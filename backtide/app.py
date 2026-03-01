@@ -38,7 +38,23 @@ section[data-testid="stSidebar"] nav span {
 </style>
 """, unsafe_allow_html=True)
 
-st.logo("images/logo transparent.png", size="large", icon_image="images/icon transparent.png")
+st.markdown(
+        f"""
+        <style>
+            [data-testid="stSidebarNav"] {{
+                background-image: url(http://placekitten.com/200/200);
+                background-repeat: no-repeat;
+                padding-top: {200 - 40}px;
+                background-position: 20px 20px;
+            }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# st.logo("images/logo transparent.png", size="large", icon_image="images/icon transparent.png")
+
+st.sidebar.image("images/logo transparent.png")
 
 pg = st.navigation({"Backtest": [new_backtest, results]})
 pg.run()
