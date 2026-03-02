@@ -9,26 +9,13 @@ from datetime import datetime
 
 import streamlit as st
 
+from backtide.assets import AssetType
+from backtide.constants import MAX_ASSET_SELECTION
 
-# Asset type options with material icons
-ASSET_TYPES = {
-    "Stocks": ":material/candlestick_chart:",
-    "Forex": ":material/currency_exchange:",
-    "ETF": ":material/account_balance:",
-    "Crypto": ":material/currency_bitcoin:",
-}
-
-# Ticker suggestions per asset type
-TICKERS = {
-    "Stocks": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "JPM", "V", "JNJ"],
-    "Forex": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CHF", "USD/CAD", "NZD/USD"],
-    "ETF": ["SPY", "QQQ", "IWM", "GLD", "TLT", "VTI", "VOO", "EFA", "AGG", "XLF"],
-    "Crypto": ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XRP/USD", "ADA/USD", "DOGE/USD"],
-}
 
 INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk", "1mo"]
 
-st.set_page_config(page_title="Backtide - Download", layout="centered")
+st.set_page_config(page_title="Backtide - Download")
 
 st.title("Download", text_alignment="center")
 
@@ -36,21 +23,35 @@ st.divider()
 
 asset_type = st.segmented_control(
     label="Asset type",
-    options=list(ASSET_TYPES.keys()),
-    format_func=lambda x: f"{ASSET_TYPES[x]} {x}",
-    default="Stocks",
+    options=AssetType,
+    format_func=lambda asset_type: f"{asset_type.icon()} {asset_type.value}",
+    default=AssetType.STOCKS,
     help="Select the type of financial asset you want to download data for.",
 )
 
-tickers = st.multiselect(
-    label="Tickers",
-    options=TICKERS.get(asset_type, []),
-    placeholder="Select one or more tickers...",
-    help=(
-        "Select the tickers to download. The available options change "
-        "based on the selected asset type. You can also type to search."
-    ),
+ticker_col, filter_col = st.columns([4, 1], vertical_alignment="bottom")
+
+assets = asset_type.list_preloaded()
+if st.session_state.get("currency"):
+    assets = [a for a in assets if a.currency == "EUR"]
+
+tickers = ticker_col.multiselect(
+    label=f"{asset_type.identifier().capitalize()}s",
+    options=sorted(assets, key=lambda x: x.symbol),
+    format_func=lambda asset: f"{asset.symbol} - {asset.name}",
+    placeholder=f"Select one or more {asset_type.identifier()}s...",
+    max_selections=MAX_ASSET_SELECTION,
+    help=f"Select the {asset_type.identifier()}(s) to download.",
 )
+
+with filter_col:
+    st.selectbox(
+        label="Currency",
+        key="currency",
+        options=[None] + [c for c in ["EUR", "USD"]],
+        format_func=lambda c: "All" if c is None else c,
+        help=f"Filter {asset_type.identifier()}s by their denominated  currency.",
+    )
 
 start_date_col, end_date_col = st.columns(2)
 

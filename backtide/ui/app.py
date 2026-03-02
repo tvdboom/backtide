@@ -10,7 +10,7 @@ import streamlit as st
 st.set_page_config(
     page_title="Backtide",
     page_icon="images/icon transparent.png",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="expanded",
 )
 
