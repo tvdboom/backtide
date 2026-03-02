@@ -1,6 +1,6 @@
 <div align="center">
 <p align="center">
-	<img src="https://github.com/tvdboom/backtide/blob/master/images/logo transparent.png?raw=true" alt="backtide" title="backtide" height="130" width="500"/>
+	<img src="https://github.com/tvdboom/backtide/blob/master/images/icon transparent.png?raw=true" alt="backtide" title="backtide" height="200" width="300"/>
 </p>
 
 # Backtide

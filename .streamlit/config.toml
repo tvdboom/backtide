@@ -1,6 +1,12 @@
+[server]
+headless = false
+showEmailPrompt = false
+runOnSave = true
+
 [theme]
 primaryColor = "#00c4e8"
 backgroundColor = "#f0f4fa"
 secondaryBackgroundColor = "#daeaf5"
 textColor = "#0b1e3d"
 font = "sans serif"
+baseFontSize = 22

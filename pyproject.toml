@@ -10,9 +10,10 @@ authors = [{name = "Mavs", email = "m.524687@gmail.com"}]
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.11,<3.15"
 keywords = ["Trading", "Backtesting", "Financail markets", "Stocks", "Forex", "Cryptocurrencies"]
 classifiers = [
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -20,6 +21,8 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    "click>=8.3.1,<9",
+    "pytickersymbols>=1.17.9,<2",
     "streamlit>=1.54.0,<2",
 ]
 
@@ -27,6 +30,9 @@ dependencies = [
 "Documentation" = "https://tvdboom.github.io/backtide/"
 "Issues" = "https://github.com/tvdboom/backtide/issues"
 "Repository" = "https://github.com/tvdboom/backtide"
+
+[project.scripts]
+backtide = "backtide.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["backtide"]
