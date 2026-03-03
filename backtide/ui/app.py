@@ -7,6 +7,7 @@ Description: Entry point for the streamlit app.
 
 import streamlit as st
 
+
 st.set_page_config(
     page_title="Backtide",
     page_icon="images/icon transparent.png",

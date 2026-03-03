@@ -12,7 +12,6 @@ from streamlit.web.bootstrap import run
 @click.group()
 def main():
     """CLI application entry point."""
-    pass
 
 
 @main.command()

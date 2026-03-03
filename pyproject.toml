@@ -21,11 +21,16 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    "aiohttp>=3.13.3,<4",
     "click>=8.3.1,<9",
     "pytickersymbols>=1.17.9,<2",
-    "ruff>=0.15.4",
     "streamlit>=1.54.0,<2",
-    "ty>=0.0.20",
+    "streamlit_code_editor>=0.1.22,<2",
+]
+
+[dependency-groups]
+lint = [
+    "pre-commit>=4.5.1,<5",
 ]
 
 [project.urls]
@@ -90,6 +95,11 @@ select = [
     "PERF",  # performance checks
     "RUF",  # ruff
 ]
+ignore = ["COM812"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Unused imports
+"app.py" = ["E501"]  # Line too long
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
