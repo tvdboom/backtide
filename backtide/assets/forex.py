@@ -1,0 +1,78 @@
+"""Backtide.
+
+Author: Mavs
+Description: Forex standard pairs.
+
+"""
+
+# Market-standard forex pairs
+FOREX = [
+    # USD pairs
+    ("EUR", "USD"),
+    ("GBP", "USD"),
+    ("AUD", "USD"),
+    ("NZD", "USD"),
+    ("USD", "JPY"),
+    ("USD", "CHF"),
+    ("USD", "CAD"),
+    ("USD", "CNY"),
+    ("USD", "HKD"),
+    ("USD", "SGD"),
+    ("USD", "SEK"),
+    ("USD", "NOK"),
+    ("USD", "DKK"),
+    ("USD", "PLN"),
+    ("USD", "CZK"),
+    ("USD", "HUF"),
+    ("USD", "TRY"),
+    ("USD", "MXN"),
+    ("USD", "BRL"),
+    ("USD", "ZAR"),
+    ("USD", "SAR"),
+    ("USD", "RUB"),
+    ("USD", "INR"),
+    ("USD", "KRW"),
+    ("USD", "TWD"),
+    ("USD", "THB"),
+    ("USD", "MYR"),
+    ("USD", "IDR"),
+    ("USD", "PHP"),
+    # EUR crosses
+    ("EUR", "GBP"),
+    ("EUR", "CHF"),
+    ("EUR", "JPY"),
+    ("EUR", "CAD"),
+    ("EUR", "AUD"),
+    ("EUR", "NZD"),
+    ("EUR", "SEK"),
+    ("EUR", "NOK"),
+    ("EUR", "DKK"),
+    ("EUR", "PLN"),
+    ("EUR", "CZK"),
+    ("EUR", "HUF"),
+    ("EUR", "TRY"),
+    ("EUR", "MXN"),
+    ("EUR", "ZAR"),
+    # GBP crosses
+    ("GBP", "JPY"),
+    ("GBP", "CHF"),
+    ("GBP", "CAD"),
+    ("GBP", "AUD"),
+    ("GBP", "NZD"),
+    ("GBP", "SEK"),
+    ("GBP", "NOK"),
+    ("GBP", "DKK"),
+    ("GBP", "PLN"),
+    ("GBP", "TRY"),
+    ("GBP", "ZAR"),
+    # Other common crosses
+    ("AUD", "JPY"),
+    ("AUD", "CHF"),
+    ("AUD", "CAD"),
+    ("AUD", "NZD"),
+    ("NZD", "JPY"),
+    ("NZD", "CHF"),
+    ("NZD", "CAD"),
+    ("CAD", "JPY"),
+    ("CHF", "JPY"),
+]

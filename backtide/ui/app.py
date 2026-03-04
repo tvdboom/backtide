@@ -18,6 +18,10 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+        .stMainBlockContainer {
+            max-width:44rem;
+        }
+
         /* Fix sidebar width and disable resizing */
         section[data-testid="stSidebar"] {
             min-width: 12rem !important;
@@ -126,8 +130,8 @@ st.sidebar.image("images/logo transparent.png", width=120)
 
 # Define pages
 run_test = st.Page(
-    "run_test.py",
-    title="Run test",
+    "experiment.py",
+    title="Experiment",
     icon=":material/science:",
 )
 results = st.Page(

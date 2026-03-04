@@ -5,91 +5,83 @@ Description: Page to download new data.
 
 """
 
+import math
 from datetime import datetime
 
 import streamlit as st
 
-from backtide.assets.assets import AssetType
-from backtide.constants import MAX_ASSET_SELECTION
+from backtide.assets.assets import Asset, AssetType
 from backtide.models.ui import Interval
-from backtide.ui.utils import _prevent_deselection
-from backtide.utils.utils import format_compact
+from backtide.ui.utils import (
+    _get_asset_type_description,
+    _prevent_deselection,
+    _to_upper_values,
+)
+from backtide.utils.constants import MAX_ASSET_SELECTION
+from backtide.utils.utils import format_compact, to_list
 
 
 st.set_page_config(page_title="Backtide - Download")
 
 st.title("Download", text_alignment="center")
 
+st.text(
+    """
+    Perform bulk download of historical OHLC market data for multiple assets and/or intervals
+    at once. FX rates for historical conversion rates are automatically downloaded if required.
+    """
+)
+
 st.divider()
 
 asset_type = st.segmented_control(
     label="Asset type",
     options=AssetType,
-    key="asset_type",
+    key="asset_type_download",
     format_func=lambda asset_type: f"{asset_type.icon()} {asset_type.value}",
-    on_change=_prevent_deselection("asset_type", AssetType.STOCKS),
+    on_change=_prevent_deselection(
+        key="asset_type_download",
+        default=AssetType.STOCKS,
+        reset=["symbols_download", "currency_download"],
+    ),
     help="Select the type of financial asset you want to download data for.",
 )
 
 with st.spinner("Fetching symbols..."):
-    all_assets = st.session_state.asset_type.list_symbols()
+    all_assets: dict[str, Asset] = st.session_state.asset_type_download.list_assets()
 
 # Filter assets based on the selected currency
-if currency := st.session_state.get("currency"):
-    assets = [a for a in all_assets if currency == "All" or a.currency == currency]
+if currency := st.session_state.get("currency_download"):
+    assets = {k: v for k, v in all_assets.items() if currency == "All" or v.currency == currency}
 else:
     assets = all_assets
 
-match st.session_state.asset_type:
-    case AssetType.STOCKS:
-        symbol_description = (
-            "List of yahoo stock tickers to download. The preloaded options are the primary "
-            "listings for companies in major indices, but any valid yahoo stock ticker can be "
-            "added."
-        )
-        curr_description = "Filter tickers by their denominated currency."
-    case AssetType.FOREX:
-        symbol_description = (
-            "List of currency pairs to download. The preloaded options are frequently traded "
-            "pairs, but any valid yahoo forex ticker can be added."
-        )
-        curr_description = "Filter pairs by their quote currency."
-    case AssetType.ETF:
-        symbol_description = (
-            "List of yahoo ETF tickers to download. The preloaded options are frequently traded "
-            "ETFs and funds, but any valid yahoo ETF ticker can be added."
-        )
-        curr_description = "Filter tickers by their denominated currency."
-    case AssetType.CRYPTO:
-        symbol_description = (
-            "List of currency pairs to download. The preloaded options are frequently traded "
-            "pairs, but any valid yahoo ticker can be added."
-        )
-        curr_description = "Filter symbols by their quote currency."
+col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
+symbol_d, currency_d = _get_asset_type_description(st.session_state.asset_type_download)
 
-ticker_col, filter_col = st.columns([3, 1], vertical_alignment="bottom")
-
-tickers = ticker_col.multiselect(
+symbols = col1.multiselect(
     label="Symbols",
-    options=sorted(assets, key=lambda x: x.symbol),
-    format_func=lambda x: f"{x.symbol} - {x.name}" if asset_type == AssetType.STOCKS else x.name,
+    key="symbols_download",
+    options=sorted([asset.symbol for asset in assets.values()]),
+    format_func=lambda x: f"{x} - {assets[x].name}" if asset_type == AssetType.STOCKS else x,
     placeholder="Select one or more symbols...",
     max_selections=MAX_ASSET_SELECTION,
     accept_new_options=True,
-    help=symbol_description,
+    on_change=_to_upper_values("symbols_download"),
+    help=symbol_d,
 )
 
-filter_col.selectbox(
+col2.selectbox(
     label="Currency",
-    key="currency",  # Use key to filter tickers
-    options=["All", *sorted(dict.fromkeys(asset.currency for asset in all_assets))],
+    key="currency_download",  # Use key to filter tickers
+    options=["All", *sorted(dict.fromkeys(asset.currency.name for asset in all_assets.values()))],
     placeholder="All",
-    help=curr_description,
+    help=currency_d,
 )
 
-start_date_col, end_date_col = st.columns(2)
+col1, col2 = st.columns(2)
 
-start_date = start_date_col.date_input(
+start_date = col1.date_input(
     label="Start date",
     value=None,
     min_value="1980-01-01",
@@ -100,7 +92,7 @@ start_date = start_date_col.date_input(
     ),
 )
 
-end_date = end_date_col.date_input(
+end_date = col2.date_input(
     label="End date",
     value="today",
     min_value=start_date,
@@ -120,18 +112,33 @@ intervals = st.pills(
     ),
 )
 
-if tickers and start_date and end_date and intervals:
+if symbols and start_date and end_date and intervals:
     n_days = (end_date - start_date).days + 1
-    n_points = len(tickers) * sum(max(1, n_days * 24 * 60 / i.to_minutes()) for i in intervals)
-    st.info(f"Download {format_compact(n_points)} data entries.", icon=":material/info:")
+    n_years = int(n_days / 365.25)
+    if n_years >= 1:
+        ranges = f"{int(n_years)}y {math.ceil(n_days - n_years * 365.25)}d"
+    else:
+        ranges = f"{n_days}d"
+
+    n_rows = len(symbols) * sum(max(1, n_days * 24 * 60 / i.to_minutes()) for i in intervals)
+    st.info(
+        f"""
+        Download overview:
+        - Number of symbols: {len(symbols)}
+        - Range: {start_date} to {end_date} ({ranges})
+        - Intervals: {",".join([x.value for x in to_list(intervals)])}
+        - Approximate number of bars: {format_compact(n_rows)}
+        """,
+        icon=":material/info:",
+    )
 
 st.divider()
 
 if st.button(
     label="Download",
-    icon=":material/cloud_download:",
+    icon=":material/get_app:",
     type="primary",
-    disabled=not (tickers and start_date and end_date),
+    disabled=not (symbols and start_date and end_date and intervals),
     width="stretch",
 ):
     if end_date > datetime.now().date():
@@ -142,7 +149,7 @@ if st.button(
         with st.spinner("Downloading data..."):
             # TODO: implement download logic
             st.success(
-                f"Successfully downloaded {len(tickers)} ticker(s) "
+                f"Successfully downloaded {len(symbols)} ticker(s) "
                 f"from {start_date} to {end_date}.",
                 icon=":material/check_circle:",
             )

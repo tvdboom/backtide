@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "backtide"
@@ -24,12 +24,17 @@ dependencies = [
     "aiohttp>=3.13.3,<4",
     "click>=8.3.1,<9",
     "pytickersymbols>=1.17.9,<2",
-    "streamlit>=1.54.0,<2",
+    "streamlit>=1.55.0,<2",
     "streamlit_code_editor>=0.1.22,<2",
+    "pyyaml>=6.0.3,<7",
 ]
 
 [dependency-groups]
 lint = [
+    "ruff>=0.15.4,<1",
+    "ty>=0.0.20,<1",
+]
+pre-commit = [
     "pre-commit>=4.5.1,<5",
 ]
 
@@ -40,6 +45,11 @@ lint = [
 
 [project.scripts]
 backtide = "backtide.cli:main"
+
+[tool.maturin]
+python-source = "."
+module-name = "backtide.core"
+manifest-path = "backtide_core/Cargo.toml"
 
 [tool.setuptools.packages.find]
 include = ["backtide"]
