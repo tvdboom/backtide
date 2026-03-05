@@ -1,45 +1,17 @@
-//! `market_data` — async market data with Python bindings.
-//!
-//! # Architecture
-//!
-//! ```text
-//! Python
-//!   └── MarketData (PyO3 wrapper)
-//!         └── YahooFinance (impl MarketDataProvider)
-//!               ├── auth    — crumb + cookie auth
-//!               └── http    — paginated screener calls with retry
-//! ```
-//!
-//! # Python usage
-//!
-//! ```python
-//! import market_data
-//!
-//! md = market_data.MarketData()
-//! stocks = md.get_stocks(300)   # list[Asset]
-//! crypto = md.get_crypto(300)
-//! etfs   = md.get_etf(300)
-//! forex  = md.get_forex(300)
-//! ```
+mod data;
+mod utils;
 
-pub mod error;
-pub mod models;
-pub mod provider;
-pub mod yahoo;
-
+use crate::data::asset::Asset;
+use crate::data::provider::yahoo::YahooFinance;
+use crate::data::MarketDataProvider;
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use tokio::runtime::Runtime;
 
-use crate::models::Asset;
-use crate::provider::MarketDataProvider;
-use crate::yahoo::YahooFinance;
-
-// ─── Python-facing wrapper ────────────────────────────────────────────────────
-
 /// Python-facing market data client backed by Yahoo Finance.
 ///
-/// Initialising this object authenticates with Yahoo Finance (fetches a crumb
-/// and session cookie).  All `get_*` methods are synchronous from Python's
+/// Initializing this object authenticates with Yahoo Finance (fetches a crumb
+/// and session cookie).  All `list_*` methods are synchronous from Python's
 /// perspective — they block on a dedicated Tokio runtime internally.
 ///
 /// # Errors
@@ -50,9 +22,9 @@ use crate::yahoo::YahooFinance;
 /// # Example
 ///
 /// ```python
-/// import market_data
+/// from backtide.core import MarketData
 ///
-/// md = market_data.MarketData()
+/// md = MarketData()
 /// for asset in md.get_stocks(100):
 ///     print(asset.symbol, asset.price)
 /// ```
@@ -69,10 +41,9 @@ impl MarketData {
     /// Raises `RuntimeError` if authentication fails.
     #[new]
     fn new() -> PyResult<Self> {
-        let runtime =
-            Runtime::new().map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        let runtime = Runtime::new().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
-        let provider = runtime.block_on(YahooFinance::new()).map_err(pyo3::PyErr::from)?;
+        let provider = runtime.block_on(YahooFinance::new()).map_err(PyErr::from)?;
 
         Ok(Self {
             provider,
@@ -86,8 +57,8 @@ impl MarketData {
     /// :param limit: Maximum number of assets to return (default 300).
     /// :raises RuntimeError: If the request fails after three retries.
     #[pyo3(signature = (limit = 300))]
-    fn get_stocks(&self, limit: usize) -> PyResult<Vec<Asset>> {
-        self.runtime.block_on(self.provider.get_stocks(limit)).map_err(pyo3::PyErr::from)
+    fn list_stocks(&self, limit: usize) -> PyResult<Vec<Asset>> {
+        self.runtime.block_on(self.provider.list_stocks(limit)).map_err(PyErr::from)
     }
 
     /// Return the top `limit` most active forex pairs sorted by volume.
@@ -95,8 +66,8 @@ impl MarketData {
     /// :param limit: Maximum number of assets to return (default 300).
     /// :raises RuntimeError: If the request fails after three retries.
     #[pyo3(signature = (limit = 300))]
-    fn get_forex(&self, limit: usize) -> PyResult<Vec<Asset>> {
-        self.runtime.block_on(self.provider.get_forex(limit)).map_err(pyo3::PyErr::from)
+    fn list_forex(&self, limit: usize) -> PyResult<Vec<Asset>> {
+        self.runtime.block_on(self.provider.list_forex(limit)).map_err(PyErr::from)
     }
 
     /// Return the top `limit` most active ETFs sorted by volume.
@@ -104,8 +75,8 @@ impl MarketData {
     /// :param limit: Maximum number of assets to return (default 300).
     /// :raises RuntimeError: If the request fails after three retries.
     #[pyo3(signature = (limit = 300))]
-    fn get_etf(&self, limit: usize) -> PyResult<Vec<Asset>> {
-        self.runtime.block_on(self.provider.get_etf(limit)).map_err(pyo3::PyErr::from)
+    fn list_etf(&self, limit: usize) -> PyResult<Vec<Asset>> {
+        self.runtime.block_on(self.provider.list_etf(limit)).map_err(PyErr::from)
     }
 
     /// Return the top `limit` most active cryptocurrencies sorted by volume.
@@ -113,16 +84,15 @@ impl MarketData {
     /// :param limit: Maximum number of assets to return (default 300).
     /// :raises RuntimeError: If the request fails after three retries.
     #[pyo3(signature = (limit = 300))]
-    fn get_crypto(&self, limit: usize) -> PyResult<Vec<Asset>> {
-        self.runtime.block_on(self.provider.get_crypto(limit)).map_err(pyo3::PyErr::from)
+    fn list_crypto(&self, limit: usize) -> PyResult<Vec<Asset>> {
+        self.runtime.block_on(self.provider.list_crypto(limit)).map_err(PyErr::from)
     }
 }
 
 // ─── Module registration ─────────────────────────────────────────────────────
 
-/// Register the Python module.
 #[pymodule]
-fn market_data(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MarketData>()?;
     m.add_class::<Asset>()?;
     Ok(())

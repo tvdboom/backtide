@@ -5,12 +5,14 @@ Description: Run a new backtest page.
 
 """
 
+import ast
 import json
 from datetime import datetime
 
 import streamlit as st
 import yaml
-
+from code_editor import code_editor
+import time
 from backtide.assets.assets import Asset, AssetType
 from backtide.assets.crypto import CRYPTOS
 from backtide.assets.currency import CURRENCIES
@@ -20,7 +22,11 @@ from backtide.ui.utils import (
     _prevent_deselection,
     _to_upper_values,
 )
-from backtide.utils.constants import MAX_ASSET_SELECTION, TAG_PATTERN
+from backtide.utils.constants import (
+    MAX_ASSET_SELECTION,
+    STRATEGY_PLACEHOLDER,
+    TAG_PATTERN,
+)
 
 
 INDICATORS = [
@@ -38,26 +44,7 @@ INDICATORS = [
     "ADX - Average Directional Index",
 ]
 
-STRATEGY_PLACEHOLDER = """\
-    # Available objects:
-    #   data   - dict[str, pd.DataFrame]  (symbol → OHLCV dataframe)
-    #   state  - portfolio state snapshot
-    #   indicators - pre-computed indicator values (if selected above)
-    #
-    # Return a list of Order objects, e.g.:
-    #   return [Order(symbol="AAPL", side="buy", qty=10)]
-
-    def strategy(data, state, indicators):
-        orders = []
-        # ── Write your logic here ──────────────────────────
-
-        return orders
-    """
-
-
 FEE_MODES = ["Percentage (%)", "Fixed amount"]
-STRATEGY_SOURCES = ["Code editor", "Upload file"]
-
 
 st.set_page_config(page_title="Backtide - Experiment", layout="centered")
 st.title("Experiment", text_alignment="center")
@@ -79,6 +66,13 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         ":material/build: Engine",
     ]
 )
+
+if not st.session_state.get("asset_type"):
+    st.session_state.asset_type = AssetType.default()
+
+with st.spinner("Loading assets..."):
+    all_assets: dict[str, Asset] = st.session_state.asset_type.list_assets()
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. Overview
@@ -155,6 +149,7 @@ with tab1:
         except (yaml.YAMLError, json.JSONDecodeError, TypeError) as ex:
             st.error(f"Failed to parse file: {ex}")
 
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 2. Data
 # ═════════════════════════════════════════════════════════════════════════════
@@ -162,19 +157,16 @@ with tab1:
 with tab2:
     asset_type = st.segmented_control(
         label="Asset type",
-        options=AssetType,
         key="asset_type",
+        options=AssetType,
         format_func=lambda asset_type: f"{asset_type.icon()} {asset_type.value}",
         on_change=_prevent_deselection(
             key="asset_type",
-            default=AssetType.STOCKS,
+            default=AssetType.default(),
             reset=["symbols", "currency"],
         ),
         help="Select the type of financial asset you want to backtest.",
     )
-
-    with st.spinner("Fetching symbols..."):
-        all_assets: dict[str, Asset] = st.session_state.asset_type.list_assets()
 
     # Filter assets based on the selected currency
     if currency := st.session_state.get("currency"):
@@ -191,7 +183,7 @@ with tab2:
         label="Symbols",
         key="symbols",
         options=sorted([asset.symbol for asset in assets.values()]),
-        format_func=lambda x: f"{x} - {assets[x].name}" if asset_type == AssetType.STOCKS else x,
+        format_func=lambda x: f"{x} - {assets[x].name}" if asset_type != AssetType.CRYPTO else x,
         placeholder="Select one or more symbols...",
         max_selections=MAX_ASSET_SELECTION,
         accept_new_options=True,
@@ -204,7 +196,7 @@ with tab2:
         key="currency",  # Use key to filter tickers
         options=[
             "All",
-            *sorted(dict.fromkeys(asset.currency.name for asset in all_assets.values())),
+            *sorted(dict.fromkeys(asset.currency for asset in all_assets.values())),
         ],
         placeholder="All",
         help=currency_d,
@@ -243,6 +235,7 @@ with tab2:
             "greatly influences the simulation's speed."
         ),
     )
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 3. Portfolio
@@ -303,47 +296,100 @@ with tab3:
         else:
             st.caption("No symbols selected.")
 
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 4. Strategy
 # ═════════════════════════════════════════════════════════════════════════════
 
-strategy_source = st.radio(
-    label="Strategy source",
-    options=STRATEGY_SOURCES,
-    index=0,
-    horizontal=True,
-    help="Provide your strategy as inline code or by uploading a `.py` file.",
-)
+with tab4:
+    if st.session_state.get("strategy_source") is None:
+        st.session_state.strategy_source = "Code editor"
 
-strategy_code: str | None = None
-
-if strategy_source == STRATEGY_SOURCES[0]:
-    st.caption(
-        "Write your strategy function below. The editor supports Python syntax highlighting, "
-        "autocompletion hints, and vim/emacs key bindings."
-    )
-    strategy_code = code_editor(
-        value=STRATEGY_PLACEHOLDER,
-        language="python",
-        theme="tomorrow_night",
-        font_size=14,
-        tab_size=4,
-        key="strategy_editor",
+    strategy_source = st.segmented_control(
+        label="Strategy source",
+        key="strategy_source",
+        options=["Code editor", "Upload file"],
+        on_change=_prevent_deselection(
+            key="strategy_source",
+            default="Code editor",
+        ),
+        help="Provide your strategy as inline code or by uploading a Python file.",
     )
 
-else:
-    uploaded_file = st.file_uploader(
-        label="Strategy file",
-        type=["py"],
-        accept_multiple_files=False,
-        help="Upload a `.py` file that defines a top-level `strategy(data, state, indicators)` function.",
-    )
-    if uploaded_file is not None:
-        strategy_code = uploaded_file.read().decode("utf-8")
-        with st.expander("Preview uploaded file"):
-            st.code(strategy_code, language="python", line_numbers=True)
+    strategy_code: str | None = None
+    if strategy_source == "Code editor":
+        st.caption("Write your strategy function below.")
+        code_editor_resp = code_editor(
+            code=STRATEGY_PLACEHOLDER,
+            buttons=[
+                {
+                    "name": "Copy",
+                    "feather": "Copy",
+                    "hasText": True,
+                    "commands": ["copyAll"],
+                    "style": {"top": "0.46rem", "right": "0.4rem"},
+                },
+                {
+                    "name": "Save",
+                    "feather": "Save",
+                    "hasText": True,
+                    "commands": ["save-state", ["response", "saved"]],
+                    "response": "saved",
+                    "style": {"top": "2.25rem", "right": "0.4rem"},
+                },
+            ],
+        )
+
+        strategy_code = code_editor_resp["text"]
     else:
-        st.info("No file uploaded yet.", icon=":material/upload_file:")
+        uploaded_file = st.file_uploader(
+            label="Strategy file",
+            type=["py"],
+            accept_multiple_files=False,
+            help=(
+                "Upload a Python file that defines a top-level function with signature: "
+                "`strategy(data, state, indicators)`."
+            ),
+        )
+
+        if uploaded_file is not None:
+            strategy_code = uploaded_file.read().decode("utf-8")
+            with st.expander("Preview uploaded file"):
+                st.code(strategy_code, language="python", line_numbers=True)
+        else:
+            st.info("No file uploaded yet.", icon=":material/upload_file:")
+
+    if strategy_code:
+        def check_strategy_code(code: str) -> bool:
+            """Check whether the code contains the expected function."""
+            try:
+                tree = ast.parse(strategy_code)
+
+                for node in tree.body:
+                    if isinstance(node, ast.FunctionDef) and node.name == "strategy":
+                        if [a.arg for a in node.args.args] == ["data", "state", "indicators"]:
+                            return True
+                        else:
+                            st.error(
+                                "Function `strategy` doesn't have signature: `strategy(data, state, indicators)`."
+                            )
+                            break
+
+                    st.error("No function `strategy(data, state, indicators)` found in the code.")
+            except SyntaxError as ex:
+                st.error(f"Syntax error:\n\n{ex}")
+
+            return False
+
+        if check_strategy_code(strategy_code):
+            # Show success message for 2 seconds
+            success = st.success("Strategy successfully saved.")
+            time.sleep(1.5)
+            success.empty()
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 5. Exchange
+# ═════════════════════════════════════════════════════════════════════════════
 
 # fee_mode_col, fee_val_col, slippage_col = st.columns(3)
 #

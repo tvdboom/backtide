@@ -5,16 +5,7 @@ Description: Cryptocurrency API.
 
 """
 
-from typing import TYPE_CHECKING
-
-import streamlit as st
-
-from backtide.assets.currency import CURRENCIES, Currency
-from backtide.utils.client import HttpClient
-
-
-if TYPE_CHECKING:
-    from backtide.assets.assets import Asset
+from backtide.assets.currency import Currency
 
 
 # Major cryptocurrencies
@@ -69,47 +60,3 @@ CRYPTOS: dict[str, Currency] = {
         Currency("XTZ", "Tezos", 6),
     ]
 }
-
-
-async def fetch_binance_assets() -> dict[str, Asset]:
-    """Get the full list of actively traded spot symbols from Binance.
-
-    Returns
-    -------
-    dict[str, Asset]
-        Preloaded symbol-asset key-value pairs.
-
-    """
-    from backtide.assets.assets import Asset
-
-    async with HttpClient() as client:
-        try:
-            response = await client.apiget("https://api.binance.com/api/v3/exchangeInfo")
-
-            def extract_currency(quote: str) -> Currency:
-                """Convert a quote value to a currency.
-
-                Extract quote from predefined currencies or cryptos, else create
-                a default.
-
-                """
-                if quote in CURRENCIES:
-                    return CURRENCIES[quote]
-                elif quote in CRYPTOS:
-                    return CRYPTOS[quote]
-                else:
-                    return Currency(quote, full_name=quote, decimals=8)
-
-            return {
-                data["symbol"]: Asset(
-                    name=data["symbol"],
-                    symbol=data["symbol"],
-                    currency=extract_currency(data["quoteAsset"]),
-                )
-                for data in response["symbols"]
-                if data["status"] == "TRADING" and data["isSpotTradingAllowed"]
-            }
-        except Exception as ex:  # noqa: BLE001
-            st.exception(ex)
-
-    return {}

@@ -1,11 +1,16 @@
+//! Trait that all market data providers must implement.
+//!
+//! Adding a new provider (e.g. Bloomberg, Alpaca) only requires implementing
+//! this trait — no changes to the Python bindings or callers are needed.
+
 use crate::data::asset::Asset;
 use crate::data::utils::MarketDataError;
 use async_trait::async_trait;
 
-pub mod asset;
-pub mod provider;
-mod utils;
-
+/// A source of financial market data.
+///
+/// All methods are async and must be safe to call concurrently from a
+/// multithreaded Tokio runtime.
 #[async_trait]
 pub trait MarketDataProvider: Send + Sync {
     /// Return the top `limit` most active equities across US, European and

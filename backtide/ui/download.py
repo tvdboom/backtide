@@ -34,21 +34,24 @@ st.text(
 
 st.divider()
 
+if not st.session_state.get("asset_type"):
+    st.session_state.asset_type = AssetType.default()
+
+with st.spinner("Loading assets..."):
+    all_assets: dict[str, Asset] = st.session_state.asset_type.list_assets()
+
 asset_type = st.segmented_control(
     label="Asset type",
-    options=AssetType,
     key="asset_type_download",
+    options=AssetType,
     format_func=lambda asset_type: f"{asset_type.icon()} {asset_type.value}",
     on_change=_prevent_deselection(
         key="asset_type_download",
-        default=AssetType.STOCKS,
+        default=AssetType.default(),
         reset=["symbols_download", "currency_download"],
     ),
-    help="Select the type of financial asset you want to download data for.",
+    help="Select the type of financial asset you want to backtest.",
 )
-
-with st.spinner("Fetching symbols..."):
-    all_assets: dict[str, Asset] = st.session_state.asset_type_download.list_assets()
 
 # Filter assets based on the selected currency
 if currency := st.session_state.get("currency_download"):
@@ -63,18 +66,18 @@ symbols = col1.multiselect(
     label="Symbols",
     key="symbols_download",
     options=sorted([asset.symbol for asset in assets.values()]),
-    format_func=lambda x: f"{x} - {assets[x].name}" if asset_type == AssetType.STOCKS else x,
+    format_func=lambda x: f"{x} - {assets[x].name}" if asset_type != AssetType.CRYPTO else x,
     placeholder="Select one or more symbols...",
     max_selections=MAX_ASSET_SELECTION,
     accept_new_options=True,
-    on_change=_to_upper_values("symbols_download"),
+    on_change=_to_upper_values("symbols"),
     help=symbol_d,
 )
 
 col2.selectbox(
     label="Currency",
     key="currency_download",  # Use key to filter tickers
-    options=["All", *sorted(dict.fromkeys(asset.currency.name for asset in all_assets.values()))],
+    options=["All", *sorted(dict.fromkeys(asset.currency for asset in all_assets.values()))],
     placeholder="All",
     help=currency_d,
 )

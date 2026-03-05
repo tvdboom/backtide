@@ -3,6 +3,7 @@
 .vscode/
 .spyproject/
 
+.cargo/
 target/
 
 # Log, pickle and figures in root directory

@@ -5,42 +5,13 @@ Description: Functions to retrieve available tickers.
 
 """
 
-import asyncio
-from dataclasses import dataclass
 from functools import cache
-from typing import cast
+from typing import Self
 
-from pytickersymbols.indices_data import INDICES
-
-from backtide.assets.crypto import fetch_binance_assets
-from backtide.assets.currency import CURRENCIES, INDEX_CURRENCIES, Currency
-from backtide.assets.etf import ETFS
 from backtide.assets.forex import FOREX
+from backtide.core import Asset, MarketData
+from backtide.utils.constants import MAX_PRELOADED_ASSETS
 from backtide.utils.enum import CaseInsensitiveEnum
-from backtide.utils.types import IndexData
-
-
-@dataclass(frozen=True)
-class Asset:
-    """Represents a financial asset.
-
-    Attributes
-    ----------
-    name : str
-        The full name of the asset (e.g., "Apple Inc.").
-
-    symbol : str
-        The market identifier of the asset. For exchange-traded assets this
-        is a ticker, for others a symbol (e.g., "AAPL" or "BTC").
-
-    currency : Currency
-        The currency in which the asset is denominated.
-
-    """
-
-    name: str
-    symbol: str
-    currency: Currency
 
 
 class AssetType(CaseInsensitiveEnum):
@@ -72,6 +43,11 @@ class AssetType(CaseInsensitiveEnum):
         """Get the list of asset types."""
         return [asset.value for asset in cls]
 
+    @classmethod
+    def default(cls) -> Self:
+        """Get the default asset type."""
+        return AssetType.STOCKS
+
     def icon(self) -> str:
         """Return the material icon of the asset."""
         match self:
@@ -99,62 +75,23 @@ class AssetType(CaseInsensitiveEnum):
             Preloaded symbol-asset key-value pairs for this asset type.
 
         """
-        seen: list[str] = []
-        result: dict[str, Asset] = {}
-
-        indices = cast(dict[str, IndexData], INDICES)
+        market_data = MarketData()
 
         match self:
             case AssetType.STOCKS:
-                for index, data in indices.items():
-                    currency = INDEX_CURRENCIES[index]
-
-                    for company in data["companies"]:
-                        name = company["name"]
-
-                        # Get all available symbols (some companies have multiple listings)
-                        if symbols := company.get("symbols"):
-                            symbols = [s.get("yahoo") for s in symbols]
-                        else:
-                            symbols = [company.get("symbol")]
-
-                        # Select only primary listing. Choose the ticker with period
-                        # if currency != USD (US listings have no exchange code, while others do)
-                        p_symbol: str | None = None
-                        for symbol in symbols:
-                            if symbol:
-                                if currency == "USD" and "." not in symbol:
-                                    p_symbol = symbol
-                                    break
-                                elif currency != "USD" and "." in symbol:
-                                    p_symbol = symbol
-                                    break
-
-                        if p_symbol and p_symbol not in seen:
-                            seen.append(p_symbol)
-                            result[p_symbol] = Asset(name, symbol=p_symbol, currency=currency)
-
+                result = market_data.list_stocks(MAX_PRELOADED_ASSETS)
             case AssetType.FOREX:
-                result = {
-                    f"{c1}{c2}=X": Asset(
+                result = [
+                    Asset(
                         name=f"{c1}/{c2}",
-                        symbol=f"{c1}{c2}=X",
-                        currency=CURRENCIES[c2],
+                        symbol=f"{c1}{c2}=X" if c1 != "USD" else f"{c2}=X",
+                        currency=c2,
                     )
                     for c1, c2 in FOREX
-                }
-
+                ]
             case AssetType.ETF:
-                result = {
-                    etf["ticker"]: Asset(
-                        name=etf["name"],
-                        symbol=etf["ticker"],
-                        currency=CURRENCIES[etf["currency"]],
-                    )
-                    for etf in ETFS
-                }
-
+                result = market_data.list_etf(MAX_PRELOADED_ASSETS)
             case AssetType.CRYPTO:
-                result = asyncio.run(fetch_binance_assets())
+                result = market_data.list_crypto(MAX_PRELOADED_ASSETS)
 
-        return result
+        return {x.symbol: x for x in result}

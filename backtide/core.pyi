@@ -1,0 +1,16 @@
+from typing import Self
+
+
+class Asset:
+    symbol: str
+    name: str
+    currency: str | None
+
+
+class MarketData:
+    def __new__(cls) -> Self: ...
+
+    def list_stocks(self, limit: int = 300) -> list[Asset]: ...
+    def list_forex(self, limit: int = 300) -> list[Asset]: ...
+    def list_etf(self, limit: int = 300) -> list[Asset]: ...
+    def list_crypto(self, limit: int = 300) -> list[Asset]: ...
