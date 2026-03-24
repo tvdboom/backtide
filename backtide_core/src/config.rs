@@ -1,14 +1,15 @@
 //! Backtide configuration module.
 //!
-//! Owns a process-wide [`Config`] singleton initialized at startup.
+//! Owns a process-wide [Config] singleton initialized at startup.
 //! After that point every caller gets a cheap `&'static` reference
-//! through [`config()`].
+//! through [config()].
 
 use crate::constants::{DEFAULT_CONFIG_FILE_NAME, DEFAULT_STORAGE_PATH};
 use crate::ingestion::provider::Provider;
 use crate::models::currency::Currency;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -19,11 +20,7 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Return a `&'static` reference to the global configuration.
 pub fn config() -> &'static Config {
-    CONFIG.get_or_init(|| {
-        find_config_file().map_or_else(Config::default, |path| {
-            parse_config(&path).expect("failed to parse config")
-        })
-    })
+    CONFIG.get_or_init(fetch_config)
 }
 
 /// Errors that can occur while loading configuration.
@@ -48,12 +45,61 @@ pub enum ConfigError {
     #[error("unsupported config format '{0}'; expected toml, yaml, yml, or json")]
     UnsupportedFormat(String),
 
-    /// [load_config] was called a second time after the singleton was set.
-    #[error("config has already been loaded; load_config may only be called once")]
-    AlreadyLoaded,
+    /// [set_config] was called after the singleton was set.
+    #[error("The configuration has already been used; set_config cannot be called anymore.")]
+    AlreadySet,
 }
 
 /// Backtide configuration.
+///
+/// !!! warning
+///     The class has no constructor. An instance is returned from the
+///     [get_config] and [load_config] functions.
+///
+/// Attributes
+/// ----------
+/// base_currency : str, default="EUR"
+///     Currency (ISO 4217 code) that all prices are normalized to.
+///
+/// ingestion : IngestionConfig
+///     Settings that control how market data is fetched and stored.
+///
+///     - storage_path : str, default = ".backtide/database.duckdb"
+///       Location to store the primary database file.
+///     - providers : ProviderConfig
+///       Which data provider to use per asset class (`stocks`, `etf`, `forex`, `crypto`).
+///
+/// display : DisplayConfig
+///     Settings that control how values are presented in the application interface.
+///
+///     - date_format : str, default="%d-%m-%Y"
+///     `strftime`-compatible date format string.
+///     - timezone : str, default=None
+///     IANA timezone name in which to display the timestamps. `None` to use system's
+///     local timezone.
+///
+/// See Also
+/// --------
+/// - backtide.config:get_config
+/// - backtide.config:load_config
+/// - backtide.config:set_config
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.config import get_config, set_config
+///
+/// # Load the current configuration and change a value
+/// cfg = get_config()
+/// cfg.ingestion.providers.crypto = "kraken"
+///
+/// # Update backtide's configuration
+/// set_config(cfg)
+///
+/// # Check that the provider is indeed "kraken" now
+/// cfg = get_config()
+/// print(cfg.ingestion.providers.crypto)
+/// ```
 #[pyclass(get_all, set_all, from_py_object, module = "backtide.config")]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -76,6 +122,16 @@ impl Config {
             self.ingestion.__repr__(),
             self.display.__repr__(),
         )
+    }
+
+    /// Convert the configuration object to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python) -> Py<PyAny> {
+        pythonize(py, self).unwrap().unbind()
     }
 }
 
@@ -131,7 +187,7 @@ pub struct ProviderConfig {
 impl ProviderConfig {
     fn __repr__(&self) -> String {
         format!(
-            "ProviderConfig(stocks={}, etf={}, forex={}, crypto={})",
+            "ProviderConfig(stocks={:?}, etf={:?}, forex={:?}, crypto={:?})",
             self.stocks, self.etf, self.forex, self.crypto,
         )
     }
@@ -158,8 +214,8 @@ pub struct DisplayConfig {
     /// `strftime`-compatible date format string.
     pub date_format: String,
 
-    /// IANA timezone name.
-    pub timezone: String,
+    /// IANA timezone name. `None` to use the system's local timezone.
+    pub timezone: Option<String>,
 }
 
 #[pymethods]
@@ -173,7 +229,7 @@ impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
             date_format: "%d-%m-%Y".to_owned(),
-            timezone: "UTC".to_owned(),
+            timezone: None,
         }
     }
 }
@@ -207,6 +263,12 @@ fn parse_config(path: &Path) -> Result<Config, ConfigError> {
     }
 }
 
+/// Load the config without updating the singleton.
+fn fetch_config() -> Config {
+    find_config_file()
+        .map_or_else(Config::default, |path| parse_config(&path).expect("failed to parse config"))
+}
+
 /// Register all config types and free functions into `backtide.core.config`.
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "backtide.config")?;
@@ -229,8 +291,8 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
 
 /// Get a copy of the current global configuration.
 ///
-/// Use this function to update the configuration programmatically before updating
-/// the current config with [set_config].
+/// Use this function to alter the configuration programmatically before
+/// updating the current config with [set_config].
 ///
 /// Returns
 /// -------
@@ -241,9 +303,21 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
 /// --------
 /// - backtide.config:load_config
 /// - backtide.config:set_config
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from pprint import pprint
+/// from backtide.config import get_config
+///
+/// # Load and display the current configuration
+/// cfg = get_config()
+/// pprint(cfg.to_dict())
+/// ```
 #[pyfunction]
 fn get_config() -> Config {
-    config().clone() // Clone only at the Python boundary
+    // Clone only at the Python boundary
+    CONFIG.get().cloned().unwrap_or_else(fetch_config)
 }
 
 /// Load a backtide configuration from a file.
@@ -266,6 +340,15 @@ fn get_config() -> Config {
 /// --------
 /// - backtide.config:get_config
 /// - backtide.config:set_config
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.config import load_config, set_config
+///
+/// # Use the configuration from a custom file location
+/// set_config(load_config("path/to/config.toml"))
+/// ```
 #[pyfunction]
 fn load_config(path: &str) -> PyResult<Config> {
     let cfg = parse_config(path.as_ref());
@@ -287,11 +370,28 @@ fn load_config(path: &str) -> PyResult<Config> {
 /// --------
 /// - backtide.config:get_config
 /// - backtide.config:load_config
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.config import get_config, set_config
+///
+/// # Load the current configuration and change a value
+/// cfg = get_config()
+/// cfg.base_currency = "USD"
+///
+/// # Update backtide's configuration
+/// set_config(cfg)
+///
+/// # Check that the base_currency is indeed "USD" now
+/// cfg = get_config()
+/// print(cfg.base_currency)
+/// ```
 #[pyfunction]
 fn set_config(config: Config) -> PyResult<()> {
     CONFIG
         .set(config)
-        .map_err(|_| ConfigError::AlreadyLoaded)
+        .map_err(|_| ConfigError::AlreadySet)
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
@@ -370,7 +470,7 @@ mod tests {
         let f = write_temp(usd_toml(), "toml");
         let cfg = parse_config(f.path()).unwrap();
         assert_eq!(cfg.base_currency, Currency::USD);
-        assert_eq!(cfg.display.timezone, "America/New_York");
+        assert_eq!(cfg.display.timezone, Some("America/New_York".to_owned()));
         assert_eq!(cfg.display.date_format, "%Y-%m-%d");
         assert_eq!(cfg.ingestion.storage_path, PathBuf::from("/tmp/test.duckdb"));
     }

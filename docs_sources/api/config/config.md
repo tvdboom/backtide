@@ -5,11 +5,18 @@
     :: signature
     :: head
     :: table:
-        - parameters
         - attributes
+    :: see also
 
 <br>
 
 ## Example
 
 :: examples
+
+## Methods
+
+:: methods:
+    toc_only: False
+    include:
+        - to_dict

@@ -7,6 +7,7 @@ Description: Module containing the automatic example rendering.
 
 import ast
 import os
+import shutil
 import sys
 from base64 import b64encode
 from code import InteractiveInterpreter
@@ -17,6 +18,10 @@ from markdown import Markdown
 from pandas.io.formats.style import Styler
 from pymdownx.superfences import SuperFencesException
 
+
+# Directory in which to store all plots from the examples
+shutil.rmtree(DIR_EXAMPLES := "docs_sources/img/examples/", ignore_errors=True)
+os.mkdir(DIR_EXAMPLES)
 
 # Cached output (same across code blocks)
 cached_last_value = None
@@ -96,7 +101,7 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
                 output[-1].extend([draw(code) for code in block])
 
             # Add filename parameter to plot call to save the figure
-            if ".plot_" in line or ".canvas(" in line:
+            if ".plot_" in line:
                 f, arguments = block[0].split("(", 1)
                 if arguments.startswith(")"):
                     # There are no other arguments
@@ -140,7 +145,7 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
 
                 figures.append(value._repr_html_())
 
-            if ".plot_" in line or ".canvas(" in line:
+            if ".plot_" in line:
                 if end_line < len(lines):
                     output.append([])  # Add new code block
 

@@ -101,6 +101,7 @@ class AutoDocs:
             self._parent_anchor = ""
 
         self.method = method
+        self.module = obj.__module__
         if not (doc := getdoc(self.obj)):
             raise ValueError(f"Object {self.obj} has no docstring.")
         else:
@@ -230,14 +231,14 @@ class AutoDocs:
         else:
             parameters = ""
 
-        f = self.obj.__module__.replace(".", "/")  # Module and filename sep by /
-        if "backtide" in self.obj.__module__:
-            url = f"{BACKTIDE_URL}{f}.py"
+        if "backtide" in self.module:
+            # Module and filename sep by /
+            url = f"{BACKTIDE_URL}{self.module.replace('.', '/')}.py"
         else:
             url = ""
 
         anchor = f"[](){{#{self._parent_anchor}{self.obj.__name__}}}\n"
-        module = self.obj.__module__ + "." if obj != "method" else ""
+        module = self.module + "." if obj != "method" else ""
         obj = f"<em>{obj}</em>"
         name = f"<strong style='color:#008AB8'>{self.obj.__name__}</strong>"
         if url:
@@ -421,13 +422,20 @@ class AutoDocs:
                     body = re.search(pattern, match, re.S | re.M).group()
 
                     header = header.replace("*", r"\*")  # Use literal * for args/kwargs
-                    text = f"<div markdown class='param'>{self.parse_body(body)}</div>"
+                    text = f"<div class='param' markdown>{self.parse_body(body)}</div>"
 
-                    content += f"<strong>{header}</strong><br>{text}"
+                    # Only parameters and attributes have names (returns and yields don't)
+                    if name in ("Parameters", "Attributes"):
+                        obj_name = header.split(":")[0]
+                        anchor = f"[](){{#{self.obj.__name__.lower()}-{obj_name}}}\n"
+                    else:
+                        anchor = ""
+
+                    content += f"{anchor}<strong>{header}</strong><br>{text}"
 
             if content:
-                table += f"<tr><td class='td_title'><strong>{name}</strong></td>"
-                table += f"<td class='td_params'>{content}</td></tr>"
+                table += f"<tr markdown><td class='td_title'><strong>{name}</strong></td>"
+                table += f"<td class='td_params' markdown>{content}</td></tr>"
 
         if table:
             table = f"<table markdown class='table_params'>{table}</table>"
@@ -474,7 +482,7 @@ class AutoDocs:
 
             name = f"[{method}][{'' if solo_link else func._parent_anchor}{method}]"
             summary = func.get_summary()
-            toc += f"<tr><td>{name}</td><td>{summary}</td></tr>"
+            toc += f"<tr markdown><td markdown>{name}</td><td>{summary}</td></tr>"
 
         toc += "</table>"
 
@@ -486,7 +494,7 @@ class AutoDocs:
 
                 blocks += "<br>" + func.get_signature()
                 blocks += func.get_summary() + "\n"
-                if func.obj.__module__.startswith("backtide"):
+                if func.module.startswith("backtide"):
                     if description := func.get_description():
                         blocks += "\n\n" + description + "\n"
                 if example := func.get_block("Examples"):
