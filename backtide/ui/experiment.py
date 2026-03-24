@@ -7,12 +7,13 @@ Description: Run a new backtest page.
 
 import ast
 import json
+import time
 from datetime import datetime
 
 import streamlit as st
 import yaml
 from code_editor import code_editor
-import time
+
 from backtide.assets.assets import Asset, AssetType
 from backtide.assets.crypto import CRYPTOS
 from backtide.assets.currency import CURRENCIES
@@ -91,7 +92,7 @@ with tab1:
 
     tags = st.multiselect(
         label="Tags",
-        options=[x.name.lower() for x in AssetType],
+        options=[],
         default=[],
         accept_new_options=True,
         placeholder="Add tags...",
@@ -360,6 +361,7 @@ with tab4:
             st.info("No file uploaded yet.", icon=":material/upload_file:")
 
     if strategy_code:
+
         def check_strategy_code(code: str) -> bool:
             """Check whether the code contains the expected function."""
             try:
@@ -371,7 +373,8 @@ with tab4:
                             return True
                         else:
                             st.error(
-                                "Function `strategy` doesn't have signature: `strategy(data, state, indicators)`."
+                                "Function `strategy` doesn't have signature: "
+                                "`strategy(data, state, indicators)`."
                             )
                             break
 

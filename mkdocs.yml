@@ -1,0 +1,126 @@
+site_name: Backtide
+site_author: Mavs
+site_url: https://tvdboom.github.io/backtide
+repo_name: tvdboom/backtide
+repo_url: https://github.com/tvdboom/backtide
+edit_uri: edit/master/docs_sources/
+docs_dir: docs_sources/
+site_dir: docs/
+copyright: Copyright &copy; 2026, by Mavs.
+
+theme:
+    name: material
+    logo: img/icon.png
+    favicon: img/favicon.ico
+    custom_dir: docs_sources/overrides
+    features:
+        - content.action.edit
+        - content.action.view
+        - content.code.copy
+        - navigation.footer
+        - navigation.instant
+        - navigation.tabs
+        - navigation.tabs.sticky
+        - navigation.top
+        - navigation.tracking
+        - content.tabs.link
+        - announce.dismiss
+        - toc.follow
+        - search.suggest
+    palette:
+        # Light mode
+        - amber: "(prefers-color-scheme: light)"
+          scheme: default
+          primary: blue
+          accent: blue
+          toggle:
+              icon: material/weather-sunny
+              name: Switch to dark mode
+
+        # Dark mode
+        - media: "(prefers-color-scheme: dark)"
+          scheme: slate
+          primary: blue
+          accent: blue
+          toggle:
+              icon: material/weather-night
+              name: Switch to light mode
+
+extra:
+    version:
+        provider: mike
+    social:
+        - icon: fontawesome/brands/github
+          link: https://github.com/tvdboom/backtide
+          name: GitHub
+        - icon: fontawesome/brands/stack-overflow
+          link: https://stackoverflow.com/questions/tagged/backtide
+          name: StackOverflow
+        - icon: fontawesome/brands/python
+          link: https://pypi.org/project/backtide/
+          name: Pypi
+        - icon: fontawesome/brands/medium
+          link: https://tvdboom.medium.com/
+          name: Medium
+        - icon: fontawesome/solid/envelope
+          link: mailto:m.524687@gmail.com
+          name: Email
+
+plugins:
+    - search
+    - autorefs
+    - mkdocs-simple-hooks:
+          hooks:
+              on_page_markdown: docs_sources.scripts:render
+              on_page_content: docs_sources.scripts:corrections
+              on_post_build: docs_sources.scripts:clean_search
+
+markdown_extensions:
+    - admonition
+    - md_in_html  # Allows for writing Markdown inside HTML
+    - def_list  # Allows for definition lists (e.g., nomenclature)
+    - attr_list  # Allows for HTML attributes and CSS classes to markdown objects
+    - footnotes
+    - pymdownx.details  # Allows for collapsible admonition blocks
+    - pymdownx.magiclink  # Allows for bare links of the form <url>
+    - pymdownx.inlinehilite  # Allows for inline highlighting of code blocks
+    - pymdownx.superfences:
+        preserve_tabs: true
+        custom_fences:
+            - name: pycon
+              class: pycon
+              format: !!python/name:docs_sources.scripts.formatter
+    - pymdownx.arithmatex:  # Allows for rendering of equations
+          generic: true
+    - pymdownx.tabbed:  # Allows the usage of content tabs
+          alternate_style: true
+    - pymdownx.emoji:  # Automatically inlines bundled and custom icons and emojis
+          emoji_index: !!python/name:material.extensions.emoji.twemoji
+          emoji_generator: !!python/name:material.extensions.emoji.to_svg
+    - pymdownx.highlight:  # Allows for highlighting of code blocks
+          use_pygments: true
+          pygments_lang_class: true
+          linenums: true
+          linenums_style: pymdownx-inline
+
+extra_css:
+    - stylesheets/extra.css
+
+extra_javascript:
+    - stylesheets/extra.js
+    - https://polyfill.io/v3/polyfill.min.js?features=es6
+    - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js  # MathJax
+
+nav:
+    - About: about.md
+    - Getting started: getting_started.md
+    - API:
+        - config:
+            - config: api/config/config.md
+            - get_config: api/config/get_config.md
+            - load_config: api/config/load_config.md
+            - set_config: api/config/set_config.md
+    - FAQ: faq.md
+    - Contributing: contributing.md
+    - Dependencies: dependencies.md
+    - License: license.md

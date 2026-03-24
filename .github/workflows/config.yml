@@ -1,0 +1,74 @@
+name: Linting and tests
+
+on:
+  push:
+    branches:
+      - master
+      - development
+  pull_request:
+    branches:
+      - master
+      - development
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.0"
+          python-version: "3.14t"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --group pre-commit
+      - name: Run pre-commit
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+  unit-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.0"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --group test
+      - name: Test with python ${{ matrix.python-version }}
+        shell: bash
+        run: |
+          export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+          uv run --frozen pytest -n=auto --cov=atom --cov-report=xml tests/
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14' }}
+        with:
+          files: ./coverage.xml
+
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.0"
+          python-version: "3.14t"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --group test
+      - name: Build documentation
+        run: |
+          export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+          uv run mkdocs build --strict

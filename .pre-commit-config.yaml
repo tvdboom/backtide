@@ -16,6 +16,11 @@ repos:
       types_or: [ python, pyi ]
       files: ^(?!docs/).*\.(py|ipy)$
 
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.10.12
+    hooks:
+      - id: uv-lock
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

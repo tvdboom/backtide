@@ -1,6 +1,5 @@
-use crate::data::asset::Asset;
-use crate::data::utils::MarketDataError;
-use crate::data::MarketDataProvider;
+use crate::ingestion::asset::Asset;
+use crate::ingestion::utils::MarketDataError;
 use crate::utils::http::{paginate, HttpClient};
 use async_trait::async_trait;
 use futures::future::join_all;
@@ -234,67 +233,67 @@ impl YahooFinance {
         })
     }
 }
-
-#[async_trait]
-impl MarketDataProvider for YahooFinance {
-    /// Return the top `limit` most active equities and returns the merged results.
-    async fn list_stocks(&self, limit: usize) -> Result<Vec<Asset>, MarketDataError> {
-        let futures: Vec<_> =
-            Self::EXCHANGES.iter().map(|ex| self.fetch_by_exchange("equity", ex, 50)).collect();
-
-        let results = join_all(futures).await;
-
-        let mut assets: Vec<Asset> = results.into_iter().filter_map(|r| r.ok()).flatten().collect();
-        assets.sort_by(|a, b| {
-            b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
-        });
-        assets.truncate(limit);
-
-        Ok(assets)
-    }
-
-    /// Return the top `_limit` most active forex pairs.
-    async fn list_forex(&self, _limit: usize) -> Result<Vec<Asset>, MarketDataError> {
-        // Yahoo doesn't have a standard way to retrieve forex pairs
-        Ok(vec![])
-    }
-
-    /// Return the top `limit` most active ETFs.
-    async fn list_etf(&self, limit: usize) -> Result<Vec<Asset>, MarketDataError> {
-        let futures: Vec<_> =
-            Self::EXCHANGES.iter().map(|ex| self.fetch_by_exchange("etf", ex, 30)).collect();
-
-        let results = join_all(futures).await;
-
-        let mut assets: Vec<Asset> = results.into_iter().filter_map(|r| r.ok()).flatten().collect();
-
-        assets.sort_by(|a, b| {
-            b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
-        });
-        assets.truncate(limit);
-
-        Ok(assets)
-    }
-
-    /// Return the top `limit` most active cryptocurrencies.
-    async fn list_crypto(&self, limit: usize) -> Result<Vec<Asset>, MarketDataError> {
-        // Fetch a large pool from multiple regional screeners concurrently
-        let (us, eu, gb) = try_join!(
-            self.fetch_predefined("all_cryptocurrencies_us", 50),
-            self.fetch_predefined("all_cryptocurrencies_eu", 50),
-            self.fetch_predefined("all_cryptocurrencies_gb", 50),
-        )?;
-
-        let mut assets: Vec<Asset> = us.into_iter().chain(eu).chain(gb).collect();
-
-        assets.sort_by(|a, b| {
-            b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
-        });
-        assets.truncate(limit);
-
-        Ok(assets)
-    }
-}
+//
+// #[async_trait]
+// impl MarketDataProvider for YahooFinance {
+//     /// Return the top `limit` most active equities and returns the merged results.
+//     async fn list_stocks(&self, limit: usize) -> Result<Vec<Asset>, MarketDataError> {
+//         let futures: Vec<_> =
+//             Self::EXCHANGES.iter().map(|ex| self.fetch_by_exchange("equity", ex, 50)).collect();
+//
+//         let results = join_all(futures).await;
+//
+//         let mut assets: Vec<Asset> = results.into_iter().filter_map(|r| r.ok()).flatten().collect();
+//         assets.sort_by(|a, b| {
+//             b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
+//         });
+//         assets.truncate(limit);
+//
+//         Ok(assets)
+//     }
+//
+//     /// Return the top `_limit` most active forex pairs.
+//     async fn list_forex(&self, _limit: usize) -> Result<Vec<Asset>, MarketDataError> {
+//         // Yahoo doesn't have a standard way to retrieve forex pairs
+//         Ok(vec![])
+//     }
+//
+//     /// Return the top `limit` most active ETFs.
+//     async fn list_etf(&self, limit: usize) -> Result<Vec<Asset>, MarketDataError> {
+//         let futures: Vec<_> =
+//             Self::EXCHANGES.iter().map(|ex| self.fetch_by_exchange("etf", ex, 30)).collect();
+//
+//         let results = join_all(futures).await;
+//
+//         let mut assets: Vec<Asset> = results.into_iter().filter_map(|r| r.ok()).flatten().collect();
+//
+//         assets.sort_by(|a, b| {
+//             b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
+//         });
+//         assets.truncate(limit);
+//
+//         Ok(assets)
+//     }
+//
+//     /// Return the top `limit` most active cryptocurrencies.
+//     async fn list_crypto(&self, limit: usize) -> Result<Vec<Asset>, MarketDataError> {
+//         // Fetch a large pool from multiple regional screeners concurrently
+//         let (us, eu, gb) = try_join!(
+//             self.fetch_predefined("all_cryptocurrencies_us", 50),
+//             self.fetch_predefined("all_cryptocurrencies_eu", 50),
+//             self.fetch_predefined("all_cryptocurrencies_gb", 50),
+//         )?;
+//
+//         let mut assets: Vec<Asset> = us.into_iter().chain(eu).chain(gb).collect();
+//
+//         assets.sort_by(|a, b| {
+//             b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
+//         });
+//         assets.truncate(limit);
+//
+//         Ok(assets)
+//     }
+// }
 
 /// Raw quote shape returned by the Yahoo Finance screener endpoint.
 /// Fields are `Option` because Yahoo omits them inconsistently.
