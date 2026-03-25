@@ -29,6 +29,13 @@ pub enum Provider {
     Kraken,
 }
 
+#[pymethods]
+impl Provider {
+    fn __repr__(&self) -> String {
+        self.to_string()
+    }
+}
+
 impl<'a, 'py> FromPyObject<'a, 'py> for Provider {
     type Error = PyErr;
 

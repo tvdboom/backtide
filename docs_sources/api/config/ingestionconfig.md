@@ -1,7 +1,7 @@
-# Config
---------
+# IngestionConfig
+-----------------
 
-:: backtide.config:Config
+:: backtide.config:IngestionConfig
     :: signature
     :: head
     :: table:

@@ -1,7 +1,7 @@
-# Config
---------
+# DisplayConfig
+---------------
 
-:: backtide.config:Config
+:: backtide.config:DisplayConfig
     :: signature
     :: head
     :: table:

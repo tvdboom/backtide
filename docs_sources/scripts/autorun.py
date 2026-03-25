@@ -9,10 +9,8 @@ import ast
 import os
 import shutil
 import sys
-from base64 import b64encode
 from code import InteractiveInterpreter
 from io import StringIO
-from uuid import uuid4
 
 from markdown import Markdown
 from pandas.io.formats.style import Styler
@@ -66,20 +64,6 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
         else:
             return f"... {code}"
 
-    def get_latest_file() -> str | None:
-        """Get the most recent file from the plots directory.
-
-        Returns
-        -------
-        str or None
-            Name of the file. Returns None if the dir is empty.
-
-        """
-        if files := [os.path.join(DIR_EXAMPLES, f) for f in os.listdir(DIR_EXAMPLES)]:
-            return os.path.basename(max(files, key=os.path.getmtime))
-        else:
-            return None
-
     global cached_last_value
 
     ipy = InteractiveInterpreter()
@@ -98,68 +82,42 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
             block = lines[node.lineno - 1 : end_line]
 
             if not line.endswith("# hide"):
-                output[-1].extend([draw(code) for code in block])
+                output[-1].extend([draw(code.removesuffix("# norun")) for code in block])
 
-            # Add filename parameter to plot call to save the figure
-            if ".plot_" in line:
-                f, arguments = block[0].split("(", 1)
-                if arguments.startswith(")"):
-                    # There are no other arguments
-                    block[0] = f'{f}(filename="{DIR_EXAMPLES}{uuid4()}")'
-                else:
-                    # Attach filename after other arguments
-                    args, close = arguments.rsplit(")", 1)
-                    block[0] = f'{f}({args}, filename="{DIR_EXAMPLES}{uuid4()}"){close}'
+            if not line.endswith("# norun"):
+                # First check for syntax errors
+                try:
+                    # Add \n at end to exit contextmanagers
+                    code = ipy.compile("\n".join(block) + "\n")
+                except (OverflowError, SyntaxError, ValueError):
+                    ipy.showsyntaxerror()
+                    raise
 
-            # First check for syntax errors
-            try:
-                # Add \n at end to exit contextmanagers
-                code = ipy.compile("\n".join(block) + "\n")
-            except (OverflowError, SyntaxError, ValueError):
-                ipy.showsyntaxerror()
-                raise
+                if code is None:
+                    raise ValueError("Code block is incomplete.")
 
-            if code is None:
-                raise ValueError("Code block is incomplete.")
+                sys.stdout = StringIO()
+                try:
+                    exec(code, ipy.locals)  # type: ignore[arg-type]
+                except Exception:
+                    ipy.showtraceback()
+                    raise
+                finally:
+                    if text := sys.stdout.getvalue():
+                        # Omit plot's output
+                        if not text.startswith(("{'application/pdf'", "<pandas.io.formats")):
+                            output[-1].append(f"\n{text[:-1]}")  # Remove last newline
 
-            sys.stdout = StringIO()
-            try:
-                exec(code, ipy.locals)  # type: ignore[arg-type]
-            except Exception:
-                ipy.showtraceback()
-                raise
-            finally:
-                if text := sys.stdout.getvalue():
-                    # Omit plot's output
-                    if not text.startswith(("{'application/pdf'", "<pandas.io.formats")):
-                        output[-1].append(f"\n{text[:-1]}")  # Remove last newline
+                    sys.stdout = sys.__stdout__
 
-                sys.stdout = sys.__stdout__
+                value = ipy.locals["__builtins__"].get("_")
+                if cached_last_value is not value and isinstance(value, Styler):
+                    cached_last_value = value
 
-            value = ipy.locals["__builtins__"].get("_")
-            if cached_last_value is not value and isinstance(value, Styler):
-                cached_last_value = value
+                    if end_line < len(lines):
+                        output.append([])  # Add new code block
 
-                if end_line < len(lines):
-                    output.append([])  # Add new code block
-
-                figures.append(value._repr_html_())
-
-            if ".plot_" in line:
-                if end_line < len(lines):
-                    output.append([])  # Add new code block
-
-                if latest_file := get_latest_file():
-                    if latest_file.endswith(".html"):
-                        with open(f"{DIR_EXAMPLES}{latest_file}", encoding="utf-8") as pio_f:
-                            figures.append(pio_f.read())
-                    else:
-                        with open(f"{DIR_EXAMPLES}{latest_file}", mode="rb") as mpl_f:
-                            img = b64encode(mpl_f.read()).decode("utf-8")  # type: ignore[[arg-type]
-
-                        figures.append(
-                            f"<img src='data:image/png;base64,{img}' alt='{f}' draggable='false'>"
-                        )
+                    figures.append(value._repr_html_())
 
         elif i > end_line:
             output[-1].append(draw(line))

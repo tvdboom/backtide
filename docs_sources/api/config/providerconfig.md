@@ -1,7 +1,7 @@
-# Config
---------
+# ProviderConfig
+----------------
 
-:: backtide.config:Config
+:: backtide.config:ProviderConfig
     :: signature
     :: head
     :: table:

@@ -1,5 +1,5 @@
-use crate::ingestion::asset::Asset;
 use crate::ingestion::utils::MarketDataError;
+use crate::models::asset::{Asset, AssetType};
 use crate::utils::http::{paginate, HttpClient};
 use async_trait::async_trait;
 use futures::future::join_all;
@@ -316,6 +316,7 @@ impl From<YahooQuote> for Asset {
             symbol: q.symbol,
             name,
             currency: q.currency.unwrap(),
+            asset_type: AssetType::Stock,
             volume: q.regular_market_volume,
             price: q.regular_market_price,
         }

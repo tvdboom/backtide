@@ -114,9 +114,11 @@ extra_javascript:
 nav:
     - About: about.md
     - Getting started: getting_started.md
+    - User guide:
+        - Nomenclature: user_guide/nomenclature.md
+        - Configuration: user_guide/configuration.md
     - API:
         - config:
-            - config: api/config/config.md
             - get_config: api/config/get_config.md
             - load_config: api/config/load_config.md
             - set_config: api/config/set_config.md

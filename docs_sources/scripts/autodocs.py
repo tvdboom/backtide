@@ -37,6 +37,8 @@ BACKTIDE_URL = "https://github.com/tvdboom/backtide/blob/master/"
 # Usage in docs: [anchor][key] or [key][] -> [anchor][value]
 CUSTOM_URLS = dict()
 
+FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+LINK_RE = re.compile(r"\[([\.`': \w_-]+?)\](?!\()(?:\s*\[(?!\[)([\w_:-]+?)\])?")
 
 # Classes ========================================================== >>
 
@@ -709,16 +711,14 @@ def custom_autorefs(markdown: str, autodocs: AutoDocs | None = None) -> str:
 
     # Skip regex check for very long docs
     if len(markdown) < 1e5:
-        for match in re.finditer(
-            r"\[([\.`': \w_-]+?)\](?!\()\s*(?:\[(?!\[)([\w_:-]+?)\])?", markdown
-        ):
+        for match in re.finditer(LINK_RE, FENCE_RE.sub("", markdown)):
             anchor = match.group(1)
             link = match.group(2)
 
             text = match.group()
             if not link:
-                # Only adapt when has form [anchor][]
-                link = anchor.replace(" ", "-").replace(".", "").replace("'", "").lower()
+                # Only adapt when has form [anchor] (no second square brackets pair)
+                link = re.sub(r"[.'`]", "", anchor).replace(" ", "-").lower()
                 text = f"[{anchor}][{link}]"
             if link in CUSTOM_URLS:
                 # Replace keyword with custom url
