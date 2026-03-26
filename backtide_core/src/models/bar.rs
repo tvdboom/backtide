@@ -2,8 +2,8 @@
 
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter};
 use strum::IntoEnumIterator;
+use strum::{Display, EnumIter};
 
 /// The time resolution of a single [`Bar`].
 ///
@@ -16,42 +16,17 @@ use strum::IntoEnumIterator;
 /// - backtide.models:Bar
 #[pyclass(from_py_object, module = "backtide.models")]
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    Eq,
-    Hash,
-    PartialEq,
-    Display,
-    EnumIter,
-    Serialize,
-    Deserialize,
+    Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Display, EnumIter, Serialize, Deserialize,
 )]
 pub enum Interval {
-    /// 1-minute bars.
     OneMinute,
-
-    /// 5-minute bars.
     FiveMinutes,
-
-    /// 15-minute bars.
     FifteenMinutes,
-
-    /// 30-minute bars.
     ThirtyMinutes,
-
-    /// 1-hour bars.
     OneHour,
-
-    /// 4-hour bars.
     FourHours,
-
     #[default]
-    /// Daily bars (calendar day, not session).
     OneDay,
-
-    /// Weekly bars (Monday open → Friday close, UTC).
     OneWeek,
 }
 
@@ -110,6 +85,33 @@ impl Interval {
 /// `adj_close` is always populated. For assets where price adjustment is
 /// meaningless (crypto, forex) it is set equal to `close`.
 ///
+/// Attributes
+/// ----------
+/// open_ts : int
+///     Bar open time in UTC (Unix seconds).
+///
+/// open_ts_exchange : float
+///     Bar open time in the exchange's local timezone (Unix seconds).
+///
+/// open : float
+///     Price at bar open.
+///
+/// high : float
+///     Highest price seen in the interval.
+///
+/// low : float
+///     Lowest price seen in the interval.
+///
+/// close : float
+///     Price at bar close.
+///
+/// adj_close : float
+///     Split- and dividend-adjusted close. Equal to `close` when adjustment
+///     is not applicable.
+///
+/// volume : float
+///     Traded volume in the asset's native units.
+///
 /// See Also
 /// --------
 /// - backtide.models:Asset
@@ -118,29 +120,13 @@ impl Interval {
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.models")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Bar {
-    /// Bar open time in UTC (Unix seconds).
     pub open_ts: i64,
-
-    /// Bar open time in the exchange's local timezone (Unix seconds).
     pub open_ts_exchange: i64,
-
-    /// Price at bar open.
     pub open: f64,
-
-    /// Highest price seen in the interval.
     pub high: f64,
-
-    /// Lowest price seen in the interval.
     pub low: f64,
-
-    /// Price at bar close.
     pub close: f64,
-
-    /// Split- and dividend-adjusted close. Equal to `close` when adjustment
-    /// is not applicable.
     pub adj_close: f64,
-
-    /// Traded volume in the asset's native units.
     pub volume: f64,
 }
 

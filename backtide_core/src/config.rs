@@ -1,6 +1,6 @@
 //! Configuration module.
 //!
-//! Owns a process-wide [Config] singleton initialized at startup.
+//! Owns a process-wide [`Config`] singleton initialized at startup.
 //! After that point every caller gets a cheap `&'static` reference
 //! through [config()].
 
@@ -193,10 +193,10 @@ fn fetch_config() -> Config {
 /// base_currency : str, default="EUR"
 ///     Currency (ISO 4217 code) that all prices are normalized to.
 ///
-/// ingestion : [IngestionConfig]
+/// ingestion : [`IngestionConfig`]
 ///     Settings that control how market data is fetched and stored.
 ///
-/// display : [DisplayConfig]
+/// display : [`DisplayConfig`]
 ///     Settings that control how values are presented in the application's interface.
 ///
 /// See Also
@@ -302,7 +302,7 @@ impl PyConfig {
 /// storage_path : str, default=".backtide/"
 ///     File-system path to the primary database file.
 ///
-/// providers : [ProviderConfig]
+/// providers : [`ProviderConfig`]
 ///     Which data provider to use for each asset type.
 ///
 /// See Also
@@ -574,7 +574,7 @@ impl PyDisplayConfig {
 ///
 /// Returns
 /// -------
-/// [Config]
+/// [`Config`]
 ///     The current configuration.
 ///
 /// See Also
@@ -611,7 +611,7 @@ fn get_config(py: Python<'_>) -> PyResult<PyConfig> {
 ///
 /// Returns
 /// -------
-/// [Config]
+/// [`Config`]
 ///     The loaded configuration.
 ///
 /// See Also
@@ -642,7 +642,7 @@ fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
 ///
 /// Parameters
 /// ----------
-/// config: [Config]
+/// config: [`Config`]
 ///     Configuration to set.
 ///
 /// See Also

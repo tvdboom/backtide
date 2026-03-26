@@ -19,8 +19,10 @@ belongs to exactly one [asset type].
 [](){#asset-type}
 <strong id="asset-type">asset type</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
-The broad category an [asset][nom-asset] belongs to. The asset type determines which
-[provider][nom-provider] is used to fetch data for that asset. See [`AssetType`].
+The broad category an [asset][nom-asset] belongs to. These include stock (individual
+equity shares), etf (exchange-traded funds), forex (spot foreign-exchange pairs) or
+crypto (cryptocurrency spot pairs). The asset type determines which [provider][nom-provider]
+is used to fetch data for that asset. See [`AssetType`].
 </div>
 
 <br>
@@ -69,9 +71,9 @@ has already been stored will not produce duplicate records.
 [](){#nom-interval}
 <strong id="interval">interval</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
-The time resolution of a [bar], such as one minute, one hour, or one day. All bars
-within a single dataset share the same interval. Also referred to as *timeframe* or
-*granularity*. See [`Interval`].
+The time resolution of a [bar][nom-bar], such as one minute, one hour, or one day.
+All bars within a single dataset share the same interval. Also referred to as
+*timeframe* or *granularity*. See [`Interval`].
 </div>
 
 <br>

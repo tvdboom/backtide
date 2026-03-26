@@ -1,9 +1,9 @@
 //! Data models module.
 
 use crate::models::asset::{Asset, AssetType};
+use crate::models::bar::{Bar, Interval};
 use crate::models::currency::Currency;
 use pyo3::prelude::*;
-use crate::models::bar::{Bar, Interval};
 
 pub mod asset;
 pub mod bar;

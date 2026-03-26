@@ -1,7 +1,6 @@
 //! Asset and AssetType definitions.
 
 use pyo3::prelude::*;
-use pyo3::types::PyType;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
 
@@ -15,17 +14,10 @@ use strum::{EnumIter, IntoEnumIterator};
 #[pyclass(from_py_object, module = "backtide.models")]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, EnumIter, Serialize, Deserialize)]
 pub enum AssetType {
-    /// Individual equity shares.
     #[default]
     Stock,
-
-    /// Exchange-traded funds.
     Etf,
-
-    /// Spot foreign-exchange pairs.
     Forex,
-
-    /// Cryptocurrency spot pairs.
     Crypto,
 }
 
@@ -65,6 +57,26 @@ impl AssetType {
 /// Each asset is uniquely identified by a [symbol][nom-symbol] and
 /// belongs to exactly one [asset type].
 ///
+/// Attributes
+/// ----------
+/// symbol : str
+///     Ticker symbol as used on the exchange.
+///
+/// name : str
+///     Human-readable name of the asset.
+///
+/// currency : str
+///     Currency the asset trades on. Quote for forex and crypto.
+///
+/// asset_type : [`AssetType`]
+///     Asset type this asset belongs to.
+///
+/// volume : int or None
+///     Traded volume during the most recent regular market session.
+///
+/// price : float or None
+///     The most recent traded price during the regular market session.
+///
 /// See Also
 /// --------
 /// - backtide.models:AssetType
@@ -73,22 +85,11 @@ impl AssetType {
 #[pyclass(skip_from_py_object, get_all, frozen, module = "backtide.models")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Asset {
-    /// Ticker symbol as used on the exchange.
     pub symbol: String,
-
-    /// Human-readable name of the asset.
     pub name: String,
-
-    /// Currency the asset trades on. Quote for forex and crypto.
     pub currency: String,
-
-    /// Asset type this asset belongs to.
     pub asset_type: AssetType,
-
-    /// Traded volume during the most recent regular market session.
     pub volume: Option<u64>,
-
-    /// The most recent traded price during the regular market session.
     pub price: Option<f64>,
 }
 

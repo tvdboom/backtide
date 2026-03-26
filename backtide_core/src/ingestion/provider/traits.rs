@@ -1,9 +1,9 @@
 //! Trait that all market-data providers must implement.
 
-use async_trait::async_trait;
-use thiserror::Error;
 use crate::models::asset::{Asset, AssetType};
 use crate::models::bar::{Bar, Interval};
+use async_trait::async_trait;
+use thiserror::Error;
 
 /// Errors that a [`Provider`] implementation may return.
 #[derive(Debug, Error)]
@@ -19,7 +19,9 @@ pub enum ProviderError {
     /// The provider's rate limit was hit. Callers should wait at least
     /// `retry_after_secs` before retrying.
     #[error("rate limited – retry after {retry_after_secs}s")]
-    RateLimited { retry_after_secs: u64 },
+    RateLimited {
+        retry_after_secs: u64,
+    },
 
     /// An underlying HTTP transport error from `reqwest`.
     #[error("request failed: {0}")]
@@ -40,7 +42,7 @@ pub trait Provider: Send + Sync {
 
     /// The intervals supported by this provider.
     fn intervals(&self) -> Vec<Interval>;
-    
+
     /// Returns an overview of the most important assets of `asset_type` that
     /// the provider serves. May be expensive – callers should cache the result.
     async fn list_assets(&self, asset_type: AssetType) -> ProviderResult<Vec<Asset>>;
