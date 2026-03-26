@@ -122,6 +122,15 @@ nav:
             - get_config: api/config/get_config.md
             - load_config: api/config/load_config.md
             - set_config: api/config/set_config.md
+            - Config: api/config/config.md
+            - DisplayConfig: api/config/displayconfig.md
+            - IngestionConfig: api/config/ingestionconfig.md
+            - ProviderConfig: api/config/providerconfig.md
+        - models:
+            - Asset: api/models/asset.md
+            - AssetType: api/models/assettype.md
+            - Bar: api/models/bar.md
+            - Interval: api/models/interval.md
     - FAQ: faq.md
     - Contributing: contributing.md
     - Dependencies: dependencies.md

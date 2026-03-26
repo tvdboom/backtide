@@ -5,8 +5,14 @@ use pyo3::types::PyType;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
 
-/// The broad category an [Asset] belongs to.
-#[pyclass(from_py_object)]
+/// The broad category an [`Asset`] belongs to.
+///
+/// See Also
+/// --------
+/// - backtide.models:Asset
+/// - backtide.models:Bar
+/// - backtide.models:Interval
+#[pyclass(from_py_object, module = "backtide.models", extends=RustEnum)]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, EnumIter, Serialize, Deserialize)]
 pub enum AssetType {
     /// Individual equity shares.
@@ -52,25 +58,27 @@ impl AssetType {
 
 /// A tradeable financial instrument.
 ///
-/// Each asset is uniquely identified by a [symbol] and belongs
-/// to exactly one [asset type].
-#[pyclass(skip_from_py_object)]
+/// Each asset is uniquely identified by a [symbol][nom-symbol] and
+/// belongs to exactly one [asset type].
+///
+/// See Also
+/// --------
+/// - backtide.models:AssetType
+/// - backtide.models:Bar
+/// - backtide.models:Interval
+#[pyclass(skip_from_py_object, get_all, frozen, module = "backtide.models")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Asset {
     /// Ticker symbol as used on the exchange.
-    #[pyo3(get)]
     pub symbol: String,
 
     /// Human-readable name of the asset.
-    #[pyo3(get)]
     pub name: String,
 
     /// Currency the asset trades on. Quote for forex and crypto.
-    #[pyo3(get)]
     pub currency: String,
 
     /// Asset type this asset belongs to.
-    #[pyo3(get)]
     pub asset_type: AssetType,
 
     /// Traded volume during the most recent regular market session.

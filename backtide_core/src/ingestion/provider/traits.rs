@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use thiserror::Error;
 use crate::models::asset::{Asset, AssetType};
+use crate::models::bar::{Bar, Interval};
 
 /// Errors that a [`Provider`] implementation may return.
 #[derive(Debug, Error)]
@@ -37,6 +38,9 @@ pub trait Provider: Send + Sync {
     /// Short identifier used for logging and config keys, e.g. `"yahoo"`, `"kraken"`.
     fn id(&self) -> &str;
 
+    /// The intervals supported by this provider.
+    fn intervals(&self) -> Vec<Interval>;
+    
     /// Returns an overview of the most important assets of `asset_type` that
     /// the provider serves. May be expensive – callers should cache the result.
     async fn list_assets(&self, asset_type: AssetType) -> ProviderResult<Vec<Asset>>;

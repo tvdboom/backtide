@@ -1,4 +1,4 @@
-//! Backtide configuration module.
+//! Configuration module.
 //!
 //! Owns a process-wide [Config] singleton initialized at startup.
 //! After that point every caller gets a cheap `&'static` reference

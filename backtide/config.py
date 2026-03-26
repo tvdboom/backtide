@@ -1,3 +1,10 @@
+"""Backtide.
+
+Author: Mavs
+Description: Module containing configuration re-exports.
+
+"""
+
 from backtide.core.config import (
     Config,
     DisplayConfig,
@@ -7,14 +14,3 @@ from backtide.core.config import (
     load_config,
     set_config,
 )
-
-
-__all__ = [
-    "Config",
-    "DisplayConfig",
-    "IngestionConfig",
-    "ProviderConfig",
-    "get_config",
-    "load_config",
-    "set_config",
-]
