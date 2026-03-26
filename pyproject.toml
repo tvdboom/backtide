@@ -29,6 +29,7 @@ dependencies = [
 ]
 
 [dependency-groups]
+# Although already in the pre-commit, required for the IDE's language server
 lint = [
     "ruff>=0.15.7,<1",
     "ty>=0.0.25,<1",

@@ -3,6 +3,7 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter};
+use strum::IntoEnumIterator;
 
 /// The time resolution of a single [`Bar`].
 ///
@@ -56,17 +57,26 @@ pub enum Interval {
 
 #[pymethods]
 impl Interval {
+    #[classattr]
+    const __RUST_ENUM__: bool = true;
+
     fn __repr__(&self) -> String {
         match self {
             Interval::OneMinute => "1m".to_string(),
             Interval::FiveMinutes => "5m".to_string(),
-            Interval::FifteenMinutes => "5m".to_string(),
-            Interval::ThirtyMinutes => "3m".to_string(),
+            Interval::FifteenMinutes => "15m".to_string(),
+            Interval::ThirtyMinutes => "30m".to_string(),
             Interval::OneHour => "1h".to_string(),
             Interval::FourHours => "4h".to_string(),
             Interval::OneDay => "1d".to_string(),
             Interval::OneWeek => "1w".to_string(),
         }
+    }
+
+    /// Return all variants.
+    #[staticmethod]
+    fn variants() -> Vec<Self> {
+        Self::iter().collect()
     }
 
     /// Minutes in this interval.
@@ -132,4 +142,10 @@ pub struct Bar {
 
     /// Traded volume in the asset's native units.
     pub volume: f64,
+}
+
+#[pymethods]
+impl Bar {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
 }

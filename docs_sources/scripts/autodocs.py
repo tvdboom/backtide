@@ -42,6 +42,12 @@ LINK_RE = re.compile(r"\[([\.`': \w_-]+?)\](?!\()(?:\s*\[(?!\[)([\w_:-]+?)\])?")
 
 # Classes ========================================================== >>
 
+# Check if an object is an enum
+check_is_enum = lambda obj: isinstance(obj, Enum) or getattr(obj, "__RUST_ENUM__", False)
+
+# Check if an object is a dataclass
+check_is_dataclass = lambda obj: is_dataclass(obj) or getattr(obj, "__RUST_DATACLASS__", False)
+
 
 class AutoDocs:
     """Parses an object to documentation in markdown/html.
@@ -197,10 +203,10 @@ class AutoDocs:
         params = signature(self.obj).parameters
 
         # Assign an object type
-        if is_dataclass(self.obj):
+        if check_is_dataclass(self.obj):
             obj = "dataclass"
         elif isclass(self.obj):
-            if issubclass(self.obj, Enum):
+            if check_is_enum(self.obj):
                 obj = "enum"
             else:
                 obj = "class"
@@ -283,8 +289,13 @@ class AutoDocs:
         match = re.match(pattern, self.doc[len(self.get_summary()) :], re.S)
         description = match.group() if match else ""
 
-        if isclass(self.obj) and issubclass(self.obj, Enum):
-            description += "\n\n" + "\n".join(f"- {k}" for k in self.obj.__members__)
+        if isclass(self.obj) and check_is_enum(self.obj):
+            if getattr(self.obj, "__members__", None):
+                members = self.obj.__members__
+            else:
+                members = self.obj.variants()
+
+            description += "\n\n" + "\n".join(f"- {k}" for k in members)
 
         return description
 

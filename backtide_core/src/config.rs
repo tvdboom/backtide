@@ -242,6 +242,9 @@ impl Clone for PyConfig {
 
 #[pymethods]
 impl PyConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
     #[new]
     #[pyo3(signature = (base_currency="EUR", ingestion=None, display=None))]
     fn new(
@@ -341,6 +344,9 @@ impl Clone for PyIngestionConfig {
 
 #[pymethods]
 impl PyIngestionConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
     #[new]
     #[pyo3(signature = (storage_path=".backtide/", providers=None))]
     fn new(py: Python<'_>, storage_path: &str, providers: Option<Py<PyProviderConfig>>) -> Self {
@@ -435,6 +441,9 @@ impl PyProviderConfig {
 
 #[pymethods]
 impl PyProviderConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
     #[new]
     #[pyo3(signature = (stocks="yahoo", etf="yahoo", forex="yahoo", crypto="binance"))]
     fn new(stocks: &str, etf: &str, forex: &str, crypto: &str) -> PyResult<Self> {
@@ -522,6 +531,9 @@ impl PyDisplayConfig {
 
 #[pymethods]
 impl PyDisplayConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
     #[new]
     #[pyo3(signature = (date_format="%d-%m-%Y", timezone=None))]
     fn new(date_format: &str, timezone: Option<&str>) -> Self {

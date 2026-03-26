@@ -266,6 +266,9 @@ impl Currency {
 
 #[pymethods]
 impl Currency {
+    #[classattr]
+    const __RUST_ENUM__: bool = true;
+
     fn __repr__(&self) -> String {
         self.to_string()
     }

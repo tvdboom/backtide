@@ -12,7 +12,7 @@ use strum::{EnumIter, IntoEnumIterator};
 /// - backtide.models:Asset
 /// - backtide.models:Bar
 /// - backtide.models:Interval
-#[pyclass(from_py_object, module = "backtide.models", extends=RustEnum)]
+#[pyclass(from_py_object, module = "backtide.models")]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, EnumIter, Serialize, Deserialize)]
 pub enum AssetType {
     /// Individual equity shares.
@@ -31,6 +31,9 @@ pub enum AssetType {
 
 #[pymethods]
 impl AssetType {
+    #[classattr]
+    const __RUST_ENUM__: bool = true;
+
     pub fn __str__(&self) -> &'static str {
         match self {
             Self::Stock => "Stocks",
@@ -40,12 +43,13 @@ impl AssetType {
         }
     }
 
-    /// All known variants as their canonical string values.
-    #[classmethod]
-    pub fn names(_cls: &Bound<'_, PyType>) -> Vec<&'static str> {
-        Self::iter().map(|x| x.__str__()).collect()
+    /// Return all variants.
+    #[staticmethod]
+    fn variants() -> Vec<Self> {
+        Self::iter().collect()
     }
 
+    /// Material icon to visually represent this asset type.
     pub fn icon(&self) -> &'static str {
         match self {
             Self::Stock => ":material/candlestick_chart:",
@@ -99,6 +103,9 @@ impl Asset {
 
 #[pymethods]
 impl Asset {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
     #[new]
     fn new(symbol: String, name: String, currency: String, asset_type: AssetType) -> Self {
         Self {
