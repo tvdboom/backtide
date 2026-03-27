@@ -7,41 +7,14 @@ Description: Unit tests for the configuration frontend.
 
 import pytest
 
-from backtide.config import (
-    Config,
-    DisplayConfig,
-    IngestionConfig,
-    ProviderConfig,
-)
-
-
-def test_provider_custom():
-    """Custom provider overrides default."""
-    p = ProviderConfig(crypto="kraken")
-    assert p.to_dict()["crypto"].lower() == "kraken"
-
-
-def test_provider_equality():
-    """ProviderConfig equality behaves correctly."""
-    assert ProviderConfig() == ProviderConfig()
-    assert ProviderConfig(crypto="kraken") != ProviderConfig()
-
-
-def test_provider_repr():
-    """__repr__ contains expected provider information."""
-    r = repr(ProviderConfig())
-    assert "ProviderConfig" in r
-    assert "yahoo" in r.lower()
-    assert "binance" in r.lower()
+from backtide.config import Config, DisplayConfig, IngestionConfig
 
 
 def test_display_custom():
     """Custom display configuration overrides defaults."""
-    d = DisplayConfig(date_format="%Y", timezone="UTC")
-    out = d.to_dict()
-
-    assert out["date_format"] == "%Y"
-    assert out["timezone"] == "UTC"
+    dc = DisplayConfig(date_format="%Y", timezone="UTC").to_dict()
+    assert dc["date_format"] == "%Y"
+    assert dc["timezone"] == "UTC"
 
 
 def test_display_equality():
@@ -52,15 +25,7 @@ def test_display_equality():
 
 def test_display_repr():
     """__repr__ contains display configuration values."""
-    r = repr(DisplayConfig())
-    assert "DisplayConfig" in r
-    assert "%d-%m-%Y" in r
-
-
-def test_ingestion_custom_path():
-    """Custom storage path is applied correctly."""
-    i = IngestionConfig(storage_path="/tmp/")
-    assert "database.duckdb" in i.to_dict()["storage_path"]
+    assert str(DisplayConfig()).startswith('DisplayConfig(date_format="YYYY-MM-DD"')
 
 
 def test_ingestion_equality():
@@ -71,9 +36,7 @@ def test_ingestion_equality():
 
 def test_ingestion_repr():
     """__repr__ contains ingestion configuration values."""
-    r = repr(IngestionConfig())
-    assert "IngestionConfig" in r
-    assert "database.duckdb" in r
+    assert str(IngestionConfig()).startswith('IngestionConfig(storage_path=".backtide/"')
 
 
 def test_config_custom():
@@ -84,31 +47,25 @@ def test_config_custom():
 
 def test_config_nested_override():
     """Nested configuration overrides propagate correctly."""
-    providers = ProviderConfig(crypto="kraken")
-    ingestion = IngestionConfig(providers=providers)
-    c = Config(ingestion=ingestion)
-
+    c = Config(ingestion=IngestionConfig(providers={"crypto": "kraken"}))
     assert c.to_dict()["ingestion"]["providers"]["crypto"].lower() == "kraken"
 
 
 def test_config_equality():
     """Config equality behaves correctly."""
     assert Config() == Config()
-    assert Config(base_currency="USD") != Config()
+    assert Config(base_currency="EUR") != Config()
 
 
 def test_config_repr():
     """__repr__ contains top-level config sections."""
-    r = repr(Config())
-    assert "Config" in r
-    assert "ingestion" in r.lower()
-    assert "display" in r.lower()
+    assert str(Config()).startswith('Config(base_currency="USD"')
 
 
 def test_invalid_provider_raises():
     """Invalid provider raises ValueError."""
     with pytest.raises(ValueError, match=".*Invalid provider.*"):
-        ProviderConfig(crypto="invalid")
+        IngestionConfig(providers={"crypto": "invalid"})
 
 
 def test_invalid_currency_raises():

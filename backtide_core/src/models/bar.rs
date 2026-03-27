@@ -1,9 +1,10 @@
 //! Interval and Bar definitions.
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
-use strum::IntoEnumIterator;
 use strum::{Display, EnumIter};
+use strum::{EnumString, IntoEnumIterator};
 
 /// The time resolution of a single [`Bar`].
 ///
@@ -16,7 +17,18 @@ use strum::{Display, EnumIter};
 /// - backtide.models:Bar
 #[pyclass(from_py_object, module = "backtide.models")]
 #[derive(
-    Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Display, EnumIter, Serialize, Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    Hash,
+    PartialEq,
+    Display,
+    EnumIter,
+    EnumString,
+    Serialize,
+    Deserialize,
 )]
 pub enum Interval {
     OneMinute,
@@ -39,6 +51,25 @@ impl Interval {
     #[classattr]
     const __RUST_ENUM__: bool = true;
 
+    #[new]
+    pub fn new(s: &str) -> PyResult<Self> {
+        s.parse().map_err(|_| PyValueError::new_err(format!("invalid Interval: {s}")))
+    }
+
+    /// Make the class pickable (required by streamlit).
+    pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
+        let cls = py.get_type::<Interval>().into_any();
+        Ok((cls, (self.to_string(),)))
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn __hash__(&self) -> u64 {
+        *self as u64
+    }
+
     fn __repr__(&self) -> String {
         match self {
             Interval::OneMinute => "1m".to_string(),
@@ -56,10 +87,16 @@ impl Interval {
         }
     }
 
+    /// Return the default variant.
+    #[staticmethod]
+    fn get_default(py: Python<'_>) -> Py<Self> {
+        Py::new(py, Self::OneDay).unwrap()
+    }
+
     /// Return all variants.
     #[staticmethod]
-    fn variants() -> Vec<Self> {
-        Self::iter().collect()
+    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
+        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
     }
 
     /// Minutes in this interval.

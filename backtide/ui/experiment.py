@@ -14,10 +14,6 @@ import streamlit as st
 import yaml
 from code_editor import code_editor
 
-from backtide.assets.assets import Asset, AssetType
-from backtide.assets.crypto import CRYPTOS
-from backtide.assets.currency import CURRENCIES
-from backtide.models.ui import Interval
 from backtide.ui.utils import (
     _get_asset_type_description,
     _prevent_deselection,

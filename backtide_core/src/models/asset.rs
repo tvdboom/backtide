@@ -1,8 +1,11 @@
 //! Asset and AssetType definitions.
 
+use crate::ingestion::provider::Provider;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use serde::{Deserialize, Serialize};
-use strum::{EnumIter, IntoEnumIterator};
+use serde::Deserialize;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
+use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
 /// The broad category an [`Asset`] belongs to.
 ///
@@ -12,13 +15,38 @@ use strum::{EnumIter, IntoEnumIterator};
 /// - backtide.models:Bar
 /// - backtide.models:Interval
 #[pyclass(from_py_object, module = "backtide.models")]
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, EnumIter, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    Hash,
+    PartialEq,
+    Display,
+    EnumIter,
+    EnumString,
+    SerializeDisplay,
+    DeserializeFromStr,
+)]
+#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 pub enum AssetType {
     #[default]
-    Stock,
+    Stocks,
     Etf,
     Forex,
     Crypto,
+}
+
+impl AssetType {
+    pub fn default(&self) -> Provider {
+        match self {
+            Self::Stocks => Provider::Yahoo,
+            Self::Etf => Provider::Yahoo,
+            Self::Forex => Provider::Yahoo,
+            Self::Crypto => Provider::Binance,
+        }
+    }
 }
 
 #[pymethods]
@@ -26,9 +54,28 @@ impl AssetType {
     #[classattr]
     const __RUST_ENUM__: bool = true;
 
+    #[new]
+    pub fn new(s: &str) -> PyResult<Self> {
+        s.parse().map_err(|_| PyValueError::new_err(format!("invalid AssetType: {s}")))
+    }
+
+    /// Make the class pickable (required by streamlit).
+    pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
+        let cls = py.get_type::<AssetType>().into_any();
+        Ok((cls, (self.to_string(),)))
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn __hash__(&self) -> u64 {
+        *self as u64
+    }
+
     pub fn __str__(&self) -> &'static str {
         match self {
-            Self::Stock => "Stocks",
+            Self::Stocks => "Stocks",
             Self::Etf => "ETF",
             Self::Forex => "Forex",
             Self::Crypto => "Crypto",
@@ -37,20 +84,20 @@ impl AssetType {
 
     /// Return the default variant.
     #[staticmethod]
-    fn get_default() -> Self {
-        Self::default()
+    fn get_default(py: Python<'_>) -> Py<Self> {
+        Py::new(py, Self::Stocks).unwrap()
     }
 
     /// Return all variants.
     #[staticmethod]
-    fn variants() -> Vec<Self> {
-        Self::iter().collect()
+    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
+        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
     }
 
     /// Material icon to visually represent this asset type.
     pub fn icon(&self) -> &'static str {
         match self {
-            Self::Stock => ":material/candlestick_chart:",
+            Self::Stocks => ":material/candlestick_chart:",
             Self::Etf => ":material/account_balance:",
             Self::Forex => ":material/currency_exchange:",
             Self::Crypto => ":material/currency_bitcoin:",
@@ -77,25 +124,37 @@ impl AssetType {
 /// asset_type : [`AssetType`]
 ///     Asset type this asset belongs to.
 ///
-/// volume : int or None
-///     Traded volume during the most recent regular market session.
+/// start_date : int
+///     Earliest moment for which there is data in UNIX timestamp.
 ///
-/// price : float or None
-///     The most recent traded price during the regular market session.
+/// end_date : int
+///     Most recent moment for which there is data in UNIX timestamp.
 ///
 /// See Also
 /// --------
 /// - backtide.models:AssetType
 /// - backtide.models:Bar
 /// - backtide.models:Interval
-#[pyclass(skip_from_py_object, get_all, frozen, module = "backtide.models")]
+#[pyclass(skip_from_py_object, frozen, module = "backtide.models")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Asset {
+    #[pyo3(get)]
     pub symbol: String,
+    #[pyo3(get)]
     pub name: String,
+    #[pyo3(get)]
     pub currency: String,
+    #[pyo3(get)]
     pub asset_type: AssetType,
+    #[pyo3(get)]
+    pub start_date: Option<u64>,
+    #[pyo3(get)]
+    pub end_date: Option<u64>,
+
+    /// Traded volume during the most recent regular market session.
     pub volume: Option<u64>,
+
+    /// The most recent traded price during the regular market session.
     pub price: Option<f64>,
 }
 
@@ -114,15 +173,32 @@ impl Asset {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    fn new(symbol: String, name: String, currency: String, asset_type: AssetType) -> Self {
+    fn new(
+        symbol: String,
+        name: String,
+        currency: String,
+        asset_type: AssetType,
+        start_date: Option<u64>,
+        end_date: Option<u64>,
+    ) -> Self {
         Self {
             symbol,
             name,
             currency,
             asset_type,
+            start_date,
+            end_date,
             volume: None,
             price: None,
         }
+    }
+
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (String, String, String, AssetType))> {
+        let cls = py.get_type::<Asset>().into_any();
+        Ok((cls, (self.symbol.clone(), self.name.clone(), self.currency.clone(), self.asset_type)))
     }
 
     fn __repr__(&self) -> String {

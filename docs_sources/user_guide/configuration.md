@@ -32,8 +32,7 @@ If no file is found, the built-in defaults are used.
     crypto = "binance"
 
     [display]
-    date_format = "%d-%m-%Y"
-    timezone = null
+    date_format = "YYYY-MM-DD"
     ```
 
 === "YAML"
@@ -49,7 +48,7 @@ If no file is found, the built-in defaults are used.
             crypto: binance
 
     display:
-        date_format: "%d-%m-%Y"
+        date_format: "YYYY-MM-DD"
         timezone: null
     ```
 
@@ -67,7 +66,7 @@ If no file is found, the built-in defaults are used.
             }
         },
         "display": {
-            "date_format": "%d-%m-%Y",
+            "date_format": "YYYY-MM-DD",
             "timezone": null
         }
     }

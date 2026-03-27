@@ -9,39 +9,39 @@ from typing import Any
 
 import streamlit as st
 
-from backtide.assets import AssetType
+from backtide.core.models import AssetType
 from backtide.utils.utils import to_list
 
 
 def _get_asset_type_description(asset_type: AssetType) -> tuple[str, str]:
     """Get the description of a given asset type for the symbol and currency."""
     match asset_type:
-        case AssetType.STOCKS:
-            symbol_description = (
-                "List of yahoo stock tickers. The preloaded options are the primary listings "
-                "for companies in major indices, but any valid yahoo stock ticker can be added."
+        case AssetType.Stocks:
+            asset_description = (
+                "List of stock tickers. The preloaded options are the primary listings "
+                "for companies in major indices, but any valid ticker can be added."
             )
             currency_description = "Filter the preloaded symbols by their denominated currency."
-        case AssetType.FOREX:
-            symbol_description = (
+        case AssetType.Etf:
+            asset_description = (
+                "List of ETF tickers. The preloaded options are frequently traded "
+                "ETFs and funds, but any valid ETF ticker can be added."
+            )
+            currency_description = "Filter the preloaded symbols by their denominated currency."
+        case AssetType.Forex:
+            asset_description = (
                 "List of currency pairs. The preloaded options are frequently traded pairs, "
-                "but any valid yahoo forex ticker can be added."
+                "but any valid forex ticker can be added."
             )
-            currency_description = "Filter the preloaded pairs by their quote currency."
-        case AssetType.ETF:
-            symbol_description = (
-                "List of yahoo ETF tickers. The preloaded options are frequently traded "
-                "ETFs and funds, but any valid yahoo ETF ticker can be added."
-            )
-            currency_description = "Filter the preloaded symbols by their denominated currency."
-        case AssetType.CRYPTO:
-            symbol_description = (
+            currency_description = "Filter the preloaded pairs by their base/quote currencies."
+        case AssetType.Crypto:
+            asset_description = (
                 "List of currency pairs. The preloaded options are frequently traded "
-                "pairs, but any valid Binance ticker can be added."
+                "pairs, but any valid ticker can be added."
             )
-            currency_description = "Filter the preloaded symbols by their quote currency."
+            currency_description = "Filter the preloaded symbols by their base/quote currencies."
 
-    return symbol_description, currency_description
+    return asset_description, currency_description
 
 
 def _prevent_deselection(key: str, default: Any, reset: list[str] | None = None):

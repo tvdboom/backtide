@@ -1,10 +1,10 @@
 //! Exchange definition.
 
+use crate::models::currency::Currency;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString};
-use crate::models::currency::Currency;
 
 /// A stock exchange identified by its ISO 10383 MIC (Market Identifier Code).
 #[pyclass(skip_from_py_object)]
@@ -63,36 +63,36 @@ impl Exchange {
         use Currency::*;
         use Exchange::*;
         match self {
-            XAMS => ("Euronext Amsterdam",               "Netherlands",   "Amsterdam", "AMS", EUR),
-            XASE => ("NYSE American",                    "United States", "New York",  "ASE", USD),
-            XASX => ("Australian Securities Exchange",   "Australia",     "Sydney",    "ASX", AUD),
-            XBOM => ("Bombay Stock Exchange",            "India",         "Mumbai",    "BSE", INR),
-            XBRU => ("Euronext Brussels",                "Belgium",       "Brussels",  "BRU", EUR),
-            XCSE => ("Nasdaq Copenhagen",                "Denmark",       "Copenhagen","CPH", DKK),
-            XETR => ("XETRA",                           "Germany",       "Frankfurt", "GER", EUR),
-            XHEL => ("Nasdaq Helsinki",                  "Finland",       "Helsinki",  "HEL", EUR),
-            XHKG => ("Hong Kong Stock Exchange",         "Hong Kong",     "Hong Kong", "HKG", HKD),
-            XJPX => ("Japan Exchange Group",             "Japan",         "Tokyo",     "JPX", JPY),
-            XKRX => ("Korea Exchange",                   "South Korea",   "Seoul",     "KSC", KRW),
-            XLIS => ("Euronext Lisbon",                  "Portugal",      "Lisbon",    "LIS", EUR),
-            XLON => ("London Stock Exchange",            "United Kingdom","London",    "LSE", GBP),
-            XMAD => ("Bolsa de Madrid",                  "Spain",         "Madrid",    "MCE", EUR),
-            XMIL => ("Borsa Italiana",                   "Italy",         "Milan",     "MIL", EUR),
-            XNAS => ("NASDAQ Global Select Market",      "United States", "New York",  "NMS", USD),
-            XNCM => ("NASDAQ Capital Market",            "United States", "New York",  "NCM", USD),
-            XNGS => ("NASDAQ Global Market",             "United States", "New York",  "NGM", USD),
-            XNSE => ("National Stock Exchange of India", "India",         "Mumbai",    "NSI", INR),
-            XNYS => ("New York Stock Exchange",          "United States", "New York",  "NYQ", USD),
-            XNZE => ("New Zealand Exchange",             "New Zealand",   "Wellington","NZE", NZD),
-            XOSL => ("Oslo Børs",                        "Norway",        "Oslo",      "OSL", NOK),
-            XPAR => ("Euronext Paris",                   "France",        "Paris",     "PAR", EUR),
-            XSES => ("Singapore Exchange",               "Singapore",     "Singapore", "SGX", SGD),
-            XSHE => ("Shenzhen Stock Exchange",          "China",         "Shenzhen",  "SHZ", CNY),
-            XSHG => ("Shanghai Stock Exchange",          "China",         "Shanghai",  "SHH", CNY),
-            XSTO => ("Nasdaq Stockholm",                 "Sweden",        "Stockholm", "STO", SEK),
-            XSWX => ("SIX Swiss Exchange",               "Switzerland",   "Zurich",    "SWX", CHF),
-            XTAI => ("Taiwan Stock Exchange",            "Taiwan",        "Taipei",    "TAI", TWD),
-            XWBO => ("Vienna Stock Exchange",            "Austria",       "Vienna",    "VIE", EUR),
+            XAMS => ("Euronext Amsterdam", "Netherlands", "Amsterdam", "AMS", EUR),
+            XASE => ("NYSE American", "United States", "New York", "ASE", USD),
+            XASX => ("Australian Securities Exchange", "Australia", "Sydney", "ASX", AUD),
+            XBOM => ("Bombay Stock Exchange", "India", "Mumbai", "BSE", INR),
+            XBRU => ("Euronext Brussels", "Belgium", "Brussels", "BRU", EUR),
+            XCSE => ("Nasdaq Copenhagen", "Denmark", "Copenhagen", "CPH", DKK),
+            XETR => ("XETRA", "Germany", "Frankfurt", "GER", EUR),
+            XHEL => ("Nasdaq Helsinki", "Finland", "Helsinki", "HEL", EUR),
+            XHKG => ("Hong Kong Stock Exchange", "Hong Kong", "Hong Kong", "HKG", HKD),
+            XJPX => ("Japan Exchange Group", "Japan", "Tokyo", "JPX", JPY),
+            XKRX => ("Korea Exchange", "South Korea", "Seoul", "KSC", KRW),
+            XLIS => ("Euronext Lisbon", "Portugal", "Lisbon", "LIS", EUR),
+            XLON => ("London Stock Exchange", "United Kingdom", "London", "LSE", GBP),
+            XMAD => ("Bolsa de Madrid", "Spain", "Madrid", "MCE", EUR),
+            XMIL => ("Borsa Italiana", "Italy", "Milan", "MIL", EUR),
+            XNAS => ("NASDAQ Global Select Market", "United States", "New York", "NMS", USD),
+            XNCM => ("NASDAQ Capital Market", "United States", "New York", "NCM", USD),
+            XNGS => ("NASDAQ Global Market", "United States", "New York", "NGM", USD),
+            XNSE => ("National Stock Exchange of India", "India", "Mumbai", "NSI", INR),
+            XNYS => ("New York Stock Exchange", "United States", "New York", "NYQ", USD),
+            XNZE => ("New Zealand Exchange", "New Zealand", "Wellington", "NZE", NZD),
+            XOSL => ("Oslo Børs", "Norway", "Oslo", "OSL", NOK),
+            XPAR => ("Euronext Paris", "France", "Paris", "PAR", EUR),
+            XSES => ("Singapore Exchange", "Singapore", "Singapore", "SGX", SGD),
+            XSHE => ("Shenzhen Stock Exchange", "China", "Shenzhen", "SHZ", CNY),
+            XSHG => ("Shanghai Stock Exchange", "China", "Shanghai", "SHH", CNY),
+            XSTO => ("Nasdaq Stockholm", "Sweden", "Stockholm", "STO", SEK),
+            XSWX => ("SIX Swiss Exchange", "Switzerland", "Zurich", "SWX", CHF),
+            XTAI => ("Taiwan Stock Exchange", "Taiwan", "Taipei", "TAI", TWD),
+            XWBO => ("Vienna Stock Exchange", "Austria", "Vienna", "VIE", EUR),
         }
     }
 

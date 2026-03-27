@@ -1,10 +1,10 @@
 //! Forex pair definition.
 
-use std::fmt::{Display, Formatter};
 use crate::models::Currency;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
+use std::fmt::{Display, Formatter};
 use strum::{EnumIter, EnumString};
 
 /// A standard forex currency pair.

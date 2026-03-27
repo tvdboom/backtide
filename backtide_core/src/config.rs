@@ -1,37 +1,26 @@
 //! Configuration module.
-//!
-//! Owns a process-wide [`Config`] singleton initialized at startup.
-//! After that point every caller gets a cheap `&'static` reference
-//! through [`config()`].
 
 use crate::constants::{DEFAULT_CONFIG_FILE_NAME, DEFAULT_STORAGE_PATH};
 use crate::ingestion::provider::Provider;
+use crate::models::asset::AssetType;
 use crate::models::currency::Currency;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::OnceLock;
+use strum::IntoEnumIterator;
 use thiserror::Error;
-
 // ────────────────────────────────────────────────────────────────────────────
-// Singleton logic
+// Configuration structs
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Process-wide configuration singleton.
 static CONFIG: OnceLock<Config> = OnceLock::new();
-
-/// Return a `&'static` reference to the global configuration.
-pub fn config() -> Result<&'static Config, ConfigError> {
-    CONFIG.get_or_try_init(fetch_config)
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Configuration structs
-// ────────────────────────────────────────────────────────────────────────────
 
 /// Backtide configuration.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -46,6 +35,19 @@ pub struct Config {
     pub display: DisplayConfig,
 }
 
+impl Config {
+    /// Return a `&'static` reference to the global configuration.
+    pub fn get() -> Result<&'static Config, ConfigError> {
+        // Replace block with get_or_try_init when it becomes stable
+        if let Some(cfg) = CONFIG.get() {
+            Ok(cfg)
+        } else {
+            let _ = CONFIG.set(fetch_config()?);
+            Ok(CONFIG.get().unwrap())
+        }
+    }
+}
+
 /// Data ingestion configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IngestionConfig {
@@ -53,41 +55,14 @@ pub struct IngestionConfig {
     pub storage_path: PathBuf,
 
     /// Which data provider to use for each asset type.
-    pub providers: ProviderConfig,
+    pub providers: HashMap<AssetType, Provider>,
 }
 
 impl Default for IngestionConfig {
     fn default() -> Self {
         Self {
-            storage_path: PathBuf::from(format!("{DEFAULT_STORAGE_PATH}database.duckdb")),
-            providers: ProviderConfig::default(),
-        }
-    }
-}
-
-/// Which data provider to use per asset type.
-#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ProviderConfig {
-    /// Provider used for individual stock tickers.
-    pub stocks: Provider,
-
-    /// Provider used for exchange-traded funds.
-    pub etf: Provider,
-
-    /// Provider used for spot foreign-exchange pairs.
-    pub forex: Provider,
-
-    /// Provider used for cryptocurrency spot pairs.
-    pub crypto: Provider,
-}
-
-impl Default for ProviderConfig {
-    fn default() -> Self {
-        Self {
-            stocks: Provider::Yahoo,
-            etf: Provider::Yahoo,
-            forex: Provider::Yahoo,
-            crypto: Provider::Binance,
+            storage_path: PathBuf::from(DEFAULT_STORAGE_PATH),
+            providers: AssetType::iter().map(|at| (at, at.default())).collect(),
         }
     }
 }
@@ -108,7 +83,7 @@ pub struct DisplayConfig {
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
-            date_format: "%d-%m-%Y".to_owned(),
+            date_format: "YYYY-MM-DD".to_owned(),
             timezone: None,
         }
     }
@@ -145,6 +120,12 @@ pub enum ConfigError {
     AlreadySet,
 }
 
+impl From<ConfigError> for PyErr {
+    fn from(e: ConfigError) -> PyErr {
+        PyRuntimeError::new_err(e.to_string())
+    }
+}
+
 /// Search CWD or its parent for a recognized config file.
 fn find_config_file() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
@@ -176,9 +157,7 @@ fn parse_config(path: &Path) -> Result<Config, ConfigError> {
 
 /// Load the config without updating the singleton.
 fn fetch_config() -> Result<Config, ConfigError> {
-    find_config_file()
-        .map(|path| parse_config(&path))
-        .unwrap_or(Ok(Config::default()))
+    find_config_file().map(|path| parse_config(&path)).unwrap_or(Ok(Config::default()))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -217,7 +196,7 @@ impl PyConfig {
     fn from_rust(py: Python<'_>, cfg: Config) -> PyResult<Self> {
         Ok(Self {
             base_currency: cfg.base_currency,
-            ingestion: Py::new(py, PyIngestionConfig::from_rust(py, cfg.ingestion)?)?,
+            ingestion: Py::new(py, PyIngestionConfig::from_rust(cfg.ingestion))?,
             display: Py::new(py, PyDisplayConfig::from_rust(cfg.display))?,
         })
     }
@@ -225,7 +204,7 @@ impl PyConfig {
     fn to_config(&self, py: Python<'_>) -> Config {
         Config {
             base_currency: self.base_currency.clone(),
-            ingestion: self.ingestion.borrow(py).to_config(py),
+            ingestion: self.ingestion.borrow(py).to_config(),
             display: self.display.borrow(py).to_config(),
         }
     }
@@ -269,7 +248,7 @@ impl PyConfig {
         format!(
             "Config(base_currency={:?}, ingestion={}, display={})",
             self.base_currency.to_string(),
-            self.ingestion.borrow(py).__repr__(py),
+            self.ingestion.borrow(py).__repr__(),
             self.display.borrow(py).__repr__(),
         )
     }
@@ -303,43 +282,43 @@ impl PyConfig {
 /// storage_path : str, default=".backtide/"
 ///     File-system path to the primary database file.
 ///
-/// providers : [`ProviderConfig`]
-///     Which data provider to use for each asset type.
+/// providers : dict[str, str] | None, default=None
+///     Which data provider to use for each asset type. If `None`, it
+///     defaults to `{"stocks": "yahoo", "etf": "yahoo", "forex": "yahoo",
+///     "crypto": "binance"}`.
 ///
 /// See Also
 /// --------
 /// - backtide.config:get_config
 /// - backtide.config:load_config
 /// - backtide.config:set_config
-#[pyclass(name = "IngestionConfig", get_all, set_all, from_py_object, module = "backtide.config")]
-#[derive(Debug)]
+#[pyclass(
+    name = "IngestionConfig",
+    get_all,
+    set_all,
+    eq,
+    from_py_object,
+    module = "backtide.config"
+)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PyIngestionConfig {
     pub storage_path: PathBuf,
-    pub providers: Py<PyProviderConfig>,
+    pub providers: HashMap<AssetType, Provider>,
 }
 
 impl PyIngestionConfig {
-    fn from_rust(py: Python<'_>, cfg: IngestionConfig) -> PyResult<Self> {
-        Ok(Self {
+    fn from_rust(cfg: IngestionConfig) -> Self {
+        Self {
             storage_path: cfg.storage_path,
-            providers: Py::new(py, PyProviderConfig::from_rust(cfg.providers))?,
-        })
-    }
-
-    fn to_config(&self, py: Python<'_>) -> IngestionConfig {
-        IngestionConfig {
-            storage_path: self.storage_path.clone(),
-            providers: self.providers.borrow(py).to_config(py),
+            providers: cfg.providers,
         }
     }
-}
 
-impl Clone for PyIngestionConfig {
-    fn clone(&self) -> Self {
-        Python::attach(|py| Self {
+    fn to_config(&self) -> IngestionConfig {
+        IngestionConfig {
             storage_path: self.storage_path.clone(),
-            providers: self.providers.clone_ref(py),
-        })
+            providers: self.providers.clone(),
+        }
     }
 }
 
@@ -350,132 +329,39 @@ impl PyIngestionConfig {
 
     #[new]
     #[pyo3(signature = (storage_path=".backtide/", providers=None))]
-    fn new(py: Python<'_>, storage_path: &str, providers: Option<Py<PyProviderConfig>>) -> Self {
-        Self {
-            storage_path: PathBuf::from(format!("{storage_path}database.duckdb")),
-            providers: providers.unwrap_or_else(|| {
-                let default = Self::from_rust(py, IngestionConfig::default()).unwrap();
-                default.providers
-            }),
-        }
-    }
+    fn new(storage_path: &str, providers: Option<HashMap<String, String>>) -> PyResult<Self> {
+        let providers = match providers {
+            Some(map) => map
+                .into_iter()
+                .map(|(k, v)| {
+                    let asset_type = AssetType::from_str(&k)
+                        .map_err(|_| PyValueError::new_err(format!("Invalid asset type: {k}")))?;
+                    let provider = Provider::from_str(&v)
+                        .map_err(|_| PyValueError::new_err(format!("Invalid provider: {v}")))?;
+                    Ok((asset_type, provider))
+                })
+                .collect::<PyResult<HashMap<_, _>>>()?,
+            None => IngestionConfig::default().providers,
+        };
 
-    fn __repr__(&self, py: Python<'_>) -> String {
-        format!(
-            "IngestionConfig(storage_path={:?}, providers={})",
-            self.storage_path,
-            self.providers.borrow(py).__repr__(),
-        )
-    }
-
-    fn __richcmp__(&self, py: Python<'_>, other: PyRef<Self>, op: CompareOp) -> bool {
-        match op {
-            CompareOp::Eq => self.to_config(py) == other.to_config(py),
-            CompareOp::Ne => self.to_config(py) != other.to_config(py),
-            _ => false,
-        }
-    }
-
-    /// Convert the configuration object to a dictionary.
-    ///
-    /// Returns
-    /// -------
-    /// dict
-    ///     Self as dict.
-    pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self.to_config(py)).unwrap().unbind()
-    }
-}
-
-/// Configuration for provider parameters.
-///
-/// The provider parameters determine which data provider to use for each asset
-/// type. Read more in the [user guide][configuration].
-///
-/// Attributes
-/// ----------
-/// stocks : str, default="yahoo"
-///     Provider used for individual stock tickers.
-///
-/// etf : str, default="yahoo"
-///     Provider used for exchange-traded funds.
-///
-/// forex : str, default="yahoo"
-///     Provider used for spot foreign-exchange pairs.
-///
-/// crypto : str, default="binance"
-///     Provider used for cryptocurrency spot pairs.
-///
-/// See Also
-/// --------
-/// - backtide.config:get_config
-/// - backtide.config:load_config
-/// - backtide.config:set_config
-#[pyclass(name = "ProviderConfig", get_all, set_all, from_py_object, module = "backtide.config")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct PyProviderConfig {
-    pub stocks: Provider,
-    pub etf: Provider,
-    pub forex: Provider,
-    pub crypto: Provider,
-}
-
-impl PyProviderConfig {
-    fn from_rust(cfg: ProviderConfig) -> Self {
-        Self {
-            stocks: cfg.stocks,
-            etf: cfg.etf,
-            forex: cfg.forex,
-            crypto: cfg.crypto,
-        }
-    }
-
-    fn to_config(&self, _py: Python<'_>) -> ProviderConfig {
-        ProviderConfig {
-            stocks: self.stocks,
-            etf: self.etf,
-            forex: self.forex,
-            crypto: self.crypto,
-        }
-    }
-}
-
-#[pymethods]
-impl PyProviderConfig {
-    #[classattr]
-    const __RUST_DATACLASS__: bool = true;
-
-    #[new]
-    #[pyo3(signature = (stocks="yahoo", etf="yahoo", forex="yahoo", crypto="binance"))]
-    fn new(stocks: &str, etf: &str, forex: &str, crypto: &str) -> PyResult<Self> {
         Ok(Self {
-            stocks: Provider::from_str(stocks)
-                .map_err(|_| PyValueError::new_err(format!("Invalid provider: {stocks}")))?,
-            etf: Provider::from_str(etf)
-                .map_err(|_| PyValueError::new_err(format!("Invalid provider: {etf}")))?,
-            forex: Provider::from_str(forex)
-                .map_err(|_| PyValueError::new_err(format!("Invalid provider: {forex}")))?,
-            crypto: Provider::from_str(crypto)
-                .map_err(|_| PyValueError::new_err(format!("Invalid provider: {crypto}")))?,
+            storage_path: PathBuf::from(storage_path),
+            providers,
         })
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "ProviderConfig(stocks={:?}, etf={:?}, forex={:?}, crypto={:?})",
-            self.stocks.to_string(),
-            self.etf.to_string(),
-            self.forex.to_string(),
-            self.crypto.to_string(),
-        )
-    }
+        let providers = {
+            let pairs: Vec<String> = AssetType::iter()
+                .map(|k| {
+                    let default = k.default();
+                    format!("\"{k}\": \"{}\"", self.providers.get(&k).unwrap_or(&default))
+                })
+                .collect();
+            format!("{{{}}}", pairs.join(", "))
+        };
 
-    fn __richcmp__(&self, other: PyRef<Self>, op: CompareOp) -> bool {
-        match op {
-            CompareOp::Eq => self == &*other,
-            CompareOp::Ne => self != &*other,
-            _ => false,
-        }
+        format!("IngestionConfig(storage_path={:?}, providers={})", self.storage_path, providers,)
     }
 
     /// Convert the configuration object to a dictionary.
@@ -485,7 +371,7 @@ impl PyProviderConfig {
     /// dict
     ///     Self as dict.
     pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self.to_config(py)).unwrap().unbind()
+        pythonize(py, &self.to_config()).unwrap().unbind()
     }
 }
 
@@ -496,8 +382,10 @@ impl PyProviderConfig {
 ///
 /// Attributes
 /// ----------
-/// date_format : str, default="%d-%m-%Y"
-///     Display dates in a `strftime`-compatible format string.
+/// date_format : str, default="YYYY-MM-DD"
+///     Format in which to display dates. The format should be one of `YYYY/MM/DD`,
+///     `DD/MM/YYYY`, or `MM/DD/YYYY` and can also use a period (.) or hyphen (-)
+///     as separators.
 ///
 /// timezone : str or None, default=None
 ///     IANA timezone name. `None` to use the system's local timezone.
@@ -507,7 +395,7 @@ impl PyProviderConfig {
 /// - backtide.config:get_config
 /// - backtide.config:load_config
 /// - backtide.config:set_config
-#[pyclass(name = "DisplayConfig", get_all, set_all, from_py_object, module = "backtide.config")]
+#[pyclass(name = "DisplayConfig", get_all, set_all, eq, from_py_object, module = "backtide.config")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PyDisplayConfig {
     pub date_format: String,
@@ -536,7 +424,7 @@ impl PyDisplayConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (date_format="%d-%m-%Y", timezone=None))]
+    #[pyo3(signature = (date_format="YYYY-MM-DD", timezone=None))]
     fn new(date_format: &str, timezone: Option<&str>) -> Self {
         Self {
             date_format: date_format.to_owned(),
@@ -546,14 +434,6 @@ impl PyDisplayConfig {
 
     fn __repr__(&self) -> String {
         format!("DisplayConfig(date_format={:?}, timezone={:?})", self.date_format, self.timezone,)
-    }
-
-    fn __richcmp__(&self, other: PyRef<Self>, op: CompareOp) -> bool {
-        match op {
-            CompareOp::Eq => self == &*other,
-            CompareOp::Ne => self != &*other,
-            _ => false,
-        }
     }
 
     /// Convert the configuration object to a dictionary.
@@ -595,7 +475,7 @@ impl PyDisplayConfig {
 /// ```
 #[pyfunction]
 fn get_config(py: Python<'_>) -> PyResult<PyConfig> {
-    let cfg = CONFIG.get().cloned().unwrap_or_else(fetch_config());
+    let cfg = CONFIG.get().cloned().unwrap_or(fetch_config()?);
     PyConfig::from_rust(py, cfg)
 }
 
@@ -680,7 +560,6 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_class::<PyConfig>()?;
     m.add_class::<PyIngestionConfig>()?;
-    m.add_class::<PyProviderConfig>()?;
     m.add_class::<PyDisplayConfig>()?;
 
     m.add_function(wrap_pyfunction!(get_config, &m)?)?;
