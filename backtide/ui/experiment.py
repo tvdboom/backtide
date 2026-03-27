@@ -246,7 +246,7 @@ with tab3:
     col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
 
     if asset_type != AssetType.CRYPTO:
-        base = CURRENCIES["EUR"]
+        base = CURRENCIES["USD"]
         options = CURRENCIES.values()
     else:
         base = CRYPTOS["USDT"]

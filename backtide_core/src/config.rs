@@ -2,7 +2,7 @@
 //!
 //! Owns a process-wide [`Config`] singleton initialized at startup.
 //! After that point every caller gets a cheap `&'static` reference
-//! through [config()].
+//! through [`config()`].
 
 use crate::constants::{DEFAULT_CONFIG_FILE_NAME, DEFAULT_STORAGE_PATH};
 use crate::ingestion::provider::Provider;
@@ -25,8 +25,8 @@ use thiserror::Error;
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Return a `&'static` reference to the global configuration.
-pub fn config() -> &'static Config {
-    CONFIG.get_or_init(fetch_config)
+pub fn config() -> Result<&'static Config, ConfigError> {
+    CONFIG.get_or_try_init(fetch_config)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -175,9 +175,10 @@ fn parse_config(path: &Path) -> Result<Config, ConfigError> {
 }
 
 /// Load the config without updating the singleton.
-fn fetch_config() -> Config {
+fn fetch_config() -> Result<Config, ConfigError> {
     find_config_file()
-        .map_or_else(Config::default, |path| parse_config(&path).expect("failed to parse config"))
+        .map(|path| parse_config(&path))
+        .unwrap_or(Ok(Config::default()))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -190,7 +191,7 @@ fn fetch_config() -> Config {
 ///
 /// Attributes
 /// ----------
-/// base_currency : str, default="EUR"
+/// base_currency : str, default="USD"
 ///     Currency (ISO 4217 code) that all prices are normalized to.
 ///
 /// ingestion : [`IngestionConfig`]
@@ -246,7 +247,7 @@ impl PyConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (base_currency="EUR", ingestion=None, display=None))]
+    #[pyo3(signature = (base_currency="USD", ingestion=None, display=None))]
     fn new(
         py: Python<'_>,
         base_currency: &str,
@@ -594,7 +595,7 @@ impl PyDisplayConfig {
 /// ```
 #[pyfunction]
 fn get_config(py: Python<'_>) -> PyResult<PyConfig> {
-    let cfg = CONFIG.get().cloned().unwrap_or_else(fetch_config);
+    let cfg = CONFIG.get().cloned().unwrap_or_else(fetch_config());
     PyConfig::from_rust(py, cfg)
 }
 
@@ -657,7 +658,7 @@ fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
 ///
 /// # Load the current configuration and change a value
 /// cfg = get_config()
-/// cfg.base_currency = "EUR"
+/// cfg.base_currency = "USD"
 ///
 /// # Update backtide's configuration
 /// set_config(cfg)  # norun

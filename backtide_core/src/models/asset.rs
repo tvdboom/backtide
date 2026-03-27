@@ -35,6 +35,12 @@ impl AssetType {
         }
     }
 
+    /// Return the default variant.
+    #[staticmethod]
+    fn get_default() -> Self {
+        Self::default()
+    }
+
     /// Return all variants.
     #[staticmethod]
     fn variants() -> Vec<Self> {

@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumString};
 
-mod traits;
+pub mod traits;
 pub mod yahoo;
 
 /// A supported market data provider.

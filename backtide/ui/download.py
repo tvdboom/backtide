@@ -10,7 +10,7 @@ from datetime import datetime
 
 import streamlit as st
 
-from backtide.assets.assets import Asset, AssetType
+from backtide.core.models import Asset, AssetType
 from backtide.models.ui import Interval
 from backtide.ui.utils import (
     _get_asset_type_description,
@@ -35,15 +35,15 @@ st.text(
 st.divider()
 
 if not st.session_state.get("asset_type"):
-    st.session_state.asset_type = AssetType.default()
+    st.session_state.asset_type = AssetType.get_default()
 
 with st.spinner("Loading assets..."):
-    all_assets: dict[str, Asset] = st.session_state.asset_type.list_assets()
+    all_assets: dict[str, Asset] = list_assets(st.session_state.asset_type)
 
 asset_type = st.segmented_control(
     label="Asset type",
     key="asset_type_download",
-    options=AssetType,
+    options=AssetType.variants(),
     format_func=lambda asset_type: f"{asset_type.icon()} {asset_type.value}",
     on_change=_prevent_deselection(
         key="asset_type_download",

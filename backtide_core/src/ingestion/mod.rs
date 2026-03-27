@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
 pub mod provider;
-mod utils;
+mod ingester;
 
 /// Register all ingestion types to `backtide.core.ingestion`.
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {

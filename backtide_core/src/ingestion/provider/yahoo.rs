@@ -1,4 +1,5 @@
-use crate::ingestion::utils::MarketDataError;
+//! Implementation of the `yahoo` provider.
+
 use crate::models::asset::{Asset, AssetType};
 use crate::utils::http::{paginate, HttpClient};
 use async_trait::async_trait;
@@ -8,7 +9,13 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::cmp::Ordering;
 use std::sync::Arc;
+use strum::IntoEnumIterator;
 use tokio::try_join;
+use crate::ingestion::provider::traits::{Provider, ProviderError, ProviderResult};
+use crate::models::bar::Interval;
+use crate::models::currency::Currency;
+use crate::models::exchange::Exchange;
+use crate::models::forex::ForexPair;
 
 pub struct YahooFinance {
     /// An async client to make requests with
@@ -37,44 +44,9 @@ impl YahooFinance {
     const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
      (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-    /// Exchange codes for major markets
-    const EXCHANGES: &[&str] = &[
-        // United States
-        "NMS", // NASDAQ
-        "NYQ", // New York Stock Exchange
-        "NGM", // NASDAQ Global Market
-        "NCM", // NASDAQ Capital Market
-        "ASE", // NYSE American (AMEX)
-        // Europe
-        "AMS", // Euronext Amsterdam
-        "PAR", // Euronext Paris
-        "GER", // XETRA Frankfurt
-        "LSE", // London Stock Exchange
-        "MCE", // Bolsa de Madrid
-        "STO", // Nasdaq Stockholm
-        "OSL", // Oslo Børs
-        "CPH", // Nasdaq Copenhagen
-        "HEL", // Nasdaq Helsinki
-        "VIE", // Vienna Stock Exchange
-        "BRU", // Euronext Brussels
-        "LIS", // Euronext Lisbon
-        "MIL", // Borsa Italiana Milan
-        "SWX", // SIX Swiss Exchange
-        // Asia & Pacific
-        "JPX", // Japan Exchange Group (Tokyo)
-        "HKG", // Hong Kong Stock Exchange
-        "SHH", // Shanghai Stock Exchange
-        "SHZ", // Shenzhen Stock Exchange
-        "KSC", // Korea Exchange (Seoul)
-        "TAI", // Taiwan Stock Exchange
-        "NSI", // National Stock Exchange of India
-        "BSE", // Bombay Stock Exchange
-        "ASX", // Australian Securities Exchange
-        "SGX", // Singapore Exchange
-        "NZE", // New Zealand Exchange
-    ];
-
-    // ── Public API ──────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────
+    // Public API
+    // ────────────────────────────────────────────────────────────────────────
 
     /// Create a new [`YahooFinance`] instance by opening an authenticated session.
     ///
@@ -86,26 +58,28 @@ impl YahooFinance {
     ///
     /// Returns [`MarketDataError::Auth`] if the HTTP client cannot be built,
     /// either request fails, or the crumb response is empty.
-    pub async fn new() -> Result<Self, MarketDataError> {
+    pub async fn new() -> Result<Self, ProviderError> {
         let jar = Arc::new(Jar::default());
-
         let client = HttpClient::new(Self::USER_AGENT, jar)
-            .map_err(|e| MarketDataError::Auth(format!("Failed to build HTTP client: {e}")))?;
+            .map_err(|e| ProviderError::Http(e))?;
 
         let crumb = Self::fetch_crumb(&client).await?;
+
         Ok(Self {
             client,
             crumb,
         })
     }
 
-    // ── Private API ─────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────
+    // Private API
+    // ────────────────────────────────────────────────────────────────────────
 
     /// Seed the cookie jar and then return a fresh crumb string.
     ///
     /// Both requests reuse `client` so the same cookie jar is populated and
     /// read within the same call.
-    async fn fetch_crumb(client: &HttpClient) -> Result<String, MarketDataError> {
+    async fn fetch_crumb(client: &HttpClient) -> Result<String, ProviderError> {
         // Ignore the response status entirely — we only care about Set-Cookie headers.
         // fc.yahoo.com commonly returns 404 but still seeds the session cookie.
         let _ = client.inner.get(Self::COOKIE_SEED_URL).send().await;
@@ -113,46 +87,20 @@ impl YahooFinance {
         let crumb_resp = client
             .get(Self::CRUMB_URL, None)
             .await
-            .map_err(|e| MarketDataError::Auth(format!("Crumb request failed: {e}")))?;
+            .map_err(|e| ProviderError::Auth(format!("Crumb request failed: {e}")))?;
 
         let crumb = crumb_resp
             .text()
             .await
-            .map_err(|e| MarketDataError::Auth(format!("Failed to read crumb: {e}")))?;
+            .map_err(|e| ProviderError::Auth(format!("Failed to read crumb: {e}")))?;
 
         if crumb.is_empty() {
-            return Err(MarketDataError::Auth(
-                "Yahoo returned an empty crumb — session cookie may be missing".to_string(),
+            return Err(ProviderError::Auth(
+                "Yahoo returned an empty crumb — session cookie may be missing".to_owned(),
             ));
         }
 
         Ok(crumb)
-    }
-
-    /// Fetch equities matching a set of exchange codes.
-    async fn fetch_by_exchange(
-        &self,
-        quote_type: &str,
-        exchange: &str,
-        limit: usize,
-    ) -> Result<Vec<Asset>, MarketDataError> {
-        let mut operands = vec![
-            json!({ "operator": "EQ", "operands": ["quoteType", quote_type] }),
-            json!({ "operator": "EQ", "operands": ["exchange", exchange] }),
-        ];
-
-        if quote_type != "etf" {
-            operands
-                .push(json!({ "operator": "GT", "operands": ["intradaymarketcap", 1000000000] }));
-            operands.push(json!({ "operator": "GT", "operands": ["regularMarketPrice", 5.0] }));
-        }
-
-        let query = json!({
-            "operator": "AND",
-            "operands": operands
-        });
-
-        self.paginate_screener(quote_type, &query, limit).await
     }
 
     /// Paginate through a predefined Yahoo screener by its screener ID.
@@ -160,7 +108,7 @@ impl YahooFinance {
         &self,
         scr_id: &str,
         limit: usize,
-    ) -> Result<Vec<Asset>, MarketDataError> {
+    ) -> Result<Vec<Asset>, ProviderError> {
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| async move {
             let resp = self
                 .client
@@ -187,17 +135,17 @@ impl YahooFinance {
     /// Paginate through the POST screener endpoint using a custom query body.
     async fn paginate_screener(
         &self,
-        quote_type: &str,
+        // quote_type: &str,
         query: &Value,
         limit: usize,
-    ) -> Result<Vec<Asset>, MarketDataError> {
+    ) -> Result<Vec<Asset>, ProviderError> {
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| {
             let payload = json!({
                 "size": batch,
                 "offset": offset,
                 "sortField": "dayvolume",
                 "sortType": "DESC",
-                "quoteType": quote_type,
+                // "quoteType": quote_type,
                 "query": query,
                 "userId": "",
                 "userIdType": "guid",
@@ -225,75 +173,123 @@ impl YahooFinance {
     }
 
     /// Validate HTTP status then deserialize screener JSON into a list of quotes.
-    async fn parse_quotes(resp: reqwest::Response) -> Result<Vec<YahooQuote>, MarketDataError> {
+    async fn parse_quotes(resp: reqwest::Response) -> Result<Vec<YahooQuote>, ProviderError> {
         let parsed = HttpClient::json::<ScreenerResponse>(resp).await?;
 
         parsed.finance.result.into_iter().next().map(|r| r.quotes).ok_or_else(|| {
-            MarketDataError::UnexpectedResponse("Empty screener result array".to_string())
+            ProviderError::UnexpectedResponse("Empty screener result array".to_string())
         })
     }
 }
-//
-// #[async_trait]
-// impl MarketDataProvider for YahooFinance {
-//     /// Return the top `limit` most active equities and returns the merged results.
-//     async fn list_stocks(&self, limit: usize) -> Result<Vec<Asset>, MarketDataError> {
-//         let futures: Vec<_> =
-//             Self::EXCHANGES.iter().map(|ex| self.fetch_by_exchange("equity", ex, 50)).collect();
-//
-//         let results = join_all(futures).await;
-//
-//         let mut assets: Vec<Asset> = results.into_iter().filter_map(|r| r.ok()).flatten().collect();
-//         assets.sort_by(|a, b| {
-//             b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
-//         });
-//         assets.truncate(limit);
-//
-//         Ok(assets)
-//     }
-//
-//     /// Return the top `_limit` most active forex pairs.
-//     async fn list_forex(&self, _limit: usize) -> Result<Vec<Asset>, MarketDataError> {
-//         // Yahoo doesn't have a standard way to retrieve forex pairs
-//         Ok(vec![])
-//     }
-//
-//     /// Return the top `limit` most active ETFs.
-//     async fn list_etf(&self, limit: usize) -> Result<Vec<Asset>, MarketDataError> {
-//         let futures: Vec<_> =
-//             Self::EXCHANGES.iter().map(|ex| self.fetch_by_exchange("etf", ex, 30)).collect();
-//
-//         let results = join_all(futures).await;
-//
-//         let mut assets: Vec<Asset> = results.into_iter().filter_map(|r| r.ok()).flatten().collect();
-//
-//         assets.sort_by(|a, b| {
-//             b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
-//         });
-//         assets.truncate(limit);
-//
-//         Ok(assets)
-//     }
-//
-//     /// Return the top `limit` most active cryptocurrencies.
-//     async fn list_crypto(&self, limit: usize) -> Result<Vec<Asset>, MarketDataError> {
-//         // Fetch a large pool from multiple regional screeners concurrently
-//         let (us, eu, gb) = try_join!(
-//             self.fetch_predefined("all_cryptocurrencies_us", 50),
-//             self.fetch_predefined("all_cryptocurrencies_eu", 50),
-//             self.fetch_predefined("all_cryptocurrencies_gb", 50),
-//         )?;
-//
-//         let mut assets: Vec<Asset> = us.into_iter().chain(eu).chain(gb).collect();
-//
-//         assets.sort_by(|a, b| {
-//             b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
-//         });
-//         assets.truncate(limit);
-//
-//         Ok(assets)
-//     }
-// }
+
+#[async_trait]
+impl Provider for YahooFinance {
+    fn intervals(&self) -> Vec<Interval> {
+        vec![
+            Interval::OneMinute,
+            Interval::TwoMinutes,
+            Interval::FiveMinutes,
+            Interval::FifteenMinutes,
+            Interval::ThirtyMinutes,
+            Interval::OneHour,
+            Interval::OneDay,
+            Interval::FiveDays,
+            Interval::OneWeek,
+            Interval::OneMonth,
+            Interval::ThreeMonths,
+        ]
+    }
+
+    async fn list_assets(&self, asset_type: AssetType, limit: usize) -> ProviderResult<Vec<Asset>> {
+        match asset_type {
+            AssetType::Stock | AssetType::Etf => {
+                // Fan out across all exchanges concurrently.
+                // Log exchange-level failures rather than aborting the whole call.
+                let tasks: Vec<_> = Exchange::iter()
+                    .map(|ex| {
+                        let query = json!({
+                            "operator": "AND",
+                            "operands": match asset_type {
+                                AssetType::Stock => {
+                                    vec![
+                                        json!({ "operator": "EQ", "operands": ["quoteType", "equity"] }),
+                                        json!({ "operator": "EQ", "operands": ["exchange", ex] }),
+                                        // Only select large companies
+                                        json!({ "operator": "GT", "operands": ["intradaymarketcap", 1000000000] }),
+                                        // Remove penny stocks
+                                        json!({ "operator": "GT", "operands": ["regularMarketPrice", 5.0] }),
+                                    ];
+                                },
+                                AssetType::Etf => {
+                                    vec![
+                                        json!({ "operator": "EQ", "operands": ["quoteType", "etf"] }),
+                                        json!({ "operator": "EQ", "operands": ["exchange", ex] }),
+                                    ];
+                                },
+                                _ => unreachable!(),
+                            }
+                        });
+
+                        async move {
+                            self.paginate_screener(&query, limit).await
+                        }
+                    })
+                    .collect();
+
+                let mut assets = Vec::new();
+                for result in join_all(tasks).await {
+                    match result {
+                        Ok(batch) => assets.extend(batch),
+                        Err(e) => tracing::warn!("Yahoo list_assets exchange error: {e}"),
+                    }
+                }
+
+                // Select only the top `limit` assets by volume x price
+                assets.sort_by(|a, b| {
+                    b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
+                });
+                assets.truncate(limit);
+
+                Ok(assets)
+            }
+
+            AssetType::Forex => {
+                Ok(ForexPair::iter().map(|f| {
+                    Asset {
+                        symbol: if f.base() != Currency::USD {
+                            format!("{f:?}=X")
+                        } else {
+                            format!("{}=X", f.quote())
+                        },
+                        name: f.to_string(),
+                        currency: f.quote().to_string(),
+                        asset_type: AssetType::Forex,
+                        volume: None,
+                        price: None,
+                    }
+                }).collect())
+            }
+
+            AssetType::Crypto => {
+                // Fetch a large pool from multiple regional screeners concurrently
+                let (us, eu, gb) = try_join!(
+                    self.fetch_predefined("all_cryptocurrencies_us", 50),
+                    self.fetch_predefined("all_cryptocurrencies_eu", 50),
+                    self.fetch_predefined("all_cryptocurrencies_gb", 50),
+                )?;
+
+                let mut assets: Vec<Asset> = us.into_iter().chain(eu).chain(gb).collect();
+
+                assets.sort_by(|a, b| {
+                    b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
+                });
+                assets.truncate(limit);
+
+                Ok(assets)
+            }
+        }
+    }
+}
 
 /// Raw quote shape returned by the Yahoo Finance screener endpoint.
 /// Fields are `Option` because Yahoo omits them inconsistently.

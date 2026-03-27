@@ -20,7 +20,7 @@ If no file is found, the built-in defaults are used.
 
 === "TOML"
     ```toml title="backtide.config.toml"
-    base_currency = "EUR"
+    base_currency = "USD"
 
     [ingestion]
     storage_path = ".backtide/database.duckdb"
@@ -38,7 +38,7 @@ If no file is found, the built-in defaults are used.
 
 === "YAML"
     ```yaml title="backtide.config.yaml"
-    base_currency: EUR
+    base_currency: USD
 
     ingestion:
         storage_path: .backtide/database.duckdb
@@ -56,7 +56,7 @@ If no file is found, the built-in defaults are used.
 === "JSON"
     ```json title="backtide.config.json"
     {
-        "base_currency": "EUR",
+        "base_currency": "USD",
         "ingestion": {
             "storage_path": ".backtide/database.duckdb",
             "providers": {

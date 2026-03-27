@@ -8,6 +8,8 @@ use pyo3::prelude::*;
 pub mod asset;
 pub mod bar;
 pub mod currency;
+pub mod exchange;
+pub mod forex;
 
 /// Register all ingestion types to `backtide.core.ingestion`.
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {

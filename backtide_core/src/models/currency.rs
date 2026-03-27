@@ -51,7 +51,6 @@ pub enum Currency {
     DOP,
     DZD,
     EGP,
-    #[default]
     EUR,
     FJD,
     GBP,
@@ -118,6 +117,7 @@ pub enum Currency {
     TZS,
     UAH,
     UGX,
+    #[default]
     USD,
     UYU,
     UZS,

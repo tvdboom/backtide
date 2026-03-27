@@ -20,6 +20,7 @@ use strum::{Display, EnumIter};
 )]
 pub enum Interval {
     OneMinute,
+    TwoMinutes,
     FiveMinutes,
     FifteenMinutes,
     ThirtyMinutes,
@@ -27,7 +28,10 @@ pub enum Interval {
     FourHours,
     #[default]
     OneDay,
+    FiveDays,
     OneWeek,
+    OneMonth,
+    ThreeMonths,
 }
 
 #[pymethods]
@@ -38,13 +42,17 @@ impl Interval {
     fn __repr__(&self) -> String {
         match self {
             Interval::OneMinute => "1m".to_string(),
+            Interval::TwoMinutes => "2m".to_string(),
             Interval::FiveMinutes => "5m".to_string(),
             Interval::FifteenMinutes => "15m".to_string(),
             Interval::ThirtyMinutes => "30m".to_string(),
             Interval::OneHour => "1h".to_string(),
             Interval::FourHours => "4h".to_string(),
             Interval::OneDay => "1d".to_string(),
+            Interval::FiveDays => "5d".to_string(),
             Interval::OneWeek => "1w".to_string(),
+            Interval::OneMonth => "1mo".to_string(),
+            Interval::ThreeMonths => "3mo".to_string(),
         }
     }
 
@@ -63,13 +71,17 @@ impl Interval {
     fn to_minutes(&self) -> u32 {
         match self {
             Interval::OneMinute => 1,
+            Interval::TwoMinutes => 2,
             Interval::FiveMinutes => 5,
             Interval::FifteenMinutes => 15,
             Interval::ThirtyMinutes => 30,
             Interval::OneHour => 60,
             Interval::FourHours => 4 * 60,
             Interval::OneDay => 24 * 60 * 60,
+            Interval::FiveDays => 5 * 24 * 60 * 60,
             Interval::OneWeek => 7 * 24 * 60 * 60,
+            Interval::OneMonth => 30 * 24 * 60 * 60,
+            Interval::ThreeMonths => 3 * 30 * 24 * 60 * 60,
         }
     }
 }
