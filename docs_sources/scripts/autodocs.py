@@ -35,7 +35,9 @@ BACKTIDE_URL = "https://github.com/tvdboom/backtide/blob/master/"
 
 # Mapping of keywords to urls
 # Usage in docs: [anchor][key] or [key][] -> [anchor][value]
-CUSTOM_URLS = dict()
+CUSTOM_URLS = dict(
+    logokit="https://logokit.com/",
+)
 
 FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 LINK_RE = re.compile(r"\[([\.`': \w_-]+?)\](?!\()(?:\s*\[(?!\[)([\w_:-]+?)\])?")

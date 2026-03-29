@@ -1,10 +1,8 @@
-//! Generic HTTP utilities: retry wrapper and pagination helper.
+//! Implementation for HTTP requests logic.
 
-use reqwest::cookie::CookieStore;
 use reqwest::Client;
 use serde::Serialize;
 use std::future::Future;
-use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
@@ -43,7 +41,9 @@ pub enum HttpError {
     UnexpectedPayload(String),
 }
 
+/// HTTP client wrapper with retry logic.
 pub struct HttpClient {
+    /// `reqwest` client.
     pub(crate) inner: Client,
 }
 
@@ -54,19 +54,13 @@ impl HttpClient {
     /// How long to wait between retry attempts.
     const RETRY_SLEEP: Duration = Duration::from_millis(100);
 
-    // ── Public API ──────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────
+    // Public API
+    // ────────────────────────────────────────────────────────────────────────
 
     /// Create a client backed by the supplied cookie jar.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HttpError::ClientBuild`] if `reqwest` fails to initialise.
-    pub fn new<C>(user_agent: &str, jar: Arc<C>) -> Result<Self, HttpError>
-    where
-        C: CookieStore + 'static,
-    {
+    pub fn new(user_agent: &str) -> Result<Self, HttpError> {
         let inner = Client::builder()
-            .cookie_provider(jar)
             .user_agent(user_agent)
             .build()
             .map_err(HttpError::ClientBuild)?;
@@ -110,7 +104,9 @@ impl HttpClient {
         self.retry(|| self.inner.post(url).query(params).json(body).send()).await
     }
 
-    // ── Private API ─────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────
+    // Private API
+    // ────────────────────────────────────────────────────────────────────────
 
     /// Execute an async request factory up to [`Self::MAX_RETRIES`] times, with
     /// status-aware retry behavior:
@@ -175,18 +171,6 @@ impl HttpClient {
 }
 
 /// Drive a paginated endpoint until `limit` items are collected.
-///
-/// `fetch_page(batch_size, offset)` is called repeatedly.  The loop stops
-/// early when a page returns fewer items than requested, signalling the source
-/// has no more results.
-///
-/// # Example
-///
-/// ```rust,no_run
-/// let results = paginate(200, 100, |batch, offset| async move {
-///     fetch_page(&client, batch, offset).await
-/// }).await?;
-/// ```
 pub async fn paginate<T, E, F, Fut>(
     limit: usize,
     page_size: usize,

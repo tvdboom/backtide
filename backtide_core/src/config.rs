@@ -1,6 +1,6 @@
 //! Configuration module.
 
-use crate::constants::{DEFAULT_CONFIG_FILE_NAME, DEFAULT_STORAGE_PATH};
+use crate::constants::{CONFIG_FILE_NAME, DEFAULT_STORAGE_PATH};
 use crate::ingestion::provider::Provider;
 use crate::models::asset::AssetType;
 use crate::models::currency::Currency;
@@ -78,6 +78,9 @@ pub struct DisplayConfig {
 
     /// IANA timezone name. `None` to use the system's local timezone.
     pub timezone: Option<String>,
+
+    /// API key for the logokit website.
+    pub logokit_api_key: Option<String>,
 }
 
 impl Default for DisplayConfig {
@@ -85,6 +88,7 @@ impl Default for DisplayConfig {
         Self {
             date_format: "YYYY-MM-DD".to_owned(),
             timezone: None,
+            logokit_api_key: None,
         }
     }
 }
@@ -133,7 +137,7 @@ fn find_config_file() -> Option<PathBuf> {
 
     for dir in candidates {
         for ext in ["toml", "yaml", "yml", "json"] {
-            let path = dir.join(format!("{DEFAULT_CONFIG_FILE_NAME}.{ext}"));
+            let path = dir.join(format!("{CONFIG_FILE_NAME}.{ext}"));
             if path.exists() {
                 return Some(path);
             }
@@ -390,6 +394,10 @@ impl PyIngestionConfig {
 /// timezone : str or None, default=None
 ///     IANA timezone name. `None` to use the system's local timezone.
 ///
+/// logokit_api_key : str or None, default=None
+///     API key for the [logokit] website, which is used to fetch images for assets.
+///     If `None`, no images are loaded.
+///
 /// See Also
 /// --------
 /// - backtide.config:get_config
@@ -400,6 +408,7 @@ impl PyIngestionConfig {
 pub struct PyDisplayConfig {
     pub date_format: String,
     pub timezone: Option<String>,
+    pub logokit_api_key: Option<String>,
 }
 
 impl PyDisplayConfig {
@@ -407,6 +416,7 @@ impl PyDisplayConfig {
         Self {
             date_format: cfg.date_format,
             timezone: cfg.timezone,
+            logokit_api_key: cfg.logokit_api_key,
         }
     }
 
@@ -414,6 +424,7 @@ impl PyDisplayConfig {
         DisplayConfig {
             date_format: self.date_format.clone(),
             timezone: self.timezone.clone(),
+            logokit_api_key: self.logokit_api_key.clone(),
         }
     }
 }
@@ -424,16 +435,17 @@ impl PyDisplayConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (date_format="YYYY-MM-DD", timezone=None))]
-    fn new(date_format: &str, timezone: Option<&str>) -> Self {
+    #[pyo3(signature = (date_format="YYYY-MM-DD", timezone=None, logokit_api_key=None))]
+    fn new(date_format: &str, timezone: Option<&str>, logokit_api_key: Option<&str>) -> Self {
         Self {
             date_format: date_format.to_owned(),
             timezone: timezone.map(|s| s.to_owned()),
+            logokit_api_key: logokit_api_key.map(|s| s.to_owned()),
         }
     }
 
     fn __repr__(&self) -> String {
-        format!("DisplayConfig(date_format={:?}, timezone={:?})", self.date_format, self.timezone,)
+        format!("DisplayConfig(date_format={:?}, timezone={:?}, logokit_api_key={:?})", self.date_format, self.timezone, self.logokit_api_key)
     }
 
     /// Convert the configuration object to a dictionary.

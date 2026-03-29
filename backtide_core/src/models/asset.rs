@@ -6,6 +6,7 @@ use pyo3::prelude::*;
 use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
+use crate::ingestion::errors::IngestionError;
 
 /// The broad category an [`Asset`] belongs to.
 ///
@@ -147,9 +148,9 @@ pub struct Asset {
     #[pyo3(get)]
     pub asset_type: AssetType,
     #[pyo3(get)]
-    pub start_date: Option<u64>,
+    pub start_date: Option<i64>,
     #[pyo3(get)]
-    pub end_date: Option<u64>,
+    pub end_date: Option<i64>,
 
     /// Traded volume during the most recent regular market session.
     pub volume: Option<u64>,
@@ -178,8 +179,8 @@ impl Asset {
         name: String,
         currency: String,
         asset_type: AssetType,
-        start_date: Option<u64>,
-        end_date: Option<u64>,
+        start_date: Option<i64>,
+        end_date: Option<i64>,
     ) -> Self {
         Self {
             symbol,

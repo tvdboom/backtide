@@ -125,6 +125,9 @@ nav:
             - Config: api/config/config.md
             - DisplayConfig: api/config/displayconfig.md
             - IngestionConfig: api/config/ingestionconfig.md
+        - ingestion:
+            - get_assets: api/ingestion/get_assets.md
+            - list_assets: api/ingestion/list_assets.md
         - models:
             - Asset: api/models/asset.md
             - AssetType: api/models/assettype.md

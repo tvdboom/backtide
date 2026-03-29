@@ -1,6 +1,6 @@
 //! Implementation of the `yahoo` provider.
 
-use crate::ingestion::provider::traits::{DataProvider, ProviderError, ProviderResult};
+use crate::ingestion::provider::traits::{DataProvider};
 use crate::models::asset::{Asset, AssetType};
 use crate::models::bar::Interval;
 use crate::models::currency::Currency;
@@ -14,9 +14,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::cmp::Ordering;
 use std::sync::Arc;
+use chrono::Utc;
 use strum::IntoEnumIterator;
 use tokio::try_join;
 use tracing::warn;
+use crate::ingestion::errors::{IngestionError, IngestionResult};
 
 /// Provider to ingest data from Yahoo Finance.
 pub struct YahooFinance {
@@ -61,9 +63,8 @@ impl YahooFinance {
     /// This performs two HTTP requests:
     /// 1. `GET` [`Self::COOKIE_SEED_URL`] — populates the cookie jar.
     /// 2. `GET` [`Self::CRUMB_URL`]       — retrieves the CSRF crumb.
-    pub async fn new() -> Result<Self, ProviderError> {
-        let jar = Arc::new(Jar::default());
-        let client = HttpClient::new(Self::USER_AGENT, jar).map_err(|e| ProviderError::Http(e))?;
+    pub async fn new() -> IngestionResult<Self> {
+        let client = HttpClient::new(Self::USER_AGENT).map_err(|e| IngestionError::Http(e))?;
 
         let crumb = Self::fetch_crumb(&client).await?;
 
@@ -81,7 +82,7 @@ impl YahooFinance {
     ///
     /// Both requests reuse `client` so the same cookie jar is populated and
     /// read within the same call.
-    async fn fetch_crumb(client: &HttpClient) -> Result<String, ProviderError> {
+    async fn fetch_crumb(client: &HttpClient) -> IngestionResult<String> {
         // Ignore the response status entirely — we only care about Set-Cookie headers.
         // fc.yahoo.com commonly returns 404 but still seeds the session cookie.
         let _ = client.inner.get(Self::COOKIE_SEED_URL).send().await;
@@ -89,15 +90,15 @@ impl YahooFinance {
         let crumb_resp = client
             .get(Self::CRUMB_URL, None)
             .await
-            .map_err(|e| ProviderError::Auth(format!("Crumb request failed: {e}")))?;
+            .map_err(|e| IngestionError::Auth(format!("Crumb request failed: {e}")))?;
 
         let crumb = crumb_resp
             .text()
             .await
-            .map_err(|e| ProviderError::Auth(format!("Failed to read crumb: {e}")))?;
+            .map_err(|e| IngestionError::Auth(format!("Failed to read crumb: {e}")))?;
 
         if crumb.is_empty() {
-            return Err(ProviderError::Auth(
+            return Err(IngestionError::Auth(
                 "Yahoo returned an empty crumb — session cookie may be missing".to_owned(),
             ));
         }
@@ -110,7 +111,7 @@ impl YahooFinance {
         &self,
         scr_id: &str,
         limit: usize,
-    ) -> Result<Vec<Asset>, ProviderError> {
+    ) -> IngestionResult<Vec<Asset>> {
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| async move {
             let resp = self
                 .client
@@ -140,7 +141,7 @@ impl YahooFinance {
         quote_type: &str,
         query: &Value,
         limit: usize,
-    ) -> Result<Vec<Asset>, ProviderError> {
+    ) -> IngestionResult<Vec<Asset>> {
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| {
             let payload = json!({
                 "size": batch,
@@ -175,11 +176,11 @@ impl YahooFinance {
     }
 
     /// Validate HTTP status then deserialize screener JSON into a list of quotes.
-    async fn parse_quotes(resp: reqwest::Response) -> Result<Vec<YahooQuote>, ProviderError> {
+    async fn parse_quotes(resp: reqwest::Response) -> IngestionResult<Vec<YahooQuote>> {
         let parsed = HttpClient::json::<ScreenerResponse>(resp).await?;
 
         parsed.finance.result.into_iter().next().map(|r| r.quotes).ok_or_else(|| {
-            ProviderError::UnexpectedResponse("Empty screener result array".to_string())
+            IngestionError::UnexpectedResponse("Empty screener result array".to_string())
         })
     }
 }
@@ -202,7 +203,7 @@ impl DataProvider for YahooFinance {
         ]
     }
 
-    async fn list_assets(&self, asset_type: AssetType, limit: usize) -> ProviderResult<Vec<Asset>> {
+    async fn list_assets(&self, asset_type: AssetType, limit: usize) -> IngestionResult<Vec<Asset>> {
         match asset_type {
             AssetType::Stocks | AssetType::Etf => {
                 let (quote_type, operands) = match asset_type {
@@ -264,6 +265,8 @@ impl DataProvider for YahooFinance {
                     name: f.to_string(),
                     currency: f.quote().to_string(),
                     asset_type: AssetType::Forex,
+                    start_date: Some(0),
+                    end_date: Some(chrono::Utc::now().timestamp()),
                     volume: None,
                     price: None,
                 })
@@ -288,7 +291,65 @@ impl DataProvider for YahooFinance {
             },
         }
     }
+
+    /// Get an asset given a symbol. This method returns the asset with all metadata.
+    async fn get_asset(&self, _: AssetType, symbol: &str) -> IngestionResult<Asset> {
+        let symbol = symbol.to_owned();
+
+        let resp = self
+            .client
+            .get(
+                &format!("{}/{symbol}", Self::CHART_URL),
+                Some(&[
+                    ("range", "1d"),
+                    ("interval", "1d"),
+                    ("crumb", &self.crumb),
+                ]),
+            )
+            .await?;
+
+        let parsed = HttpClient::json::<ChartResponse>(resp).await?;
+
+        let meta = parsed
+            .chart
+            .result
+            .into_iter()
+            .next()
+            .map(|r| r.meta)
+            .ok_or_else(|| IngestionError::UnexpectedResponse(
+                format!("No chart result for symbol: {symbol}")
+            ))?;
+
+        let currency = meta.currency.ok_or_else(|| {
+            ProviderError::UnexpectedResponse(format!("no currency for symbol: {symbol}"))
+        })?;
+
+        let asset_type = match meta.instrument_type.as_deref() {
+            Some("EQUITY") => AssetType::Stocks,
+            Some("ETF") => AssetType::Etf,
+            Some("CURRENCY") => AssetType::Forex,
+            Some("CRYPTOCURRENCY") => AssetType::Crypto,
+            s => return Err(ProviderError::UnexpectedResponse(
+                format!("unknown instrument type: {s:?}")
+            )),
+        };
+
+        Ok(Asset {
+            symbol: symbol.to_owned(),
+            name: meta.short_name.or(meta.long_name).unwrap_or_else(|| symbol.to_owned()),
+            currency,
+            asset_type,
+            volume: meta.regular_market_volume,
+            price: meta.regular_market_price,
+            start_date: Some(meta.first_trade_date.unwrap_or(Utc::now().timestamp())),
+            end_date: Some(meta.regular_market_time.unwrap_or(0)),
+        })
+    }
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Yahoo API objects
+// ────────────────────────────────────────────────────────────────────────────
 
 /// Raw quote shape returned by the Yahoo Finance screener endpoint.
 /// Fields are `Option` because Yahoo omits them inconsistently.
@@ -311,7 +372,9 @@ impl From<YahooQuote> for Asset {
             symbol: q.symbol,
             name,
             currency: q.currency.unwrap(),
-            asset_type: AssetType::Stocks,
+            asset_type: meta.instrument_type.as_deref().into(),
+            start_date: None,
+            end_date: None,
             volume: q.regular_market_volume,
             price: q.regular_market_price,
         }
@@ -331,4 +394,32 @@ struct ScreenerFinance {
 #[derive(Debug, Deserialize)]
 struct ScreenerResult {
     quotes: Vec<YahooQuote>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartResponse {
+    chart: ChartBody,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartBody {
+    result: Vec<ChartResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartResult {
+    meta: ChartMeta,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChartMeta {
+    short_name: Option<String>,
+    long_name: Option<String>,
+    currency: Option<String>,
+    instrument_type: Option<String>,
+    first_trade_date: Option<i64>,
+    regular_market_time: Option<i64>,
+    regular_market_price: Option<f64>,
+    regular_market_volume: Option<u64>,
 }
