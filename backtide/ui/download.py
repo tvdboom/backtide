@@ -11,7 +11,7 @@ from datetime import datetime
 import streamlit as st
 
 from backtide.core.config import get_config
-from backtide.core.ingestion import list_assets
+from backtide.core.ingestion import list_assets, list_intervals, get_assets
 from backtide.core.models import AssetType, Interval
 from backtide.ui.utils import (
     _get_asset_type_description,
@@ -137,7 +137,7 @@ if not full_history:
 
 intervals = st.pills(
     label="Interval",
-    options=Interval.variants(),
+    options=list_intervals(asset_type),
     selection_mode="multi",
     default=Interval.get_default(),
     help=(

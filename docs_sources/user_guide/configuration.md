@@ -23,7 +23,7 @@ If no file is found, the built-in defaults are used.
     base_currency = "USD"
 
     [ingestion]
-    storage_path = ".backtide/database.duckdb"
+    storage_path = ".backtide"
 
     [ingestion.providers]
     stocks = "yahoo"
@@ -40,7 +40,7 @@ If no file is found, the built-in defaults are used.
     base_currency: USD
 
     ingestion:
-        storage_path: .backtide/database.duckdb
+        storage_path: .backtide
         providers:
             stocks: yahoo
             etf: yahoo
@@ -57,7 +57,7 @@ If no file is found, the built-in defaults are used.
     {
         "base_currency": "USD",
         "ingestion": {
-            "storage_path": ".backtide/database.duckdb",
+            "storage_path": ".backtide",
             "providers": {
                 "stocks": "yahoo",
                 "etf": "yahoo",

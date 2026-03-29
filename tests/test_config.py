@@ -36,7 +36,7 @@ def test_ingestion_equality():
 
 def test_ingestion_repr():
     """__repr__ contains ingestion configuration values."""
-    assert str(IngestionConfig()).startswith('IngestionConfig(storage_path=".backtide/"')
+    assert str(IngestionConfig()).startswith('IngestionConfig(storage_path=".backtide"')
 
 
 def test_config_custom():

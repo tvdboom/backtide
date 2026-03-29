@@ -1,8 +1,10 @@
 //! Implementation for HTTP requests logic.
 
+use reqwest::cookie::Jar;
 use reqwest::Client;
 use serde::Serialize;
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
@@ -54,14 +56,18 @@ impl HttpClient {
     /// How long to wait between retry attempts.
     const RETRY_SLEEP: Duration = Duration::from_millis(100);
 
+    /// User-agent sent with every request.
+    const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
     // ────────────────────────────────────────────────────────────────────────
     // Public API
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Create a client backed by the supplied cookie jar.
-    pub fn new(user_agent: &str) -> Result<Self, HttpError> {
+    pub fn new() -> Result<Self, HttpError> {
         let inner = Client::builder()
-            .user_agent(user_agent)
+            .cookie_provider(Arc::new(Jar::default()))
+            .user_agent(Self::USER_AGENT)
             .build()
             .map_err(HttpError::ClientBuild)?;
 
@@ -71,10 +77,6 @@ impl HttpClient {
     }
 
     /// Send a `GET` request to `url`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HttpError::Exhausted`] if all retry attempts fail.
     pub async fn get(
         &self,
         url: &str,
@@ -91,10 +93,6 @@ impl HttpClient {
     }
 
     /// Send a `POST` request with a JSON body and optional query parameters.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HttpError::Exhausted`] if all retry attempts fail.
     pub async fn post<B: Serialize>(
         &self,
         url: &str,
@@ -108,16 +106,7 @@ impl HttpClient {
     // Private API
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Execute an async request factory up to [`Self::MAX_RETRIES`] times, with
-    /// status-aware retry behavior:
-    ///
-    /// - **2xx** — success, return the response immediately.
-    /// - **4xx** — client error, return [`HttpError::Status`] immediately without
-    ///   retrying (the request is definitively wrong).
-    /// - **5xx** — server error, store the error and retry after [`Self::RETRY_SLEEP`].
-    /// - **Transport error** — store the error and retry after [`Self::RETRY_SLEEP`].
-    ///
-    /// If every attempt fails, returns the last stored error.
+    /// Execute an async request factory up to [`Self::MAX_RETRIES`] times.
     async fn retry<F, Fut>(&self, mut f: F) -> Result<reqwest::Response, HttpError>
     where
         F: FnMut() -> Fut,

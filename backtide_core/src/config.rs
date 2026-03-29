@@ -283,8 +283,8 @@ impl PyConfig {
 ///
 /// Attributes
 /// ----------
-/// storage_path : str, default=".backtide/"
-///     File-system path to the primary database file.
+/// storage_path : str, default=".backtide"
+///     File-system path to the location to store the database and cache.
 ///
 /// providers : dict[str, str] | None, default=None
 ///     Which data provider to use for each asset type. If `None`, it
@@ -332,7 +332,7 @@ impl PyIngestionConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (storage_path=".backtide/", providers=None))]
+    #[pyo3(signature = (storage_path=".backtide", providers=None))]
     fn new(storage_path: &str, providers: Option<HashMap<String, String>>) -> PyResult<Self> {
         let providers = match providers {
             Some(map) => map
@@ -445,7 +445,10 @@ impl PyDisplayConfig {
     }
 
     fn __repr__(&self) -> String {
-        format!("DisplayConfig(date_format={:?}, timezone={:?}, logokit_api_key={:?})", self.date_format, self.timezone, self.logokit_api_key)
+        format!(
+            "DisplayConfig(date_format={:?}, timezone={:?}, logokit_api_key={:?})",
+            self.date_format, self.timezone, self.logokit_api_key
+        )
     }
 
     /// Convert the configuration object to a dictionary.

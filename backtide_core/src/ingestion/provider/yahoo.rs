@@ -1,6 +1,7 @@
 //! Implementation of the `yahoo` provider.
 
-use crate::ingestion::provider::traits::{DataProvider};
+use crate::ingestion::errors::{IngestionError, IngestionResult};
+use crate::ingestion::provider::traits::DataProvider;
 use crate::models::asset::{Asset, AssetType};
 use crate::models::bar::Interval;
 use crate::models::currency::Currency;
@@ -8,17 +9,14 @@ use crate::models::exchange::Exchange;
 use crate::models::forex::ForexPair;
 use crate::utils::http::{paginate, HttpClient};
 use async_trait::async_trait;
+use chrono::Utc;
 use futures::future::join_all;
-use reqwest::cookie::Jar;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::cmp::Ordering;
-use std::sync::Arc;
-use chrono::Utc;
 use strum::IntoEnumIterator;
 use tokio::try_join;
 use tracing::warn;
-use crate::ingestion::errors::{IngestionError, IngestionResult};
 
 /// Provider to ingest data from Yahoo Finance.
 pub struct YahooFinance {
@@ -49,11 +47,6 @@ impl YahooFinance {
     /// Maximum results returned per screener page.
     const PAGE_SIZE: usize = 100;
 
-    /// User-agent sent with every request. A generic browser string is required;
-    /// Yahoo rejects requests that use the default `reqwest` agent.
-    const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-     (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-
     // ────────────────────────────────────────────────────────────────────────
     // Public API
     // ────────────────────────────────────────────────────────────────────────
@@ -64,7 +57,7 @@ impl YahooFinance {
     /// 1. `GET` [`Self::COOKIE_SEED_URL`] — populates the cookie jar.
     /// 2. `GET` [`Self::CRUMB_URL`]       — retrieves the CSRF crumb.
     pub async fn new() -> IngestionResult<Self> {
-        let client = HttpClient::new(Self::USER_AGENT).map_err(|e| IngestionError::Http(e))?;
+        let client = HttpClient::new().map_err(|e| IngestionError::Http(e))?;
 
         let crumb = Self::fetch_crumb(&client).await?;
 
@@ -169,10 +162,7 @@ impl YahooFinance {
         })
         .await?;
 
-        Ok(quotes
-            .into_iter()
-            .filter_map(|quote| quote.currency.is_some().then(|| Asset::from(quote)))
-            .collect())
+        Ok(quotes.into_iter().map(Asset::from).collect())
     }
 
     /// Validate HTTP status then deserialize screener JSON into a list of quotes.
@@ -180,30 +170,64 @@ impl YahooFinance {
         let parsed = HttpClient::json::<ScreenerResponse>(resp).await?;
 
         parsed.finance.result.into_iter().next().map(|r| r.quotes).ok_or_else(|| {
-            IngestionError::UnexpectedResponse("Empty screener result array".to_string())
+            IngestionError::UnexpectedResponse("empty screener result array".to_owned())
         })
     }
 }
 
 #[async_trait]
 impl DataProvider for YahooFinance {
-    fn intervals(&self) -> Vec<Interval> {
-        vec![
-            Interval::OneMinute,
-            Interval::TwoMinutes,
-            Interval::FiveMinutes,
-            Interval::FifteenMinutes,
-            Interval::ThirtyMinutes,
-            Interval::OneHour,
-            Interval::OneDay,
-            Interval::FiveDays,
-            Interval::OneWeek,
-            Interval::OneMonth,
-            Interval::ThreeMonths,
-        ]
+    /// Get an asset given a symbol. This method returns the asset with all metadata.
+    async fn get_asset(&self, _: AssetType, symbol: &str) -> IngestionResult<Asset> {
+        let symbol = symbol.to_owned();
+
+        let resp = self
+            .client
+            .get(
+                &format!("{}/{symbol}", Self::CHART_URL),
+                Some(&[("range", "1d"), ("interval", "1d"), ("crumb", &self.crumb)]),
+            )
+            .await?;
+
+        let parsed = HttpClient::json::<ChartResponse>(resp).await?;
+
+        let meta = parsed.chart.result.into_iter().next().map(|r| r.meta).ok_or_else(|| {
+            IngestionError::NotFound(symbol.clone())
+        })?;
+
+        let currency = meta.currency.ok_or_else(|| {
+            IngestionError::UnexpectedResponse(format!("no currency for symbol: {symbol}"))
+        })?;
+
+        let asset_type = match meta.instrument_type.as_deref() {
+            Some("EQUITY") => AssetType::Stocks,
+            Some("ETF") => AssetType::Etf,
+            Some("CURRENCY") => AssetType::Forex,
+            Some("CRYPTOCURRENCY") => AssetType::Crypto,
+            s => {
+                return Err(IngestionError::UnexpectedResponse(format!(
+                    "unknown instrument type: {s:?}"
+                )))
+            },
+        };
+
+        Ok(Asset {
+            symbol: symbol.to_owned(),
+            name: meta.short_name.or(meta.long_name).unwrap_or_else(|| symbol.to_owned()),
+            currency,
+            asset_type,
+            volume: meta.regular_market_volume,
+            price: meta.regular_market_price,
+            start_date: Some(meta.first_trade_date.unwrap_or(Utc::now().timestamp())),
+            end_date: Some(meta.regular_market_time.unwrap_or(0)),
+        })
     }
 
-    async fn list_assets(&self, asset_type: AssetType, limit: usize) -> IngestionResult<Vec<Asset>> {
+    async fn list_assets(
+        &self,
+        asset_type: AssetType,
+        limit: usize,
+    ) -> IngestionResult<Vec<Asset>> {
         match asset_type {
             AssetType::Stocks | AssetType::Etf => {
                 let (quote_type, operands) = match asset_type {
@@ -266,7 +290,7 @@ impl DataProvider for YahooFinance {
                     currency: f.quote().to_string(),
                     asset_type: AssetType::Forex,
                     start_date: Some(0),
-                    end_date: Some(chrono::Utc::now().timestamp()),
+                    end_date: Some(Utc::now().timestamp()),
                     volume: None,
                     price: None,
                 })
@@ -292,58 +316,20 @@ impl DataProvider for YahooFinance {
         }
     }
 
-    /// Get an asset given a symbol. This method returns the asset with all metadata.
-    async fn get_asset(&self, _: AssetType, symbol: &str) -> IngestionResult<Asset> {
-        let symbol = symbol.to_owned();
-
-        let resp = self
-            .client
-            .get(
-                &format!("{}/{symbol}", Self::CHART_URL),
-                Some(&[
-                    ("range", "1d"),
-                    ("interval", "1d"),
-                    ("crumb", &self.crumb),
-                ]),
-            )
-            .await?;
-
-        let parsed = HttpClient::json::<ChartResponse>(resp).await?;
-
-        let meta = parsed
-            .chart
-            .result
-            .into_iter()
-            .next()
-            .map(|r| r.meta)
-            .ok_or_else(|| IngestionError::UnexpectedResponse(
-                format!("No chart result for symbol: {symbol}")
-            ))?;
-
-        let currency = meta.currency.ok_or_else(|| {
-            ProviderError::UnexpectedResponse(format!("no currency for symbol: {symbol}"))
-        })?;
-
-        let asset_type = match meta.instrument_type.as_deref() {
-            Some("EQUITY") => AssetType::Stocks,
-            Some("ETF") => AssetType::Etf,
-            Some("CURRENCY") => AssetType::Forex,
-            Some("CRYPTOCURRENCY") => AssetType::Crypto,
-            s => return Err(ProviderError::UnexpectedResponse(
-                format!("unknown instrument type: {s:?}")
-            )),
-        };
-
-        Ok(Asset {
-            symbol: symbol.to_owned(),
-            name: meta.short_name.or(meta.long_name).unwrap_or_else(|| symbol.to_owned()),
-            currency,
-            asset_type,
-            volume: meta.regular_market_volume,
-            price: meta.regular_market_price,
-            start_date: Some(meta.first_trade_date.unwrap_or(Utc::now().timestamp())),
-            end_date: Some(meta.regular_market_time.unwrap_or(0)),
-        })
+    fn list_intervals(&self) -> Vec<Interval> {
+        vec![
+            Interval::OneMinute,
+            Interval::TwoMinutes,
+            Interval::FiveMinutes,
+            Interval::FifteenMinutes,
+            Interval::ThirtyMinutes,
+            Interval::OneHour,
+            Interval::OneDay,
+            Interval::FiveDays,
+            Interval::OneWeek,
+            Interval::OneMonth,
+            Interval::ThreeMonths,
+        ]
     }
 }
 
@@ -351,7 +337,7 @@ impl DataProvider for YahooFinance {
 // Yahoo API objects
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Raw quote shape returned by the Yahoo Finance screener endpoint.
+/// Raw quote shape returned by the Yahoo Finance endpoint.
 /// Fields are `Option` because Yahoo omits them inconsistently.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -359,7 +345,8 @@ pub struct YahooQuote {
     pub symbol: String,
     pub short_name: Option<String>,
     pub long_name: Option<String>,
-    pub currency: Option<String>,
+    pub currency: String,
+    pub quote_type: String,
     pub regular_market_volume: Option<u64>,
     pub regular_market_price: Option<f64>,
 }
@@ -371,8 +358,14 @@ impl From<YahooQuote> for Asset {
         Self {
             symbol: q.symbol,
             name,
-            currency: q.currency.unwrap(),
-            asset_type: meta.instrument_type.as_deref().into(),
+            currency: q.currency,
+            asset_type: match q.quote_type.as_str() {
+                "EQUITY" => AssetType::Stocks,
+                "ETF" => AssetType::Etf,
+                "CURRENCY" => AssetType::Forex,
+                "CRYPTOCURRENCY" => AssetType::Crypto,
+                _ => unreachable!(),
+            },
             start_date: None,
             end_date: None,
             volume: q.regular_market_volume,

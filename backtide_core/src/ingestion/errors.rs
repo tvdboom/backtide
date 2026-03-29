@@ -1,9 +1,10 @@
 //! Custom errors raised during data ingestion.
 
+use crate::config::ConfigError;
+use crate::utils::http::HttpError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;
 use thiserror::Error;
-use crate::utils::http::HttpError;
 
 /// Errors that the [`DataIngester`] implementation might return.
 #[derive(Debug, Error)]
@@ -11,6 +12,10 @@ pub enum IngestionError {
     /// Failed to authenticate (e.g. provider crumb fetch failed).
     #[error("Authentication failed: {0}")]
     Auth(String),
+
+    /// An error when trying to retrieve the config file.
+    #[error("configuration error: {0}")]
+    Config(#[from] ConfigError),
 
     /// An HTTP client related error.
     #[error("HTTP error: {0}")]

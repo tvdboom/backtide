@@ -6,7 +6,6 @@ use pyo3::prelude::*;
 use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
-use crate::ingestion::errors::IngestionError;
 
 /// The broad category an [`Asset`] belongs to.
 ///

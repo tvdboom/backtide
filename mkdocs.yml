@@ -128,6 +128,7 @@ nav:
         - ingestion:
             - get_assets: api/ingestion/get_assets.md
             - list_assets: api/ingestion/list_assets.md
+            - list_intervals: api/ingestion/list_intervals.md
         - models:
             - Asset: api/models/asset.md
             - AssetType: api/models/assettype.md
