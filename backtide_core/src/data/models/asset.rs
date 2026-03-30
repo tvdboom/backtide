@@ -1,20 +1,23 @@
 //! Asset and AssetType definitions.
 
-use crate::ingestion::provider::Provider;
+use crate::data::provider::provider::Provider;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
+/// Canonical (provider-independent) symbol name.
+pub type Symbol = String;
+
 /// The broad category an [`Asset`] belongs to.
 ///
 /// See Also
 /// --------
-/// - backtide.models:Asset
-/// - backtide.models:Bar
-/// - backtide.models:Interval
-#[pyclass(from_py_object, module = "backtide.models")]
+/// - backtide.data:Asset
+/// - backtide.data:Bar
+/// - backtide.data:Interval
+#[pyclass(from_py_object, module = "backtide.data")]
 #[derive(
     Clone,
     Copy,
@@ -118,38 +121,44 @@ impl AssetType {
 /// name : str
 ///     Human-readable name of the asset.
 ///
-/// currency : str
-///     Currency the asset trades on. Quote for forex and crypto.
+/// base : str | None
+///     The currency of the tradeable asset. Only defined for forex and
+///     crypto pairs.
+///
+/// quote : str
+///     The currency the asset trades on.
 ///
 /// asset_type : [`AssetType`]
 ///     Asset type this asset belongs to.
 ///
-/// start_date : int
-///     Earliest moment for which there is data in UNIX timestamp.
+/// earliest_ts : int | None
+///     Earliest timestamp for which there is data in UNIX timestamp.
 ///
-/// end_date : int
-///     Most recent moment for which there is data in UNIX timestamp.
+/// latest_ts : int | None
+///     Most recent timestamp for which there is data in UNIX timestamp.
 ///
 /// See Also
 /// --------
-/// - backtide.models:AssetType
-/// - backtide.models:Bar
-/// - backtide.models:Interval
-#[pyclass(skip_from_py_object, frozen, module = "backtide.models")]
+/// - backtide.data:AssetType
+/// - backtide.data:Bar
+/// - backtide.data:Interval
+#[pyclass(skip_from_py_object, frozen, module = "backtide.data")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Asset {
     #[pyo3(get)]
-    pub symbol: String,
+    pub symbol: Symbol,
     #[pyo3(get)]
     pub name: String,
     #[pyo3(get)]
-    pub currency: String,
+    pub base: Option<String>,
+    #[pyo3(get)]
+    pub quote: String,
     #[pyo3(get)]
     pub asset_type: AssetType,
     #[pyo3(get)]
-    pub start_date: Option<i64>,
+    pub earliest_ts: Option<i64>,
     #[pyo3(get)]
-    pub end_date: Option<i64>,
+    pub latest_ts: Option<i64>,
 
     /// Traded volume during the most recent regular market session.
     pub volume: Option<u64>,
@@ -174,20 +183,22 @@ impl Asset {
 
     #[new]
     fn new(
-        symbol: String,
+        symbol: Symbol,
         name: String,
-        currency: String,
+        base: Option<String>,
+        quote: String,
         asset_type: AssetType,
-        start_date: Option<i64>,
-        end_date: Option<i64>,
+        earliest_ts: Option<i64>,
+        latest_ts: Option<i64>,
     ) -> Self {
         Self {
             symbol,
             name,
-            currency,
+            base,
+            quote,
             asset_type,
-            start_date,
-            end_date,
+            earliest_ts,
+            latest_ts,
             volume: None,
             price: None,
         }
@@ -196,15 +207,24 @@ impl Asset {
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyAny>, (String, String, String, AssetType))> {
+    ) -> PyResult<(Bound<'py, PyAny>, (Symbol, String, Option<String>, String, AssetType))> {
         let cls = py.get_type::<Asset>().into_any();
-        Ok((cls, (self.symbol.clone(), self.name.clone(), self.currency.clone(), self.asset_type)))
+        Ok((
+            cls,
+            (
+                self.symbol.clone(),
+                self.name.clone(),
+                self.base.clone(),
+                self.quote.clone(),
+                self.asset_type,
+            ),
+        ))
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "Asset(symbol={:?}, name={:?}, currency={:?}, asset_type={:?})",
-            self.symbol, self.name, self.currency, self.asset_type
+            "Asset(symbol={:?}, name={:?}, base={:?}, quote={:?}, asset_type={:?})",
+            self.symbol, self.name, self.base, self.quote, self.asset_type
         )
     }
 }

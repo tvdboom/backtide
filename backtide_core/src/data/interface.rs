@@ -1,8 +1,8 @@
-//! Python interface for the ingestion module.
+//! Python interface for the data module.
 
-use crate::ingestion::ingester::DataIngester;
-use crate::models::asset::{Asset, AssetType};
-use crate::models::bar::Interval;
+use crate::data::download::DataDownload;
+use crate::data::models::asset::{Asset, AssetType};
+use crate::data::models::bar::Interval;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::PyAnyMethods;
 use pyo3::{pyfunction, Bound, PyAny, PyResult};
@@ -10,8 +10,6 @@ use pyo3::{pyfunction, Bound, PyAny, PyResult};
 /// Get a list of assets given their symbols.
 ///
 /// The returned assets should contain defined all metadata fields.
-/// Additionally, if [`logokit_api_key`][displayconfig] is set,
-/// download the images corresponding to the requested symbols.
 ///
 /// Parameters
 /// ----------
@@ -25,13 +23,13 @@ use pyo3::{pyfunction, Bound, PyAny, PyResult};
 ///
 /// See Also
 /// --------
-/// - backtide.ingestion:list_assets
-/// - backtide.ingestion:list_intervals
+/// - backtide.data:list_assets
+/// - backtide.data:list_intervals
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.ingestion import get_assets
+/// from backtide.data import get_assets
 ///
 /// print(get_assets("stocks", ["APPL", "MSFT"]))
 /// ```
@@ -43,7 +41,7 @@ pub fn get_assets(asset_type: Bound<'_, PyAny>, symbols: Vec<String>) -> PyResul
         asset_type.extract::<AssetType>()?
     };
 
-    let ingester = DataIngester::get()?;
+    let ingester = DataDownload::get()?;
     ingester.get_assets(asset_type, symbols).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
@@ -64,13 +62,13 @@ pub fn get_assets(asset_type: Bound<'_, PyAny>, symbols: Vec<String>) -> PyResul
 ///
 /// See Also
 /// --------
-/// - backtide.ingestion:get_assets
-/// - backtide.ingestion:list_intervals
+/// - backtide.data:get_assets
+/// - backtide.data:list_intervals
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.ingestion import list_assets
+/// from backtide.data import list_assets
 ///
 /// print(list_assets("crypto"))
 /// ```
@@ -83,7 +81,7 @@ pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<A
         asset_type.extract::<AssetType>()?
     };
 
-    let ingester = DataIngester::get()?;
+    let ingester = DataDownload::get()?;
     ingester.list_assets(asset_type, limit).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
@@ -96,13 +94,13 @@ pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<A
 ///
 /// See Also
 /// --------
-/// - backtide.ingestion:get_assets
-/// - backtide.ingestion:list_assets
+/// - backtide.data:get_assets
+/// - backtide.data:list_assets
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.ingestion import list_intervals
+/// from backtide.data import list_intervals
 ///
 /// print(list_intervals("stocks"))
 /// ```
@@ -114,6 +112,6 @@ pub fn list_intervals(asset_type: Bound<'_, PyAny>) -> PyResult<Vec<Interval>> {
         asset_type.extract::<AssetType>()?
     };
 
-    let ingester = DataIngester::get()?;
+    let ingester = DataDownload::get()?;
     Ok(ingester.list_intervals(asset_type))
 }

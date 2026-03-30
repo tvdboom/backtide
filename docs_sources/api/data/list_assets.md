@@ -1,7 +1,7 @@
-# list_intervals
-----------------
+# list_assets
+-------------
 
-:: backtide.ingestion:list_intervals
+:: backtide.data:list_assets
     :: signature
     :: head
     :: table:

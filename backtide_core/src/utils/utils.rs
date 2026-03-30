@@ -1,4 +1,4 @@
-//! Utility functions.
+//! General utility functions.
 
 use pyo3::{pyfunction, PyResult};
 use tracing_subscriber::layer::SubscriberExt;

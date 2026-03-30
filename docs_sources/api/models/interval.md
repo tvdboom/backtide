@@ -1,7 +1,7 @@
 # Interval
 ----------
 
-:: backtide.models:Interval
+:: backtide.data:Interval
     :: signature
     :: head
     :: table:

@@ -1,12 +1,9 @@
-//! Data provider definitions.
+//! Implementation of the [`Provider`] enum.
 
 use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
+use pyo3::{pyclass, pymethods, Borrowed, FromPyObject, PyAny, PyErr};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumString};
-
-pub mod traits;
-pub mod yahoo;
 
 /// A supported market data provider.
 #[pyclass(skip_from_py_object)]

@@ -9,7 +9,7 @@ from typing import Any
 
 import streamlit as st
 
-from backtide.core.models import AssetType
+from backtide.core.data import AssetType
 from backtide.utils.utils import to_list
 
 
@@ -19,25 +19,25 @@ def _get_asset_type_description(asset_type: AssetType) -> tuple[str, str]:
         case AssetType.Stocks:
             asset_description = (
                 "List of stock tickers. The preloaded options are the primary listings "
-                "for companies in major indices, but any valid ticker can be added."
+                "for companies in major indices, but any valid stock ticker can be added."
             )
             currency_description = "Filter the preloaded symbols by their denominated currency."
         case AssetType.Etf:
             asset_description = (
-                "List of ETF tickers. The preloaded options are frequently traded "
-                "ETFs and funds, but any valid ETF ticker can be added."
+                "List of ETF tickers. The preloaded options are frequently traded ETFs, but "
+                "any valid ETF ticker can be added."
             )
             currency_description = "Filter the preloaded symbols by their denominated currency."
         case AssetType.Forex:
             asset_description = (
                 "List of currency pairs. The preloaded options are frequently traded pairs, "
-                "but any valid forex ticker can be added."
+                "but any valid forex symbol can be added."
             )
             currency_description = "Filter the preloaded pairs by their base/quote currencies."
         case AssetType.Crypto:
             asset_description = (
-                "List of currency pairs. The preloaded options are frequently traded "
-                "pairs, but any valid ticker can be added."
+                "List of cryptocurrency pairs. The preloaded options are frequently traded "
+                "pairs, but any valid crypto symbol can be added."
             )
             currency_description = "Filter the preloaded symbols by their base/quote currencies."
 

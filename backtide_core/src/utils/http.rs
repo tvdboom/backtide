@@ -1,4 +1,4 @@
-//! Implementation for HTTP requests logic.
+//! Utilities for HTTP requests.
 
 use reqwest::cookie::Jar;
 use reqwest::Client;

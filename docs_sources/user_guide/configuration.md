@@ -22,10 +22,10 @@ If no file is found, the built-in defaults are used.
     ```toml title="backtide.config.toml"
     base_currency = "USD"
 
-    [ingestion]
+    [data]
     storage_path = ".backtide"
 
-    [ingestion.providers]
+    [data.providers]
     stocks = "yahoo"
     etf = "yahoo"
     forex = "yahoo"
@@ -39,7 +39,7 @@ If no file is found, the built-in defaults are used.
     ```yaml title="backtide.config.yaml"
     base_currency: USD
 
-    ingestion:
+    data:
         storage_path: .backtide
         providers:
             stocks: yahoo
@@ -56,7 +56,7 @@ If no file is found, the built-in defaults are used.
     ```json title="backtide.config.json"
     {
         "base_currency": "USD",
-        "ingestion": {
+        "data": {
             "storage_path": ".backtide",
             "providers": {
                 "stocks": "yahoo",

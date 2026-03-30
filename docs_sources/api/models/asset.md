@@ -1,7 +1,7 @@
 # Asset
 -------
 
-:: backtide.models:Asset
+:: backtide.data:Asset
     :: signature
     :: head
     :: table:

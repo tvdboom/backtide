@@ -1,7 +1,7 @@
 # Bar
 -----
 
-:: backtide.models:Bar
+:: backtide.data:Bar
     :: signature
     :: head
     :: table:

@@ -1,7 +1,7 @@
-# IngestionConfig
+# DataConfig
 -----------------
 
-:: backtide.config:IngestionConfig
+:: backtide.config:DataConfig
     :: signature
     :: head
     :: table:

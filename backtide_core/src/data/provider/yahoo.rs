@@ -1,12 +1,13 @@
 //! Implementation of the `yahoo` provider.
 
-use crate::ingestion::errors::{IngestionError, IngestionResult};
-use crate::ingestion::provider::traits::DataProvider;
-use crate::models::asset::{Asset, AssetType};
-use crate::models::bar::Interval;
-use crate::models::currency::Currency;
-use crate::models::exchange::Exchange;
-use crate::models::forex::ForexPair;
+use crate::data::errors::{DataError, DataResult};
+use crate::data::models::asset::{Asset, AssetType, Symbol};
+use crate::data::models::bar::Interval;
+use crate::data::models::currency::Currency;
+use crate::data::models::exchange::Exchange;
+use crate::data::models::forex::ForexPair;
+use crate::data::provider::traits::DataProvider;
+use crate::data::utils::canonical_symbol;
 use crate::utils::http::{paginate, HttpClient};
 use async_trait::async_trait;
 use chrono::Utc;
@@ -56,8 +57,8 @@ impl YahooFinance {
     /// This performs two HTTP requests:
     /// 1. `GET` [`Self::COOKIE_SEED_URL`] — populates the cookie jar.
     /// 2. `GET` [`Self::CRUMB_URL`]       — retrieves the CSRF crumb.
-    pub async fn new() -> IngestionResult<Self> {
-        let client = HttpClient::new().map_err(|e| IngestionError::Http(e))?;
+    pub async fn new() -> DataResult<Self> {
+        let client = HttpClient::new().map_err(|e| DataError::Http(e))?;
 
         let crumb = Self::fetch_crumb(&client).await?;
 
@@ -75,7 +76,7 @@ impl YahooFinance {
     ///
     /// Both requests reuse `client` so the same cookie jar is populated and
     /// read within the same call.
-    async fn fetch_crumb(client: &HttpClient) -> IngestionResult<String> {
+    async fn fetch_crumb(client: &HttpClient) -> DataResult<String> {
         // Ignore the response status entirely — we only care about Set-Cookie headers.
         // fc.yahoo.com commonly returns 404 but still seeds the session cookie.
         let _ = client.inner.get(Self::COOKIE_SEED_URL).send().await;
@@ -83,15 +84,15 @@ impl YahooFinance {
         let crumb_resp = client
             .get(Self::CRUMB_URL, None)
             .await
-            .map_err(|e| IngestionError::Auth(format!("Crumb request failed: {e}")))?;
+            .map_err(|e| DataError::Auth(format!("Crumb request failed: {e}")))?;
 
         let crumb = crumb_resp
             .text()
             .await
-            .map_err(|e| IngestionError::Auth(format!("Failed to read crumb: {e}")))?;
+            .map_err(|e| DataError::Auth(format!("Failed to read crumb: {e}")))?;
 
         if crumb.is_empty() {
-            return Err(IngestionError::Auth(
+            return Err(DataError::Auth(
                 "Yahoo returned an empty crumb — session cookie may be missing".to_owned(),
             ));
         }
@@ -104,7 +105,7 @@ impl YahooFinance {
         &self,
         scr_id: &str,
         limit: usize,
-    ) -> IngestionResult<Vec<Asset>> {
+    ) -> DataResult<Vec<Asset>> {
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| async move {
             let resp = self
                 .client
@@ -125,7 +126,7 @@ impl YahooFinance {
         })
         .await?;
 
-        Ok(quotes.into_iter().map(Asset::from).collect())
+        Ok(quotes.into_iter().map(Asset::try_from).collect::<DataResult<_>>()?)
     }
 
     /// Paginate through the POST screener endpoint using a custom query body.
@@ -134,7 +135,7 @@ impl YahooFinance {
         quote_type: &str,
         query: &Value,
         limit: usize,
-    ) -> IngestionResult<Vec<Asset>> {
+    ) -> DataResult<Vec<Asset>> {
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| {
             let payload = json!({
                 "size": batch,
@@ -162,25 +163,61 @@ impl YahooFinance {
         })
         .await?;
 
-        Ok(quotes.into_iter().map(Asset::from).collect())
+        Ok(quotes.into_iter().map(Asset::try_from).collect::<DataResult<_>>()?)
     }
 
     /// Validate HTTP status then deserialize screener JSON into a list of quotes.
-    async fn parse_quotes(resp: reqwest::Response) -> IngestionResult<Vec<YahooQuote>> {
+    async fn parse_quotes(resp: reqwest::Response) -> DataResult<Vec<YahooQuote>> {
         let parsed = HttpClient::json::<ScreenerResponse>(resp).await?;
 
-        parsed.finance.result.into_iter().next().map(|r| r.quotes).ok_or_else(|| {
-            IngestionError::UnexpectedResponse("empty screener result array".to_owned())
-        })
+        parsed
+            .finance
+            .result
+            .into_iter()
+            .next()
+            .map(|r| r.quotes)
+            .ok_or(DataError::UnexpectedResponse("empty screener result array".to_owned()))
+    }
+
+    /// Parse the yahoo response for instrument into an asset type.
+    fn parse_asset_type(instrument_type: &str) -> DataResult<AssetType> {
+        match instrument_type {
+            "EQUITY" => Ok(AssetType::Stocks),
+            "ETF" => Ok(AssetType::Etf),
+            "CURRENCY" => Ok(AssetType::Forex),
+            "CRYPTOCURRENCY" => Ok(AssetType::Crypto),
+            other => Err(DataError::UnexpectedResponse(format!("unknown asset type: {other:?}"))),
+        }
+    }
+
+    /// Extract the canonical symbol, base and quote currencies from a symbol.
+    fn parse_symbol(symbol: &str, currency: &str) -> DataResult<(Option<String>, String)> {
+        // Forex: "EURUSD=X", "JPY=X".
+        if let Some(symbol) = symbol.strip_suffix("=X") {
+            return match symbol.len() {
+                // Single currency like "JPY" means USD/JPY
+                3 => Ok((Some(Currency::USD.to_string()), symbol.to_owned())),
+                // Standard 6-char "EURUSD" means EUR/USD
+                6 => Ok((Some(symbol[..3].to_owned()), symbol[3..].to_owned())),
+                // Anything else: invalid forex type
+                _ => Err(DataError::UnexpectedResponse("invalid symbol".to_owned())),
+            };
+        }
+
+        // Crypto: "BTC-USD", "ETH-USDT".
+        if let Some((base, quote)) = symbol.split_once('-') {
+            return Ok((Some(base.to_owned()), quote.to_owned()));
+        }
+
+        // Equity / ETF: no base currency concept
+        Ok((None, currency.to_string()))
     }
 }
 
 #[async_trait]
 impl DataProvider for YahooFinance {
     /// Get an asset given a symbol. This method returns the asset with all metadata.
-    async fn get_asset(&self, _: AssetType, symbol: &str) -> IngestionResult<Asset> {
-        let symbol = symbol.to_owned();
-
+    async fn get_asset(&self, _: AssetType, symbol: &Symbol) -> DataResult<Asset> {
         let resp = self
             .client
             .get(
@@ -191,43 +228,18 @@ impl DataProvider for YahooFinance {
 
         let parsed = HttpClient::json::<ChartResponse>(resp).await?;
 
-        let meta = parsed.chart.result.into_iter().next().map(|r| r.meta).ok_or_else(|| {
-            IngestionError::NotFound(symbol.clone())
-        })?;
+        let asset = parsed
+            .chart
+            .result
+            .into_iter()
+            .next()
+            .map(|r| Asset::try_from(r.meta))
+            .ok_or(DataError::NotFound(symbol.clone()))??;
 
-        let currency = meta.currency.ok_or_else(|| {
-            IngestionError::UnexpectedResponse(format!("no currency for symbol: {symbol}"))
-        })?;
-
-        let asset_type = match meta.instrument_type.as_deref() {
-            Some("EQUITY") => AssetType::Stocks,
-            Some("ETF") => AssetType::Etf,
-            Some("CURRENCY") => AssetType::Forex,
-            Some("CRYPTOCURRENCY") => AssetType::Crypto,
-            s => {
-                return Err(IngestionError::UnexpectedResponse(format!(
-                    "unknown instrument type: {s:?}"
-                )))
-            },
-        };
-
-        Ok(Asset {
-            symbol: symbol.to_owned(),
-            name: meta.short_name.or(meta.long_name).unwrap_or_else(|| symbol.to_owned()),
-            currency,
-            asset_type,
-            volume: meta.regular_market_volume,
-            price: meta.regular_market_price,
-            start_date: Some(meta.first_trade_date.unwrap_or(Utc::now().timestamp())),
-            end_date: Some(meta.regular_market_time.unwrap_or(0)),
-        })
+        Ok(asset)
     }
 
-    async fn list_assets(
-        &self,
-        asset_type: AssetType,
-        limit: usize,
-    ) -> IngestionResult<Vec<Asset>> {
+    async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
         match asset_type {
             AssetType::Stocks | AssetType::Etf => {
                 let (quote_type, operands) = match asset_type {
@@ -287,10 +299,11 @@ impl DataProvider for YahooFinance {
                         format!("{}=X", f.quote())
                     },
                     name: f.to_string(),
-                    currency: f.quote().to_string(),
+                    base: Some(f.base().to_string()),
+                    quote: f.quote().to_string(),
                     asset_type: AssetType::Forex,
-                    start_date: Some(0),
-                    end_date: Some(Utc::now().timestamp()),
+                    earliest_ts: Some(0),
+                    latest_ts: Some(Utc::now().timestamp()),
                     volume: None,
                     price: None,
                 })
@@ -345,32 +358,42 @@ pub struct YahooQuote {
     pub symbol: String,
     pub short_name: Option<String>,
     pub long_name: Option<String>,
-    pub currency: String,
-    pub quote_type: String,
+    pub currency: Option<String>,
+    pub quote_type: Option<String>,
     pub regular_market_volume: Option<u64>,
     pub regular_market_price: Option<f64>,
 }
 
-impl From<YahooQuote> for Asset {
-    fn from(q: YahooQuote) -> Self {
-        let name = q.short_name.or(q.long_name).unwrap_or_else(|| q.symbol.clone());
+impl TryFrom<YahooQuote> for Asset {
+    type Error = DataError;
 
-        Self {
-            symbol: q.symbol,
-            name,
-            currency: q.currency,
-            asset_type: match q.quote_type.as_str() {
-                "EQUITY" => AssetType::Stocks,
-                "ETF" => AssetType::Etf,
-                "CURRENCY" => AssetType::Forex,
-                "CRYPTOCURRENCY" => AssetType::Crypto,
-                _ => unreachable!(),
-            },
-            start_date: None,
-            end_date: None,
-            volume: q.regular_market_volume,
+    fn try_from(q: YahooQuote) -> DataResult<Self> {
+        let currency = q.currency.ok_or(DataError::UnexpectedResponse(format!(
+            "no currency for symbol: {}",
+            q.symbol
+        )))?;
+
+        let asset_type = q
+            .quote_type
+            .as_deref()
+            .ok_or_else(|| {
+                DataError::UnexpectedResponse(format!("no quote type for symbol: {}", q.symbol))
+            })
+            .and_then(YahooFinance::parse_asset_type)?;
+
+        let (base, quote) = YahooFinance::parse_symbol(&q.symbol, &currency)?;
+
+        Ok(Asset {
+            symbol: canonical_symbol(&q.symbol, &base, &quote),
+            name: q.short_name.or(q.long_name).unwrap_or_else(|| quote.clone()),
+            base,
+            quote,
+            asset_type,
             price: q.regular_market_price,
-        }
+            volume: q.regular_market_volume,
+            earliest_ts: None,
+            latest_ts: None,
+        })
     }
 }
 
@@ -404,15 +427,54 @@ struct ChartResult {
     meta: ChartMeta,
 }
 
+/// Raw chart shape returned by the Yahoo Finance endpoint.
+/// Fields are `Option` because Yahoo omits them inconsistently.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ChartMeta {
+    symbol: String,
     short_name: Option<String>,
     long_name: Option<String>,
     currency: Option<String>,
     instrument_type: Option<String>,
     first_trade_date: Option<i64>,
     regular_market_time: Option<i64>,
-    regular_market_price: Option<f64>,
     regular_market_volume: Option<u64>,
+    regular_market_price: Option<f64>,
+}
+
+impl TryFrom<ChartMeta> for Asset {
+    type Error = DataError;
+
+    fn try_from(m: ChartMeta) -> DataResult<Self> {
+        let currency = m.currency.ok_or(DataError::UnexpectedResponse(format!(
+            "no currency for symbol: {}",
+            m.symbol
+        )))?;
+
+        let asset_type = m
+            .instrument_type
+            .as_deref()
+            .ok_or_else(|| {
+                DataError::UnexpectedResponse(format!(
+                    "no instrument type for symbol: {}",
+                    m.symbol
+                ))
+            })
+            .and_then(YahooFinance::parse_asset_type)?;
+
+        let (base, quote) = YahooFinance::parse_symbol(&m.symbol, &currency)?;
+
+        Ok(Asset {
+            symbol: canonical_symbol(&m.symbol, &base, &quote),
+            name: m.short_name.or(m.long_name).unwrap_or_else(|| quote.clone()),
+            base,
+            quote,
+            asset_type,
+            price: m.regular_market_price,
+            volume: m.regular_market_volume,
+            earliest_ts: m.first_trade_date,
+            latest_ts: m.regular_market_time,
+        })
+    }
 }

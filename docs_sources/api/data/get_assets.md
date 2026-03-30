@@ -1,7 +1,7 @@
-# list_assets
--------------
+# get_assets
+------------
 
-:: backtide.ingestion:list_assets
+:: backtide.data:get_assets
     :: signature
     :: head
     :: table:

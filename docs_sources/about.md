@@ -135,21 +135,21 @@ core project contributors with a set of developer tools free of charge.
   </div>
   <div class="column">
     <div class="logo">
-      <a href="../user_guide/ingestion/#providers" draggable="false">
+      <a href="../user_guide/data/#providers" draggable="false">
         <img src="../img/integrations/yahoo.png" alt="yahoo" draggable="false">
       </a>
     </div>
   </div>
   <div class="column">
     <div class="logo">
-      <a href="../API/ingestion/#providers" draggable="false">
+      <a href="../API/data/#providers" draggable="false">
         <img src="../img/integrations/binance.png" alt="binance" draggable="false">
       </a>
     </div>
   </div>
   <div class="column">
     <div class="logo">
-      <a href="/API/ingestion/#providers" draggable="false">
+      <a href="/API/data/#providers" draggable="false">
         <img src="../img/integrations/kraken.png" alt="kraken" draggable="false">
       </a>
     </div>

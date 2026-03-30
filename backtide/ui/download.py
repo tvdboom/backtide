@@ -11,8 +11,8 @@ from datetime import datetime
 import streamlit as st
 
 from backtide.core.config import get_config
-from backtide.core.ingestion import list_assets, list_intervals, get_assets
-from backtide.core.models import AssetType, Interval
+from backtide.core.data import list_assets, list_intervals, get_assets
+from backtide.core.data import AssetType, Interval
 from backtide.ui.utils import (
     _get_asset_type_description,
     _prevent_deselection,
@@ -60,9 +60,7 @@ if currency := st.session_state.get("currency_download"):
     filtered_assets = [
         asset
         for asset in all_assets
-        if currency == "All"
-        or asset.currency == currency
-        or (asset_type in (AssetType.Forex, AssetType.Crypto) and currency in asset.name)
+        if currency == "All" or asset.base == currency or asset.quote == currency
     ]
 else:
     filtered_assets = all_assets

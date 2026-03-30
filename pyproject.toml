@@ -78,15 +78,6 @@ manifest-path = "backtide_core/Cargo.toml"
 [tool.setuptools.packages.find]
 include = ["backtide"]
 
-[tool.isort]
-skip_gitignore = true
-multi_line_output = 5
-atomic = true
-lines_after_imports = 2
-include_trailing_comma = true
-ignore_comments = true
-remove_redundant_aliases = true
-
 [tool.ruff]
 cache-dir = ".cache/ruff"
 line-length = 99
@@ -96,6 +87,7 @@ extend-include = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = [
+    "I",  # isort
     "F",  # pyflakes
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -130,6 +122,17 @@ select = [
     "RUF",  # ruff
 ]
 ignore = ["COM812"]
+
+[tool.ruff.lint.isort]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "known-first-party",
+    "first-party",
+    "local-folder",
+]
+force-sort-within-sections = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Unused imports

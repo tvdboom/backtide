@@ -57,17 +57,6 @@ when aligning bars across multiple assets.
 
 <br>
 
-
-[](){#ingestion}
-<strong id="ingestion">ingestion</strong>
-<div markdown style="margin: -1em 0 0 1.2em">
-The process of fetching raw market data from a [provider][nom-provider] and writing
-it to the local database. Ingestion is idempotent — re-running it for a period that
-has already been stored will not produce duplicate records.
-</div>
-
-<br>
-
 [](){#nom-interval}
 <strong id="interval">interval</strong>
 <div markdown style="margin: -1em 0 0 1.2em">

@@ -124,11 +124,11 @@ nav:
             - set_config: api/config/set_config.md
             - Config: api/config/config.md
             - DisplayConfig: api/config/displayconfig.md
-            - IngestionConfig: api/config/ingestionconfig.md
-        - ingestion:
-            - get_assets: api/ingestion/get_assets.md
-            - list_assets: api/ingestion/list_assets.md
-            - list_intervals: api/ingestion/list_intervals.md
+            - DataConfig: api/config/DataConfig.md
+        - data:
+            - get_assets: api/data/get_assets.md
+            - list_assets: api/data/list_assets.md
+            - list_intervals: api/data/list_intervals.md
         - models:
             - Asset: api/models/asset.md
             - AssetType: api/models/assettype.md

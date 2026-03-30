@@ -8,7 +8,7 @@ use thiserror::Error;
 
 /// Errors that the [`DataIngester`] implementation might return.
 #[derive(Debug, Error)]
-pub enum IngestionError {
+pub enum DataError {
     /// Failed to authenticate (e.g. provider crumb fetch failed).
     #[error("Authentication failed: {0}")]
     Auth(String),
@@ -49,10 +49,10 @@ pub enum IngestionError {
     UnexpectedResponse(String),
 }
 
-pub type IngestionResult<T> = Result<T, IngestionError>;
+pub type DataResult<T> = Result<T, DataError>;
 
-impl From<IngestionError> for PyErr {
-    fn from(e: IngestionError) -> PyErr {
+impl From<DataError> for PyErr {
+    fn from(e: DataError) -> PyErr {
         PyRuntimeError::new_err(e.to_string())
     }
 }

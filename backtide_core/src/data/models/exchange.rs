@@ -1,6 +1,6 @@
 //! Exchange definition.
 
-use crate::models::currency::Currency;
+use crate::data::models::currency::Currency;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};

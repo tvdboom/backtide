@@ -12,10 +12,10 @@ use strum::{EnumString, IntoEnumIterator};
 ///
 /// See Also
 /// --------
-/// - backtide.models:Asset
-/// - backtide.models:AssetType
-/// - backtide.models:Bar
-#[pyclass(from_py_object, module = "backtide.models")]
+/// - backtide.data:Asset
+/// - backtide.data:AssetType
+/// - backtide.data:Bar
+#[pyclass(from_py_object, module = "backtide.data")]
 #[derive(
     Clone,
     Copy,
@@ -163,10 +163,10 @@ impl Interval {
 ///
 /// See Also
 /// --------
-/// - backtide.models:Asset
-/// - backtide.models:AssetType
-/// - backtide.models:Interval
-#[pyclass(from_py_object, get_all, frozen, module = "backtide.models")]
+/// - backtide.data:Asset
+/// - backtide.data:AssetType
+/// - backtide.data:Interval
+#[pyclass(from_py_object, get_all, frozen, module = "backtide.data")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Bar {
     pub open_ts: i64,

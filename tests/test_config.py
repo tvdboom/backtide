@@ -7,7 +7,7 @@ Description: Unit tests for the configuration frontend.
 
 import pytest
 
-from backtide.config import Config, DisplayConfig, IngestionConfig
+from backtide.config import Config, DisplayConfig, DataConfig
 
 
 def test_display_custom():
@@ -28,15 +28,15 @@ def test_display_repr():
     assert str(DisplayConfig()).startswith('DisplayConfig(date_format="YYYY-MM-DD"')
 
 
-def test_ingestion_equality():
-    """IngestionConfig equality behaves correctly."""
-    assert IngestionConfig() == IngestionConfig()
-    assert IngestionConfig(storage_path="/tmp/") != IngestionConfig()
+def test_data_equality():
+    """DataConfig equality behaves correctly."""
+    assert DataConfig() == DataConfig()
+    assert DataConfig(storage_path="/tmp/") != DataConfig()
 
 
-def test_ingestion_repr():
-    """__repr__ contains ingestion configuration values."""
-    assert str(IngestionConfig()).startswith('IngestionConfig(storage_path=".backtide"')
+def test_data_repr():
+    """__repr__ contains data configuration values."""
+    assert str(DataConfig()).startswith('DataConfig(storage_path=".backtide"')
 
 
 def test_config_custom():
@@ -47,8 +47,8 @@ def test_config_custom():
 
 def test_config_nested_override():
     """Nested configuration overrides propagate correctly."""
-    c = Config(ingestion=IngestionConfig(providers={"crypto": "kraken"}))
-    assert c.to_dict()["ingestion"]["providers"]["crypto"].lower() == "kraken"
+    c = Config(data=DataConfig(providers={"crypto": "kraken"}))
+    assert c.to_dict()["data"]["providers"]["crypto"].lower() == "kraken"
 
 
 def test_config_equality():
@@ -65,7 +65,7 @@ def test_config_repr():
 def test_invalid_provider_raises():
     """Invalid provider raises ValueError."""
     with pytest.raises(ValueError, match=".*Invalid provider.*"):
-        IngestionConfig(providers={"crypto": "invalid"})
+        DataConfig(providers={"crypto": "invalid"})
 
 
 def test_invalid_currency_raises():

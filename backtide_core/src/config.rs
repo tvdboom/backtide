@@ -1,9 +1,9 @@
 //! Configuration module.
 
 use crate::constants::{CONFIG_FILE_NAME, DEFAULT_STORAGE_PATH};
-use crate::ingestion::provider::Provider;
-use crate::models::asset::AssetType;
-use crate::models::currency::Currency;
+use crate::data::models::asset::AssetType;
+use crate::data::models::currency::Currency;
+use crate::data::provider::provider::Provider;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -15,6 +15,7 @@ use std::str::FromStr;
 use std::sync::OnceLock;
 use strum::IntoEnumIterator;
 use thiserror::Error;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Configuration structs
 // ────────────────────────────────────────────────────────────────────────────
@@ -29,7 +30,7 @@ pub struct Config {
     pub base_currency: Currency,
 
     /// Settings that control how market data is fetched and stored.
-    pub ingestion: IngestionConfig,
+    pub data: DataConfig,
 
     /// Settings that control how values are presented in the frontend.
     pub display: DisplayConfig,
@@ -48,9 +49,9 @@ impl Config {
     }
 }
 
-/// Data ingestion configuration.
+/// Data configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct IngestionConfig {
+pub struct DataConfig {
     /// File-system path to the primary database file.
     pub storage_path: PathBuf,
 
@@ -58,7 +59,7 @@ pub struct IngestionConfig {
     pub providers: HashMap<AssetType, Provider>,
 }
 
-impl Default for IngestionConfig {
+impl Default for DataConfig {
     fn default() -> Self {
         Self {
             storage_path: PathBuf::from(DEFAULT_STORAGE_PATH),
@@ -177,7 +178,7 @@ fn fetch_config() -> Result<Config, ConfigError> {
 /// base_currency : str, default="USD"
 ///     Currency (ISO 4217 code) that all prices are normalized to.
 ///
-/// ingestion : [`IngestionConfig`]
+/// data : [`DataConfig`]
 ///     Settings that control how market data is fetched and stored.
 ///
 /// display : [`DisplayConfig`]
@@ -192,7 +193,7 @@ fn fetch_config() -> Result<Config, ConfigError> {
 #[derive(Debug)]
 pub struct PyConfig {
     pub base_currency: Currency,
-    pub ingestion: Py<PyIngestionConfig>,
+    pub data: Py<PyDataConfig>,
     pub display: Py<PyDisplayConfig>,
 }
 
@@ -200,7 +201,7 @@ impl PyConfig {
     fn from_rust(py: Python<'_>, cfg: Config) -> PyResult<Self> {
         Ok(Self {
             base_currency: cfg.base_currency,
-            ingestion: Py::new(py, PyIngestionConfig::from_rust(cfg.ingestion))?,
+            data: Py::new(py, PyDataConfig::from_rust(cfg.data))?,
             display: Py::new(py, PyDisplayConfig::from_rust(cfg.display))?,
         })
     }
@@ -208,7 +209,7 @@ impl PyConfig {
     fn to_config(&self, py: Python<'_>) -> Config {
         Config {
             base_currency: self.base_currency.clone(),
-            ingestion: self.ingestion.borrow(py).to_config(),
+            data: self.data.borrow(py).to_config(),
             display: self.display.borrow(py).to_config(),
         }
     }
@@ -218,7 +219,7 @@ impl Clone for PyConfig {
     fn clone(&self) -> Self {
         Python::attach(|py| Self {
             base_currency: self.base_currency.clone(),
-            ingestion: self.ingestion.clone_ref(py),
+            data: self.data.clone_ref(py),
             display: self.display.clone_ref(py),
         })
     }
@@ -230,11 +231,11 @@ impl PyConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (base_currency="USD", ingestion=None, display=None))]
+    #[pyo3(signature = (base_currency="USD", data=None, display=None))]
     fn new(
         py: Python<'_>,
         base_currency: &str,
-        ingestion: Option<Py<PyIngestionConfig>>,
+        data: Option<Py<PyDataConfig>>,
         display: Option<Py<PyDisplayConfig>>,
     ) -> PyResult<Self> {
         let default = Self::from_rust(py, Config::default())?;
@@ -243,16 +244,16 @@ impl PyConfig {
             base_currency: Currency::from_str(base_currency).map_err(|_| {
                 PyValueError::new_err(format!("Invalid base currency: {base_currency}"))
             })?,
-            ingestion: ingestion.unwrap_or(default.ingestion),
+            data: data.unwrap_or(default.data),
             display: display.unwrap_or(default.display),
         })
     }
 
     fn __repr__(&self, py: Python<'_>) -> String {
         format!(
-            "Config(base_currency={:?}, ingestion={}, display={})",
+            "Config(base_currency={:?}, data={}, display={})",
             self.base_currency.to_string(),
-            self.ingestion.borrow(py).__repr__(),
+            self.data.borrow(py).__repr__(),
             self.display.borrow(py).__repr__(),
         )
     }
@@ -276,9 +277,9 @@ impl PyConfig {
     }
 }
 
-/// Configuration for ingestion parameters.
+/// Configuration for data parameters.
 ///
-/// The ingestion parameters control how and where market data is fetched and
+/// The data parameters control how and where market data is fetched and
 /// stored. Read more in the [user guide][configuration].
 ///
 /// Attributes
@@ -296,30 +297,23 @@ impl PyConfig {
 /// - backtide.config:get_config
 /// - backtide.config:load_config
 /// - backtide.config:set_config
-#[pyclass(
-    name = "IngestionConfig",
-    get_all,
-    set_all,
-    eq,
-    from_py_object,
-    module = "backtide.config"
-)]
+#[pyclass(name = "DataConfig", get_all, set_all, eq, from_py_object, module = "backtide.config")]
 #[derive(Debug, Clone, PartialEq)]
-pub struct PyIngestionConfig {
+pub struct PyDataConfig {
     pub storage_path: PathBuf,
     pub providers: HashMap<AssetType, Provider>,
 }
 
-impl PyIngestionConfig {
-    fn from_rust(cfg: IngestionConfig) -> Self {
+impl PyDataConfig {
+    fn from_rust(cfg: DataConfig) -> Self {
         Self {
             storage_path: cfg.storage_path,
             providers: cfg.providers,
         }
     }
 
-    fn to_config(&self) -> IngestionConfig {
-        IngestionConfig {
+    fn to_config(&self) -> DataConfig {
+        DataConfig {
             storage_path: self.storage_path.clone(),
             providers: self.providers.clone(),
         }
@@ -327,7 +321,7 @@ impl PyIngestionConfig {
 }
 
 #[pymethods]
-impl PyIngestionConfig {
+impl PyDataConfig {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 
@@ -345,7 +339,7 @@ impl PyIngestionConfig {
                     Ok((asset_type, provider))
                 })
                 .collect::<PyResult<HashMap<_, _>>>()?,
-            None => IngestionConfig::default().providers,
+            None => DataConfig::default().providers,
         };
 
         Ok(Self {
@@ -365,7 +359,7 @@ impl PyIngestionConfig {
             format!("{{{}}}", pairs.join(", "))
         };
 
-        format!("IngestionConfig(storage_path={:?}, providers={})", self.storage_path, providers,)
+        format!("DataConfig(storage_path={:?}, providers={})", self.storage_path, providers,)
     }
 
     /// Convert the configuration object to a dictionary.
@@ -574,7 +568,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "backtide.config")?;
 
     m.add_class::<PyConfig>()?;
-    m.add_class::<PyIngestionConfig>()?;
+    m.add_class::<PyDataConfig>()?;
     m.add_class::<PyDisplayConfig>()?;
 
     m.add_function(wrap_pyfunction!(get_config, &m)?)?;
@@ -614,10 +608,10 @@ mod tests {
         r#"
         base_currency = "usd"
 
-        [ingestion]
+        [data]
         storage_path = "/tmp/test.duckdb"
 
-        [ingestion.providers]
+        [data.providers]
         stocks = "Yahoo"
         etf    = "Yahoo"
         forex  = "Yahoo"
@@ -633,7 +627,7 @@ mod tests {
     fn config_as_yaml() -> &'static str {
         r#"
         base_currency: USD
-        ingestion:
+        data:
           storage_path: /tmp/test.duckdb
           providers:
             stocks: yahoo
@@ -650,7 +644,7 @@ mod tests {
     fn config_as_json() -> &'static str {
         r#"{
             "base_currency": "USD",
-            "ingestion": {
+            "data": {
                 "storage_path": "/tmp/test.duckdb",
                 "providers": {
                     "stocks": "Yahoo",
@@ -677,7 +671,7 @@ mod tests {
         assert_eq!(cfg.base_currency, Currency::USD);
         assert_eq!(cfg.display.timezone, Some("America/New_York".to_owned()));
         assert_eq!(cfg.display.date_format, "%Y-%m-%d");
-        assert_eq!(cfg.ingestion.storage_path, PathBuf::from("/tmp/test.duckdb"));
+        assert_eq!(cfg.data.storage_path, PathBuf::from("/tmp/test.duckdb"));
     }
 
     #[test]

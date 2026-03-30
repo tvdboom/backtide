@@ -5,6 +5,7 @@ from backtide.core.currency import Currency
 class DisplayConfig:
     date_format: str
     timezone: str
+    logokit_api_key: str
     def __repr__(self) -> str: ...
 
 class ProviderConfig:
@@ -14,14 +15,14 @@ class ProviderConfig:
     crypto: Provider
     def __repr__(self) -> str: ...
 
-class IngestionConfig:
+class DataConfig:
     storage_path: Path
     providers: ProviderConfig
     def __repr__(self) -> str: ...
 
 class Config:
     base_currency: Currency
-    ingestion: IngestionConfig
+    data: DataConfig
     display: DisplayConfig
     def __repr__(self) -> str: ...
 

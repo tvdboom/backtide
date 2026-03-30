@@ -8,7 +8,7 @@ Description: Module containing configuration re-exports.
 from backtide.core.config import (
     Config,
     DisplayConfig,
-    IngestionConfig,
+    DataConfig,
     get_config,
     load_config,
     set_config,
