@@ -5,6 +5,7 @@ use crate::utils::http::HttpError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;
 use thiserror::Error;
+use crate::data::models::asset::Symbol;
 
 /// Errors that the [`DataIngester`] implementation might return.
 #[derive(Debug, Error)]
@@ -31,7 +32,7 @@ pub enum DataError {
 
     /// The requested value does not exist or is not served.
     #[error("symbol not found: {0}")]
-    NotFound(String),
+    SymbolNotFound(Symbol),
 
     /// Any other failure not covered by the other variants.
     #[error("{0}")]

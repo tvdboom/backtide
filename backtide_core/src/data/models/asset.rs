@@ -207,7 +207,10 @@ impl Asset {
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyAny>, (Symbol, String, Option<String>, String, AssetType))> {
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (Symbol, String, Option<String>, String, AssetType, Option<i64>, Option<i64>),
+    )> {
         let cls = py.get_type::<Asset>().into_any();
         Ok((
             cls,
@@ -217,14 +220,16 @@ impl Asset {
                 self.base.clone(),
                 self.quote.clone(),
                 self.asset_type,
+                self.earliest_ts,
+                self.latest_ts,
             ),
         ))
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "Asset(symbol={:?}, name={:?}, base={:?}, quote={:?}, asset_type={:?})",
-            self.symbol, self.name, self.base, self.quote, self.asset_type
+            "Asset(symbol={:?}, name={:?}, base={:?}, quote={:?}, asset_type={:?}, earliest_ts={:?}, latest_ts={:?})",
+            self.symbol, self.name, self.base, self.quote, self.asset_type, self.earliest_ts, self.latest_ts
         )
     }
 }

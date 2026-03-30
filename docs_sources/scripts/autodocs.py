@@ -7,10 +7,9 @@ Description: Module containing the documentation rendering.
 
 from __future__ import annotations
 
-import importlib
-import json
 from dataclasses import is_dataclass
 from enum import Enum
+import importlib
 from inspect import (
     Parameter,
     getdoc,
@@ -22,12 +21,12 @@ from inspect import (
     isroutine,
     signature,
 )
+import json
 from types import MethodType
 
+from mkdocs.config.defaults import MkDocsConfig
 import regex as re
 import yaml
-from mkdocs.config.defaults import MkDocsConfig
-
 
 # Variables ======================================================== >>
 

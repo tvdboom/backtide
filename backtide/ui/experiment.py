@@ -6,13 +6,13 @@ Description: Run a new backtest page.
 """
 
 import ast
+from datetime import datetime
 import json
 import time
-from datetime import datetime
 
+from code_editor import code_editor
 import streamlit as st
 import yaml
-from code_editor import code_editor
 
 from backtide.ui.utils import (
     _get_asset_type_description,
@@ -24,7 +24,6 @@ from backtide.utils.constants import (
     STRATEGY_PLACEHOLDER,
     TAG_PATTERN,
 )
-
 
 INDICATORS = [
     "SMA - Simple Moving Average",

@@ -5,24 +5,26 @@ Description: Page to download new data.
 
 """
 
+from datetime import datetime, timedelta
 import math
-from datetime import datetime
-
+from zoneinfo import ZoneInfo
 import streamlit as st
 
 from backtide.core.config import get_config
-from backtide.core.data import list_assets, list_intervals, get_assets
-from backtide.core.data import AssetType, Interval
+from backtide.core.data import AssetType, Interval, list_assets, list_intervals, get_assets
 from backtide.ui.utils import (
     _get_asset_type_description,
-    _prevent_deselection,
     _to_upper_values,
+    _prevent_deselection,
 )
 from backtide.utils.constants import MAX_ASSET_SELECTION, MAX_PRELOADED_ASSETS
 from backtide.utils.utils import format_compact, to_list
 
-
 config = get_config()
+if config.display.timezone:
+    tz = ZoneInfo(config.display.timezone)
+else:
+    tz = datetime.now().astimezone().tzinfo
 
 st.set_page_config(page_title="Backtide - Download")
 
@@ -39,9 +41,6 @@ st.divider()
 if not st.session_state.get("asset_type_download"):
     st.session_state.asset_type_download = AssetType.get_default()
 
-with st.spinner("Loading assets..."):
-    all_assets = list_assets(st.session_state.asset_type_download, MAX_PRELOADED_ASSETS)
-
 asset_type = st.segmented_control(
     label="Asset type",
     key="asset_type_download",
@@ -50,10 +49,16 @@ asset_type = st.segmented_control(
     on_change=_prevent_deselection(
         key="asset_type_download",
         default=AssetType.get_default(),
-        reset=["symbols_download", "currency_download"],
+        reset=["assets_download", "currency_download"],
     ),
     help="Select the type of financial asset you want to backtest.",
 )
+
+if not st.session_state.get(f"all_assets_{asset_type}"):
+    with st.spinner("Loading assets..."):
+        st.session_state[f"all_assets_{asset_type}"] = list_assets(st.session_state.asset_type_download, MAX_PRELOADED_ASSETS)
+
+all_assets = st.session_state[f"all_assets_{asset_type}"]
 
 # Filter assets based on the selected currency
 if currency := st.session_state.get("currency_download"):
@@ -68,40 +73,31 @@ else:
 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
 asset_d, currency_d = _get_asset_type_description(st.session_state.asset_type_download)
 
-
-def format_func(asset: Asset) -> str:
-    """User-friendly representation of an asset."""
-    match asset_type:
-        case AssetType.Stocks | AssetType.Etf:
-            return f"{asset.symbol} - {asset.name}"
-        case AssetType.Forex:
-            return asset.name
-        case _:
-            return asset.symbol
-
-
 assets = col1.multiselect(
     label="Symbols",
     key="assets_download",
     options=sorted(filtered_assets, key=lambda a: a.symbol),
-    format_func=format_func,
+    format_func=lambda a: f"{a.symbol} - {a.name}" if a.asset_type in (AssetType.Stocks, AssetType.Etf) else a.symbol,
     placeholder="Select one or more symbols...",
     max_selections=MAX_ASSET_SELECTION,
     accept_new_options=True,
-    on_change=_to_upper_values("symbols"),
+    on_change=_to_upper_values("assets_download"),
     help=asset_d,
 )
+
+# Convert custom symbols to assets and retrieve all metadata for predefined assets
+assets = get_assets([getattr(a, "symbol", a) for a in assets], asset_type)
 
 col2.selectbox(
     label="Currency",
     key="currency_download",  # Use key to filter tickers
-    options=["All", *sorted(dict.fromkeys(a.currency for a in all_assets))],
+    options=["All", *sorted(dict.fromkeys(a.quote for a in all_assets))],
     placeholder="All",
     help=currency_d,
 )
 
 full_history = st.toggle(
-    label="Download all history",
+    label="Download full history",
     value=True,
     help=(
         "Whether to download the maximum available history for all selected tickers. "
@@ -109,32 +105,66 @@ full_history = st.toggle(
     ),
 )
 
-if not full_history:
+if assets:
+    earliest_ts = datetime.fromtimestamp(min(asset.earliest_ts for asset in assets), tz=tz)
+    latest_ts = datetime.fromtimestamp(max(asset.latest_ts for asset in assets), tz=tz)
+else:
+    earliest_ts = datetime(1980, 1, 1, tzinfo=tz)
+    latest_ts = datetime.now(tz=tz)
+
+if full_history:
+    start_ts = earliest_ts
+    end_ts = latest_ts
+else:
     col1, col2 = st.columns(2)
 
-    start_date = col1.date_input(
-        label="Start date",
-        value=None,
-        min_value="1980-01-01",
-        max_value=datetime.now().date(),
-        format=config.display.date_format,
-        help=(
-            "Download data starting from this date (inclusive). If the historical "
-            "data does not go so far back, it downloads the full available history."
-        ),
-    )
+    intervals = st.session_state.get("interval_download", [])
+    if any(interval.is_intraday() for interval in intervals):
+        step = max(30, *[i.to_minutes() for i in intervals])
 
-    end_date = col2.date_input(
-        label="End date",
-        value="today",
-        min_value=start_date,
-        max_value="today",
-        format=config.display.date_format,
-        help="Download data up to this date (exclusive).",
-    )
+        # Use datetime widgets when there are intraday intervals
+        start_ts = col1.datetime_input(
+            label="Start date",
+            value=earliest_ts,
+            min_value=earliest_ts,
+            max_value=datetime.now(tz=tz),
+            step=timedelta(minutes=step),
+            format=config.display.date_format,
+            help="Download data starting from this timestamp (inclusive).",
+        )
+
+        latest_ts = col2.datetime_input(
+            label="End date",
+            value=latest_ts,
+            min_value=start_ts,
+            max_value=datetime.now(tz=tz),
+            step=timedelta(minutes=step),
+            format=config.display.date_format,
+            help="Download data up to this timestamp (exclusive).",
+        )
+    else:
+        # Use date widgets when there are no intraday intervals
+        start_ts = col1.date_input(
+            label="Start date",
+            value=earliest_ts,
+            min_value=earliest_ts,
+            max_value="today",
+            format=config.display.date_format,
+            help="Download data starting from this date (inclusive).",
+        )
+    
+        latest_ts = col2.date_input(
+            label="End date",
+            value=latest_ts,
+            min_value=start_ts,
+            max_value="today",
+            format=config.display.date_format,
+            help="Download data up to this date (exclusive).",
+        )
 
 intervals = st.pills(
     label="Interval",
+    key="interval_download",
     options=list_intervals(asset_type),
     selection_mode="multi",
     default=Interval.get_default(),
@@ -144,25 +174,21 @@ intervals = st.pills(
     ),
 )
 
-if assets and start_date and end_date and intervals:
-    n_days = (end_date - start_date).days + 1
+if assets and start_ts and latest_ts and intervals:
+    n_days = (latest_ts - start_ts).days + 1
     n_years = int(n_days / 365.25)
     if n_years >= 1:
         ranges = f"{int(n_years)}y {math.ceil(n_days - n_years * 365.25)}d"
     else:
         ranges = f"{n_days}d"
 
-    n_rows = len(assets) * sum(max(1, n_days * 24 * 60 / i.to_minutes()) for i in intervals)
-    st.info(
-        f"""
-        Download overview:
-        - Number of symbols: {len(assets)}
-        - Range: {start_date} to {end_date} ({ranges})
-        - Intervals: {",".join([x.value for x in to_list(intervals)])}
-        - Approximate number of bars: {format_compact(n_rows)}
-        """,
-        icon=":material/info:",
-    )
+    BYTES_PER_ROW = 150  # ~150 bytes/row (parquet OHLCV estimate)
+    ROWS_PER_SECOND = 40_000  # rough download + write throughput
+
+    logokit_key = config.display.logokit_api_key
+
+    rows_data = []
+    total_rows = 0
 
 st.divider()
 
@@ -170,18 +196,18 @@ if st.button(
     label="Download",
     icon=":material/get_app:",
     type="primary",
-    disabled=not (assets and start_date and end_date and intervals),
+    disabled=not (assets and start_ts and latest_ts and intervals),
     width="stretch",
 ):
-    if end_date > datetime.now().date():
+    if latest_ts > datetime.now(tz=tz):
         st.error("End date cannot be in the future.", icon=":material/error:")
-    elif start_date > end_date:  # ty:ignore[unsupported-operator]
+    elif start_ts > latest_ts:  # ty:ignore[unsupported-operator]
         st.error("Start date must be equal or prior to end date.", icon=":material/error:")
     else:
         with st.spinner("Downloading data..."):
             # TODO: implement download logic
             st.success(
                 f"Successfully downloaded {len(symbols)} ticker(s) "
-                f"from {start_date} to {end_date}.",
+                f"from {start_ts} to {latest_ts}.",
                 icon=":material/check_circle:",
             )

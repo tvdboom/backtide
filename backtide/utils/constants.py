@@ -7,7 +7,6 @@ Description: Constants shared by the package.
 
 import re
 
-
 # Regex pattern to which tags must comply
 TAG_PATTERN = re.compile(r"^[\w-]{1,15}$")
 

@@ -7,7 +7,6 @@ Description: Backtest results page.
 
 import streamlit as st
 
-
 st.title("Results")
 st.divider()
 

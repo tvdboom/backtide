@@ -99,6 +99,16 @@ impl Interval {
         Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
     }
 
+    /// Whether the interval is smaller than one day.
+    ///
+    /// Returns
+    /// -------
+    /// bool
+    ///     If interval is intraday.
+    fn is_intraday(&self) -> bool {
+        self.to_minutes() < Interval::OneDay.to_minutes()
+    }
+    
     /// Minutes in this interval.
     ///
     /// Returns

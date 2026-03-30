@@ -9,7 +9,7 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait DataProvider: Send + Sync {
     /// Fetch metadata for a single symbol without downloading any bars.
-    async fn get_asset(&self, asset_type: AssetType, symbol: &Symbol) -> DataResult<Asset>;
+    async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset>;
 
     /// Returns an overview of the most important assets of `asset_type`.
     /// May be expensive – callers should cache the result.

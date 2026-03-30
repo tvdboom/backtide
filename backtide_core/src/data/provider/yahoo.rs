@@ -15,9 +15,12 @@ use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::cmp::Ordering;
+use std::time::Instant;
+use dashmap::DashMap;
 use strum::IntoEnumIterator;
 use tokio::try_join;
-use tracing::warn;
+use tracing::debug;
+use crate::constants::PROVIDER_CACHE_TTL;
 
 /// Provider to ingest data from Yahoo Finance.
 pub struct YahooFinance {
@@ -26,6 +29,9 @@ pub struct YahooFinance {
 
     /// CSRF protection token that verifies that a request was legitimate.
     crumb: String,
+
+    /// Cache for loaded assets.
+    cache: DashMap<Symbol, (Asset, Instant)>,
 }
 
 impl YahooFinance {
@@ -59,12 +65,12 @@ impl YahooFinance {
     /// 2. `GET` [`Self::CRUMB_URL`]       — retrieves the CSRF crumb.
     pub async fn new() -> DataResult<Self> {
         let client = HttpClient::new().map_err(|e| DataError::Http(e))?;
-
         let crumb = Self::fetch_crumb(&client).await?;
 
         Ok(Self {
             client,
             crumb,
+            cache: DashMap::new(),
         })
     }
 
@@ -216,15 +222,26 @@ impl YahooFinance {
 
 #[async_trait]
 impl DataProvider for YahooFinance {
-    /// Get an asset given a symbol. This method returns the asset with all metadata.
-    async fn get_asset(&self, _: AssetType, symbol: &Symbol) -> DataResult<Asset> {
+    /// Get an asset given a symbol.
+    ///
+    /// This method returns the asset with all metadata. Results are cached.
+    async fn get_asset(&self, symbol: &Symbol, _: AssetType) -> DataResult<Asset> {
+        // Try first from cache
+        if let Some(entry) = self.cache.get(symbol) {
+            let (asset, cached_at) = entry.value();
+            if cached_at.elapsed() < PROVIDER_CACHE_TTL {
+                return Ok(asset.clone());
+            }
+        }
+
         let resp = self
             .client
             .get(
                 &format!("{}/{symbol}", Self::CHART_URL),
                 Some(&[("range", "1d"), ("interval", "1d"), ("crumb", &self.crumb)]),
             )
-            .await?;
+            .await
+            .map_err(|_| DataError::SymbolNotFound(symbol.clone()))?;
 
         let parsed = HttpClient::json::<ChartResponse>(resp).await?;
 
@@ -234,11 +251,12 @@ impl DataProvider for YahooFinance {
             .into_iter()
             .next()
             .map(|r| Asset::try_from(r.meta))
-            .ok_or(DataError::NotFound(symbol.clone()))??;
+            .ok_or(DataError::UnexpectedResponse("empty chart result".to_owned()))??;
 
         Ok(asset)
     }
 
+    /// List the major available assets for a given asset type.
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
         match asset_type {
             AssetType::Stocks | AssetType::Etf => {
@@ -278,7 +296,7 @@ impl DataProvider for YahooFinance {
                 for result in join_all(tasks).await {
                     match result {
                         Ok(batch) => assets.extend(batch),
-                        Err(e) => warn!("Yahoo list_assets exchange error: {e}"),
+                        Err(e) => debug!("Yahoo list_assets exchange error: {e}"),
                     }
                 }
 
@@ -292,20 +310,22 @@ impl DataProvider for YahooFinance {
             },
 
             AssetType::Forex => Ok(ForexPair::iter()
-                .map(|f| Asset {
-                    symbol: if f.base() != Currency::USD {
-                        format!("{f:?}=X")
-                    } else {
-                        format!("{}=X", f.quote())
-                    },
-                    name: f.to_string(),
-                    base: Some(f.base().to_string()),
-                    quote: f.quote().to_string(),
-                    asset_type: AssetType::Forex,
-                    earliest_ts: Some(0),
-                    latest_ts: Some(Utc::now().timestamp()),
-                    volume: None,
-                    price: None,
+                .map(|f| {
+                    let symbol = f.to_string();
+                    let base = Some(f.base().to_string());
+                    let quote = f.quote().to_string();
+
+                    Asset {
+                        symbol: canonical_symbol(&symbol, &base, &quote),
+                        name: f.to_string(),
+                        base,
+                        quote,
+                        asset_type: AssetType::Forex,
+                        earliest_ts: Some(0),
+                        latest_ts: Some(Utc::now().timestamp()),
+                        volume: None,
+                        price: None,
+                    }
                 })
                 .collect()),
 
@@ -329,6 +349,7 @@ impl DataProvider for YahooFinance {
         }
     }
 
+    /// List the available intervals for an asset type.
     fn list_intervals(&self) -> Vec<Interval> {
         vec![
             Interval::OneMinute,

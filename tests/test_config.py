@@ -7,7 +7,7 @@ Description: Unit tests for the configuration frontend.
 
 import pytest
 
-from backtide.config import Config, DisplayConfig, DataConfig
+from backtide.config import Config, DataConfig, DisplayConfig
 
 
 def test_display_custom():

@@ -38,7 +38,7 @@ pub struct Config {
 
 impl Config {
     /// Return a `&'static` reference to the global configuration.
-    pub fn get() -> Result<&'static Config, ConfigError> {
+    pub fn get() -> ConfigResult<&'static Config> {
         // Replace block with get_or_try_init when it becomes stable
         if let Some(cfg) = CONFIG.get() {
             Ok(cfg)
@@ -125,6 +125,8 @@ pub enum ConfigError {
     AlreadySet,
 }
 
+type ConfigResult<T> = Result<T, ConfigError>;
+
 impl From<ConfigError> for PyErr {
     fn from(e: ConfigError) -> PyErr {
         PyRuntimeError::new_err(e.to_string())
@@ -149,7 +151,7 @@ fn find_config_file() -> Option<PathBuf> {
 }
 
 /// Deserialize a config file, dispatching on its extension.
-fn parse_config(path: &Path) -> Result<Config, ConfigError> {
+fn parse_config(path: &Path) -> ConfigResult<Config> {
     let text = std::fs::read_to_string(path)?;
     match path.extension().and_then(|e| e.to_str()) {
         Some("toml") => Ok(toml::from_str(&text)?),
@@ -161,7 +163,7 @@ fn parse_config(path: &Path) -> Result<Config, ConfigError> {
 }
 
 /// Load the config without updating the singleton.
-fn fetch_config() -> Result<Config, ConfigError> {
+fn fetch_config() -> ConfigResult<Config> {
     find_config_file().map(|path| parse_config(&path)).unwrap_or(Ok(Config::default()))
 }
 
@@ -519,7 +521,7 @@ fn get_config(py: Python<'_>) -> PyResult<PyConfig> {
 /// ```
 #[pyfunction]
 fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
-    let cfg = parse_config(path.as_ref()).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let cfg = parse_config(path.as_ref())?;
     PyConfig::from_rust(py, cfg)
 }
 

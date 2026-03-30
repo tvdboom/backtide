@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 async-trait = "0.1.89"
 chrono = "0.4.44"
+dashmap = "6.1.0"
 futures = "0.3.32"
 pyo3 = { version = "0.28.2", features = ["extension-module"] }
 pythonize = "0.28.0"

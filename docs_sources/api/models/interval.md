@@ -15,4 +15,5 @@
 :: methods:
     toc_only: False
     include:
+        - is_intraday
         - to_minutes

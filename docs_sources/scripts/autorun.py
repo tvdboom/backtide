@@ -6,16 +6,15 @@ Description: Module containing the automatic example rendering.
 """
 
 import ast
+from code import InteractiveInterpreter
+from io import StringIO
 import os
 import shutil
 import sys
-from code import InteractiveInterpreter
-from io import StringIO
 
 from markdown import Markdown
 from pandas.io.formats.style import Styler
 from pymdownx.superfences import SuperFencesException
-
 
 # Directory in which to store all plots from the examples
 shutil.rmtree(DIR_EXAMPLES := "docs_sources/img/examples/", ignore_errors=True)

@@ -68,5 +68,5 @@ def _to_upper_values(key: str):
     """Convert values in a streamlit state to uppercase."""
     if key in st.session_state:
         st.session_state[key] = [
-            s.upper() for s in to_list(st.session_state[key]) if isinstance(s, str)
+            s.upper() if isinstance(s, str) else s for s in to_list(st.session_state[key])
         ]

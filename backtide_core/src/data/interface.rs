@@ -13,14 +13,14 @@ use pyo3::{pyfunction, Bound, PyAny, PyResult};
 ///
 /// Parameters
 /// ----------
-/// asset_type : str | [`AssetType`]
-///     For which [asset type][nom-asset-type] to get the assets.
-///
 /// symbols : list[str]
 ///     Symbols for which to get the asset. The symbols should be of the form
 ///     expected by the [provider][nom-provider] corresponding to the selected
 ///     `asset_type`.
 ///
+/// asset_type : str | [`AssetType`]
+///     For which [asset type][nom-asset-type] to get the assets.
+/// 
 /// See Also
 /// --------
 /// - backtide.data:list_assets
@@ -34,7 +34,7 @@ use pyo3::{pyfunction, Bound, PyAny, PyResult};
 /// print(get_assets("stocks", ["APPL", "MSFT"]))
 /// ```
 #[pyfunction]
-pub fn get_assets(asset_type: Bound<'_, PyAny>, symbols: Vec<String>) -> PyResult<Vec<Asset>> {
+pub fn get_assets(symbols: Vec<String>, asset_type: Bound<'_, PyAny>) -> PyResult<Vec<Asset>> {
     let asset_type: AssetType = if let Ok(s) = asset_type.extract::<String>() {
         s.parse().map_err(|_| PyValueError::new_err(format!("invalid asset type: {s}")))?
     } else {
@@ -42,7 +42,7 @@ pub fn get_assets(asset_type: Bound<'_, PyAny>, symbols: Vec<String>) -> PyResul
     };
 
     let ingester = DataDownload::get()?;
-    ingester.get_assets(asset_type, symbols).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    ingester.get_assets(symbols, asset_type).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
 /// List available assets for a given asset type.
