@@ -15,4 +15,5 @@
 :: methods:
     toc_only: False
     include:
+        - datetime_format
         - to_dict

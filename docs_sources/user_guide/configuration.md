@@ -20,7 +20,9 @@ If no file is found, the built-in defaults are used.
 
 === "TOML"
     ```toml title="backtide.config.toml"
+    [general]
     base_currency = "USD"
+    log_level = "warn"
 
     [data]
     storage_path = ".backtide"
@@ -33,11 +35,15 @@ If no file is found, the built-in defaults are used.
 
     [display]
     date_format = "YYYY-MM-DD"
+    time_format = "HH:MM"
+    port = 8501
     ```
 
 === "YAML"
     ```yaml title="backtide.config.yaml"
-    base_currency: USD
+    general:
+        base_currency: USD
+        log_level: warn
 
     data:
         storage_path: .backtide
@@ -49,13 +55,19 @@ If no file is found, the built-in defaults are used.
 
     display:
         date_format: "YYYY-MM-DD"
+        time_format: "HH:MM"
         timezone: null
+        address: null
+        port: 8501
     ```
 
 === "JSON"
     ```json title="backtide.config.json"
     {
-        "base_currency": "USD",
+        "general": {
+            "base_currency": "USD",
+            "log_level": "warn",
+        },
         "data": {
             "storage_path": ".backtide",
             "providers": {
@@ -67,7 +79,10 @@ If no file is found, the built-in defaults are used.
         },
         "display": {
             "date_format": "YYYY-MM-DD",
-            "timezone": null
+            "time_format": "HH:MM",
+            "timezone": null,
+            "address": null,
+            "port": 8501,
         }
     }
     ```

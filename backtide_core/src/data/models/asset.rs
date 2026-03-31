@@ -1,8 +1,10 @@
 //! Asset and AssetType definitions.
 
-use crate::data::provider::provider::Provider;
+use crate::data::models::currency::Currency;
+use crate::data::providers::provider::Provider;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyString;
 use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
@@ -121,15 +123,21 @@ impl AssetType {
 /// name : str
 ///     Human-readable name of the asset.
 ///
-/// base : str | None
+/// base : str | [`Currency`] | None
 ///     The currency of the tradeable asset. Only defined for forex and
 ///     crypto pairs.
 ///
-/// quote : str
+/// quote : str | [`Currency`]
 ///     The currency the asset trades on.
 ///
 /// asset_type : [`AssetType`]
 ///     Asset type this asset belongs to.
+///
+/// exchange : str
+///     Short exchange code.
+///
+/// exchange_name : str
+///     Human-readable exchange name.
 ///
 /// earliest_ts : int | None
 ///     Earliest timestamp for which there is data in UNIX timestamp.
@@ -156,9 +164,13 @@ pub struct Asset {
     #[pyo3(get)]
     pub asset_type: AssetType,
     #[pyo3(get)]
-    pub earliest_ts: Option<i64>,
+    pub exchange: String,
     #[pyo3(get)]
-    pub latest_ts: Option<i64>,
+    pub exchange_name: String,
+    #[pyo3(get)]
+    pub earliest_ts: Option<u64>,
+    #[pyo3(get)]
+    pub latest_ts: Option<u64>,
 
     /// Traded volume during the most recent regular market session.
     pub volume: Option<u64>,
@@ -188,8 +200,10 @@ impl Asset {
         base: Option<String>,
         quote: String,
         asset_type: AssetType,
-        earliest_ts: Option<i64>,
-        latest_ts: Option<i64>,
+        exchange: String,
+        exchange_name: String,
+        earliest_ts: Option<u64>,
+        latest_ts: Option<u64>,
     ) -> Self {
         Self {
             symbol,
@@ -197,6 +211,8 @@ impl Asset {
             base,
             quote,
             asset_type,
+            exchange,
+            exchange_name,
             earliest_ts,
             latest_ts,
             volume: None,
@@ -209,7 +225,17 @@ impl Asset {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        (Symbol, String, Option<String>, String, AssetType, Option<i64>, Option<i64>),
+        (
+            Symbol,
+            String,
+            Option<String>,
+            String,
+            AssetType,
+            String,
+            String,
+            Option<u64>,
+            Option<u64>,
+        ),
     )> {
         let cls = py.get_type::<Asset>().into_any();
         Ok((
@@ -220,6 +246,8 @@ impl Asset {
                 self.base.clone(),
                 self.quote.clone(),
                 self.asset_type,
+                self.exchange.clone(),
+                self.exchange_name.clone(),
                 self.earliest_ts,
                 self.latest_ts,
             ),
@@ -228,8 +256,35 @@ impl Asset {
 
     fn __repr__(&self) -> String {
         format!(
-            "Asset(symbol={:?}, name={:?}, base={:?}, quote={:?}, asset_type={:?}, earliest_ts={:?}, latest_ts={:?})",
-            self.symbol, self.name, self.base, self.quote, self.asset_type, self.earliest_ts, self.latest_ts
+            "Asset(symbol={:?}, name={:?}, base={}, quote={:?}, asset_type={:?}, exchange={:?}, exchange_name={:?}, earliest_ts={}, latest_ts={})",
+            self.symbol,
+            self.name,
+            self.base.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
+            self.quote,
+            self.asset_type.to_string(),
+            self.exchange,
+            self.exchange_name,
+            self.earliest_ts.map_or("None".to_owned(), |s| format!("{s:?}")),
+            self.latest_ts.map_or("None".to_owned(), |s| format!("{s:?}")),
         )
+    }
+
+    #[getter]
+    fn base(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        match &self.base {
+            None => Ok(None),
+            Some(s) => Ok(Some(match s.parse::<Currency>() {
+                Ok(c) => Py::new(py, c)?.into_any(),
+                Err(_) => PyString::new(py, s).unbind().into_any(),
+            })),
+        }
+    }
+
+    #[getter]
+    fn quote(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(match self.quote.parse::<Currency>() {
+            Ok(c) => Py::new(py, c)?.into_any(),
+            Err(_) => PyString::new(py, &self.quote).unbind().into_any(),
+        })
     }
 }

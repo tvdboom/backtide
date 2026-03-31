@@ -23,6 +23,7 @@ use strum::{Display, EnumIter, EnumString};
     DeserializeFromStr,
 )]
 #[strum(ascii_case_insensitive)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Exchange {
     XAMS,
     XASE,

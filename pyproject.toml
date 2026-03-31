@@ -138,7 +138,7 @@ force-sort-within-sections = true
 "__init__.py" = ["F401"]  # Unused imports
 "app.py" = ["E501"]  # Line too long
 "config.py" = ["F401"]  # Unused imports
-"models.py" = ["F401"]  # Unused imports
+"data.py" = ["F401"]  # Unused imports
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"

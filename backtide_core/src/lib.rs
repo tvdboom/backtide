@@ -3,7 +3,7 @@ mod constants;
 mod data;
 mod utils;
 
-use crate::utils::utils::init_tracing;
+use crate::utils::tracing::init_tracing;
 use pyo3::prelude::*;
 
 /// Register the Python interface for `backtide.core`.

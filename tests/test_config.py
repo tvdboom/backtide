@@ -7,7 +7,7 @@ Description: Unit tests for the configuration frontend.
 
 import pytest
 
-from backtide.config import Config, DataConfig, DisplayConfig
+from backtide.config import Config, DataConfig, DisplayConfig, GeneralConfig
 
 
 def test_display_custom():
@@ -41,8 +41,8 @@ def test_data_repr():
 
 def test_config_custom():
     """Custom base currency overrides default."""
-    c = Config(base_currency="USD")
-    assert c.to_dict()["base_currency"].lower() == "usd"
+    c = Config(GeneralConfig(base_currency="USD"))
+    assert c.to_dict()["general"]["base_currency"].lower() == "usd"
 
 
 def test_config_nested_override():
@@ -54,12 +54,13 @@ def test_config_nested_override():
 def test_config_equality():
     """Config equality behaves correctly."""
     assert Config() == Config()
-    assert Config(base_currency="EUR") != Config()
+    assert Config(GeneralConfig(base_currency="EUR")) != Config()
 
 
 def test_config_repr():
     """__repr__ contains top-level config sections."""
-    assert str(Config()).startswith('Config(base_currency="USD"')
+    print(str(Config()))
+    assert str(Config()).startswith('Config(general=GeneralConfig(base_currency="USD"')
 
 
 def test_invalid_provider_raises():
@@ -70,5 +71,5 @@ def test_invalid_provider_raises():
 
 def test_invalid_currency_raises():
     """Invalid base currency raises ValueError."""
-    with pytest.raises(ValueError, match=".*Invalid base currency.*"):
-        Config(base_currency="invalid")
+    with pytest.raises(ValueError, match=".*Invalid base_currency.*"):
+        Config(GeneralConfig(base_currency="invalid"))

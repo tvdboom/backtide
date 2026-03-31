@@ -9,6 +9,7 @@ import click
 from streamlit.web.bootstrap import run
 
 from backtide.core import init_tracing
+from backtide.core.config import get_config
 
 
 @click.group()
@@ -24,9 +25,8 @@ def main():
     show_default=True,
     help=(
         "The address where the server will listen for client and browser connections. "
-        "Use this if you want to bind the server to a specific address. "
-        "If set, the server will only be available from this address, "
-        "and not from any aliases (like localhost)."
+        "Use this if you want to bind the server to a specific address. If set, the server "
+        "will only be available from this address, and not from any aliases (like localhost)."
     ),
 )
 @click.option(
@@ -47,21 +47,22 @@ def launch(address: str, port: str, log_level: str):
 
     Parameters
     ----------
-    address : str, default=""
+    address : str
         The address where the server will listen for client and browser
         connections. Use this if you want to bind the server to a specific
         address. If set, the server will only be available from this address,
         and not from any aliases (like localhost).
 
-    port : str, default=8501
-        The port where the server will listen for browser connections.
+    port : str
+        TCP port the server listens on.
 
-    log_level : str, default="warn"
+    log_level : str
         Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.
 
     """
     click.echo("🚀  Launching app...")
 
+    cfg = get_config()
     init_tracing(log_level)
 
     run(
@@ -69,8 +70,8 @@ def launch(address: str, port: str, log_level: str):
         is_hello=False,
         args=[],
         flag_options={
-            "server.port": port,
-            "server.address": address,
+            "server.port": port or cfg.display.port,
+            "server.address": address or cfg.display.address,
         },
     )
 

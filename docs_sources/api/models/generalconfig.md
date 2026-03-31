@@ -1,7 +1,7 @@
-# Interval
-----------
+# GeneralConfig
+---------------
 
-:: backtide.data:Interval
+:: backtide.config:GeneralConfig
     :: signature
     :: head
     :: table:
@@ -15,5 +15,4 @@
 :: methods:
     toc_only: False
     include:
-        - is_intraday
-        - minutes
+        - to_dict

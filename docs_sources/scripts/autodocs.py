@@ -36,10 +36,11 @@ BACKTIDE_URL = "https://github.com/tvdboom/backtide/blob/master/"
 # Usage in docs: [anchor][key] or [key][] -> [anchor][value]
 CUSTOM_URLS = dict(
     logokit="https://logokit.com/",
+    momentjs="https://momentjscom.readthedocs.io/en/latest/moment/04-displaying/01-format/",
 )
 
 FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
-LINK_RE = re.compile(r"\[([\.`': \w_-]+?)\](?!\()(?:\s*\[(?!\[)([\w_:-]+?)\])?")
+LINK_RE = re.compile(r"(?<!\w)\[([.`': \w_-]+?)](?!\()(?:\s*\[(?!\[)([\w_:-]+?)])?")
 
 # Classes ========================================================== >>
 
@@ -296,7 +297,7 @@ class AutoDocs:
             else:
                 members = self.obj.variants()
 
-            description += "\n\n" + "\n".join(f"- {k}" for k in members)
+            description += "\n\n" + "\n".join(f"- {k}" for k in members) + "\n\n"
 
         return description
 

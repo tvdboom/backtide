@@ -106,16 +106,16 @@ impl Interval {
     /// bool
     ///     If interval is intraday.
     fn is_intraday(&self) -> bool {
-        self.to_minutes() < Interval::OneDay.to_minutes()
+        self.minutes() < Interval::OneDay.minutes()
     }
-    
+
     /// Minutes in this interval.
     ///
     /// Returns
     /// -------
     /// int
     ///     Number of minutes.
-    fn to_minutes(&self) -> u32 {
+    fn minutes(&self) -> u32 {
         match self {
             Interval::OneMinute => 1,
             Interval::TwoMinutes => 2,

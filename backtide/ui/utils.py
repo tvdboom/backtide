@@ -9,7 +9,7 @@ from typing import Any
 
 import streamlit as st
 
-from backtide.core.data import AssetType
+from backtide.core.data import Asset, AssetType
 from backtide.utils.utils import to_list
 
 
@@ -42,6 +42,36 @@ def _get_asset_type_description(asset_type: AssetType) -> tuple[str, str]:
             currency_description = "Filter the preloaded symbols by their base/quote currencies."
 
     return asset_description, currency_description
+
+
+def _format_number(n: float) -> str:
+    """Nicely format a number."""
+    if n > 10_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    elif n > 1_000_000:
+        return f"{n / 1_000_000:.2f}M"
+    elif n > 100_000:
+        return f"{n / 100_000:.0f}k"
+    elif n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    else:
+        return str(n)
+
+
+def _get_logokit_url(asset: Asset, api_key: str) -> str:
+    """Retrieve the Logokit url to retrieve the logo for an asset."""
+    match asset.asset_type:
+        case AssetType.Forex:
+            url = "ticker"
+            symbol = f"{asset.base}{asset.quote}:CUR"
+        case AssetType.Crypto:
+            url = "crypto"
+            symbol = asset.base
+        case _:
+            url = "ticker"
+            symbol = asset.symbol
+
+    return f"https://img.logokit.com/{url}/{symbol}?token={api_key}"
 
 
 def _prevent_deselection(key: str, default: Any, reset: list[str] | None = None):

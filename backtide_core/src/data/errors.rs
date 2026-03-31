@@ -1,11 +1,11 @@
 //! Custom errors raised during data ingestion.
 
 use crate::config::ConfigError;
+use crate::data::models::asset::Symbol;
 use crate::utils::http::HttpError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;
 use thiserror::Error;
-use crate::data::models::asset::Symbol;
 
 /// Errors that the [`DataIngester`] implementation might return.
 #[derive(Debug, Error)]

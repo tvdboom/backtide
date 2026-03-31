@@ -1,7 +1,7 @@
-# Interval
+# Currency
 ----------
 
-:: backtide.data:Interval
+:: backtide.data:Currency
     :: signature
     :: head
     :: table:
@@ -15,5 +15,4 @@
 :: methods:
     toc_only: False
     include:
-        - is_intraday
-        - minutes
+        - format

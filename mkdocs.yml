@@ -123,6 +123,7 @@ nav:
             - load_config: api/config/load_config.md
             - set_config: api/config/set_config.md
         - data:
+            - get_asset: api/data/get_asset.md
             - get_assets: api/data/get_assets.md
             - list_assets: api/data/list_assets.md
             - list_intervals: api/data/list_intervals.md
@@ -131,8 +132,10 @@ nav:
             - AssetType: api/models/assettype.md
             - Bar: api/models/bar.md
             - Config: api/models/config.md
+            - Currency: api/models/currency.md
             - DataConfig: api/models/dataconfig.md
             - DisplayConfig: api/models/displayconfig.md
+            - GeneralConfig: api/models/generalconfig.md
             - Interval: api/models/interval.md
     - FAQ: faq.md
     - Contributing: contributing.md

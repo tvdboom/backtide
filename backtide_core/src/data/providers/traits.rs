@@ -8,14 +8,13 @@ use async_trait::async_trait;
 /// Abstraction over a market-data source.
 #[async_trait]
 pub trait DataProvider: Send + Sync {
-    /// Fetch metadata for a single symbol without downloading any bars.
+    /// Get a single asset given its symbol.
     async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset>;
 
-    /// Returns an overview of the most important assets of `asset_type`.
-    /// May be expensive – callers should cache the result.
+    /// List the most important assets for a given asset type.
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>>;
 
-    /// The intervals supported by this provider.
+    /// List the intervals supported by this provider.
     fn list_intervals(&self) -> Vec<Interval>;
 
     // /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.

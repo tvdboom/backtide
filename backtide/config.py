@@ -9,6 +9,7 @@ from backtide.core.config import (
     Config,
     DataConfig,
     DisplayConfig,
+    GeneralConfig,
     get_config,
     load_config,
     set_config,

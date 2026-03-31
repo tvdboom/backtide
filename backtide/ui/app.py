@@ -18,7 +18,7 @@ st.markdown(
     """
     <style>
         .stMainBlockContainer {
-            max-width:44rem;
+            max-width:46rem;
         }
 
         /* Fix sidebar width and disable resizing */

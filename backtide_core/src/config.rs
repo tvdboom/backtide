@@ -1,19 +1,32 @@
 //! Configuration module.
+//!
+//! Config is loaded once into a process-wide singleton ([`Config::get`]) from
+//! the first `backtide.{toml,yaml,yml,json}` file found in the working
+//! directory or its parent. If no file is found, defaults are used.
+//!
+//! ## Structure
+//!
+//! | Section     | Purpose                                              |
+//! |-------------|------------------------------------------------------|
+//! | `[general]` | Portfolio-wide settings                              |
+//! | `[data]`    | Data fetching and storage settings                   |
+//! | `[display]` | UI / Streamlit app                                   |
 
 use crate::constants::{CONFIG_FILE_NAME, DEFAULT_STORAGE_PATH};
 use crate::data::models::asset::AssetType;
 use crate::data::models::currency::Currency;
-use crate::data::provider::provider::Provider;
+use crate::data::providers::provider::Provider;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::OnceLock;
-use strum::IntoEnumIterator;
+use strum::{Display, EnumString, IntoEnumIterator};
 use thiserror::Error;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -25,9 +38,10 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Backtide configuration.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
-    /// ISO 4217 code that all prices are normalized to, e.g. `"USD"`.
-    pub base_currency: Currency,
+    /// Portfolio-wide settings.
+    pub general: GeneralConfig,
 
     /// Settings that control how market data is fetched and stored.
     pub data: DataConfig,
@@ -38,6 +52,8 @@ pub struct Config {
 
 impl Config {
     /// Return a `&'static` reference to the global configuration.
+    ///
+    /// Initializes from disk on first call; subsequent calls are free.
     pub fn get() -> ConfigResult<&'static Config> {
         // Replace block with get_or_try_init when it becomes stable
         if let Some(cfg) = CONFIG.get() {
@@ -49,8 +65,20 @@ impl Config {
     }
 }
 
+/// Portfolio-wide settings.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GeneralConfig {
+    /// ISO 4217 currency code that all prices are normalized to (e.g., `"USD"`).
+    pub base_currency: Currency,
+
+    /// Minimum tracing log level.
+    pub log_level: LogLevel,
+}
+
 /// Data configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DataConfig {
     /// File-system path to the primary database file.
     pub storage_path: PathBuf,
@@ -73,23 +101,36 @@ impl Default for DataConfig {
 /// These settings affect how values are displayed in the frontend.
 /// They have no effect on computation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DisplayConfig {
-    /// Display dates in a `strftime`-compatible format string.
+    /// Format in which to display dates.
     pub date_format: String,
+
+    /// Format in which to display the time.
+    pub time_format: String,
 
     /// IANA timezone name. `None` to use the system's local timezone.
     pub timezone: Option<String>,
 
     /// API key for the logokit website.
     pub logokit_api_key: Option<String>,
+
+    /// IP address the Streamlit server binds to.
+    pub address: Option<String>,
+
+    /// TCP port the Streamlit server listens on.
+    pub port: u16,
 }
 
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
             date_format: "YYYY-MM-DD".to_owned(),
+            time_format: "HH:MM".to_owned(),
             timezone: None,
             logokit_api_key: None,
+            address: None,
+            port: 8501,
         }
     }
 }
@@ -125,11 +166,56 @@ pub enum ConfigError {
     AlreadySet,
 }
 
-type ConfigResult<T> = Result<T, ConfigError>;
+pub type ConfigResult<T> = Result<T, ConfigError>;
 
 impl From<ConfigError> for PyErr {
     fn from(e: ConfigError) -> PyErr {
         PyRuntimeError::new_err(e.to_string())
+    }
+}
+
+/// Tracing logging level.
+#[pyclass(skip_from_py_object)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    Hash,
+    PartialEq,
+    Display,
+    EnumString,
+    SerializeDisplay,
+    DeserializeFromStr,
+)]
+#[strum(ascii_case_insensitive)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    #[default]
+    Warn,
+    Error,
+}
+
+#[pymethods]
+impl LogLevel {
+    #[classattr]
+    const __RUST_ENUM__: bool = true;
+
+    fn __repr__(&self) -> String {
+        self.to_string().to_lowercase()
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for LogLevel {
+    type Error = PyErr;
+
+    /// Parse the currency from a string.
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+        let s: String = obj.extract()?;
+        s.parse().map_err(|_| PyValueError::new_err(format!("invalid log_level {s:?}")))
     }
 }
 
@@ -177,14 +263,14 @@ fn fetch_config() -> ConfigResult<Config> {
 ///
 /// Attributes
 /// ----------
-/// base_currency : str, default="USD"
-///     Currency (ISO 4217 code) that all prices are normalized to.
+/// general : [`GeneralConfig`]
+///     Portfolio-wide settings.
 ///
 /// data : [`DataConfig`]
 ///     Settings that control how market data is fetched and stored.
 ///
 /// display : [`DisplayConfig`]
-///     Settings that control how values are presented in the application's interface.
+///     Settings that control how values are presented in the application's frontend.
 ///
 /// See Also
 /// --------
@@ -194,7 +280,7 @@ fn fetch_config() -> ConfigResult<Config> {
 #[pyclass(name = "Config", get_all, set_all, from_py_object, module = "backtide.config")]
 #[derive(Debug)]
 pub struct PyConfig {
-    pub base_currency: Currency,
+    pub general: Py<PyGeneralConfig>,
     pub data: Py<PyDataConfig>,
     pub display: Py<PyDisplayConfig>,
 }
@@ -202,7 +288,7 @@ pub struct PyConfig {
 impl PyConfig {
     fn from_rust(py: Python<'_>, cfg: Config) -> PyResult<Self> {
         Ok(Self {
-            base_currency: cfg.base_currency,
+            general: Py::new(py, PyGeneralConfig::from_rust(cfg.general))?,
             data: Py::new(py, PyDataConfig::from_rust(cfg.data))?,
             display: Py::new(py, PyDisplayConfig::from_rust(cfg.display))?,
         })
@@ -210,7 +296,7 @@ impl PyConfig {
 
     fn to_config(&self, py: Python<'_>) -> Config {
         Config {
-            base_currency: self.base_currency.clone(),
+            general: self.general.borrow(py).to_config(),
             data: self.data.borrow(py).to_config(),
             display: self.display.borrow(py).to_config(),
         }
@@ -220,7 +306,7 @@ impl PyConfig {
 impl Clone for PyConfig {
     fn clone(&self) -> Self {
         Python::attach(|py| Self {
-            base_currency: self.base_currency.clone(),
+            general: self.general.clone_ref(py),
             data: self.data.clone_ref(py),
             display: self.display.clone_ref(py),
         })
@@ -233,19 +319,17 @@ impl PyConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (base_currency="USD", data=None, display=None))]
+    #[pyo3(signature = (general=None, data=None, display=None))]
     fn new(
         py: Python<'_>,
-        base_currency: &str,
+        general: Option<Py<PyGeneralConfig>>,
         data: Option<Py<PyDataConfig>>,
         display: Option<Py<PyDisplayConfig>>,
     ) -> PyResult<Self> {
         let default = Self::from_rust(py, Config::default())?;
 
         Ok(Self {
-            base_currency: Currency::from_str(base_currency).map_err(|_| {
-                PyValueError::new_err(format!("Invalid base currency: {base_currency}"))
-            })?,
+            general: general.unwrap_or(default.general),
             data: data.unwrap_or(default.data),
             display: display.unwrap_or(default.display),
         })
@@ -253,8 +337,8 @@ impl PyConfig {
 
     fn __repr__(&self, py: Python<'_>) -> String {
         format!(
-            "Config(base_currency={:?}, data={}, display={})",
-            self.base_currency.to_string(),
+            "Config(general={}, data={}, display={})",
+            self.general.borrow(py).__repr__(),
             self.data.borrow(py).__repr__(),
             self.display.borrow(py).__repr__(),
         )
@@ -276,6 +360,81 @@ impl PyConfig {
     ///     Self as dict.
     pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
         pythonize(py, &self.to_config(py)).unwrap().unbind()
+    }
+}
+
+/// Portfolio-wide settings.
+///
+/// Attributes
+/// ----------
+/// base_currency : str, default="USD"
+///     ISO 4217 currency code that all prices are normalized to.
+///
+/// log_level : str, defeault="warn"
+///     Minimum tracing log level. Choose from: "error", "warn", "info",
+///    "trace".
+///
+/// See Also
+/// --------
+/// - backtide.config:get_config
+/// - backtide.config:load_config
+/// - backtide.config:set_config
+#[pyclass(name = "GeneralConfig", get_all, set_all, eq, from_py_object, module = "backtide.config")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PyGeneralConfig {
+    pub base_currency: Currency,
+    pub log_level: LogLevel,
+}
+
+impl PyGeneralConfig {
+    fn from_rust(cfg: GeneralConfig) -> Self {
+        Self {
+            base_currency: cfg.base_currency,
+            log_level: cfg.log_level,
+        }
+    }
+
+    fn to_config(&self) -> GeneralConfig {
+        GeneralConfig {
+            base_currency: self.base_currency,
+            log_level: self.log_level,
+        }
+    }
+}
+
+#[pymethods]
+impl PyGeneralConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (base_currency="USD", log_level="warn"))]
+    fn new(base_currency: &str, log_level: &str) -> PyResult<Self> {
+        Ok(Self {
+            base_currency: Currency::from_str(base_currency).map_err(|_| {
+                PyValueError::new_err(format!("Invalid base_currency: {base_currency}"))
+            })?,
+            log_level: LogLevel::from_str(log_level)
+                .map_err(|_| PyValueError::new_err(format!("Invalid log_level: {log_level}")))?,
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "GeneralConfig(base_currency={:?}, log_level={:?})",
+            self.base_currency.to_string(),
+            self.log_level
+        )
+    }
+
+    /// Convert the configuration object to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
+        pythonize(py, &self.to_config()).unwrap().unbind()
     }
 }
 
@@ -383,9 +542,13 @@ impl PyDataConfig {
 /// Attributes
 /// ----------
 /// date_format : str, default="YYYY-MM-DD"
-///     Format in which to display dates. The format should be one of `YYYY/MM/DD`,
-///     `DD/MM/YYYY`, or `MM/DD/YYYY` and can also use a period (.) or hyphen (-)
-///     as separators.
+///     Format in which to display dates in [momentjs] style. Valid formats include
+///     `YYYY/MM/DD`, `DD/MM/YYYY`, or `MM/DD/YYYY` and can also use a period (.) or
+///     hyphen (-) as separators.
+///
+/// time_format : str, default="HH:MM"
+///     Format in which to display timestamps in [momentjs] style. Valid formats
+///     include `HH:MM:SS` (include seconds), `hh:mm a` (show am/pm).
 ///
 /// timezone : str or None, default=None
 ///     IANA timezone name. `None` to use the system's local timezone.
@@ -393,6 +556,15 @@ impl PyDataConfig {
 /// logokit_api_key : str or None, default=None
 ///     API key for the [logokit] website, which is used to fetch images for assets.
 ///     If `None`, no images are loaded.
+///
+/// address : str | None, default=None
+///     The address where the streamlit server will listen for client and browser
+///     connections. Use this if you want to bind the server to a specific
+///     address. If set, the server will only be available from this address,
+///     and not from any aliases (like localhost).
+///
+/// port : int, default=8501
+///     TCP port the server listens on.
 ///
 /// See Also
 /// --------
@@ -403,24 +575,33 @@ impl PyDataConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PyDisplayConfig {
     pub date_format: String,
+    pub time_format: String,
     pub timezone: Option<String>,
     pub logokit_api_key: Option<String>,
+    pub address: Option<String>,
+    pub port: u16,
 }
 
 impl PyDisplayConfig {
     fn from_rust(cfg: DisplayConfig) -> Self {
         Self {
             date_format: cfg.date_format,
+            time_format: cfg.time_format,
             timezone: cfg.timezone,
             logokit_api_key: cfg.logokit_api_key,
+            address: cfg.address,
+            port: cfg.port,
         }
     }
 
     fn to_config(&self) -> DisplayConfig {
         DisplayConfig {
             date_format: self.date_format.clone(),
+            time_format: self.time_format.clone(),
             timezone: self.timezone.clone(),
             logokit_api_key: self.logokit_api_key.clone(),
+            address: self.address.clone(),
+            port: self.port,
         }
     }
 }
@@ -431,20 +612,40 @@ impl PyDisplayConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (date_format="YYYY-MM-DD", timezone=None, logokit_api_key=None))]
-    fn new(date_format: &str, timezone: Option<&str>, logokit_api_key: Option<&str>) -> Self {
+    #[pyo3(signature = (date_format="YYYY-MM-DD", time_format="HH:MM", timezone=None, logokit_api_key=None, address=None, port=8501))]
+    fn new(
+        date_format: &str,
+        time_format: &str,
+        timezone: Option<&str>,
+        logokit_api_key: Option<&str>,
+        address: Option<&str>,
+        port: u16,
+    ) -> Self {
         Self {
             date_format: date_format.to_owned(),
+            time_format: time_format.to_owned(),
             timezone: timezone.map(|s| s.to_owned()),
             logokit_api_key: logokit_api_key.map(|s| s.to_owned()),
+            address: address.map(|a| a.to_owned()),
+            port,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "DisplayConfig(date_format={:?}, timezone={:?}, logokit_api_key={:?})",
-            self.date_format, self.timezone, self.logokit_api_key
+            "DisplayConfig(date_format={:?}, time_format={:?}, timezone={:?}, logokit_api_key={:?}, address={:?}, port={:?})",
+            self.date_format, self.time_format, self.timezone, self.logokit_api_key, self.address, self.port
         )
+    }
+
+    /// Return the configuration's format for a datetime timestamp.
+    ///
+    /// Returns
+    /// -------
+    /// str
+    ///     Datetime format.
+    pub fn datetime_format(&self) -> String {
+        format!("{} {}", self.date_format, self.time_format)
     }
 
     /// Convert the configuration object to a dictionary.
@@ -549,13 +750,13 @@ fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
 ///
 /// # Load the current configuration and change a value
 /// cfg = get_config()
-/// cfg.base_currency = "USD"
+/// cfg.general.base_currency = "USD"
 ///
 /// # Update backtide's configuration
 /// set_config(cfg)  # norun
 ///
 /// cfg = get_config()
-/// print(cfg.base_currency)
+/// print(cfg.general.base_currency)
 /// ```
 #[pyfunction]
 fn set_config(py: Python<'_>, config: PyConfig) -> PyResult<()> {
@@ -572,6 +773,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyConfig>()?;
     m.add_class::<PyDataConfig>()?;
     m.add_class::<PyDisplayConfig>()?;
+    m.add_class::<PyGeneralConfig>()?;
 
     m.add_function(wrap_pyfunction!(get_config, &m)?)?;
     m.add_function(wrap_pyfunction!(load_config, &m)?)?;
@@ -670,7 +872,7 @@ mod tests {
     fn parse_toml() {
         let f = write_temp(config_as_toml(), "toml");
         let cfg = parse_config(f.path()).unwrap();
-        assert_eq!(cfg.base_currency, Currency::USD);
+        assert_eq!(cfg.general.base_currency, Currency::USD);
         assert_eq!(cfg.display.timezone, Some("America/New_York".to_owned()));
         assert_eq!(cfg.display.date_format, "%Y-%m-%d");
         assert_eq!(cfg.data.storage_path, PathBuf::from("/tmp/test.duckdb"));
@@ -680,21 +882,21 @@ mod tests {
     fn parse_json() {
         let f = write_temp(config_as_json(), "json");
         let cfg = parse_config(f.path()).unwrap();
-        assert_eq!(cfg.base_currency, Currency::USD);
+        assert_eq!(cfg.general.base_currency, Currency::USD);
     }
 
     #[test]
     fn parse_yaml() {
         let f = write_temp(config_as_yaml(), "yaml");
         let cfg = parse_config(f.path()).unwrap();
-        assert_eq!(cfg.base_currency, Currency::USD);
+        assert_eq!(cfg.general.base_currency, Currency::USD);
     }
 
     #[test]
     fn parse_yml_extension() {
         let f = write_temp(config_as_yaml(), "yml");
         let cfg = parse_config(f.path()).unwrap();
-        assert_eq!(cfg.base_currency, Currency::USD);
+        assert_eq!(cfg.general.base_currency, Currency::USD);
     }
 
     #[test]

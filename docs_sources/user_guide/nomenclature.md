@@ -71,8 +71,7 @@ All bars within a single dataset share the same interval. Also referred to as
 <strong id="provider">provider</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
 A data source from which Backtide fetches historical market data. Each
-[asset type] is mapped to exactly one active provider at a time, configured
-via [`ProviderConfig`].
+[asset type] is mapped to exactly one active provider at a time.
 </div>
 
 <br>

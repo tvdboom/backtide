@@ -3,12 +3,37 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use strum::{Display, EnumString};
+use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
 /// An ISO 4217 currency tied to a specific country or supranational union.
 ///
 /// Variant names are identical to their 3-letter ISO codes.
-#[pyclass(skip_from_py_object)]
+///
+/// Attributes
+/// ----------
+/// name : str
+///     The human-readable name of the currency.
+///
+/// country : str
+///     The full name of the country or region that issues this currency.
+///
+/// country_code : str
+///     The two-letter ISO 3166-1 alpha-2 country code.
+///
+/// country_flag : str
+///     The Unicode flag emoji for the country that issues this currency.
+///
+/// decimals : int
+///     The number of decimal places conventionally used when displaying
+///     amounts in this currency, per ISO 4217.
+///
+/// symbol : str
+///     The currency symbol as a UTF-8 string (e.g., `$`, `€`, `₺`).
+///
+/// symbol_prefix : bool
+///     Returns `true` if the currency symbol is conventionally placed before
+///     the numeric amount, or `false` if it follows the amount.
+#[pyclass(skip_from_py_object, module = "backtide.data")]
 #[derive(
     Clone,
     Copy,
@@ -18,6 +43,7 @@ use strum::{Display, EnumString};
     Hash,
     PartialEq,
     Display,
+    EnumIter,
     EnumString,
     SerializeDisplay,
     DeserializeFromStr,
@@ -127,6 +153,7 @@ pub enum Currency {
     ZMW,
 }
 impl Currency {
+    /// Returns the metadata `(name, country, flag, decimals, symbol, symbol_prefix)`.
     fn data(&self) -> (&'static str, &'static str, &'static str, u8, &'static str, bool) {
         use Currency::*;
         match self {
@@ -231,37 +258,6 @@ impl Currency {
             ZMW => ("Kwacha", "Zambia", "🇿🇲", 2, "ZK", true),
         }
     }
-
-    pub fn name(&self) -> &'static str {
-        self.data().0
-    }
-    pub fn country(&self) -> &'static str {
-        self.data().1
-    }
-    pub fn flag(&self) -> &'static str {
-        self.data().2
-    }
-    pub fn decimals(&self) -> u8 {
-        self.data().3
-    }
-    pub fn symbol(&self) -> &'static str {
-        self.data().4
-    }
-    pub fn symbol_prefix(&self) -> bool {
-        self.data().5
-    }
-
-    /// Format an amount using this currency's symbol and placement convention.
-    /// e.g. `USD.format(300.0)` → `"$300.00"`, `SEK.format(300.0)` → `"300.00 kr"`
-    pub fn format(&self, amount: f64) -> String {
-        let decimals = self.decimals() as usize;
-        let symbol = self.symbol();
-        if self.symbol_prefix() {
-            format!("{symbol}{amount:.decimals$}")
-        } else {
-            format!("{amount:.decimals$} {symbol}")
-        }
-    }
 }
 
 #[pymethods]
@@ -271,6 +267,83 @@ impl Currency {
 
     fn __repr__(&self) -> String {
         self.to_string()
+    }
+
+    /// Return the default variant.
+    #[staticmethod]
+    fn get_default(py: Python<'_>) -> Py<Self> {
+        Py::new(py, Self::USD).unwrap()
+    }
+
+    /// Return all variants.
+    #[staticmethod]
+    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
+        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
+    }
+
+    /// The human-readable name of the currency.
+    #[getter]
+    pub fn name(&self) -> &'static str {
+        self.data().0
+    }
+
+    /// The full name of the country or region that issues this currency.
+    #[getter]
+    pub fn country(&self) -> &'static str {
+        self.data().1
+    }
+
+    /// The two-letter ISO 3166-1 alpha-2 country code.
+    #[getter]
+    pub fn country_code(&self) -> String {
+        self.to_string()[..2].to_lowercase()
+    }
+
+    /// The Unicode flag emoji for the country that issues this currency.
+    #[getter]
+    pub fn country_flag(&self) -> &'static str {
+        self.data().2
+    }
+
+    /// The number of decimal places conventionally used when displaying
+    /// amounts in this currency, per ISO 4217.
+    #[getter]
+    pub fn decimals(&self) -> u8 {
+        self.data().3
+    }
+
+    /// The currency symbol as a UTF-8 string (e.g., `$`, `€`, `₺`).
+    #[getter]
+    pub fn symbol(&self) -> &'static str {
+        self.data().4
+    }
+
+    /// Returns `true` if the currency symbol is conventionally placed before
+    /// the numeric amount, or `false` if it follows the amount.
+    #[getter]
+    pub fn symbol_prefix(&self) -> bool {
+        self.data().5
+    }
+
+    /// Format an amount using this currency's symbol and placement convention.
+    ///
+    /// Parameters
+    /// ----------
+    /// amount : int | float
+    ///     Amount to display.
+    ///
+    /// Returns
+    /// -------
+    /// str
+    ///     Formatted amount with currency indicator.
+    pub fn format(&self, amount: f64) -> String {
+        let decimals = self.decimals() as usize;
+        let symbol = self.symbol();
+        if self.symbol_prefix() {
+            format!("{symbol}{amount:.decimals$}")
+        } else {
+            format!("{amount:.decimals$} {symbol}")
+        }
     }
 }
 
