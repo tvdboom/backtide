@@ -1,7 +1,7 @@
 //! Custom errors raised during data ingestion.
 
 use crate::config::ConfigError;
-use crate::data::models::asset::Symbol;
+use crate::constants::Symbol;
 use crate::utils::http::HttpError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;

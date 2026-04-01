@@ -1,6 +1,6 @@
 //! Utility functions for the data module.
 
-use crate::data::models::asset::Symbol;
+use crate::constants::Symbol;
 
 /// Create the canonical (provider independent) symbol.
 pub fn canonical_symbol(symbol: &str, base: &Option<String>, quote: &String) -> Symbol {

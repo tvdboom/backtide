@@ -132,9 +132,11 @@ nav:
             - AssetType: api/models/assettype.md
             - Bar: api/models/bar.md
             - Config: api/models/config.md
+            - Country: api/models/country.md
             - Currency: api/models/currency.md
             - DataConfig: api/models/dataconfig.md
             - DisplayConfig: api/models/displayconfig.md
+            - Exchange: api/models/exchange.md
             - GeneralConfig: api/models/generalconfig.md
             - Interval: api/models/interval.md
     - FAQ: faq.md

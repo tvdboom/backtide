@@ -3,12 +3,14 @@
 //! Authenticates via a session cookie + CSRF crumb, then exposes asset
 //! discovery (screener) and per-symbol metadata (chart endpoint).
 
+use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
-use crate::data::models::asset::{Asset, AssetType, Symbol};
-use crate::data::models::bar::Interval;
+use crate::data::models::asset::Asset;
+use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::forex::ForexPair;
+use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
 use crate::utils::http::{paginate, HttpClient};
@@ -18,7 +20,6 @@ use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::cmp::Ordering;
-use std::str::FromStr;
 use strum::IntoEnumIterator;
 use tokio::try_join;
 use tracing::{debug, info, instrument};
@@ -297,6 +298,8 @@ impl DataProvider for YahooFinance {
     /// - **Crypto**: merges US, EU, and GB predefined screeners concurrently.
     #[instrument(skip(self), fields(?asset_type, limit))]
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
+        use Exchange::*;
+
         debug!(?asset_type, %limit, "Listing assets");
         match asset_type {
             AssetType::Stocks | AssetType::Etf => {
@@ -319,8 +322,14 @@ impl DataProvider for YahooFinance {
                     _ => unreachable!(),
                 };
 
-                // Fan out across all exchanges concurrently.
-                let tasks: Vec<_> = Exchange::iter()
+                // Fan out across major exchanges concurrently.
+                let exchanges = [
+                    XAMS, XASX, XETR, XHKG, XJPX, XKRX, XLON, XNAS, XNSE, XNYS, XPAR, XSES, XSHG,
+                    XSHE, XSWX,
+                ];
+
+                let tasks: Vec<_> = exchanges
+                    .iter()
                     .map(|ex| {
                         let mut operands = operands.clone();
                         operands.push(
@@ -364,7 +373,6 @@ impl DataProvider for YahooFinance {
                             quote,
                             asset_type: AssetType::Forex,
                             exchange: "CCY".to_owned(), // "CCY" is Yahoo's placeholder code for the interbank FX market
-                            exchange_name: "Currency".to_owned(),
                             earliest_ts: Some(0),
                             latest_ts: Some(Utc::now().timestamp() as u64),
                             volume: None,
@@ -441,10 +449,7 @@ pub struct YahooQuote {
     pub quote_type: Option<String>,
 
     /// Short exchange code (e.g. `"NMS"`, `"NYQ"`).
-    exchange: Option<String>,
-
-    /// Human-readable exchange name (e.g. `"NasdaqGS"`, `"NYSE"`).
-    full_exchange_name: Option<String>,
+    pub exchange: Option<String>,
 
     /// Most recent session volume in units of the base asset.
     pub regular_market_volume: Option<u64>,
@@ -472,13 +477,12 @@ impl TryFrom<YahooQuote> for Asset {
             })
             .and_then(YahooFinance::parse_asset_type)?;
 
-        let exchange = q.exchange.ok_or_else(|| {
-            DataError::UnexpectedResponse(format!("no exchange for symbol: {}", q.symbol))
-        })?;
-
-        let exchange_name = q.full_exchange_name.ok_or_else(|| {
-            DataError::UnexpectedResponse(format!("no exchange_name for symbol: {}", q.symbol))
-        })?;
+        let exchange = {
+            let s = q.exchange.ok_or_else(|| {
+                DataError::UnexpectedResponse(format!("no exchange for symbol: {}", q.symbol))
+            })?;
+            Exchange::from_yahoo_code(&s).map(|ex| ex.to_string()).unwrap_or(s)
+        };
 
         Ok(Asset {
             symbol: canonical_symbol(&q.symbol, &base, &quote),
@@ -487,7 +491,6 @@ impl TryFrom<YahooQuote> for Asset {
             quote,
             asset_type,
             exchange,
-            exchange_name,
             price: q.regular_market_price,
             volume: q.regular_market_volume,
             earliest_ts: None,
@@ -555,9 +558,6 @@ struct ChartMeta {
     /// Short exchange code (e.g. `"NMS"`, `"NYQ"`).
     exchange_name: Option<String>,
 
-    /// Human-readable exchange name (e.g. `"NasdaqGS"`, `"NYSE"`).
-    full_exchange_name: Option<String>,
-
     /// Unix timestamp of the first ever traded bar.
     first_trade_date: Option<i64>,
 
@@ -593,13 +593,12 @@ impl TryFrom<ChartMeta> for Asset {
             })
             .and_then(YahooFinance::parse_asset_type)?;
 
-        let exchange = m.exchange_name.ok_or_else(|| {
-            DataError::UnexpectedResponse(format!("no exchange for symbol: {}", m.symbol))
-        })?;
-
-        let exchange_name = m.full_exchange_name.ok_or_else(|| {
-            DataError::UnexpectedResponse(format!("no exchange_name for symbol: {}", m.symbol))
-        })?;
+        let exchange = {
+            let s = m.exchange_name.ok_or_else(|| {
+                DataError::UnexpectedResponse(format!("no exchange for symbol: {}", m.symbol))
+            })?;
+            Exchange::from_yahoo_code(&s).map(|ex| ex.to_string()).unwrap_or(s)
+        };
 
         Ok(Asset {
             symbol: canonical_symbol(&m.symbol, &base, &quote),
@@ -608,7 +607,6 @@ impl TryFrom<ChartMeta> for Asset {
             quote,
             asset_type,
             exchange,
-            exchange_name,
             price: m.regular_market_price,
             volume: m.regular_market_volume,
             earliest_ts: m.first_trade_date.map(|v| v.max(0) as u64),

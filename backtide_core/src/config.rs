@@ -13,7 +13,7 @@
 //! | `[display]` | UI / Streamlit app                                   |
 
 use crate::constants::{CONFIG_FILE_NAME, DEFAULT_STORAGE_PATH};
-use crate::data::models::asset::AssetType;
+use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
 use crate::data::providers::provider::Provider;
 use pyo3::basic::CompareOp;
@@ -69,8 +69,17 @@ impl Config {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneralConfig {
-    /// ISO 4217 currency code that all prices are normalized to (e.g., `"USD"`).
+    /// ISO 4217 currency code that all prices are normalized to.
     pub base_currency: Currency,
+
+    /// The cryptocurrency used as an intermediate triangulation step.
+    pub triangulation_fiat: Currency,
+
+    /// The fiat currency used as an intermediate triangulation step.
+    pub triangulation_crypto: String,
+
+    /// The fiat currency to which `triangulation_crypto` is pegged.
+    pub triangulation_crypto_pegged: Currency,
 
     /// Minimum tracing log level.
     pub log_level: LogLevel,
@@ -370,6 +379,29 @@ impl PyConfig {
 /// base_currency : str, default="USD"
 ///     ISO 4217 currency code that all prices are normalized to.
 ///
+/// triangulation_fiat : str, default="USD"
+///     The fiat currency used as an intermediate when no direct conversion
+///     path exists between a fiat currency and `base_currency`. For example,
+///     if converting `PLN → THB` and no `PLN-THB` pair is available, the engine
+///     will route through this currency as `PLN` → `triangulation_fiat` → `THB`.
+///     The chosen currency is expected to have pairs with all the currencies the
+///     project works with.
+///
+/// triangulation_crypto : str, default="USDT"
+///     The cryptocurrency used as an intermediate when no direct conversion
+///     path exists between a crypto and `base_currency`. For example, to calculate
+///     the value of `BTC`, the engine will route `BTC` → `triangulation_crypto` →
+///     `triangulation_crypto_pegged` → `base_currency`. The selected crypto is
+///     expected to be a stablecoin pegged to the `triangulation_crypto_pegged`
+///     fiat currency.
+///
+/// triangulation_crypto_pegged : str, default="USD"
+///     The fiat currency to which `triangulation_crypto` is pegged, for the
+///     purposes of bridging between the crypto and fiat conversion graphs. When
+///     a conversion path crosses the crypto/fiat boundary (e.g., `BTC → EUR`),
+///     the engine treats `triangulation_crypto`/`triangulation_crypto_pegged`
+///     as the crossing pair at parity 1:1.
+///
 /// log_level : str, defeault="warn"
 ///     Minimum tracing log level. Choose from: "error", "warn", "info",
 ///    "trace".
@@ -383,6 +415,9 @@ impl PyConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PyGeneralConfig {
     pub base_currency: Currency,
+    pub triangulation_fiat: Currency,
+    pub triangulation_crypto: String,
+    pub triangulation_crypto_pegged: Currency,
     pub log_level: LogLevel,
 }
 
@@ -390,6 +425,9 @@ impl PyGeneralConfig {
     fn from_rust(cfg: GeneralConfig) -> Self {
         Self {
             base_currency: cfg.base_currency,
+            triangulation_fiat: cfg.triangulation_fiat,
+            triangulation_crypto: cfg.triangulation_crypto,
+            triangulation_crypto_pegged: cfg.triangulation_crypto_pegged,
             log_level: cfg.log_level,
         }
     }
@@ -397,6 +435,9 @@ impl PyGeneralConfig {
     fn to_config(&self) -> GeneralConfig {
         GeneralConfig {
             base_currency: self.base_currency,
+            triangulation_fiat: self.triangulation_fiat,
+            triangulation_crypto: self.triangulation_crypto,
+            triangulation_crypto_pegged: self.triangulation_crypto_pegged,
             log_level: self.log_level,
         }
     }

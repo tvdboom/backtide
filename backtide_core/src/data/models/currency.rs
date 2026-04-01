@@ -1,5 +1,4 @@
-//! Currency definition.
-
+use crate::data::models::country::Country;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -14,21 +13,15 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// name : str
 ///     The human-readable name of the currency.
 ///
-/// country : str
-///     The full name of the country or region that issues this currency.
+/// symbol : str
+///     The currency symbol as a UTF-8 string (e.g., `$`, `€`, `₺`).
 ///
-/// country_code : str
-///     The two-letter ISO 3166-1 alpha-2 country code.
-///
-/// country_flag : str
-///     The Unicode flag emoji for the country that issues this currency.
+/// country : [`Country`]
+///     The country that issues this currency.
 ///
 /// decimals : int
 ///     The number of decimal places conventionally used when displaying
 ///     amounts in this currency, per ISO 4217.
-///
-/// symbol : str
-///     The currency symbol as a UTF-8 string (e.g., `$`, `€`, `₺`).
 ///
 /// symbol_prefix : bool
 ///     Returns `true` if the currency symbol is conventionally placed before
@@ -152,110 +145,111 @@ pub enum Currency {
     ZAR,
     ZMW,
 }
+
 impl Currency {
-    /// Returns the metadata `(name, country, flag, decimals, symbol, symbol_prefix)`.
-    fn data(&self) -> (&'static str, &'static str, &'static str, u8, &'static str, bool) {
-        use Currency::*;
+    /// Returns `(name, symbol, country, decimals, symbol_prefix)`.
+    fn data(&self) -> (&'static str, &'static str, Country, u8, bool) {
+        use Country::*;
         match self {
-            AED => ("United Arab Emirates Dirham", "United Arab Emirates", "🇦🇪", 2, "د.إ", false),
-            AFN => ("Afghani", "Afghanistan", "🇦🇫", 2, "؋", true),
-            ALL => ("Lek", "Albania", "🇦🇱", 2, "L", false),
-            AMD => ("Dram", "Armenia", "🇦🇲", 2, "֏", false),
-            AOA => ("Kwanza", "Angola", "🇦🇴", 2, "Kz", false),
-            ARS => ("Argentine Peso", "Argentina", "🇦🇷", 2, "$", true),
-            AUD => ("Australian Dollar", "Australia", "🇦🇺", 2, "$", true),
-            AZN => ("Manat", "Azerbaijan", "🇦🇿", 2, "₼", false),
-            BAM => ("Convertible Mark", "Bosnia and Herzegovina", "🇧🇦", 2, "KM", false),
-            BDT => ("Taka", "Bangladesh", "🇧🇩", 2, "৳", true),
-            BGN => ("Lev", "Bulgaria", "🇧🇬", 2, "лв", false),
-            BHD => ("Bahraini Dinar", "Bahrain", "🇧🇭", 3, "BD", true),
-            BND => ("Brunei Dollar", "Brunei", "🇧🇳", 2, "$", true),
-            BOB => ("Boliviano", "Bolivia", "🇧🇴", 2, "Bs.", true),
-            BRL => ("Real", "Brazil", "🇧🇷", 2, "R$", true),
-            CAD => ("Canadian Dollar", "Canada", "🇨🇦", 2, "$", true),
-            CHF => ("Swiss Franc", "Switzerland", "🇨🇭", 2, "Fr.", true),
-            CLP => ("Chilean Peso", "Chile", "🇨🇱", 0, "$", true),
-            CNY => ("Yuan", "China", "🇨🇳", 2, "¥", true),
-            COP => ("Colombian Peso", "Colombia", "🇨🇴", 2, "$", true),
-            CRC => ("Colon", "Costa Rica", "🇨🇷", 2, "₡", true),
-            CZK => ("Koruna", "Czech Republic", "🇨🇿", 2, "Kč", false),
-            DKK => ("Danish Krone", "Denmark", "🇩🇰", 2, "kr", false),
-            DOP => ("Dominican Peso", "Dominican Republic", "🇩🇴", 2, "RD$", true),
-            DZD => ("Algerian Dinar", "Algeria", "🇩🇿", 2, "دج", false),
-            EGP => ("Egyptian Pound", "Egypt", "🇪🇬", 2, "E£", true),
-            EUR => ("Euro", "Europe", "🇪🇺", 2, "€", false),
-            FJD => ("Fiji Dollar", "Fiji", "🇫🇯", 2, "FJ$", true),
-            GBP => ("Pound Sterling", "United Kingdom", "🇬🇧", 2, "£", true),
-            GEL => ("Lari", "Georgia", "🇬🇪", 2, "₾", false),
-            GHS => ("Cedi", "Ghana", "🇬🇭", 2, "₵", false),
-            GTQ => ("Quetzal", "Guatemala", "🇬🇹", 2, "Q", true),
-            HKD => ("Hong Kong Dollar", "Hong Kong", "🇭🇰", 2, "HK$", true),
-            HNL => ("Lempira", "Honduras", "🇭🇳", 2, "L", true),
-            HUF => ("Forint", "Hungary", "🇭🇺", 2, "Ft", false),
-            IDR => ("Rupiah", "Indonesia", "🇮🇩", 2, "Rp", true),
-            ILS => ("New Shekel", "Israel", "🇮🇱", 2, "₪", true),
-            INR => ("Indian Rupee", "India", "🇮🇳", 2, "₹", true),
-            IQD => ("Iraqi Dinar", "Iraq", "🇮🇶", 3, "ع.د", false),
-            ISK => ("Icelandic Króna", "Iceland", "🇮🇸", 0, "kr", false),
-            JMD => ("Jamaican Dollar", "Jamaica", "🇯🇲", 2, "J$", true),
-            JOD => ("Jordanian Dinar", "Jordan", "🇯🇴", 3, "JD", true),
-            JPY => ("Yen", "Japan", "🇯🇵", 0, "¥", true),
-            KES => ("Kenyan Shilling", "Kenya", "🇰🇪", 2, "KSh", true),
-            KRW => ("Won", "South Korea", "🇰🇷", 0, "₩", true),
-            KWD => ("Kuwaiti Dinar", "Kuwait", "🇰🇼", 3, "KD", true),
-            KYD => ("Cayman Islands Dollar", "Cayman Islands", "🇰🇾", 2, "CI$", true),
-            KZT => ("Tenge", "Kazakhstan", "🇰🇿", 2, "₸", false),
-            LBP => ("Lebanese Pound", "Lebanon", "🇱🇧", 0, "ل.ل", false),
-            LKR => ("Sri Lankan Rupee", "Sri Lanka", "🇱🇰", 2, "Rs", true),
-            LYD => ("Libyan Dinar", "Libya", "🇱🇾", 3, "LD", true),
-            MAD => ("Moroccan Dirham", "Morocco", "🇲🇦", 2, "د.م.", false),
-            MDL => ("Moldovan Leu", "Moldova", "🇲🇩", 2, "L", false),
-            MKD => ("Denar", "North Macedonia", "🇲🇰", 0, "ден", false),
-            MNT => ("Tugrik", "Mongolia", "🇲🇳", 2, "₮", false),
-            MOP => ("Pataca", "Macau", "🇲🇴", 2, "MOP$", true),
-            MUR => ("Mauritian Rupee", "Mauritius", "🇲🇺", 2, "Rs", true),
-            MVR => ("Rufiyaa", "Maldives", "🇲🇻", 2, "Rf", false),
-            MXN => ("Mexican Peso", "Mexico", "🇲🇽", 2, "$", true),
-            MYR => ("Ringgit", "Malaysia", "🇲🇾", 2, "RM", true),
-            MZN => ("Metical", "Mozambique", "🇲🇿", 2, "MT", false),
-            NAD => ("Namibian Dollar", "Namibia", "🇳🇦", 2, "N$", true),
-            NGN => ("Naira", "Nigeria", "🇳🇬", 2, "₦", true),
-            NIO => ("Córdoba", "Nicaragua", "🇳🇮", 2, "C$", true),
-            NOK => ("Norwegian Krone", "Norway", "🇳🇴", 2, "kr", false),
-            NPR => ("Nepalese Rupee", "Nepal", "🇳🇵", 2, "Rs", true),
-            NZD => ("New Zealand Dollar", "New Zealand", "🇳🇿", 2, "$", true),
-            OMR => ("Omani Rial", "Oman", "🇴🇲", 3, "ر.ع.", false),
-            PEN => ("Nuevo Sol", "Peru", "🇵🇪", 2, "S/", true),
-            PGK => ("Kina", "Papua New Guinea", "🇵🇬", 2, "K", true),
-            PHP => ("Philippine Peso", "Philippines", "🇵🇭", 2, "₱", true),
-            PKR => ("Pakistani Rupee", "Pakistan", "🇵🇰", 2, "Rs", true),
-            PLN => ("Złoty", "Poland", "🇵🇱", 2, "zł", false),
-            PYG => ("Guaraní", "Paraguay", "🇵🇾", 0, "₲", false),
-            QAR => ("Qatari Riyal", "Qatar", "🇶🇦", 2, "QR", true),
-            RON => ("Romanian New Leu", "Romania", "🇷🇴", 2, "lei", false),
-            RSD => ("Serbian Dinar", "Serbia", "🇷🇸", 2, "din", false),
-            RUB => ("Rouble", "Russia", "🇷🇺", 2, "₽", false),
-            RWF => ("Rwandan Franc", "Rwanda", "🇷🇼", 0, "Fr", false),
-            SAR => ("Saudi Riyal", "Saudi Arabia", "🇸🇦", 2, "ر.س", false),
-            SCR => ("Seychelles Rupee", "Seychelles", "🇸🇨", 2, "Rs", true),
-            SEK => ("Swedish Krona", "Sweden", "🇸🇪", 2, "kr", false),
-            SGD => ("Singapore Dollar", "Singapore", "🇸🇬", 2, "S$", true),
-            SRD => ("Surinamese Dollar", "Suriname", "🇸🇷", 2, "Sr$", true),
-            THB => ("Baht", "Thailand", "🇹🇭", 2, "฿", true),
-            TND => ("Tunisian Dinar", "Tunisia", "🇹🇳", 3, "DT", false),
-            TRY => ("Lira", "Turkey", "🇹🇷", 2, "₺", true),
-            TTD => ("Trinidad and Tobago Dollar", "Trinidad and Tobago", "🇹🇹", 2, "TT$", true),
-            TWD => ("New Taiwan Dollar", "Taiwan", "🇹🇼", 2, "NT$", true),
-            TZS => ("Tanzanian Shilling", "Tanzania", "🇹🇿", 2, "TSh", true),
-            UAH => ("Hryvnia", "Ukraine", "🇺🇦", 2, "₴", false),
-            UGX => ("Ugandan Shilling", "Uganda", "🇺🇬", 2, "USh", true),
-            USD => ("United States Dollar", "United States", "🇺🇸", 2, "$", true),
-            UYU => ("Uruguayan Peso", "Uruguay", "🇺🇾", 2, "$U", true),
-            UZS => ("Som", "Uzbekistan", "🇺🇿", 2, "сум", false),
-            VND => ("Dong", "Vietnam", "🇻🇳", 0, "₫", false),
-            YER => ("Yemeni Rial", "Yemen", "🇾🇪", 2, "﷼", false),
-            ZAR => ("Rand", "South Africa", "🇿🇦", 2, "R", true),
-            ZMW => ("Kwacha", "Zambia", "🇿🇲", 2, "ZK", true),
+            Currency::AED => ("United Arab Emirates Dirham", "د.إ", ARE, 2, false),
+            Currency::AFN => ("Afghani", "؋", AFG, 2, true),
+            Currency::ALL => ("Lek", "L", ALB, 2, false),
+            Currency::AMD => ("Dram", "֏", ARM, 2, false),
+            Currency::AOA => ("Kwanza", "Kz", AGO, 2, false),
+            Currency::ARS => ("Argentine Peso", "$", ARG, 2, true),
+            Currency::AUD => ("Australian Dollar", "$", AUS, 2, true),
+            Currency::AZN => ("Manat", "₼", AZE, 2, false),
+            Currency::BAM => ("Convertible Mark", "KM", BIH, 2, false),
+            Currency::BDT => ("Taka", "৳", BGD, 2, true),
+            Currency::BGN => ("Lev", "лв", BGR, 2, false),
+            Currency::BHD => ("Bahraini Dinar", "BD", BHR, 3, true),
+            Currency::BND => ("Brunei Dollar", "$", BRN, 2, true),
+            Currency::BOB => ("Boliviano", "Bs.", BOL, 2, true),
+            Currency::BRL => ("Real", "R$", BRA, 2, true),
+            Currency::CAD => ("Canadian Dollar", "$", CAN, 2, true),
+            Currency::CHF => ("Swiss Franc", "Fr.", CHE, 2, true),
+            Currency::CLP => ("Chilean Peso", "$", CHL, 0, true),
+            Currency::CNY => ("Yuan", "¥", CHN, 2, true),
+            Currency::COP => ("Colombian Peso", "$", COL, 2, true),
+            Currency::CRC => ("Colon", "₡", CRI, 2, true),
+            Currency::CZK => ("Koruna", "Kč", CZE, 2, false),
+            Currency::DKK => ("Danish Krone", "kr", DNK, 2, false),
+            Currency::DOP => ("Dominican Peso", "RD$", DOM, 2, true),
+            Currency::DZD => ("Algerian Dinar", "دج", DZA, 2, false),
+            Currency::EGP => ("Egyptian Pound", "E£", EGY, 2, true),
+            Currency::EUR => ("Euro", "€", EUR, 2, false),
+            Currency::FJD => ("Fiji Dollar", "FJ$", FJI, 2, true),
+            Currency::GBP => ("Pound Sterling", "£", GBR, 2, true),
+            Currency::GEL => ("Lari", "₾", GEO, 2, false),
+            Currency::GHS => ("Cedi", "₵", GHA, 2, false),
+            Currency::GTQ => ("Quetzal", "Q", GTM, 2, true),
+            Currency::HKD => ("Hong Kong Dollar", "HK$", HKG, 2, true),
+            Currency::HNL => ("Lempira", "L", HND, 2, true),
+            Currency::HUF => ("Forint", "Ft", HUN, 2, false),
+            Currency::IDR => ("Rupiah", "Rp", IDN, 2, true),
+            Currency::ILS => ("New Shekel", "₪", ISR, 2, true),
+            Currency::INR => ("Indian Rupee", "₹", IND, 2, true),
+            Currency::IQD => ("Iraqi Dinar", "ع.د", IRQ, 3, false),
+            Currency::ISK => ("Icelandic Króna", "kr", ISL, 0, false),
+            Currency::JMD => ("Jamaican Dollar", "J$", JAM, 2, true),
+            Currency::JOD => ("Jordanian Dinar", "JD", JOR, 3, true),
+            Currency::JPY => ("Yen", "¥", JPN, 0, true),
+            Currency::KES => ("Kenyan Shilling", "KSh", KEN, 2, true),
+            Currency::KRW => ("Won", "₩", KOR, 0, true),
+            Currency::KWD => ("Kuwaiti Dinar", "KD", KWT, 3, true),
+            Currency::KYD => ("Cayman Islands Dollar", "CI$", CYM, 2, true),
+            Currency::KZT => ("Tenge", "₸", KAZ, 2, false),
+            Currency::LBP => ("Lebanese Pound", "ل.ل", LBN, 0, false),
+            Currency::LKR => ("Sri Lankan Rupee", "Rs", LKA, 2, true),
+            Currency::LYD => ("Libyan Dinar", "LD", LBY, 3, true),
+            Currency::MAD => ("Moroccan Dirham", "د.م.", MAR, 2, false),
+            Currency::MDL => ("Moldovan Leu", "L", MDA, 2, false),
+            Currency::MKD => ("Denar", "ден", MKD, 0, false),
+            Currency::MNT => ("Tugrik", "₮", MNG, 2, false),
+            Currency::MOP => ("Pataca", "MOP$", MAC, 2, true),
+            Currency::MUR => ("Mauritian Rupee", "Rs", MUS, 2, true),
+            Currency::MVR => ("Rufiyaa", "Rf", MDV, 2, false),
+            Currency::MXN => ("Mexican Peso", "$", MEX, 2, true),
+            Currency::MYR => ("Ringgit", "RM", MYS, 2, true),
+            Currency::MZN => ("Metical", "MT", MOZ, 2, false),
+            Currency::NAD => ("Namibian Dollar", "N$", NAM, 2, true),
+            Currency::NGN => ("Naira", "₦", NGA, 2, true),
+            Currency::NIO => ("Córdoba", "C$", NIC, 2, true),
+            Currency::NOK => ("Norwegian Krone", "kr", NOR, 2, false),
+            Currency::NPR => ("Nepalese Rupee", "Rs", NPL, 2, true),
+            Currency::NZD => ("New Zealand Dollar", "$", NZL, 2, true),
+            Currency::OMR => ("Omani Rial", "ر.ع.", OMN, 3, false),
+            Currency::PEN => ("Nuevo Sol", "S/", PER, 2, true),
+            Currency::PGK => ("Kina", "K", PNG, 2, true),
+            Currency::PHP => ("Philippine Peso", "₱", PHL, 2, true),
+            Currency::PKR => ("Pakistani Rupee", "Rs", PAK, 2, true),
+            Currency::PLN => ("Złoty", "zł", POL, 2, false),
+            Currency::PYG => ("Guaraní", "₲", PRY, 0, false),
+            Currency::QAR => ("Qatari Riyal", "QR", QAT, 2, true),
+            Currency::RON => ("Romanian New Leu", "lei", ROU, 2, false),
+            Currency::RSD => ("Serbian Dinar", "din", SRB, 2, false),
+            Currency::RUB => ("Rouble", "₽", RUS, 2, false),
+            Currency::RWF => ("Rwandan Franc", "Fr", RWA, 0, false),
+            Currency::SAR => ("Saudi Riyal", "ر.س", SAU, 2, false),
+            Currency::SCR => ("Seychelles Rupee", "Rs", SYC, 2, true),
+            Currency::SEK => ("Swedish Krona", "kr", SWE, 2, false),
+            Currency::SGD => ("Singapore Dollar", "S$", SGP, 2, true),
+            Currency::SRD => ("Surinamese Dollar", "Sr$", SUR, 2, true),
+            Currency::THB => ("Baht", "฿", THA, 2, true),
+            Currency::TND => ("Tunisian Dinar", "DT", TUN, 3, false),
+            Currency::TRY => ("Lira", "₺", TUR, 2, true),
+            Currency::TTD => ("Trinidad and Tobago Dollar", "TT$", TTO, 2, true),
+            Currency::TWD => ("New Taiwan Dollar", "NT$", TWN, 2, true),
+            Currency::TZS => ("Tanzanian Shilling", "TSh", TZA, 2, true),
+            Currency::UAH => ("Hryvnia", "₴", UKR, 2, false),
+            Currency::UGX => ("Ugandan Shilling", "USh", UGA, 2, true),
+            Currency::USD => ("United States Dollar", "$", USA, 2, true),
+            Currency::UYU => ("Uruguayan Peso", "$U", URY, 2, true),
+            Currency::UZS => ("Som", "сум", UZB, 2, false),
+            Currency::VND => ("Dong", "₫", VNM, 0, false),
+            Currency::YER => ("Yemeni Rial", "﷼", YEM, 2, false),
+            Currency::ZAR => ("Rand", "R", ZAF, 2, true),
+            Currency::ZMW => ("Kwacha", "ZK", ZMB, 2, true),
         }
     }
 }
@@ -287,21 +281,15 @@ impl Currency {
         self.data().0
     }
 
-    /// The full name of the country or region that issues this currency.
+    /// The currency symbol as a UTF-8 string.
     #[getter]
-    pub fn country(&self) -> &'static str {
+    pub fn symbol(&self) -> &'static str {
         self.data().1
     }
 
-    /// The two-letter ISO 3166-1 alpha-2 country code.
+    /// The country that issues this currency.
     #[getter]
-    pub fn country_code(&self) -> String {
-        self.to_string()[..2].to_lowercase()
-    }
-
-    /// The Unicode flag emoji for the country that issues this currency.
-    #[getter]
-    pub fn country_flag(&self) -> &'static str {
+    pub fn country(&self) -> Country {
         self.data().2
     }
 
@@ -312,17 +300,11 @@ impl Currency {
         self.data().3
     }
 
-    /// The currency symbol as a UTF-8 string (e.g., `$`, `€`, `₺`).
-    #[getter]
-    pub fn symbol(&self) -> &'static str {
-        self.data().4
-    }
-
     /// Returns `true` if the currency symbol is conventionally placed before
     /// the numeric amount, or `false` if it follows the amount.
     #[getter]
     pub fn symbol_prefix(&self) -> bool {
-        self.data().5
+        self.data().4
     }
 
     /// Format an amount using this currency's symbol and placement convention.

@@ -5,16 +5,16 @@ Description: Page to download new data.
 
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
 
 from backtide.core.config import get_config
-from backtide.core.data import AssetType, Interval, get_assets, list_assets, list_intervals
+from backtide.core.data import AssetType, Interval, get_assets, list_assets, list_intervals, Exchange
 from backtide.ui.utils import (
-    _format_number,
+    _fmt_number,
     _get_asset_type_description,
     _get_logokit_url,
     _prevent_deselection,
@@ -128,7 +128,8 @@ else:
     col1, col2 = st.columns(2)
 
     if is_intraday:
-        step = max(30, *[i.minutes() for i in intervals])
+        # Clamp datetime steps between 15min and 1h
+        step = min(max(15, min(i.minutes() for i in intervals)), 60) * 60
 
         # Use datetime widgets when there are intraday intervals
         start_ts = col1.datetime_input(
@@ -136,20 +137,20 @@ else:
             value=earliest_ts,
             min_value=earliest_ts,
             max_value=datetime.now(tz=tz),
-            step=timedelta(minutes=step),
+            step=step,
             format=config.display.date_format,
             help="Download data starting from this timestamp (inclusive).",
-        )
+        ).replace(tzinfo=tz)
 
-        latest_ts = col2.datetime_input(
+        end_ts = col2.datetime_input(
             label="End date",
             value=latest_ts,
             min_value=start_ts,
             max_value=datetime.now(tz=tz),
-            step=timedelta(minutes=step),
+            step=step,
             format=config.display.date_format,
             help="Download data up to this timestamp (exclusive).",
-        )
+        ).replace(tzinfo=tz)
     else:
         # Use date widgets when there are no intraday intervals
         start_ts = col1.date_input(
@@ -161,7 +162,7 @@ else:
             help="Download data starting from this date (inclusive).",
         )
 
-        latest_ts = col2.date_input(
+        end_ts = col2.date_input(
             label="End date",
             value=latest_ts,
             min_value=start_ts,
@@ -190,13 +191,18 @@ if is_enabled:
 
     logokit_key = config.display.logokit_api_key
 
-    data = []
-    total_rows = 0
-    with st.expander("Download overview"):
+    with st.expander("Download overview", icon=":material/archive:", expanded=True):
+        data = []
+        total_rows = 0
+
         for asset in assets:
             # Determine the download range per asset
             asset_start = datetime.fromtimestamp(asset.earliest_ts, tz=tz)
             asset_end = datetime.fromtimestamp(asset.latest_ts, tz=tz)
+
+            if not is_intraday:
+                asset_start = asset_start.date()
+                asset_end = asset_end.date()
 
             if not full_history:
                 asset_start = max(start_ts, asset_start)
@@ -212,19 +218,42 @@ if is_enabled:
                 row["Name"] = asset.name
 
             if asset.asset_type in (AssetType.Stocks, AssetType.Etf):
-                if country_code := getattr(asset.quote, "country_code", None):
-                    row["Country"] = f"https://flagcdn.com/h80/{country_code}.png"
+                if isinstance(asset.exchange, Exchange):
+                    code = asset.exchange.country.alpha2.lower()
+                    row["Country"] = f"https://flagcdn.com/80x60/{code}.png"
                 else:
                     row["Country"] = ""
-                row["Exchange"] = asset.exchange
+                row["Exchange"] = str(asset.exchange)
                 row["Currency"] = str(asset.quote)
 
             data.append(row)
 
-            # Calculate metrics
+            # Calculate estimated number of rows for this asset per interval
             delta_minutes = max((asset_end - asset_start).total_seconds() / 60, 1)
+            delta_days = (asset_end - asset_start).days
+
             for interval in intervals:
-                total_rows += max(int(delta_minutes // interval.minutes()), 1)
+                if asset_type in (AssetType.Stocks, AssetType.Etf):
+                    # Stocks / ETFs: 8/5
+                    if interval.is_intraday():
+                        effective_minutes = delta_minutes * (5 / 7) * (8 / 24)
+                        total_rows += max(int(effective_minutes // interval.minutes()), 1)
+                    else:
+                        trading_days = delta_days * (5 / 7)
+                        total_rows += max(int(trading_days // (interval.minutes() / 1440)), 1)
+
+                elif asset_type == AssetType.Forex:
+                    # Forex: 24/5
+                    if interval.is_intraday():
+                        effective_minutes = delta_minutes * (5 / 7)
+                        total_rows += max(int(effective_minutes // interval.minutes()), 1)
+                    else:
+                        trading_days = delta_days * (5 / 7)
+                        total_rows += max(int(trading_days // (interval.minutes() / 1440)), 1)
+
+                else:
+                    # Crypto: 24/7
+                    total_rows += max(int(delta_minutes // interval.minutes()), 1)
 
         data = pd.DataFrame(data)
 
@@ -239,14 +268,14 @@ if is_enabled:
 
         if logokit_key:
             data = data.set_index("Logo")
-            column_config["Logo"] = st.column_config.ImageColumn("", width="small")
+            column_config["Logo"] = st.column_config.ImageColumn("", width="small", pinned=True)
 
         if "Name" in data.columns:
             column_config["Name"] = st.column_config.TextColumn("Name")  # No width = stretch
             column_order.insert(1, "Name")
 
         if "Country" in data.columns:
-            column_config["Country"] = st.column_config.ImageColumn("Country", width="small")
+            column_config["Country"] = st.column_config.ImageColumn("Country", width=60)
             column_order.insert(2, "Country")
 
         if "Exchange" in data.columns:
@@ -265,10 +294,14 @@ if is_enabled:
         )
 
         estimated_memory = (total_rows * BYTES_PER_ROW) / (1024**2)
-        estimated_seconds = total_rows / ROWS_PER_SECOND
-        minutes, seconds = divmod(int(estimated_seconds), 60)
+        estimated_seconds = int(total_rows / ROWS_PER_SECOND)
 
-        if minutes:
+        hours, remainder = divmod(estimated_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        if hours:
+            time_str = f"{hours}h {minutes}m"
+        elif minutes:
             time_str = f"{minutes}m {seconds}s"
         elif seconds:
             time_str = f"{seconds}s"
@@ -282,10 +315,10 @@ if is_enabled:
         else:
             size_str = "<0.1 MB"
 
-        _, col1, col2, col3 = st.columns([1, 2, 2, 3], gap="large")
-        col1.metric("Est. Rows", _format_number(total_rows))
-        col2.metric("Est. Time", time_str)
-        col3.metric("Est. Memory", size_str)
+        col1, col2, col3 = st.columns(3)
+        col1.metric(":material/table_rows: Estimated rows", _fmt_number(total_rows), border=True)
+        col2.metric(":material/timer: Estimated time", time_str, border=True)
+        col3.metric(":material/memory: Estimated memory", size_str, border=True)
 
 st.divider()
 

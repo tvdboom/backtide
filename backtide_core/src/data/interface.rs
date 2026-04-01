@@ -1,8 +1,10 @@
 //! Python interface for the data module.
 
+use crate::constants::Symbol;
 use crate::data::download::DataDownload;
-use crate::data::models::asset::{Asset, AssetType, Symbol};
-use crate::data::models::bar::Interval;
+use crate::data::models::asset::Asset;
+use crate::data::models::asset_type::AssetType;
+use crate::data::models::interval::Interval;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
 use pyo3::{pyfunction, Bound, PyAny, PyResult};

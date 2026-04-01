@@ -1,114 +1,10 @@
-//! Asset and AssetType definitions.
-
+use crate::constants::Symbol;
+use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
-use crate::data::providers::provider::Provider;
-use pyo3::exceptions::PyValueError;
+use crate::data::models::exchange::Exchange;
 use pyo3::prelude::*;
 use pyo3::types::PyString;
 use serde::Deserialize;
-use serde_with::{DeserializeFromStr, SerializeDisplay};
-use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
-
-/// Canonical (provider-independent) symbol name.
-pub type Symbol = String;
-
-/// The broad category an [`Asset`] belongs to.
-///
-/// See Also
-/// --------
-/// - backtide.data:Asset
-/// - backtide.data:Bar
-/// - backtide.data:Interval
-#[pyclass(from_py_object, module = "backtide.data")]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    Eq,
-    Hash,
-    PartialEq,
-    Display,
-    EnumIter,
-    EnumString,
-    SerializeDisplay,
-    DeserializeFromStr,
-)]
-#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
-pub enum AssetType {
-    #[default]
-    Stocks,
-    Etf,
-    Forex,
-    Crypto,
-}
-
-impl AssetType {
-    pub fn default(&self) -> Provider {
-        match self {
-            Self::Stocks => Provider::Yahoo,
-            Self::Etf => Provider::Yahoo,
-            Self::Forex => Provider::Yahoo,
-            Self::Crypto => Provider::Binance,
-        }
-    }
-}
-
-#[pymethods]
-impl AssetType {
-    #[classattr]
-    const __RUST_ENUM__: bool = true;
-
-    #[new]
-    pub fn new(s: &str) -> PyResult<Self> {
-        s.parse().map_err(|_| PyValueError::new_err(format!("invalid AssetType: {s}")))
-    }
-
-    /// Make the class pickable (required by streamlit).
-    pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
-        let cls = py.get_type::<AssetType>().into_any();
-        Ok((cls, (self.to_string(),)))
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self == other
-    }
-
-    fn __hash__(&self) -> u64 {
-        *self as u64
-    }
-
-    pub fn __str__(&self) -> &'static str {
-        match self {
-            Self::Stocks => "Stocks",
-            Self::Etf => "ETF",
-            Self::Forex => "Forex",
-            Self::Crypto => "Crypto",
-        }
-    }
-
-    /// Return the default variant.
-    #[staticmethod]
-    fn get_default(py: Python<'_>) -> Py<Self> {
-        Py::new(py, Self::Stocks).unwrap()
-    }
-
-    /// Return all variants.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
-
-    /// Material icon to visually represent this asset type.
-    pub fn icon(&self) -> &'static str {
-        match self {
-            Self::Stocks => ":material/candlestick_chart:",
-            Self::Etf => ":material/account_balance:",
-            Self::Forex => ":material/currency_exchange:",
-            Self::Crypto => ":material/currency_bitcoin:",
-        }
-    }
-}
 
 /// A tradeable financial instrument.
 ///
@@ -133,8 +29,8 @@ impl AssetType {
 /// asset_type : [`AssetType`]
 ///     Asset type this asset belongs to.
 ///
-/// exchange : str
-///     Short exchange code.
+/// exchange : str | [`Exchange`]
+///     The exchange this asset is listed in.
 ///
 /// exchange_name : str
 ///     Human-readable exchange name.
@@ -165,8 +61,6 @@ pub struct Asset {
     pub asset_type: AssetType,
     #[pyo3(get)]
     pub exchange: String,
-    #[pyo3(get)]
-    pub exchange_name: String,
     #[pyo3(get)]
     pub earliest_ts: Option<u64>,
     #[pyo3(get)]
@@ -201,7 +95,6 @@ impl Asset {
         quote: String,
         asset_type: AssetType,
         exchange: String,
-        exchange_name: String,
         earliest_ts: Option<u64>,
         latest_ts: Option<u64>,
     ) -> Self {
@@ -212,7 +105,6 @@ impl Asset {
             quote,
             asset_type,
             exchange,
-            exchange_name,
             earliest_ts,
             latest_ts,
             volume: None,
@@ -225,17 +117,7 @@ impl Asset {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        (
-            Symbol,
-            String,
-            Option<String>,
-            String,
-            AssetType,
-            String,
-            String,
-            Option<u64>,
-            Option<u64>,
-        ),
+        (Symbol, String, Option<String>, String, AssetType, String, Option<u64>, Option<u64>),
     )> {
         let cls = py.get_type::<Asset>().into_any();
         Ok((
@@ -247,7 +129,6 @@ impl Asset {
                 self.quote.clone(),
                 self.asset_type,
                 self.exchange.clone(),
-                self.exchange_name.clone(),
                 self.earliest_ts,
                 self.latest_ts,
             ),
@@ -256,14 +137,13 @@ impl Asset {
 
     fn __repr__(&self) -> String {
         format!(
-            "Asset(symbol={:?}, name={:?}, base={}, quote={:?}, asset_type={:?}, exchange={:?}, exchange_name={:?}, earliest_ts={}, latest_ts={})",
+            "Asset(symbol={:?}, name={:?}, base={}, quote={:?}, asset_type={:?}, exchange={:?}, earliest_ts={}, latest_ts={})",
             self.symbol,
             self.name,
             self.base.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
             self.quote,
             self.asset_type.to_string(),
             self.exchange,
-            self.exchange_name,
             self.earliest_ts.map_or("None".to_owned(), |s| format!("{s:?}")),
             self.latest_ts.map_or("None".to_owned(), |s| format!("{s:?}")),
         )
@@ -285,6 +165,14 @@ impl Asset {
         Ok(match self.quote.parse::<Currency>() {
             Ok(c) => Py::new(py, c)?.into_any(),
             Err(_) => PyString::new(py, &self.quote).unbind().into_any(),
+        })
+    }
+
+    #[getter]
+    fn exchange(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(match self.exchange.parse::<Exchange>() {
+            Ok(c) => Py::new(py, c)?.into_any(),
+            Err(_) => PyString::new(py, &self.exchange).unbind().into_any(),
         })
     }
 }

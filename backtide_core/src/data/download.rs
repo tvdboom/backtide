@@ -4,10 +4,11 @@
 //! a shared Tokio runtime, and a TTL asset cache.
 
 use crate::config::Config;
-use crate::constants::ASSET_CACHE_TTL;
+use crate::constants::{Symbol, ASSET_CACHE_TTL};
 use crate::data::errors::DataResult;
-use crate::data::models::asset::{Asset, AssetType, Symbol};
-use crate::data::models::bar::Interval;
+use crate::data::models::asset::Asset;
+use crate::data::models::asset_type::AssetType;
+use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
 use crate::data::providers::traits::DataProvider;
 use crate::data::providers::yahoo::YahooFinance;

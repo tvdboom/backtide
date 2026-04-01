@@ -26,7 +26,6 @@ dependencies = [
     "streamlit_code_editor>=0.1.22",
     "pandas>=2.3.3",
     "pyyaml>=6.0.3",
-    "ty>=0.0.26",
 ]
 
 [dependency-groups]

@@ -44,14 +44,12 @@ def _get_asset_type_description(asset_type: AssetType) -> tuple[str, str]:
     return asset_description, currency_description
 
 
-def _format_number(n: float) -> str:
+def _fmt_number(n: float) -> str:
     """Nicely format a number."""
     if n > 10_000_000:
         return f"{n / 1_000_000:.1f}M"
     elif n > 1_000_000:
         return f"{n / 1_000_000:.2f}M"
-    elif n > 100_000:
-        return f"{n / 100_000:.0f}k"
     elif n >= 1_000:
         return f"{n / 1_000:.1f}k"
     else:
