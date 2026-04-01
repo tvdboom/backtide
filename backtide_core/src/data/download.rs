@@ -9,6 +9,7 @@ use crate::data::errors::DataResult;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::interval::Interval;
+use crate::data::providers::binance::Binance;
 use crate::data::providers::provider::Provider;
 use crate::data::providers::traits::DataProvider;
 use crate::data::providers::yahoo::YahooFinance;
@@ -124,6 +125,7 @@ impl DataDownload {
                 debug!(?asset_type, ?provider, "Creating new provider instance");
                 let p: Arc<dyn DataProvider> = match provider {
                     Provider::Yahoo => Arc::new(rt.block_on(YahooFinance::new())?),
+                    Provider::Binance => Arc::new(rt.block_on(Binance::new())?),
                     _ => unreachable!(),
                 };
                 cache.insert(*provider, p.clone());

@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 /// open_ts : int
 ///     Bar open time in UTC (Unix seconds).
 ///
+/// close_ts : int
+///     Bar close time in UTC (Unix seconds).
+///
 /// open_ts_exchange : float
 ///     Bar open time in the exchange's local timezone (Unix seconds).
 ///
@@ -39,6 +42,9 @@ use serde::{Deserialize, Serialize};
 /// volume : float
 ///     Traded volume in the asset's native units.
 ///
+/// n_trades: int | None
+///     Number of trades that occurred this bar.
+///
 /// See Also
 /// --------
 /// - backtide.data:Asset
@@ -49,12 +55,14 @@ use serde::{Deserialize, Serialize};
 pub struct Bar {
     pub open_ts: i64,
     pub open_ts_exchange: i64,
+    pub close_ts: i64,
     pub open: f64,
     pub high: f64,
     pub low: f64,
     pub close: f64,
     pub adj_close: f64,
     pub volume: f64,
+    pub n_trades: Option<i32>,
 }
 
 #[pymethods]

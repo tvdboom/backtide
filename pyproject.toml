@@ -120,7 +120,9 @@ select = [
     "PERF",  # performance checks
     "RUF",  # ruff
 ]
-ignore = ["COM812"]
+ignore = [
+    "E731",  # Do not use a lambda expression
+]
 
 [tool.ruff.lint.isort]
 section-order = [

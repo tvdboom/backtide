@@ -47,7 +47,7 @@ to throughout Backtide. Configured globally via [`Config`].
 
 <br>
 
-[](){#exchange}
+[](){#nom-exchange}
 <strong id="exchange">exchange</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
 The marketplace on which an [asset][nom-asset] is listed and traded, such as NASDAQ,

@@ -29,7 +29,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 ///
 /// currency : [`Currency`]
 ///     The primary trading currency of the exchange.
-#[pyclass(skip_from_py_object)]
+#[pyclass(skip_from_py_object, module = "backtide.data")]
 #[derive(
     Clone,
     Copy,
@@ -232,6 +232,12 @@ impl Exchange {
     #[getter]
     pub fn currency(&self) -> Currency {
         self.data().4
+    }
+
+    /// Return all variants.
+    #[staticmethod]
+    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
+        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
     }
 }
 

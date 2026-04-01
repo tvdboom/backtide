@@ -65,85 +65,6 @@ impl Config {
     }
 }
 
-/// Portfolio-wide settings.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct GeneralConfig {
-    /// ISO 4217 currency code that all prices are normalized to.
-    pub base_currency: Currency,
-
-    /// The cryptocurrency used as an intermediate triangulation step.
-    pub triangulation_fiat: Currency,
-
-    /// The fiat currency used as an intermediate triangulation step.
-    pub triangulation_crypto: String,
-
-    /// The fiat currency to which `triangulation_crypto` is pegged.
-    pub triangulation_crypto_pegged: Currency,
-
-    /// Minimum tracing log level.
-    pub log_level: LogLevel,
-}
-
-/// Data configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DataConfig {
-    /// File-system path to the primary database file.
-    pub storage_path: PathBuf,
-
-    /// Which data provider to use for each asset type.
-    pub providers: HashMap<AssetType, Provider>,
-}
-
-impl Default for DataConfig {
-    fn default() -> Self {
-        Self {
-            storage_path: PathBuf::from(DEFAULT_STORAGE_PATH),
-            providers: AssetType::iter().map(|at| (at, at.default())).collect(),
-        }
-    }
-}
-
-/// UI and formatting preferences.
-///
-/// These settings affect how values are displayed in the frontend.
-/// They have no effect on computation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DisplayConfig {
-    /// Format in which to display dates.
-    pub date_format: String,
-
-    /// Format in which to display the time.
-    pub time_format: String,
-
-    /// IANA timezone name. `None` to use the system's local timezone.
-    pub timezone: Option<String>,
-
-    /// API key for the logokit website.
-    pub logokit_api_key: Option<String>,
-
-    /// IP address the Streamlit server binds to.
-    pub address: Option<String>,
-
-    /// TCP port the Streamlit server listens on.
-    pub port: u16,
-}
-
-impl Default for DisplayConfig {
-    fn default() -> Self {
-        Self {
-            date_format: "YYYY-MM-DD".to_owned(),
-            time_format: "HH:MM".to_owned(),
-            timezone: None,
-            logokit_api_key: None,
-            address: None,
-            port: 8501,
-        }
-    }
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 // Utilities
 // ────────────────────────────────────────────────────────────────────────────
@@ -289,25 +210,25 @@ fn fetch_config() -> ConfigResult<Config> {
 #[pyclass(name = "Config", get_all, set_all, from_py_object, module = "backtide.config")]
 #[derive(Debug)]
 pub struct PyConfig {
-    pub general: Py<PyGeneralConfig>,
-    pub data: Py<PyDataConfig>,
-    pub display: Py<PyDisplayConfig>,
+    pub general: Py<GeneralConfig>,
+    pub data: Py<DataConfig>,
+    pub display: Py<DisplayConfig>,
 }
 
 impl PyConfig {
     fn from_rust(py: Python<'_>, cfg: Config) -> PyResult<Self> {
         Ok(Self {
-            general: Py::new(py, PyGeneralConfig::from_rust(cfg.general))?,
-            data: Py::new(py, PyDataConfig::from_rust(cfg.data))?,
-            display: Py::new(py, PyDisplayConfig::from_rust(cfg.display))?,
+            general: Py::new(py, cfg.general)?,
+            data: Py::new(py, cfg.data)?,
+            display: Py::new(py, cfg.display)?,
         })
     }
 
-    fn to_config(&self, py: Python<'_>) -> Config {
+    fn to_rust(&self, py: Python<'_>) -> Config {
         Config {
-            general: self.general.borrow(py).to_config(),
-            data: self.data.borrow(py).to_config(),
-            display: self.display.borrow(py).to_config(),
+            general: self.general.borrow(py).clone(),
+            data: self.data.borrow(py).clone(),
+            display: self.display.borrow(py).clone(),
         }
     }
 }
@@ -331,9 +252,9 @@ impl PyConfig {
     #[pyo3(signature = (general=None, data=None, display=None))]
     fn new(
         py: Python<'_>,
-        general: Option<Py<PyGeneralConfig>>,
-        data: Option<Py<PyDataConfig>>,
-        display: Option<Py<PyDisplayConfig>>,
+        general: Option<Py<GeneralConfig>>,
+        data: Option<Py<DataConfig>>,
+        display: Option<Py<DisplayConfig>>,
     ) -> PyResult<Self> {
         let default = Self::from_rust(py, Config::default())?;
 
@@ -355,8 +276,8 @@ impl PyConfig {
 
     fn __richcmp__(&self, py: Python<'_>, other: PyRef<Self>, op: CompareOp) -> bool {
         match op {
-            CompareOp::Eq => self.to_config(py) == other.to_config(py),
-            CompareOp::Ne => self.to_config(py) != other.to_config(py),
+            CompareOp::Eq => self.to_rust(py) == other.to_rust(py),
+            CompareOp::Ne => self.to_rust(py) != other.to_rust(py),
             _ => false,
         }
     }
@@ -368,7 +289,7 @@ impl PyConfig {
     /// dict
     ///     Self as dict.
     pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self.to_config(py)).unwrap().unbind()
+        pythonize(py, &self.to_rust(py)).unwrap().unbind()
     }
 }
 
@@ -411,9 +332,10 @@ impl PyConfig {
 /// - backtide.config:get_config
 /// - backtide.config:load_config
 /// - backtide.config:set_config
-#[pyclass(name = "GeneralConfig", get_all, set_all, eq, from_py_object, module = "backtide.config")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct PyGeneralConfig {
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.config")]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GeneralConfig {
     pub base_currency: Currency,
     pub triangulation_fiat: Currency,
     pub triangulation_crypto: String,
@@ -421,40 +343,35 @@ pub struct PyGeneralConfig {
     pub log_level: LogLevel,
 }
 
-impl PyGeneralConfig {
-    fn from_rust(cfg: GeneralConfig) -> Self {
-        Self {
-            base_currency: cfg.base_currency,
-            triangulation_fiat: cfg.triangulation_fiat,
-            triangulation_crypto: cfg.triangulation_crypto,
-            triangulation_crypto_pegged: cfg.triangulation_crypto_pegged,
-            log_level: cfg.log_level,
-        }
-    }
-
-    fn to_config(&self) -> GeneralConfig {
-        GeneralConfig {
-            base_currency: self.base_currency,
-            triangulation_fiat: self.triangulation_fiat,
-            triangulation_crypto: self.triangulation_crypto,
-            triangulation_crypto_pegged: self.triangulation_crypto_pegged,
-            log_level: self.log_level,
-        }
-    }
-}
-
 #[pymethods]
-impl PyGeneralConfig {
+impl GeneralConfig {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (base_currency="USD", log_level="warn"))]
-    fn new(base_currency: &str, log_level: &str) -> PyResult<Self> {
+    #[pyo3(signature = (base_currency="USD", triangulation_fiat="USD", triangulation_crypto="USDT", triangulation_crypto_pegged="USD", log_level="warn"))]
+    fn new(
+        base_currency: &str,
+        triangulation_fiat: &str,
+        triangulation_crypto: &str,
+        triangulation_crypto_pegged: &str,
+        log_level: &str,
+    ) -> PyResult<Self> {
         Ok(Self {
             base_currency: Currency::from_str(base_currency).map_err(|_| {
                 PyValueError::new_err(format!("Invalid base_currency: {base_currency}"))
             })?,
+            triangulation_fiat: Currency::from_str(triangulation_fiat).map_err(|_| {
+                PyValueError::new_err(format!("Invalid triangulation_fiat: {triangulation_fiat}"))
+            })?,
+            triangulation_crypto: triangulation_crypto.to_owned(),
+            triangulation_crypto_pegged: Currency::from_str(triangulation_crypto_pegged).map_err(
+                |_| {
+                    PyValueError::new_err(format!(
+                        "Invalid triangulation_crypto_pegged: {triangulation_crypto_pegged}"
+                    ))
+                },
+            )?,
             log_level: LogLevel::from_str(log_level)
                 .map_err(|_| PyValueError::new_err(format!("Invalid log_level: {log_level}")))?,
         })
@@ -475,7 +392,7 @@ impl PyGeneralConfig {
     /// dict
     ///     Self as dict.
     pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self.to_config()).unwrap().unbind()
+        pythonize(py, &self).unwrap().unbind()
     }
 }
 
@@ -499,31 +416,25 @@ impl PyGeneralConfig {
 /// - backtide.config:get_config
 /// - backtide.config:load_config
 /// - backtide.config:set_config
-#[pyclass(name = "DataConfig", get_all, set_all, eq, from_py_object, module = "backtide.config")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct PyDataConfig {
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.config")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DataConfig {
     pub storage_path: PathBuf,
     pub providers: HashMap<AssetType, Provider>,
 }
 
-impl PyDataConfig {
-    fn from_rust(cfg: DataConfig) -> Self {
+impl Default for DataConfig {
+    fn default() -> Self {
         Self {
-            storage_path: cfg.storage_path,
-            providers: cfg.providers,
-        }
-    }
-
-    fn to_config(&self) -> DataConfig {
-        DataConfig {
-            storage_path: self.storage_path.clone(),
-            providers: self.providers.clone(),
+            storage_path: PathBuf::from(DEFAULT_STORAGE_PATH),
+            providers: AssetType::iter().map(|at| (at, at.default())).collect(),
         }
     }
 }
 
 #[pymethods]
-impl PyDataConfig {
+impl DataConfig {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 
@@ -571,7 +482,7 @@ impl PyDataConfig {
     /// dict
     ///     Self as dict.
     pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self.to_config()).unwrap().unbind()
+        pythonize(py, &self).unwrap().unbind()
     }
 }
 
@@ -612,9 +523,10 @@ impl PyDataConfig {
 /// - backtide.config:get_config
 /// - backtide.config:load_config
 /// - backtide.config:set_config
-#[pyclass(name = "DisplayConfig", get_all, set_all, eq, from_py_object, module = "backtide.config")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct PyDisplayConfig {
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.config")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DisplayConfig {
     pub date_format: String,
     pub time_format: String,
     pub timezone: Option<String>,
@@ -623,32 +535,21 @@ pub struct PyDisplayConfig {
     pub port: u16,
 }
 
-impl PyDisplayConfig {
-    fn from_rust(cfg: DisplayConfig) -> Self {
+impl Default for DisplayConfig {
+    fn default() -> Self {
         Self {
-            date_format: cfg.date_format,
-            time_format: cfg.time_format,
-            timezone: cfg.timezone,
-            logokit_api_key: cfg.logokit_api_key,
-            address: cfg.address,
-            port: cfg.port,
-        }
-    }
-
-    fn to_config(&self) -> DisplayConfig {
-        DisplayConfig {
-            date_format: self.date_format.clone(),
-            time_format: self.time_format.clone(),
-            timezone: self.timezone.clone(),
-            logokit_api_key: self.logokit_api_key.clone(),
-            address: self.address.clone(),
-            port: self.port,
+            date_format: "YYYY-MM-DD".to_owned(),
+            time_format: "HH:MM".to_owned(),
+            timezone: None,
+            logokit_api_key: None,
+            address: None,
+            port: 8501,
         }
     }
 }
 
 #[pymethods]
-impl PyDisplayConfig {
+impl DisplayConfig {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 
@@ -696,7 +597,7 @@ impl PyDisplayConfig {
     /// dict
     ///     Self as dict.
     pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self.to_config()).unwrap().unbind()
+        pythonize(py, &self).unwrap().unbind()
     }
 }
 
@@ -802,7 +703,7 @@ fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
 #[pyfunction]
 fn set_config(py: Python<'_>, config: PyConfig) -> PyResult<()> {
     CONFIG
-        .set(config.to_config(py))
+        .set(config.to_rust(py))
         .map_err(|_| ConfigError::AlreadySet)
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
@@ -812,9 +713,9 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "backtide.config")?;
 
     m.add_class::<PyConfig>()?;
-    m.add_class::<PyDataConfig>()?;
-    m.add_class::<PyDisplayConfig>()?;
-    m.add_class::<PyGeneralConfig>()?;
+    m.add_class::<DataConfig>()?;
+    m.add_class::<DisplayConfig>()?;
+    m.add_class::<GeneralConfig>()?;
 
     m.add_function(wrap_pyfunction!(get_config, &m)?)?;
     m.add_function(wrap_pyfunction!(load_config, &m)?)?;

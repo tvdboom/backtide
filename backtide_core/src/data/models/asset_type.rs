@@ -91,6 +91,12 @@ impl AssetType {
         Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
     }
 
+    /// Whether the asset type has ownership stakes (true for stocks and etf).
+    #[getter]
+    fn is_equity(&self) -> bool {
+        matches!(self, AssetType::Stocks | AssetType::Etf)
+    }
+
     /// Material icon to visually represent this asset type.
     pub fn icon(&self) -> &'static str {
         match self {

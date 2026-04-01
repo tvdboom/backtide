@@ -59,17 +59,16 @@ def test_config_equality():
 
 def test_config_repr():
     """__repr__ contains top-level config sections."""
-    print(str(Config()))
     assert str(Config()).startswith('Config(general=GeneralConfig(base_currency="USD"')
 
 
 def test_invalid_provider_raises():
     """Invalid provider raises ValueError."""
-    with pytest.raises(ValueError, match=".*Invalid provider.*"):
+    with pytest.raises(ValueError, match=r".*Invalid provider.*"):
         DataConfig(providers={"crypto": "invalid"})
 
 
 def test_invalid_currency_raises():
     """Invalid base currency raises ValueError."""
-    with pytest.raises(ValueError, match=".*Invalid base_currency.*"):
+    with pytest.raises(ValueError, match=r".*Invalid base_currency.*"):
         Config(GeneralConfig(base_currency="invalid"))

@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use strum::{Display, EnumIter, EnumString};
+use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
 /// A country identified by its ISO 3166-1 alpha-3 code.
 ///
@@ -20,7 +20,7 @@ use strum::{Display, EnumIter, EnumString};
 ///
 /// flag : str
 ///     The Unicode regional-indicator flag emoji for the country.
-#[pyclass(skip_from_py_object)]
+#[pyclass(skip_from_py_object, module = "backtide.data")]
 #[derive(
     Clone,
     Copy,
@@ -379,6 +379,12 @@ impl Country {
             .chars()
             .map(|c| char::from_u32(0x1F1E6 + (c as u32 - 'A' as u32)).unwrap())
             .collect()
+    }
+
+    /// Return all variants.
+    #[staticmethod]
+    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
+        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
     }
 }
 

@@ -34,10 +34,10 @@ BACKTIDE_URL = "https://github.com/tvdboom/backtide/blob/master/"
 
 # Mapping of keywords to urls
 # Usage in docs: [anchor][key] or [key][] -> [anchor][value]
-CUSTOM_URLS = dict(
-    logokit="https://logokit.com/",
-    momentjs="https://momentjscom.readthedocs.io/en/latest/moment/04-displaying/01-format/",
-)
+CUSTOM_URLS = {
+    "logokit": "https://logokit.com/",
+    "momentjs": "https://momentjscom.readthedocs.io/en/latest/moment/04-displaying/01-format/",
+}
 
 FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 LINK_RE = re.compile(r"(?<!\w)\[([.`': \w_-]+?)](?!\()(?:\s*\[(?!\[)([\w_:-]+?)])?")
@@ -631,7 +631,7 @@ def types_conversion(dtype: str) -> str:
     return dtype
 
 
-def corrections(html: str, **kwargs) -> str:
+def corrections(html: str, **kwargs) -> str:  # noqa: ARG001
     """Make last minute corrections to the page.
 
     This function adjusts the url to the download sources and changes

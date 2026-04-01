@@ -56,15 +56,12 @@ def _fmt_number(n: float) -> str:
         return str(n)
 
 
-def _get_logokit_url(asset: Asset, api_key: str) -> str:
+def _get_logokit_url(asset: Asset, api_key: str, *, use_quote: bool = False) -> str:
     """Retrieve the Logokit url to retrieve the logo for an asset."""
     match asset.asset_type:
-        case AssetType.Forex:
-            url = "ticker"
-            symbol = f"{asset.base}{asset.quote}:CUR"
         case AssetType.Crypto:
             url = "crypto"
-            symbol = asset.base
+            symbol = asset.base if not use_quote else asset.quote
         case _:
             url = "ticker"
             symbol = asset.symbol

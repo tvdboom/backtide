@@ -68,7 +68,6 @@ dependencies = [
     { name = "pyyaml" },
     { name = "streamlit" },
     { name = "streamlit-code-editor" },
-    { name = "ty" },
 ]
 
 [package.dev-dependencies]
@@ -110,7 +109,6 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "streamlit", specifier = ">=1.55.0" },
     { name = "streamlit-code-editor", specifier = ">=0.1.22" },
-    { name = "ty", specifier = ">=0.0.26" },
 ]
 
 [package.metadata.requires-dev]

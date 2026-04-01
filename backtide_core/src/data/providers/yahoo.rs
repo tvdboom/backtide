@@ -233,7 +233,7 @@ impl YahooFinance {
         Ok((None, currency.to_string()))
     }
 
-    /// Convert a canonical symbol to yahoo's expected format.
+    /// Convert a canonical symbol to yahoo format.
     fn parse_canonical_symbol(symbol: &str, asset_type: AssetType) -> DataResult<String> {
         match asset_type {
             AssetType::Forex => {

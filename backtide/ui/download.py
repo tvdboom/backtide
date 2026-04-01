@@ -12,7 +12,15 @@ import pandas as pd
 import streamlit as st
 
 from backtide.core.config import get_config
-from backtide.core.data import AssetType, Interval, get_assets, list_assets, list_intervals, Exchange
+from backtide.core.data import (
+    AssetType,
+    Currency,
+    Exchange,
+    Interval,
+    get_assets,
+    list_assets,
+    list_intervals,
+)
 from backtide.ui.utils import (
     _fmt_number,
     _get_asset_type_description,
@@ -190,6 +198,7 @@ if is_enabled:
     ROWS_PER_SECOND = 40_000  # Estimated number of rows downloaded per second
 
     logokit_key = config.display.logokit_api_key
+    get_flag = lambda code: f"https://flagcdn.com/80x60/{code.lower()}.png"
 
     with st.expander("Download overview", icon=":material/archive:", expanded=True):
         data = []
@@ -212,19 +221,24 @@ if is_enabled:
             row = {"Symbol": asset.symbol, "Start": asset_start, "End": asset_end}
 
             if logokit_key:
-                row["Logo"] = _get_logokit_url(asset, logokit_key)
+                if isinstance(asset.base, Currency):
+                    row["Logo"] = get_flag(asset.base.country.alpha2)
+                else:
+                    row["Logo"] = _get_logokit_url(asset, logokit_key)
 
-            if asset.asset_type != AssetType.Forex:
+            if asset.asset_type.is_equity:
                 row["Name"] = asset.name
-
-            if asset.asset_type in (AssetType.Stocks, AssetType.Etf):
                 if isinstance(asset.exchange, Exchange):
-                    code = asset.exchange.country.alpha2.lower()
-                    row["Country"] = f"https://flagcdn.com/80x60/{code}.png"
+                    row["Country"] = get_flag(asset.exchange.country.alpha2)
                 else:
                     row["Country"] = ""
                 row["Exchange"] = str(asset.exchange)
                 row["Currency"] = str(asset.quote)
+            else:
+                if isinstance(asset.quote, Currency):
+                    row["Quote"] = get_flag(asset.quote.country.alpha2)
+                else:
+                    row["Quote"] = _get_logokit_url(asset, logokit_key, use_quote=True)
 
             data.append(row)
 
@@ -268,7 +282,8 @@ if is_enabled:
 
         if logokit_key:
             data = data.set_index("Logo")
-            column_config["Logo"] = st.column_config.ImageColumn("", width="small", pinned=True)
+            title = "" if asset.asset_type.is_equity else "Base"
+            column_config["Logo"] = st.column_config.ImageColumn(title, width="small", pinned=True)
 
         if "Name" in data.columns:
             column_config["Name"] = st.column_config.TextColumn("Name")  # No width = stretch
@@ -285,6 +300,10 @@ if is_enabled:
         if "Currency" in data.columns:
             column_config["Currency"] = st.column_config.TextColumn("Currency", width="small")
             column_order.insert(4, "Currency")
+
+        if "Quote" in data.columns:
+            column_config["Quote"] = st.column_config.ImageColumn("Quote", width=-50)
+            column_order.insert(1, "Quote")
 
         st.dataframe(
             data=data,
