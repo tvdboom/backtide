@@ -6,7 +6,6 @@ use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
-use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
 use crate::utils::http::{HttpClient, HttpError};
@@ -93,8 +92,6 @@ impl Binance {
         end_time: Option<i64>,
         limit: usize,
     ) -> DataResult<Vec<BinanceKline>> {
-        debug!(%symbol, %limit, "Fetching bar data");
-
         // Build query params dynamically so absent bounds are simply omitted.
         let mut params: Vec<(&str, String)> = vec![
             ("symbol", symbol.to_owned()),
@@ -124,7 +121,6 @@ impl Binance {
         let bars: Vec<BinanceKline> =
             rows.into_iter().map(|row| BinanceKline::try_from(row)).collect::<DataResult<_>>()?;
 
-        debug!(%symbol, %limit, "Bar data retrieval complete");
         Ok(bars)
     }
 }
@@ -137,7 +133,6 @@ impl DataProvider for Binance {
         Self::require_crypto(asset_type)?;
 
         let symbol = Self::parse_canonical_symbol(symbol);
-        debug!(%symbol, "Fetching asset metadata");
 
         let (info, bars) = tokio::try_join!(
             self.fetch_symbol_info(&symbol),
@@ -147,7 +142,6 @@ impl DataProvider for Binance {
         let bar = bars.first().unwrap();
         let asset = Asset::try_from((info, *bar))?;
 
-        debug!(%symbol, "Asset metadata resolved");
         Ok(asset)
     }
 
@@ -155,8 +149,6 @@ impl DataProvider for Binance {
     #[instrument(skip(self), fields(?asset_type, limit))]
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
         Self::require_crypto(asset_type)?;
-
-        debug!(%limit, "Listing Binance crypto assets");
 
         let resp =
             self.client.get(Self::EXCHANGE_INFO_URL, Some(&[("permissions", "SPOT")])).await?;
@@ -177,29 +169,7 @@ impl DataProvider for Binance {
             .take(limit)
             .collect();
 
-        info!(count = assets.len(), "list_assets crypto complete");
         Ok(assets)
-    }
-
-    /// All intervals supported by Binance.
-    fn list_intervals(&self) -> Vec<Interval> {
-        vec![
-            Interval::OneMinute,
-            Interval::ThreeMinutes,
-            Interval::FiveMinutes,
-            Interval::FifteenMinutes,
-            Interval::ThirtyMinutes,
-            Interval::OneHour,
-            Interval::TwoHours,
-            Interval::FourHours,
-            Interval::SixHours,
-            Interval::EightHours,
-            Interval::TwelveHours,
-            Interval::OneDay,
-            Interval::ThreeDays,
-            Interval::OneWeek,
-            Interval::OneMonth,
-        ]
     }
 }
 

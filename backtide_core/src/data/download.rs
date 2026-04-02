@@ -8,7 +8,6 @@ use crate::constants::{Symbol, ASSET_CACHE_TTL};
 use crate::data::errors::DataResult;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
-use crate::data::models::interval::Interval;
 use crate::data::providers::binance::Binance;
 use crate::data::providers::provider::Provider;
 use crate::data::providers::traits::DataProvider;
@@ -57,6 +56,7 @@ impl DataDownload {
         if let Some(cfg) = DOWNLOADER.get() {
             Ok(cfg)
         } else {
+            info!("Initializing data downloader.");
             let _ = DOWNLOADER.set(DataDownload::init()?);
             Ok(DOWNLOADER.get().unwrap())
         }
@@ -75,7 +75,7 @@ impl DataDownload {
         symbols: Vec<Symbol>,
         asset_type: AssetType,
     ) -> DataResult<Vec<Asset>> {
-        debug!(count = symbols.len(), ?asset_type, "Fetching assets concurrently");
+        info!(count = symbols.len(), ?asset_type, "Fetching assets concurrently");
         self.rt.block_on(async {
             let tasks: Vec<_> = symbols.iter().map(|s| self.load_asset(s, asset_type)).collect();
 
@@ -88,14 +88,8 @@ impl DataDownload {
     /// Delegates directly to the provider — callers should cache the result
     /// as this may trigger multiple network requests.
     pub fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
-        debug!(?asset_type, %limit, "Listing assets");
+        info!(?asset_type, %limit, "Listing assets");
         self.rt.block_on(self.providers.get(&asset_type).unwrap().list_assets(asset_type, limit))
-    }
-
-    /// Return the bar intervals supported by the provider for `asset_type`.
-    pub fn list_intervals(&self, asset_type: AssetType) -> Vec<Interval> {
-        let provider = self.providers.get(&asset_type).unwrap();
-        provider.list_intervals()
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -107,8 +101,6 @@ impl DataDownload {
     /// Provider instances are deduplicated — if two asset types share the same
     /// [`Provider`] variant they receive the same [`Arc`].
     fn init() -> DataResult<Self> {
-        info!("Initializing DataDownload singleton");
-
         let rt = Runtime::new()?;
         let pc = &Config::get()?.data.providers;
 

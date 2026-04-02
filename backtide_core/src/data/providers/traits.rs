@@ -16,9 +16,6 @@ pub trait DataProvider: Send + Sync {
     /// List the most important assets for a given asset type.
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>>;
 
-    /// List the intervals supported by this provider.
-    fn list_intervals(&self) -> Vec<Interval>;
-
     // /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
     // /// Returns an empty `Vec` when the symbol had no trading activity that period
     // /// (e.g. before listing date), which is distinct from a `IngestionError`.

@@ -126,7 +126,6 @@ nav:
             - get_asset: api/data/get_asset.md
             - get_assets: api/data/get_assets.md
             - list_assets: api/data/list_assets.md
-            - list_intervals: api/data/list_intervals.md
         - models:
             - Asset: api/models/asset.md
             - AssetType: api/models/assettype.md

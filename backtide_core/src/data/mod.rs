@@ -1,4 +1,4 @@
-use crate::data::interface::{get_asset, get_assets, list_assets, list_intervals};
+use crate::data::interface::{get_asset, get_assets, list_assets};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::bar::Bar;
@@ -33,7 +33,6 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_asset, &m)?)?;
     m.add_function(wrap_pyfunction!(get_assets, &m)?)?;
     m.add_function(wrap_pyfunction!(list_assets, &m)?)?;
-    m.add_function(wrap_pyfunction!(list_intervals, &m)?)?;
 
     parent.add_submodule(&m)?;
 

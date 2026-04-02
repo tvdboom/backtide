@@ -379,9 +379,12 @@ impl GeneralConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "GeneralConfig(base_currency={:?}, log_level={:?})",
+            "GeneralConfig(base_currency={:?}, triangulation_fiat={:?}, triangulation_crypto={:?}, triangulation_crypto_pegged={:?}, log_level={:?})",
             self.base_currency.to_string(),
-            self.log_level
+            self.triangulation_fiat.to_string(),
+            self.triangulation_crypto,
+            self.triangulation_crypto_pegged.to_string(),
+            self.log_level.to_string().to_lowercase(),
         )
     }
 
@@ -576,7 +579,12 @@ impl DisplayConfig {
     fn __repr__(&self) -> String {
         format!(
             "DisplayConfig(date_format={:?}, time_format={:?}, timezone={:?}, logokit_api_key={:?}, address={:?}, port={:?})",
-            self.date_format, self.time_format, self.timezone, self.logokit_api_key, self.address, self.port
+            self.date_format,
+            self.time_format,
+            self.timezone,
+            self.logokit_api_key.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
+            self.address,
+            self.port,
         )
     }
 

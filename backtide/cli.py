@@ -21,8 +21,6 @@ def main():
 @click.option(
     "--address",
     "-A",
-    default="",
-    show_default=True,
     help=(
         "The address where the server will listen for client and browser connections. "
         "Use this if you want to bind the server to a specific address. If set, the server "
@@ -32,14 +30,10 @@ def main():
 @click.option(
     "--port",
     "-P",
-    default="8501",
-    show_default=True,
     help="The port where the server will listen for browser connections.",
 )
 @click.option(
     "--log_level",
-    default="warn",
-    show_default=True,
     help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
 )
 def launch(address: str, port: str, log_level: str):

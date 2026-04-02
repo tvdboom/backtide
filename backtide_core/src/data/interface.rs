@@ -27,7 +27,6 @@ use pyo3::{pyfunction, Bound, PyAny, PyResult};
 /// --------
 /// - backtide.data:get_assets
 /// - backtide.data:list_assets
-/// - backtide.data:list_intervals
 ///
 /// Examples
 /// --------
@@ -66,7 +65,6 @@ pub fn get_asset(symbol: Symbol, asset_type: Bound<'_, PyAny>) -> PyResult<Asset
 /// --------
 /// - backtide.data:get_asset
 /// - backtide.data:list_assets
-/// - backtide.data:list_intervals
 ///
 /// Examples
 /// --------
@@ -106,7 +104,6 @@ pub fn get_assets(symbols: Vec<Symbol>, asset_type: Bound<'_, PyAny>) -> PyResul
 /// --------
 /// - backtide.data:get_asset
 /// - backtide.data:get_assets
-/// - backtide.data:list_intervals
 ///
 /// Examples
 /// --------
@@ -126,36 +123,4 @@ pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<A
 
     let ingester = DataDownload::get()?;
     Ok(ingester.list_assets(asset_type, limit)?)
-}
-
-/// List the available intervals for an asset type.
-///
-/// Parameters
-/// ----------
-/// asset_type : str | [`AssetType`]
-///     For which [asset type] to get the [intervals][nom-interval].
-///
-/// See Also
-/// --------
-/// - backtide.data:get_asset
-/// - backtide.data:get_assets
-/// - backtide.data:list_assets
-///
-/// Examples
-/// --------
-/// ```pycon
-/// from backtide.data import list_intervals
-///
-/// print(list_intervals("stocks"))
-/// ```
-#[pyfunction]
-pub fn list_intervals(asset_type: Bound<'_, PyAny>) -> PyResult<Vec<Interval>> {
-    let asset_type: AssetType = if let Ok(s) = asset_type.extract::<String>() {
-        s.parse().map_err(|_| PyValueError::new_err(format!("invalid asset type: {s}")))?
-    } else {
-        asset_type.extract::<AssetType>()?
-    };
-
-    let ingester = DataDownload::get()?;
-    Ok(ingester.list_intervals(asset_type))
 }

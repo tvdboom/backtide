@@ -10,7 +10,6 @@ use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::forex::ForexPair;
-use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
 use crate::utils::http::{paginate, HttpClient};
@@ -116,7 +115,6 @@ impl YahooFinance {
         scr_id: &str,
         limit: usize,
     ) -> DataResult<Vec<Asset>> {
-        debug!(%scr_id, %limit, "Fetching predefined screener");
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| async move {
             let resp = self
                 .client
@@ -137,10 +135,7 @@ impl YahooFinance {
         })
         .await?;
 
-        let assets: Vec<Asset> =
-            quotes.into_iter().map(Asset::try_from).collect::<DataResult<_>>()?;
-        debug!(%scr_id, count = ?assets.len(), "Predefined screener complete");
-        Ok(assets)
+        Ok(quotes.into_iter().map(Asset::try_from).collect::<DataResult<_>>()?)
     }
 
     /// Paginate the custom POST screener with an arbitrary query predicate.
@@ -153,7 +148,6 @@ impl YahooFinance {
         query: &Value,
         limit: usize,
     ) -> DataResult<Vec<Asset>> {
-        debug!(%quote_type, %limit, "Paginating custom screener");
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| {
             let payload = json!({
                 "size": batch,
@@ -181,10 +175,7 @@ impl YahooFinance {
         })
         .await?;
 
-        let assets: Vec<Asset> =
-            quotes.into_iter().map(Asset::try_from).collect::<DataResult<_>>()?;
-        debug!(%quote_type, count = ?assets.len(), "Custom screener complete");
-        Ok(assets)
+        Ok(quotes.into_iter().map(Asset::try_from).collect::<DataResult<_>>()?)
     }
 
     /// Validate HTTP status then deserialize a screener response into quotes.
@@ -266,7 +257,6 @@ impl DataProvider for YahooFinance {
     async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
         let symbol = Self::parse_canonical_symbol(symbol, asset_type)?;
 
-        debug!(%symbol, "Fetching asset metadata");
         let resp = self
             .client
             .get(
@@ -286,7 +276,6 @@ impl DataProvider for YahooFinance {
             .map(|r| Asset::try_from(r.meta))
             .ok_or(DataError::UnexpectedResponse("empty chart result".to_owned()))??;
 
-        debug!(%symbol, "Asset metadata resolved");
         Ok(asset)
     }
 
@@ -300,7 +289,6 @@ impl DataProvider for YahooFinance {
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
         use Exchange::*;
 
-        debug!(?asset_type, %limit, "Listing assets");
         match asset_type {
             AssetType::Stocks | AssetType::Etf => {
                 let (quote_type, operands) = match asset_type {
@@ -355,7 +343,6 @@ impl DataProvider for YahooFinance {
                 });
                 assets.truncate(limit);
 
-                info!(?asset_type, count = assets.len(), "list_assets complete");
                 Ok(assets)
             },
 
@@ -381,7 +368,6 @@ impl DataProvider for YahooFinance {
                     })
                     .collect();
 
-                info!(count = assets.len(), "list_assets forex complete");
                 Ok(assets)
             },
 
@@ -399,27 +385,9 @@ impl DataProvider for YahooFinance {
                 });
                 assets.truncate(limit);
 
-                info!(count = assets.len(), "list_assets crypto complete");
                 Ok(assets)
             },
         }
-    }
-
-    /// All intervals supported by Yahoo Finance.
-    fn list_intervals(&self) -> Vec<Interval> {
-        vec![
-            Interval::OneMinute,
-            Interval::TwoMinutes,
-            Interval::FiveMinutes,
-            Interval::FifteenMinutes,
-            Interval::ThirtyMinutes,
-            Interval::OneHour,
-            Interval::OneDay,
-            Interval::FiveDays,
-            Interval::OneWeek,
-            Interval::OneMonth,
-            Interval::ThreeMonths,
-        ]
     }
 }
 

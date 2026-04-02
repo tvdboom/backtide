@@ -72,7 +72,7 @@ def _get_logokit_url(asset: Asset, api_key: str, *, use_quote: bool = False) -> 
 def _prevent_deselection(key: str, default: Any, reset: list[str] | None = None):
     """On-change function to call for widgets for which a valid must be selected.
 
-    Additionally, remove entries in the `reset` keys from streamlit's state.
+    Additionally, remove entries in the `reset` keys from Streamlit's state.
 
     """
     if "_cache" not in st.session_state:

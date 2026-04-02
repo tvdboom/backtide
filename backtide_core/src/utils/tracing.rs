@@ -8,6 +8,7 @@
 use crate::config::{Config, ConfigResult};
 use pyo3::{pyfunction, PyResult};
 use std::sync::OnceLock;
+use tracing::info;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -15,25 +16,17 @@ use tracing_subscriber::{fmt, EnvFilter};
 static TRACING: OnceLock<()> = OnceLock::new();
 
 /// Initialize the global tracing subscriber at most once.
-///
-/// Level resolution order:
-/// 1. `level` argument (if supplied)
-/// 2. `Config::get().log_level` (if config is already loaded)
-/// 3. `RUST_LOG` environment variable
-/// 4. `"warn"` hard default
-///
-/// Safe to call from multiple code paths — subsequent calls after the first
-/// are no-ops.
 pub fn ensure_tracing(level: Option<&str>) -> ConfigResult<()> {
     let cfg = Config::get()?;
 
     TRACING.get_or_init(|| {
-        let resolved = level
+        let level = level
             .map(str::to_owned)
-            .unwrap_or_else(|| cfg.general.log_level.to_string().to_uppercase());
+            .unwrap_or_else(|| cfg.general.log_level.to_string().to_lowercase());
 
+        info!("Backtide logging level set to: {level}");
         tracing_subscriber::registry()
-            .with(EnvFilter::new(resolved))
+            .with(EnvFilter::new(level))
             .with(
                 fmt::layer()
                     .with_target(true)

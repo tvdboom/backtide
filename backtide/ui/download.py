@@ -19,7 +19,6 @@ from backtide.core.data import (
     Interval,
     get_assets,
     list_assets,
-    list_intervals,
 )
 from backtide.ui.utils import (
     _fmt_number,
@@ -182,7 +181,7 @@ else:
 intervals = st.pills(
     label="Interval",
     key="interval_download",
-    options=list_intervals(asset_type),
+    options=Interval.variants(),
     selection_mode="multi",
     default=Interval.get_default(),
     help=(
@@ -220,11 +219,8 @@ if is_enabled:
             # Add row to dataframe
             row = {"Symbol": asset.symbol, "Start": asset_start, "End": asset_end}
 
-            if logokit_key:
-                if isinstance(asset.base, Currency):
-                    row["Logo"] = get_flag(asset.base.country.alpha2)
-                else:
-                    row["Logo"] = _get_logokit_url(asset, logokit_key)
+            if logokit_key and asset.asset_type.is_equity:
+                row["Logo"] = _get_logokit_url(asset, logokit_key)
 
             if asset.asset_type.is_equity:
                 row["Name"] = asset.name
@@ -234,10 +230,12 @@ if is_enabled:
                     row["Country"] = ""
                 row["Exchange"] = str(asset.exchange)
                 row["Currency"] = str(asset.quote)
-            else:
+            elif asset.asset_type == AssetType.Forex or logokit_key:
                 if isinstance(asset.quote, Currency):
+                    row["Base"] = get_flag(asset.base.country.alpha2)
                     row["Quote"] = get_flag(asset.quote.country.alpha2)
                 else:
+                    row["Base"] = _get_logokit_url(asset, logokit_key)
                     row["Quote"] = _get_logokit_url(asset, logokit_key, use_quote=True)
 
             data.append(row)
@@ -280,10 +278,9 @@ if is_enabled:
 
         column_order = ["Symbol", "Start", "End"]
 
-        if logokit_key:
+        if "Logo" in data.columns:
             data = data.set_index("Logo")
-            title = "" if asset.asset_type.is_equity else "Base"
-            column_config["Logo"] = st.column_config.ImageColumn(title, width="small", pinned=True)
+            column_config["Logo"] = st.column_config.ImageColumn(width="small", pinned=True)
 
         if "Name" in data.columns:
             column_config["Name"] = st.column_config.TextColumn("Name")  # No width = stretch
@@ -301,13 +298,17 @@ if is_enabled:
             column_config["Currency"] = st.column_config.TextColumn("Currency", width="small")
             column_order.insert(4, "Currency")
 
+        if "Base" in data.columns:
+            column_config["Base"] = st.column_config.ImageColumn("Base", width=-50)
+            column_order.insert(0, "Base")
+
         if "Quote" in data.columns:
             column_config["Quote"] = st.column_config.ImageColumn("Quote", width=-50)
-            column_order.insert(1, "Quote")
+            column_order.insert(2, "Quote")
 
         st.dataframe(
             data=data,
-            hide_index=logokit_key is None,
+            hide_index=data.index.name is None,
             column_config=column_config,
             column_order=column_order,
         )
