@@ -4,7 +4,6 @@ use crate::constants::Symbol;
 use crate::data::errors::DataResult;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
-use crate::data::models::interval::Interval;
 use async_trait::async_trait;
 
 /// Abstraction over a market-data source.

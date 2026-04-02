@@ -227,23 +227,24 @@ impl YahooFinance {
     /// Convert a canonical symbol to yahoo format.
     fn parse_canonical_symbol(symbol: &str, asset_type: AssetType) -> DataResult<String> {
         match asset_type {
-            AssetType::Forex => {
-                let (base, quote) = symbol.split_once('-').ok_or_else(|| {
-                    DataError::UnexpectedResponse(format!("invalid forex symbol: {symbol}"))
-                })?;
+            AssetType::Forex | AssetType::Crypto => {
+                let (base, quote) = symbol
+                    .split_once('-')
+                    .ok_or_else(|| DataError::SymbolNotFound(symbol.to_owned()))?;
 
-                if base == Currency::USD.to_string() {
-                    Ok(format!("{quote}=X"))
-                } else {
-                    Ok(format!("{base}{quote}=X"))
+                if base == quote {
+                    return Err(DataError::SymbolNotFound(symbol.to_owned()));
                 }
-            },
-            AssetType::Crypto => {
-                let (base, quote) = symbol.split_once('-').ok_or_else(|| {
-                    DataError::UnexpectedResponse(format!("invalid crypto symbol: {symbol}"))
-                })?;
 
-                Ok(format!("{base}-{quote}"))
+                if asset_type == AssetType::Forex {
+                    if base == Currency::USD.to_string() {
+                        Ok(format!("{quote}=X"))
+                    } else {
+                        Ok(format!("{base}{quote}=X"))
+                    }
+                } else {
+                    Ok(format!("{base}-{quote}"))
+                }
             },
             _ => Ok(symbol.to_owned()),
         }

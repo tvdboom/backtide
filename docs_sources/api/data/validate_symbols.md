@@ -1,7 +1,7 @@
-# get_asset
------------
+# validate_symbols
+------------------
 
-:: backtide.data:get_asset
+:: backtide.data:validate_symbols
     :: signature
     :: head
     :: table:

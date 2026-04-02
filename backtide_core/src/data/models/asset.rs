@@ -46,7 +46,7 @@ use serde::Deserialize;
 /// - backtide.data:AssetType
 /// - backtide.data:Bar
 /// - backtide.data:Interval
-#[pyclass(skip_from_py_object, frozen, module = "backtide.data")]
+#[pyclass(from_py_object, frozen, module = "backtide.data")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Asset {
     #[pyo3(get)]

@@ -4,66 +4,72 @@ use crate::constants::Symbol;
 use crate::data::download::DataDownload;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
-use crate::data::models::interval::Interval;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
 use pyo3::{pyfunction, Bound, PyAny, PyResult};
+use std::str::FromStr;
 
-/// Get a single asset given its symbols.
-///
-/// The returned assets contain all defined metadata fields.
-///
-/// Parameters
-/// ----------
-/// symbol : str
-///     Symbol for which to get the asset. The symbol should be of the form
-///     expected by the [provider][nom-provider] corresponding to the selected
-///     `asset_type`.
-///
-/// asset_type : str | [`AssetType`]
-///     For which [asset type] to get the asset.
-///
-/// See Also
-/// --------
-/// - backtide.data:get_assets
-/// - backtide.data:list_assets
-///
-/// Examples
-/// --------
-/// ```pycon
-/// from backtide.data import get_asset
-///
-/// print(get_asset("AAPL", "stocks"))
-/// ```
-#[pyfunction]
-pub fn get_asset(symbol: Symbol, asset_type: Bound<'_, PyAny>) -> PyResult<Asset> {
-    let asset_type: AssetType = if let Ok(s) = asset_type.extract::<String>() {
-        s.parse().map_err(|_| PyValueError::new_err(format!("invalid asset type: {s}")))?
+/// Parse input from Python into a list of symbols.
+fn parse_asset(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
+    if let Ok(seq) = symbols.extract::<Vec<Bound<'_, PyAny>>>() {
+        // Parse symbols: Sequence[str | Asset]
+        seq.into_iter()
+            .map(|item| {
+                if let Ok(s) = item.extract::<String>() {
+                    Ok(Symbol::from(s))
+                } else if let Ok(asset) = item.extract::<Asset>() {
+                    Ok(asset.symbol)
+                } else {
+                    Err(PyValueError::new_err("symbols must be str, Asset, or a sequence of those"))
+                }
+            })
+            .collect::<PyResult<_>>()
     } else {
-        asset_type.extract::<AssetType>()?
-    };
-
-    let ingester = DataDownload::get()?;
-    Ok(ingester.get_asset(symbol, asset_type)?)
+        // Parse symbols: str | Asset
+        if let Ok(s) = symbols.extract::<String>() {
+            Ok(vec![Symbol::from(s)])
+        } else if let Ok(asset) = symbols.extract::<Asset>() {
+            Ok(vec![asset.symbol])
+        } else {
+            Err(PyValueError::new_err("symbols must be str, Asset, or a sequence of those"))
+        }
+    }
 }
 
-/// Get a list of assets given their symbols.
+/// Parse input from Python into an asset type.
+fn parse_asset_type(asset_type: Bound<'_, PyAny>) -> PyResult<AssetType> {
+    // Parse asset_type: str | AssetType
+    if let Ok(s) = asset_type.extract::<String>() {
+        AssetType::from_str(&s)
+            .map_err(|e| PyValueError::new_err(format!("invalid asset type: {e}")))
+    } else {
+        asset_type
+            .extract::<AssetType>()
+            .map_err(|e| PyValueError::new_err(format!("invalid asset type: {e}")))
+    }
+}
+
+/// Get assets given their symbols.
 ///
-/// The returned assets contain all defined metadata fields.
+/// Unlike [`list_assets`], the returned assets contain all defined metadata
+/// fields.
 ///
 /// Parameters
 /// ----------
-/// symbols : list[str]
-///     Symbols for which to get the asset. The symbols should be of the form
-///     expected by the [provider][nom-provider] corresponding to the selected
-///     `asset_type`.
+/// symbols : str | [Asset] | list[str | [Asset]]
+///     Symbols for which to get the assets. The symbols should be of the
+///     [canonical form][nom-symbol] expected by backtide.
 ///
-/// asset_type : str | [`AssetType`]
+/// asset_type : str | [AssetType]
 ///     For which [asset type] to get the assets.
+///
+/// Returns
+/// -------
+/// list[[Asset]]
+///     Assets corresponding to the provided symbols.
 ///
 /// See Also
 /// --------
-/// - backtide.data:get_asset
 /// - backtide.data:list_assets
 ///
 /// Examples
@@ -74,15 +80,13 @@ pub fn get_asset(symbol: Symbol, asset_type: Bound<'_, PyAny>) -> PyResult<Asset
 /// print(get_assets(["AAPL", "MSFT"], "stocks"))
 /// ```
 #[pyfunction]
-pub fn get_assets(symbols: Vec<Symbol>, asset_type: Bound<'_, PyAny>) -> PyResult<Vec<Asset>> {
-    let asset_type: AssetType = if let Ok(s) = asset_type.extract::<String>() {
-        s.parse().map_err(|_| PyValueError::new_err(format!("invalid asset type: {s}")))?
-    } else {
-        asset_type.extract::<AssetType>()?
-    };
+#[pyo3(signature = (symbols: "str | Asset | Sequence[int | Asset]", asset_type: "str | AssetType") -> "list[Asset]")]
+pub fn get_assets(symbols: Bound<'_, PyAny>, asset_type: Bound<'_, PyAny>) -> PyResult<Vec<Asset>> {
+    let symbols = parse_asset(symbols)?;
+    let asset_type = parse_asset_type(asset_type)?;
 
-    let ingester = DataDownload::get()?;
-    Ok(ingester.get_assets(symbols, asset_type)?)
+    let downloader = DataDownload::get()?;
+    Ok(downloader.get_assets(symbols, asset_type)?)
 }
 
 /// List available assets for a given asset type.
@@ -93,16 +97,20 @@ pub fn get_assets(symbols: Vec<Symbol>, asset_type: Bound<'_, PyAny>) -> PyResul
 ///
 /// Parameters
 /// ----------
-/// asset_type : str | [`AssetType`]
+/// asset_type : str | [AssetType]
 ///     For which [asset type] to list the assets.
 ///
 /// limit : int, default=100
 ///     Maximum number of assets to return. The actual number may be smaller,
 ///     but not larger.
 ///
+/// Returns
+/// -------
+/// list[[Asset]]
+///     Major assets for the given asset type.
+///
 /// See Also
 /// --------
-/// - backtide.data:get_asset
 /// - backtide.data:get_assets
 ///
 /// Examples
@@ -113,14 +121,54 @@ pub fn get_assets(symbols: Vec<Symbol>, asset_type: Bound<'_, PyAny>) -> PyResul
 /// print(list_assets("crypto", limit=5))
 /// ```
 #[pyfunction]
-#[pyo3(signature = (asset_type, limit=100))]
+#[pyo3(signature = (asset_type: "str | AssetType", limit: "int"=100))]
 pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<Asset>> {
-    let asset_type: AssetType = if let Ok(s) = asset_type.extract::<String>() {
-        s.parse().map_err(|_| PyValueError::new_err(format!("invalid asset type: {s}")))?
-    } else {
-        asset_type.extract::<AssetType>()?
-    };
+    let asset_type = parse_asset_type(asset_type)?;
 
-    let ingester = DataDownload::get()?;
-    Ok(ingester.list_assets(asset_type, limit)?)
+    let downloader = DataDownload::get()?;
+    Ok(downloader.list_assets(asset_type, limit)?)
+}
+
+/// Validate a set of symbols.
+///
+/// Resolves all assets required to price the given symbols in the
+/// project's base currency, including any triangulation intermediaries.
+///
+/// Parameters
+/// ----------
+/// symbols : str | [Asset] | list[str | [Asset]]
+///     Symbols for which to get the assets. The symbols should be of the
+///     [canonical form][nom-symbol] expected by backtide.
+///
+/// asset_type : str | [AssetType]
+///     For which [asset type] to get the assets.
+///
+/// Returns
+/// -------
+/// list[[Asset]]
+///     Assets corresponding to the provided symbols.
+///
+/// See Also
+/// --------
+/// - backtide.data:get_assets
+/// - backtide.data:list_assets
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.data import validate_symbols
+///
+/// print(validate_symbols(["AAPL", "MSFT"], "stocks"))
+/// ```
+#[pyfunction]
+#[pyo3(signature = (symbols: "str | Asset | Sequence[int | Asset]", asset_type: "str | AssetType") -> "list[Asset]")]
+pub fn validate_symbols(
+    symbols: Bound<'_, PyAny>,
+    asset_type: Bound<'_, PyAny>,
+) -> PyResult<Vec<Asset>> {
+    let symbols = parse_asset(symbols)?;
+    let asset_type = parse_asset_type(asset_type)?;
+
+    let downloader = DataDownload::get()?;
+    Ok(downloader.validate_symbols(symbols, asset_type)?)
 }

@@ -13,7 +13,7 @@ from backtide.core.data import (
     Currency,
     Exchange,
     Interval,
-    get_asset,
     get_assets,
     list_assets,
+    validate_symbols,
 )

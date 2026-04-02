@@ -89,6 +89,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures",
+ "indexmap 2.13.0",
  "moka",
  "pyo3",
  "pythonize",

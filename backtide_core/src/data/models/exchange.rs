@@ -139,7 +139,7 @@ impl Exchange {
             XHKG => ("Hong Kong Stock Exchange", HKG, "Hong Kong", "HKG", HKD),
             XICE => ("Nasdaq Iceland", ISL, "Reykjavik", "IC", ISK),
             XIDX => ("Indonesia Stock Exchange", IDN, "Jakarta", "JK", IDR),
-            XIST => ("Borsa Istanbul", TUR, "Istanbul", "IS", TRY),
+            XIST => ("Borsa Istanbul", TUR, "Istanbul", "IST", TRY),
             XJPX => ("Japan Exchange Group", JPN, "Tokyo", "JPX", JPY),
             XKAR => ("Pakistan Stock Exchange", PAK, "Karachi", "KA", PKR),
             XKLS => ("Bursa Malaysia", MYS, "Kuala Lumpur", "KL", MYR),

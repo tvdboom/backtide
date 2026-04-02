@@ -79,7 +79,9 @@ A data source from which Backtide fetches historical market data. Each
 [](){#nom-symbol}
 <strong id="symbol">symbol</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
-A short, provider-specific string that uniquely identifies an [asset][nom-asset]
-within a data source — for example `AAPL`, `BTC/USDT`, or `EURUSD=X`. The same
-underlying asset may carry different symbols across different [providers][nom-provider].
+A short string that uniquely identifies an [asset][nom-asset]. Backtide uses a canonical
+symnbol convention since the same underlying asset may carry different symbols across
+[providers][nom-provider]. For stocks and ETFs, symbols are of the form expected by the
+yahoo data provider (e.g., `AAPL` or `ASML.AS`). For forex and cryptos, symbols are of
+the form `base-quote` (e.g., `BTC-USDT`, or `EUR-USD`).
 </div>

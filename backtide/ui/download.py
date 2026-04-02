@@ -17,8 +17,8 @@ from backtide.core.data import (
     Currency,
     Exchange,
     Interval,
-    get_assets,
     list_assets,
+    validate_symbols,
 )
 from backtide.ui.utils import (
     _fmt_number,
@@ -29,9 +29,152 @@ from backtide.ui.utils import (
 )
 from backtide.utils.constants import MAX_ASSET_SELECTION, MAX_PRELOADED_ASSETS
 
-config = get_config()
-if config.display.timezone:
-    tz = ZoneInfo(config.display.timezone)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+def draw_asset_df(assets: list[Asset]) -> int:
+    """Draw a Streamlit dataframe of a list of assets.
+
+    The display includes asset metadata and images.
+
+    Parameters
+    ----------
+    assets : list[Asset]
+        Assets to display in the table.
+
+    Returns
+    -------
+    int
+        Number of rows expected to be downloaded for the equested assets.
+
+    """
+    data = []
+    total_rows = 0
+    for asset in assets:
+        # Determine the download range per asset
+        asset_start = datetime.fromtimestamp(asset.earliest_ts, tz=tz)
+        asset_end = datetime.fromtimestamp(asset.latest_ts, tz=tz)
+
+        if not is_intraday:
+            asset_start = asset_start.date()
+            asset_end = asset_end.date()
+
+        if not full_history:
+            asset_start = max(start_ts, asset_start)
+            asset_end = min(end_ts, asset_end)
+
+        # Add row to dataframe
+        row = {"Symbol": asset.symbol, "Start": asset_start, "End": asset_end}
+
+        if logokit_key and asset.asset_type.is_equity:
+            row["Logo"] = _get_logokit_url(asset, logokit_key)
+
+        if asset.asset_type.is_equity:
+            row["Name"] = asset.name
+            if isinstance(asset.exchange, Exchange):
+                row["Country"] = get_flag(asset.exchange.country.alpha2)
+            else:
+                row["Country"] = ""
+            row["Exchange"] = str(asset.exchange)
+            row["Currency"] = str(asset.quote)
+        elif asset.asset_type == AssetType.Forex or logokit_key:
+            if isinstance(asset.base, Currency):
+                row["Base"] = get_flag(asset.base.country.alpha2)
+            else:
+                row["Base"] = _get_logokit_url(asset, logokit_key)
+            if isinstance(asset.quote, Currency):
+                row["Quote"] = get_flag(asset.quote.country.alpha2)
+            else:
+                row["Quote"] = _get_logokit_url(asset, logokit_key, use_quote=True)
+
+        data.append(row)
+
+        # Calculate estimated number of rows for this asset per interval
+        delta_minutes = max((asset_end - asset_start).total_seconds() / 60, 1)
+        delta_days = (asset_end - asset_start).days
+
+        for interval in intervals:
+            if asset_type in (AssetType.Stocks, AssetType.Etf):
+                # Stocks / ETFs: 8/5
+                if interval.is_intraday():
+                    effective_minutes = delta_minutes * (5 / 7) * (8 / 24)
+                    total_rows += max(int(effective_minutes // interval.minutes()), 1)
+                else:
+                    trading_days = delta_days * (5 / 7)
+                    total_rows += max(int(trading_days // (interval.minutes() / 1440)), 1)
+
+            elif asset_type == AssetType.Forex:
+                # Forex: 24/5
+                if interval.is_intraday():
+                    effective_minutes = delta_minutes * (5 / 7)
+                    total_rows += max(int(effective_minutes // interval.minutes()), 1)
+                else:
+                    trading_days = delta_days * (5 / 7)
+                    total_rows += max(int(trading_days // (interval.minutes() / 1440)), 1)
+
+            else:
+                # Crypto: 24/7
+                total_rows += max(int(delta_minutes // interval.minutes()), 1)
+
+    data = pd.DataFrame(data)
+
+    ts_format = cfg.display.datetime_format() if is_intraday else cfg.display.date_format
+    column_config = {
+        "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+        "Start": st.column_config.DatetimeColumn("Start", format=ts_format),
+        "End": st.column_config.DatetimeColumn("End", format=ts_format),
+    }
+
+    column_order = ["Symbol", "Start", "End"]
+
+    if "Logo" in data.columns:
+        data = data.set_index("Logo")
+        column_config["Logo"] = st.column_config.ImageColumn(width="small", pinned=True)
+
+    if "Name" in data.columns:
+        column_config["Name"] = st.column_config.TextColumn("Name")  # No width = stretch
+        column_order.insert(1, "Name")
+
+    if "Country" in data.columns:
+        column_config["Country"] = st.column_config.ImageColumn("Country", width=60)
+        column_order.insert(2, "Country")
+
+    if "Exchange" in data.columns:
+        column_config["Exchange"] = st.column_config.TextColumn("Exchange", width="small")
+        column_order.insert(3, "Exchange")
+
+    if "Currency" in data.columns:
+        column_config["Currency"] = st.column_config.TextColumn("Currency", width="small")
+        column_order.insert(4, "Currency")
+
+    if "Base" in data.columns:
+        column_config["Base"] = st.column_config.ImageColumn("Base", width=-50)
+        column_order.insert(0, "Base")
+
+    if "Quote" in data.columns:
+        column_config["Quote"] = st.column_config.ImageColumn("Quote", width=-50)
+        column_order.insert(2, "Quote")
+
+    st.dataframe(
+        data=data,
+        height="stretch",
+        hide_index=data.index.name is None,
+        column_config=column_config,
+        column_order=column_order,
+    )
+
+    return total_rows
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Streamlit page
+# ─────────────────────────────────────────────────────────────────────────────
+
+cfg = get_config()
+if cfg.display.timezone:
+    tz = ZoneInfo(cfg.display.timezone)
 else:
     tz = datetime.now().astimezone().tzinfo
 
@@ -84,7 +227,7 @@ else:
 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
 asset_d, currency_d = _get_asset_type_description(st.session_state.asset_type_download)
 
-assets = col1.multiselect(
+symbols = col1.multiselect(
     label="Symbols",
     key="assets_download",
     options=sorted(filtered_assets, key=lambda a: a.symbol),
@@ -98,8 +241,8 @@ assets = col1.multiselect(
     help=asset_d,
 )
 
-# Convert custom symbols to assets and retrieve all metadata for predefined assets
-assets = get_assets([getattr(a, "symbol", a) for a in assets], asset_type)
+# Convert custom symbols to assets and add triangulation currencies
+assets = validate_symbols(symbols, asset_type)
 
 col2.selectbox(
     label="Currency",
@@ -145,7 +288,7 @@ else:
             min_value=earliest_ts,
             max_value=datetime.now(tz=tz),
             step=step,
-            format=config.display.date_format,
+            format=cfg.display.date_format,
             help="Download data starting from this timestamp (inclusive).",
         ).replace(tzinfo=tz)
 
@@ -155,7 +298,7 @@ else:
             min_value=start_ts,
             max_value=datetime.now(tz=tz),
             step=step,
-            format=config.display.date_format,
+            format=cfg.display.date_format,
             help="Download data up to this timestamp (exclusive).",
         ).replace(tzinfo=tz)
     else:
@@ -165,7 +308,7 @@ else:
             value=earliest_ts,
             min_value=earliest_ts,
             max_value="today",
-            format=config.display.date_format,
+            format=cfg.display.date_format,
             help="Download data starting from this date (inclusive).",
         )
 
@@ -174,7 +317,7 @@ else:
             value=latest_ts,
             min_value=start_ts,
             max_value="today",
-            format=config.display.date_format,
+            format=cfg.display.date_format,
             help="Download data up to this date (exclusive).",
         )
 
@@ -196,122 +339,18 @@ if is_enabled:
     BYTES_PER_ROW = 150  # Estimated memory required per OHLC bar
     ROWS_PER_SECOND = 40_000  # Estimated number of rows downloaded per second
 
-    logokit_key = config.display.logokit_api_key
+    logokit_key = cfg.display.logokit_api_key
     get_flag = lambda code: f"https://flagcdn.com/80x60/{code.lower()}.png"
 
     with st.expander("Download overview", icon=":material/archive:", expanded=True):
-        data = []
         total_rows = 0
 
-        for asset in assets:
-            # Determine the download range per asset
-            asset_start = datetime.fromtimestamp(asset.earliest_ts, tz=tz)
-            asset_end = datetime.fromtimestamp(asset.latest_ts, tz=tz)
-
-            if not is_intraday:
-                asset_start = asset_start.date()
-                asset_end = asset_end.date()
-
-            if not full_history:
-                asset_start = max(start_ts, asset_start)
-                asset_end = min(end_ts, asset_end)
-
-            # Add row to dataframe
-            row = {"Symbol": asset.symbol, "Start": asset_start, "End": asset_end}
-
-            if logokit_key and asset.asset_type.is_equity:
-                row["Logo"] = _get_logokit_url(asset, logokit_key)
-
-            if asset.asset_type.is_equity:
-                row["Name"] = asset.name
-                if isinstance(asset.exchange, Exchange):
-                    row["Country"] = get_flag(asset.exchange.country.alpha2)
-                else:
-                    row["Country"] = ""
-                row["Exchange"] = str(asset.exchange)
-                row["Currency"] = str(asset.quote)
-            elif asset.asset_type == AssetType.Forex or logokit_key:
-                if isinstance(asset.quote, Currency):
-                    row["Base"] = get_flag(asset.base.country.alpha2)
-                    row["Quote"] = get_flag(asset.quote.country.alpha2)
-                else:
-                    row["Base"] = _get_logokit_url(asset, logokit_key)
-                    row["Quote"] = _get_logokit_url(asset, logokit_key, use_quote=True)
-
-            data.append(row)
-
-            # Calculate estimated number of rows for this asset per interval
-            delta_minutes = max((asset_end - asset_start).total_seconds() / 60, 1)
-            delta_days = (asset_end - asset_start).days
-
-            for interval in intervals:
-                if asset_type in (AssetType.Stocks, AssetType.Etf):
-                    # Stocks / ETFs: 8/5
-                    if interval.is_intraday():
-                        effective_minutes = delta_minutes * (5 / 7) * (8 / 24)
-                        total_rows += max(int(effective_minutes // interval.minutes()), 1)
-                    else:
-                        trading_days = delta_days * (5 / 7)
-                        total_rows += max(int(trading_days // (interval.minutes() / 1440)), 1)
-
-                elif asset_type == AssetType.Forex:
-                    # Forex: 24/5
-                    if interval.is_intraday():
-                        effective_minutes = delta_minutes * (5 / 7)
-                        total_rows += max(int(effective_minutes // interval.minutes()), 1)
-                    else:
-                        trading_days = delta_days * (5 / 7)
-                        total_rows += max(int(trading_days // (interval.minutes() / 1440)), 1)
-
-                else:
-                    # Crypto: 24/7
-                    total_rows += max(int(delta_minutes // interval.minutes()), 1)
-
-        data = pd.DataFrame(data)
-
-        ts_format = config.display.datetime_format() if is_intraday else config.display.date_format
-        column_config = {
-            "Symbol": st.column_config.TextColumn("Symbol", width="small"),
-            "Start": st.column_config.DatetimeColumn("Start", format=ts_format),
-            "End": st.column_config.DatetimeColumn("End", format=ts_format),
-        }
-
-        column_order = ["Symbol", "Start", "End"]
-
-        if "Logo" in data.columns:
-            data = data.set_index("Logo")
-            column_config["Logo"] = st.column_config.ImageColumn(width="small", pinned=True)
-
-        if "Name" in data.columns:
-            column_config["Name"] = st.column_config.TextColumn("Name")  # No width = stretch
-            column_order.insert(1, "Name")
-
-        if "Country" in data.columns:
-            column_config["Country"] = st.column_config.ImageColumn("Country", width=60)
-            column_order.insert(2, "Country")
-
-        if "Exchange" in data.columns:
-            column_config["Exchange"] = st.column_config.TextColumn("Exchange", width="small")
-            column_order.insert(3, "Exchange")
-
-        if "Currency" in data.columns:
-            column_config["Currency"] = st.column_config.TextColumn("Currency", width="small")
-            column_order.insert(4, "Currency")
-
-        if "Base" in data.columns:
-            column_config["Base"] = st.column_config.ImageColumn("Base", width=-50)
-            column_order.insert(0, "Base")
-
-        if "Quote" in data.columns:
-            column_config["Quote"] = st.column_config.ImageColumn("Quote", width=-50)
-            column_order.insert(2, "Quote")
-
-        st.dataframe(
-            data=data,
-            hide_index=data.index.name is None,
-            column_config=column_config,
-            column_order=column_order,
-        )
+        if asset_type.is_equity:
+            n_symbols = len(symbols)
+            for assets in [assets[:n_symbols], assets[n_symbols:]]:
+                total_rows += draw_asset_df(assets)
+        else:
+            total_rows += draw_asset_df(assets)
 
         estimated_memory = (total_rows * BYTES_PER_ROW) / (1024**2)
         estimated_seconds = int(total_rows / ROWS_PER_SECOND)
