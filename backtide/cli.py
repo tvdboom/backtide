@@ -57,7 +57,7 @@ def launch(address: str, port: str, log_level: str):
     click.echo("🚀  Launching app...")
 
     cfg = get_config()
-    init_tracing(log_level)
+    init_tracing(log_level or cfg.general.log_level)
 
     run(
         main_script_path="backtide/ui/app.py",

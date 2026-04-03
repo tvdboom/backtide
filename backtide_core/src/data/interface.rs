@@ -1,13 +1,13 @@
 //! Python interface for the data module.
 
 use crate::constants::Symbol;
-use crate::data::download::DataDownload;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
 use pyo3::{pyfunction, Bound, PyAny, PyResult};
 use std::str::FromStr;
+use crate::engine::Engine;
 
 /// Parse input from Python into a list of symbols.
 fn parse_asset(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
@@ -85,8 +85,8 @@ pub fn get_assets(symbols: Bound<'_, PyAny>, asset_type: Bound<'_, PyAny>) -> Py
     let symbols = parse_asset(symbols)?;
     let asset_type = parse_asset_type(asset_type)?;
 
-    let downloader = DataDownload::get()?;
-    Ok(downloader.get_assets(symbols, asset_type)?)
+    let engine = Engine::get()?;
+    Ok(engine.get_assets(symbols, asset_type)?)
 }
 
 /// List available assets for a given asset type.
@@ -125,8 +125,8 @@ pub fn get_assets(symbols: Bound<'_, PyAny>, asset_type: Bound<'_, PyAny>) -> Py
 pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<Asset>> {
     let asset_type = parse_asset_type(asset_type)?;
 
-    let downloader = DataDownload::get()?;
-    Ok(downloader.list_assets(asset_type, limit)?)
+    let engine = Engine::get()?;
+    Ok(engine.list_assets(asset_type, limit)?)
 }
 
 /// Validate a set of symbols.
@@ -169,6 +169,6 @@ pub fn validate_symbols(
     let symbols = parse_asset(symbols)?;
     let asset_type = parse_asset_type(asset_type)?;
 
-    let downloader = DataDownload::get()?;
-    Ok(downloader.validate_symbols(symbols, asset_type)?)
+    let engine = Engine::get()?;
+    Ok(engine.validate_symbols(symbols, asset_type)?)
 }

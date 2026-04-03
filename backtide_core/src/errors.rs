@@ -8,9 +8,9 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;
 use thiserror::Error;
 
-/// Errors that the [`DataIngester`] implementation might return.
+/// Errors that the [`Engine`] implementation might return.
 #[derive(Debug, Error)]
-pub enum DataError {
+pub enum EngineError {
     /// Failed to authenticate (e.g. provider crumb fetch failed).
     #[error("authentication failed: {0}")]
     Auth(String),

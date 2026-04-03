@@ -241,8 +241,12 @@ symbols = col1.multiselect(
     help=asset_d,
 )
 
-# Convert custom symbols to assets and add triangulation currencies
-assets = validate_symbols(symbols, asset_type)
+try:
+    # Convert custom symbols to assets and add triangulation currencies
+    assets = validate_symbols(symbols, asset_type)
+except RuntimeError as ex:
+    assets = []
+    st.error(ex, icon="❌")
 
 col2.selectbox(
     label="Currency",
