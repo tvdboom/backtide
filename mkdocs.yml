@@ -138,6 +138,10 @@ nav:
             - Exchange: api/models/exchange.md
             - GeneralConfig: api/models/generalconfig.md
             - Interval: api/models/interval.md
+            - LogLevel: api/models/loglevel.md
+        - utils:
+            - clear_cache: api/utils/clear_cache.md
+            - init_logging: api/utils/init_logging.md
     - FAQ: faq.md
     - Contributing: contributing.md
     - Dependencies: dependencies.md

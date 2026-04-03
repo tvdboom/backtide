@@ -1,6 +1,6 @@
 use crate::data::providers::provider::Provider;
 use pyo3::exceptions::PyValueError;
-use pyo3::{pyclass, pymethods, Bound, Py, PyAny, PyResult, Python};
+use pyo3::{pyclass, pymethods, Borrowed, Bound, FromPyObject, Py, PyAny, PyErr, PyResult, Python};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
@@ -11,7 +11,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// - backtide.data:Asset
 /// - backtide.data:Bar
 /// - backtide.data:Interval
-#[pyclass(from_py_object, module = "backtide.data")]
+#[pyclass(skip_from_py_object, module = "backtide.data")]
 #[derive(
     Clone,
     Copy,
@@ -53,7 +53,7 @@ impl AssetType {
 
     #[new]
     pub fn new(s: &str) -> PyResult<Self> {
-        s.parse().map_err(|_| PyValueError::new_err(format!("invalid AssetType: {s}")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("unknown AssetType: {s}")))
     }
 
     /// Make the class pickable (required by streamlit).
@@ -105,5 +105,20 @@ impl AssetType {
             Self::Forex => ":material/currency_exchange:",
             Self::Crypto => ":material/currency_bitcoin:",
         }
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for AssetType {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+        // First try a direct downcast
+        if let Ok(bound) = obj.cast::<AssetType>() {
+            return Ok(bound.borrow().clone());
+        }
+
+        // Else parse from string
+        let s: String = obj.extract()?;
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown asset_type {s:?}.")))
     }
 }

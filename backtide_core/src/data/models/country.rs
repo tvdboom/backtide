@@ -1,3 +1,4 @@
+use crate::data::models::currency::Currency;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -391,8 +392,14 @@ impl Country {
 impl<'a, 'py> FromPyObject<'a, 'py> for Country {
     type Error = PyErr;
 
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+        // First try a direct downcast
+        if let Ok(bound) = obj.cast::<Country>() {
+            return Ok(bound.borrow().clone());
+        }
+
+        // Else parse from string
         let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("unknown country {s:?}")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown country {s:?}.")))
     }
 }

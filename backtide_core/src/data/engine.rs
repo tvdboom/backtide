@@ -1,19 +1,15 @@
-//! Global [`DataDownload`] singleton — the entry point for all data access.
-//!
-//! Wraps one or more [`DataProvider`] implementations (keyed by [`AssetType`]),
-//! a shared Tokio runtime, and a TTL asset cache.
+//! Implementation of data related methods for [`Engine`].
 
-use crate::config::Config;
-use crate::constants::{Symbol};
+use crate::constants::Symbol;
 use crate::data::errors::DataResult;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
+use crate::engine::Engine;
 use futures::future::{join_all, try_join_all};
 use indexmap::IndexMap;
-use std::sync::{Arc};
+use std::sync::Arc;
 use tracing::{debug, instrument};
-use crate::engine::Engine;
 
 impl Engine {
     // ────────────────────────────────────────────────────────────────────────
@@ -57,11 +53,10 @@ impl Engine {
         symbols: Vec<Symbol>,
         asset_type: AssetType,
     ) -> DataResult<Vec<Asset>> {
-        let cfg = Config::get()?;
-        let base_currency = &cfg.general.base_currency.to_string();
-        let tri_fiat = &cfg.general.triangulation_fiat.to_string();
-        let tri_crypto = &cfg.general.triangulation_crypto;
-        let tri_crypto_pegged = &cfg.general.triangulation_crypto_pegged.to_string();
+        let base_currency = &self.config.general.base_currency.to_string();
+        let tri_fiat = &self.config.general.triangulation_fiat.to_string();
+        let tri_crypto = &self.config.general.triangulation_crypto;
+        let tri_crypto_pegged = &self.config.general.triangulation_crypto_pegged.to_string();
 
         self.rt.block_on(async {
             // Resolve all primary assets concurrently.
@@ -89,7 +84,7 @@ impl Engine {
                 };
 
                 // Try direct conversion first.
-                if self.load_asset_bidirectional(quote, base_currency, at).await.is_ok() {
+                if self.load_asset_bidirectional(&quote, &base_currency, at).await.is_ok() {
                     leg_symbols
                         .entry(format!("{quote}-{base_currency}"))
                         .or_insert_with(|| (quote.clone(), base_currency.clone(), at));
@@ -110,10 +105,10 @@ impl Engine {
                 };
 
                 if quote != mid1 {
-                    insert_leg(quote, mid1);
+                    insert_leg(&quote, mid1);
                 }
                 if mid2 != base_currency {
-                    insert_leg(mid2, base_currency);
+                    insert_leg(mid2, &base_currency);
                 }
             }
 

@@ -1,4 +1,4 @@
-//! Trait that all market-data providers must implement.
+//! Trait that market-data providers must implement.
 
 use crate::constants::Symbol;
 use crate::data::errors::DataResult;

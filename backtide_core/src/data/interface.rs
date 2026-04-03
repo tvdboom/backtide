@@ -3,11 +3,10 @@
 use crate::constants::Symbol;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::engine::Engine;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
 use pyo3::{pyfunction, Bound, PyAny, PyResult};
-use std::str::FromStr;
-use crate::engine::Engine;
 
 /// Parse input from Python into a list of symbols.
 fn parse_asset(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
@@ -15,37 +14,28 @@ fn parse_asset(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
         // Parse symbols: Sequence[str | Asset]
         seq.into_iter()
             .map(|item| {
-                if let Ok(s) = item.extract::<String>() {
-                    Ok(Symbol::from(s))
+                if let Ok(symbol) = item.extract::<String>() {
+                    Ok(symbol)
                 } else if let Ok(asset) = item.extract::<Asset>() {
                     Ok(asset.symbol)
                 } else {
-                    Err(PyValueError::new_err("symbols must be str, Asset, or a sequence of those"))
+                    Err(PyValueError::new_err(
+                        "Parameter symbols must be a str, Asset or a sequence of those.",
+                    ))
                 }
             })
             .collect::<PyResult<_>>()
     } else {
         // Parse symbols: str | Asset
-        if let Ok(s) = symbols.extract::<String>() {
-            Ok(vec![Symbol::from(s)])
+        if let Ok(symbol) = symbols.extract::<String>() {
+            Ok(vec![symbol])
         } else if let Ok(asset) = symbols.extract::<Asset>() {
             Ok(vec![asset.symbol])
         } else {
-            Err(PyValueError::new_err("symbols must be str, Asset, or a sequence of those"))
+            Err(PyValueError::new_err(
+                "Parameter symbols must be a str, Asset or a sequence of those.",
+            ))
         }
-    }
-}
-
-/// Parse input from Python into an asset type.
-fn parse_asset_type(asset_type: Bound<'_, PyAny>) -> PyResult<AssetType> {
-    // Parse asset_type: str | AssetType
-    if let Ok(s) = asset_type.extract::<String>() {
-        AssetType::from_str(&s)
-            .map_err(|e| PyValueError::new_err(format!("invalid asset type: {e}")))
-    } else {
-        asset_type
-            .extract::<AssetType>()
-            .map_err(|e| PyValueError::new_err(format!("invalid asset type: {e}")))
     }
 }
 
@@ -83,7 +73,7 @@ fn parse_asset_type(asset_type: Bound<'_, PyAny>) -> PyResult<AssetType> {
 #[pyo3(signature = (symbols: "str | Asset | Sequence[int | Asset]", asset_type: "str | AssetType") -> "list[Asset]")]
 pub fn get_assets(symbols: Bound<'_, PyAny>, asset_type: Bound<'_, PyAny>) -> PyResult<Vec<Asset>> {
     let symbols = parse_asset(symbols)?;
-    let asset_type = parse_asset_type(asset_type)?;
+    let asset_type = asset_type.extract::<AssetType>()?;
 
     let engine = Engine::get()?;
     Ok(engine.get_assets(symbols, asset_type)?)
@@ -123,7 +113,7 @@ pub fn get_assets(symbols: Bound<'_, PyAny>, asset_type: Bound<'_, PyAny>) -> Py
 #[pyfunction]
 #[pyo3(signature = (asset_type: "str | AssetType", limit: "int"=100))]
 pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<Asset>> {
-    let asset_type = parse_asset_type(asset_type)?;
+    let asset_type = asset_type.extract::<AssetType>()?;
 
     let engine = Engine::get()?;
     Ok(engine.list_assets(asset_type, limit)?)
@@ -167,7 +157,7 @@ pub fn validate_symbols(
     asset_type: Bound<'_, PyAny>,
 ) -> PyResult<Vec<Asset>> {
     let symbols = parse_asset(symbols)?;
-    let asset_type = parse_asset_type(asset_type)?;
+    let asset_type = asset_type.extract::<AssetType>()?;
 
     let engine = Engine::get()?;
     Ok(engine.validate_symbols(symbols, asset_type)?)

@@ -244,8 +244,14 @@ impl Exchange {
 impl<'a, 'py> FromPyObject<'a, 'py> for Exchange {
     type Error = PyErr;
 
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+        // First try a direct downcast
+        if let Ok(bound) = obj.cast::<Exchange>() {
+            return Ok(bound.borrow().clone());
+        }
+
+        // Else parse from string
         let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("unknown exchange {s:?}")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown exchange {s:?}.")))
     }
 }

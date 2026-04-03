@@ -8,28 +8,31 @@ use crate::config::Config;
 use crate::constants::{Symbol, ASSET_CACHE_TTL};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::data::providers::binance::Binance;
+use crate::data::providers::provider::Provider;
 use crate::data::providers::traits::DataProvider;
-use crate::utils::tracing::{init_tracing};
+use crate::data::providers::yahoo::YahooFinance;
+use crate::errors::EngineResult;
+use crate::storage::duckdb::DuckDb;
+use crate::storage::traits::Storage;
+use crate::utils::interface::init_logging_with_level;
 use moka::future::Cache;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use strum::IntoEnumIterator;
 use tokio::runtime::Runtime;
 use tracing::{debug, info};
-use crate::data::providers::binance::Binance;
-use crate::data::providers::provider::Provider;
-use crate::data::providers::yahoo::YahooFinance;
 
 /// Process-wide configuration singleton.
-static ENGINE: OnceLock<Config> = OnceLock::new();
+static ENGINE: OnceLock<Engine> = OnceLock::new();
 
 /// Backtide core engine.
 pub struct Engine {
     /// Global configuration.
-    pub config: Config,
+    pub config: &'static Config,
 
     /// Dedicated runtime for blocking async calls from sync contexts.
-    pub  rt: Runtime,
+    pub rt: Runtime,
 
     /// One provider arc per asset type, potentially shared across types.
     pub providers: HashMap<AssetType, Arc<dyn DataProvider>>,
@@ -37,8 +40,8 @@ pub struct Engine {
     /// TTL asset cache keyed by symbol, avoiding redundant provider round-trips.
     pub asset_cache: Cache<Symbol, Arc<Asset>>,
 
-    // Database which stores all data.
-    //db: Box<dyn DataStorage>
+    /// Database which stores all data.
+    pub db: Box<dyn Storage>,
 }
 
 impl Engine {
@@ -55,12 +58,17 @@ impl Engine {
         if let Some(cfg) = ENGINE.get() {
             Ok(cfg)
         } else {
-            info!("Initializing engine.");
             let _ = ENGINE.set(Self::init()?);
+            info!("Engine initialized.");
             Ok(ENGINE.get().unwrap())
         }
     }
-    
+
+    /// Invalidate all cache in the engine.
+    pub fn clear_cache(&self) {
+        self.asset_cache.invalidate_all();
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     // Private interface
     // ────────────────────────────────────────────────────────────────────────
@@ -72,10 +80,10 @@ impl Engine {
     fn init() -> EngineResult<Self> {
         // Load the configuration from the file or use default.
         let config = Config::get()?;
-        init_tracing(&config.general.log_level.to_string());
+        init_logging_with_level(config.general.log_level);
 
         let rt = Runtime::new()?;
-        let pc = config.data.providers;
+        let pc = &config.data.providers;
 
         // Provider instances are deduplicated — if two asset types share the same
         // variant, they receive the same Arc.
@@ -83,7 +91,8 @@ impl Engine {
         let mut providers: HashMap<AssetType, Arc<dyn DataProvider>> = HashMap::new();
 
         for asset_type in AssetType::iter() {
-            let provider = pc.get(&asset_type).unwrap_or(&asset_type.default());
+            let default = asset_type.default();
+            let provider = pc.get(&asset_type).unwrap_or(&default);
             let p = if let Some(p) = cache.get(provider) {
                 debug!(?asset_type, ?provider, "Reusing existing provider instance");
                 p.clone()
@@ -101,12 +110,16 @@ impl Engine {
             providers.insert(asset_type, p);
         }
 
-        info!(asset_types = providers.len(), "DataDownload initialized");
+        // Initialize the database and create all required tables
+        let db = DuckDb::new(&config.data.storage_path)?;
+        db.init()?;
+
         Ok(Self {
-            config: *config,
+            config,
             providers,
             rt,
             asset_cache: Cache::builder().time_to_live(ASSET_CACHE_TTL).build(),
+            db: Box::new(db),
         })
     }
 }

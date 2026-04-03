@@ -105,7 +105,7 @@ impl From<ConfigError> for PyErr {
 }
 
 /// Tracing logging level.
-#[pyclass(skip_from_py_object)]
+#[pyclass(skip_from_py_object, module = "backtide.config")]
 #[derive(
     Clone,
     Copy,
@@ -142,10 +142,15 @@ impl LogLevel {
 impl<'a, 'py> FromPyObject<'a, 'py> for LogLevel {
     type Error = PyErr;
 
-    /// Parse the currency from a string.
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+        // First try a direct downcast
+        if let Ok(bound) = obj.cast::<LogLevel>() {
+            return Ok(bound.borrow().clone());
+        }
+
+        // Else parse from string
         let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("invalid log_level {s:?}")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown log_level {s:?}.")))
     }
 }
 
@@ -679,7 +684,7 @@ fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
 /// Set the global configuration.
 ///
 /// The configuration can only be set before it's used anywhere, so call this
-/// function at thw start of the process. If the configuration is already used
+/// function at the start of the process. If the configuration is already used
 /// by any backtide functionality, an exception is raised. Read more in the
 /// [user guide][configuration].
 ///
@@ -721,6 +726,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "backtide.config")?;
 
     m.add_class::<PyConfig>()?;
+    m.add_class::<LogLevel>()?;
     m.add_class::<DataConfig>()?;
     m.add_class::<DisplayConfig>()?;
     m.add_class::<GeneralConfig>()?;

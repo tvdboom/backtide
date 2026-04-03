@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// close_ts : int
 ///     Bar close time in UTC (Unix seconds).
 ///
-/// open_ts_exchange : float
+/// open_ts_exchange : int
 ///     Bar open time in the exchange's local timezone (Unix seconds).
 ///
 /// open : float
@@ -54,8 +54,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Bar {
     pub open_ts: i64,
-    pub open_ts_exchange: i64,
     pub close_ts: i64,
+    pub open_ts_exchange: i64,
     pub open: f64,
     pub high: f64,
     pub low: f64,

@@ -402,7 +402,7 @@ impl DataProvider for YahooFinance {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct YahooQuote {
-    /// Yahoo ticker symbol (e.g., `"AAPL"`, `"BTC-USD"`, `"EURUSD=X"`).
+    /// Yahoo ticker symbol.
     pub symbol: String,
 
     /// Short display name, if available.
@@ -414,10 +414,10 @@ pub struct YahooQuote {
     /// ISO 4217 quote currency reported by Yahoo.
     pub currency: Option<String>,
 
-    /// Asset class string (e.g., `"EQUITY"`, `"ETF"`, `"CRYPTOCURRENCY"`).
+    /// Asset class string.
     pub quote_type: Option<String>,
 
-    /// Short exchange code (e.g. `"NMS"`, `"NYQ"`).
+    /// Short exchange code.
     pub exchange: Option<String>,
 
     /// Most recent session volume in units of the base asset.
@@ -521,10 +521,10 @@ struct ChartMeta {
     /// ISO 4217 quote currency.
     currency: Option<String>,
 
-    /// Asset class string (e.g., `"EQUITY"`, `"CRYPTOCURRENCY"`).
+    /// Asset class string.
     instrument_type: Option<String>,
 
-    /// Short exchange code (e.g. `"NMS"`, `"NYQ"`).
+    /// Short exchange code.
     exchange_name: Option<String>,
 
     /// Unix timestamp of the first ever traded bar.

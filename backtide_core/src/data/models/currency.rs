@@ -1,3 +1,4 @@
+use crate::config::LogLevel;
 use crate::data::models::country::Country;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -332,9 +333,14 @@ impl Currency {
 impl<'a, 'py> FromPyObject<'a, 'py> for Currency {
     type Error = PyErr;
 
-    /// Parse the currency from a string.
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+        // First try a direct downcast
+        if let Ok(bound) = obj.cast::<Currency>() {
+            return Ok(bound.borrow().clone());
+        }
+
+        // Else parse from string
         let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("unknown currency {s:?}")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown currency {s:?}.")))
     }
 }

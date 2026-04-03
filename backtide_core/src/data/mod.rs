@@ -10,7 +10,7 @@ use crate::data::providers::provider::Provider;
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
-mod download;
+mod engine;
 pub mod errors;
 mod interface;
 pub mod models;

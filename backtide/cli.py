@@ -8,7 +8,7 @@ Description: Entry point for the CLI application.
 import click
 from streamlit.web.bootstrap import run
 
-from backtide.core import init_tracing
+from backtide.core.utils import init_logging
 from backtide.core.config import get_config
 
 
@@ -54,10 +54,10 @@ def launch(address: str, port: str, log_level: str):
         Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.
 
     """
-    click.echo("🚀  Launching app...")
-
     cfg = get_config()
-    init_tracing(log_level or cfg.general.log_level)
+    init_logging(log_level or cfg.general.log_level)
+
+    click.echo("🚀  Launching app...")
 
     run(
         main_script_path="backtide/ui/app.py",

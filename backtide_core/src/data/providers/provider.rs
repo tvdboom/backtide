@@ -1,5 +1,6 @@
 //! Implementation of the [`Provider`] enum.
 
+use crate::data::models::currency::Currency;
 use pyo3::exceptions::PyValueError;
 use pyo3::{pyclass, pymethods, Borrowed, FromPyObject, PyAny, PyErr};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -36,13 +37,14 @@ impl Provider {
 impl<'a, 'py> FromPyObject<'a, 'py> for Provider {
     type Error = PyErr;
 
-    /// Parse the provider from a string.
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+        // First try a direct downcast
+        if let Ok(bound) = obj.cast::<Provider>() {
+            return Ok(bound.borrow().clone());
+        }
+
+        // Else parse from string
         let s: String = obj.extract()?;
-        s.parse().map_err(|_| {
-            PyValueError::new_err(format!(
-                "unknown provider {s:?}; expected one of: yahoo, binance, kraken"
-            ))
-        })
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown provider {s:?}.")))
     }
 }
