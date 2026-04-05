@@ -1,18 +1,9 @@
-//! Configuration module.
-//!
-//! Config is loaded once into a process-wide singleton ([`Config::get`]) from
-//! the first `backtide.{toml,yaml,yml,json}` file found in the working
-//! directory or its parent. If no file is found, defaults are used.
-//!
-//! ## Structure
-//!
-//! | Section     | Purpose                                              |
-//! |-------------|------------------------------------------------------|
-//! | `[general]` | Portfolio-wide settings                              |
-//! | `[data]`    | Data fetching and storage settings                   |
-//! | `[display]` | UI / Streamlit app                                   |
-
-use crate::constants::{CONFIG_FILE_NAME, DEFAULT_STORAGE_PATH};
+use crate::config::config::{Config, CONFIG};
+use crate::config::errors::ConfigError;
+use crate::config::models::log_level::LogLevel;
+use crate::config::models::triangulation_strategy::TriangulationStrategy;
+use crate::config::utils::{fetch_config, parse_config};
+use crate::constants::DEFAULT_STORAGE_PATH;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
 use crate::data::providers::provider::Provider;
@@ -21,176 +12,10 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::OnceLock;
-use strum::{Display, EnumString, IntoEnumIterator};
-use thiserror::Error;
-
-// ────────────────────────────────────────────────────────────────────────────
-// Configuration structs
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Process-wide configuration singleton.
-static CONFIG: OnceLock<Config> = OnceLock::new();
-
-/// Backtide configuration.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Config {
-    /// Portfolio-wide settings.
-    pub general: GeneralConfig,
-
-    /// Settings that control how market data is fetched and stored.
-    pub data: DataConfig,
-
-    /// Settings that control how values are presented in the frontend.
-    pub display: DisplayConfig,
-}
-
-impl Config {
-    /// Return a `&'static` reference to the global configuration.
-    ///
-    /// Initializes from disk on first call; subsequent calls are free.
-    pub fn get() -> ConfigResult<&'static Config> {
-        // Replace block with get_or_try_init when it becomes stable
-        if let Some(cfg) = CONFIG.get() {
-            Ok(cfg)
-        } else {
-            let _ = CONFIG.set(fetch_config()?);
-            Ok(CONFIG.get().unwrap())
-        }
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Utilities
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Errors that can occur while loading configuration.
-#[derive(Debug, Error)]
-pub enum ConfigError {
-    #[error("I/O error reading config: {0}")]
-    Io(#[from] std::io::Error),
-
-    /// TOML parse failure.
-    #[error("TOML parse error: {0}")]
-    Toml(#[from] toml::de::Error),
-
-    /// JSON parse failure.
-    #[error("JSON parse error: {0}")]
-    Json(#[from] serde_json::Error),
-
-    /// YAML parse failure.
-    #[error("YAML parse error: {0}")]
-    Yaml(#[from] serde_yml::Error),
-
-    /// The file extension is not one of `.toml`, `.yaml`, `.yml`, `.json`.
-    #[error("unsupported config format '{0}'; expected toml, yaml, yml, or json")]
-    UnsupportedFormat(String),
-
-    /// [`set_config`] was called after the singleton was set.
-    #[error("The configuration has already been used; set_config cannot be called anymore.")]
-    AlreadySet,
-}
-
-pub type ConfigResult<T> = Result<T, ConfigError>;
-
-impl From<ConfigError> for PyErr {
-    fn from(e: ConfigError) -> PyErr {
-        PyRuntimeError::new_err(e.to_string())
-    }
-}
-
-/// Tracing logging level.
-#[pyclass(skip_from_py_object, module = "backtide.config")]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    Eq,
-    Hash,
-    PartialEq,
-    Display,
-    EnumString,
-    SerializeDisplay,
-    DeserializeFromStr,
-)]
-#[strum(ascii_case_insensitive)]
-pub enum LogLevel {
-    Trace,
-    Debug,
-    Info,
-    #[default]
-    Warn,
-    Error,
-}
-
-#[pymethods]
-impl LogLevel {
-    #[classattr]
-    const __RUST_ENUM__: bool = true;
-
-    fn __repr__(&self) -> String {
-        self.to_string().to_lowercase()
-    }
-}
-
-impl<'a, 'py> FromPyObject<'a, 'py> for LogLevel {
-    type Error = PyErr;
-
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
-        // First try a direct downcast
-        if let Ok(bound) = obj.cast::<LogLevel>() {
-            return Ok(bound.borrow().clone());
-        }
-
-        // Else parse from string
-        let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown log_level {s:?}.")))
-    }
-}
-
-/// Search CWD or its parent for a recognized config file.
-fn find_config_file() -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    let candidates = [cwd.as_path(), cwd.parent()?];
-
-    for dir in candidates {
-        for ext in ["toml", "yaml", "yml", "json"] {
-            let path = dir.join(format!("{CONFIG_FILE_NAME}.{ext}"));
-            if path.exists() {
-                return Some(path);
-            }
-        }
-    }
-
-    None
-}
-
-/// Deserialize a config file, dispatching on its extension.
-fn parse_config(path: &Path) -> ConfigResult<Config> {
-    let text = std::fs::read_to_string(path)?;
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("toml") => Ok(toml::from_str(&text)?),
-        Some("yaml" | "yml") => Ok(serde_yml::from_str(&text)?),
-        Some("json") => Ok(serde_json::from_str(&text)?),
-        Some(ext) => Err(ConfigError::UnsupportedFormat(ext.to_owned())),
-        None => Err(ConfigError::UnsupportedFormat(String::new())),
-    }
-}
-
-/// Load the config without updating the singleton.
-fn fetch_config() -> ConfigResult<Config> {
-    find_config_file().map(|path| parse_config(&path)).unwrap_or(Ok(Config::default()))
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Python interface
-// ────────────────────────────────────────────────────────────────────────────
+use strum::IntoEnumIterator;
 
 /// Backtide configuration.
 ///
@@ -302,14 +127,19 @@ impl PyConfig {
 ///
 /// Attributes
 /// ----------
-/// base_currency : str, default="USD"
+/// base_currency : str | [Currency], default="USD"
 ///     ISO 4217 currency code that all prices are normalized to.
 ///
-/// triangulation_fiat : str, default="USD"
-///     The fiat currency used as an intermediate when no direct conversion
-///     path exists between a fiat currency and `base_currency`. For example,
-///     if converting `PLN → THB` and no `PLN-THB` pair is available, the engine
-///     will route through this currency as `PLN` → `triangulation_fiat` → `THB`.
+/// triangulation_strategy : str | [TriangulationStrategy], default="direct"
+///     With which approach to convert currencies to `base_currency`. Read more
+///     in the [user guide][currency-conversion].
+///
+/// triangulation_fiat : str | [Currency], default="USD"
+///     The fiat currency used as an intermediate between a fiat currency and
+///     `base_currency`. This method is chosen when no direct conversion path exists
+///     or when this method has longer history and `triangulation_strategy="earliest"`
+///     For example, if converting `PLN → THB` and no `PLN-THB` pair is available, the
+///     engine will route through this currency as `PLN` → `triangulation_fiat` → `THB`.
 ///     The chosen currency is expected to have pairs with all the currencies the
 ///     project works with.
 ///
@@ -324,13 +154,12 @@ impl PyConfig {
 /// triangulation_crypto_pegged : str, default="USD"
 ///     The fiat currency to which `triangulation_crypto` is pegged, for the
 ///     purposes of bridging between the crypto and fiat conversion graphs. When
-///     a conversion path crosses the crypto/fiat boundary (e.g., `BTC → EUR`),
+///     a conversion path crosses the crypto/fiat boundary (e.g., `USDT → USD`),
 ///     the engine treats `triangulation_crypto`/`triangulation_crypto_pegged`
 ///     as the crossing pair at parity 1:1.
 ///
 /// log_level : str, defeault="warn"
-///     Minimum tracing log level. Choose from: "error", "warn", "info",
-///    "trace".
+///     Minimum tracing log level. Choose from: "error", "warn", "info", "trace".
 ///
 /// See Also
 /// --------
@@ -342,6 +171,7 @@ impl PyConfig {
 #[serde(default)]
 pub struct GeneralConfig {
     pub base_currency: Currency,
+    pub triangulation_strategy: TriangulationStrategy,
     pub triangulation_fiat: Currency,
     pub triangulation_crypto: String,
     pub triangulation_crypto_pegged: Currency,
@@ -354,38 +184,38 @@ impl GeneralConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (base_currency="USD", triangulation_fiat="USD", triangulation_crypto="USDT", triangulation_crypto_pegged="USD", log_level="warn"))]
+    #[pyo3(signature = (
+        base_currency=None,
+        triangulation_strategy=None,
+        triangulation_fiat=None,
+        triangulation_crypto="USDT",
+        triangulation_crypto_pegged=None,
+        log_level=None
+    ))]
     fn new(
-        base_currency: &str,
-        triangulation_fiat: &str,
+        base_currency: Option<Currency>,
+        triangulation_strategy: Option<TriangulationStrategy>,
+        triangulation_fiat: Option<Currency>,
         triangulation_crypto: &str,
-        triangulation_crypto_pegged: &str,
-        log_level: &str,
+        triangulation_crypto_pegged: Option<Currency>,
+        log_level: Option<LogLevel>,
     ) -> PyResult<Self> {
         Ok(Self {
-            base_currency: Currency::from_str(base_currency).map_err(|_| {
-                PyValueError::new_err(format!("Invalid base_currency: {base_currency}"))
-            })?,
-            triangulation_fiat: Currency::from_str(triangulation_fiat).map_err(|_| {
-                PyValueError::new_err(format!("Invalid triangulation_fiat: {triangulation_fiat}"))
-            })?,
+            base_currency: base_currency.unwrap_or(Currency::USD),
+            triangulation_strategy: triangulation_strategy
+                .unwrap_or(TriangulationStrategy::default()),
+            triangulation_fiat: triangulation_fiat.unwrap_or(Currency::USD),
             triangulation_crypto: triangulation_crypto.to_owned(),
-            triangulation_crypto_pegged: Currency::from_str(triangulation_crypto_pegged).map_err(
-                |_| {
-                    PyValueError::new_err(format!(
-                        "Invalid triangulation_crypto_pegged: {triangulation_crypto_pegged}"
-                    ))
-                },
-            )?,
-            log_level: LogLevel::from_str(log_level)
-                .map_err(|_| PyValueError::new_err(format!("Invalid log_level: {log_level}")))?,
+            triangulation_crypto_pegged: triangulation_crypto_pegged.unwrap_or(Currency::USD),
+            log_level: log_level.unwrap_or(LogLevel::default()),
         })
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "GeneralConfig(base_currency={:?}, triangulation_fiat={:?}, triangulation_crypto={:?}, triangulation_crypto_pegged={:?}, log_level={:?})",
+            "GeneralConfig(base_currency={:?}, triangulation_strategy={:?}, triangulation_fiat={:?}, triangulation_crypto={:?}, triangulation_crypto_pegged={:?}, log_level={:?})",
             self.base_currency.to_string(),
+            self.triangulation_strategy.to_string(),
             self.triangulation_fiat.to_string(),
             self.triangulation_crypto,
             self.triangulation_crypto_pegged.to_string(),
@@ -562,7 +392,14 @@ impl DisplayConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (date_format="YYYY-MM-DD", time_format="HH:MM", timezone=None, logokit_api_key=None, address=None, port=8501))]
+    #[pyo3(signature = (
+        date_format="YYYY-MM-DD",
+        time_format="HH:MM",
+        timezone=None,
+        logokit_api_key=None,
+        address=None,
+        port=8501
+    ))]
     fn new(
         date_format: &str,
         time_format: &str,
@@ -641,7 +478,7 @@ impl DisplayConfig {
 /// pprint(cfg.to_dict())
 /// ```
 #[pyfunction]
-fn get_config(py: Python<'_>) -> PyResult<PyConfig> {
+pub fn get_config(py: Python<'_>) -> PyResult<PyConfig> {
     let cfg = CONFIG.get().cloned().unwrap_or(fetch_config()?);
     PyConfig::from_rust(py, cfg)
 }
@@ -676,7 +513,7 @@ fn get_config(py: Python<'_>) -> PyResult<PyConfig> {
 /// set_config(load_config("path/to/config.toml")) # norun
 /// ```
 #[pyfunction]
-fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
+pub fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
     let cfg = parse_config(path.as_ref())?;
     PyConfig::from_rust(py, cfg)
 }
@@ -714,178 +551,9 @@ fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
 /// print(cfg.general.base_currency)
 /// ```
 #[pyfunction]
-fn set_config(py: Python<'_>, config: PyConfig) -> PyResult<()> {
+pub fn set_config(py: Python<'_>, config: PyConfig) -> PyResult<()> {
     CONFIG
         .set(config.to_rust(py))
         .map_err(|_| ConfigError::AlreadySet)
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-}
-
-/// Register all config types and free functions into `backtide.core.config`.
-pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
-    let m = PyModule::new(parent.py(), "backtide.config")?;
-
-    m.add_class::<PyConfig>()?;
-    m.add_class::<LogLevel>()?;
-    m.add_class::<DataConfig>()?;
-    m.add_class::<DisplayConfig>()?;
-    m.add_class::<GeneralConfig>()?;
-
-    m.add_function(wrap_pyfunction!(get_config, &m)?)?;
-    m.add_function(wrap_pyfunction!(load_config, &m)?)?;
-    m.add_function(wrap_pyfunction!(set_config, &m)?)?;
-
-    parent.add_submodule(&m)?;
-
-    parent.py().import("sys")?.getattr("modules")?.set_item("backtide.core.config", &m)?;
-
-    Ok(())
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Tests
-// ────────────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Helpers
-    // ────────────────────────────────────────────────────────────────────────────
-
-    /// Write some content to a temporary file.
-    fn write_temp(content: &str, ext: &str) -> NamedTempFile {
-        let mut f = tempfile::Builder::new().suffix(&format!(".{ext}")).tempfile().unwrap();
-        f.write_all(content.as_bytes()).unwrap();
-        f
-    }
-
-    /// Dummy configuration in TOML format.
-    fn config_as_toml() -> &'static str {
-        r#"
-        base_currency = "usd"
-
-        [data]
-        storage_path = "/tmp/test.duckdb"
-
-        [data.providers]
-        stocks = "Yahoo"
-        etf    = "Yahoo"
-        forex  = "Yahoo"
-        crypto = "Binance"
-
-        [display]
-        date_format = "%Y-%m-%d"
-        timezone    = "America/New_York"
-        "#
-    }
-
-    /// Dummy configuration in YAML format.
-    fn config_as_yaml() -> &'static str {
-        r#"
-        base_currency: USD
-        data:
-          storage_path: /tmp/test.duckdb
-          providers:
-            stocks: yahoo
-            etf:    yahoo
-            forex:  yahoo
-            crypto: binance
-        display:
-          date_format: "%Y-%m-%d"
-          timezone: America/New_York
-        "#
-    }
-
-    /// Dummy configuration in JSON format.
-    fn config_as_json() -> &'static str {
-        r#"{
-            "base_currency": "USD",
-            "data": {
-                "storage_path": "/tmp/test.duckdb",
-                "providers": {
-                    "stocks": "Yahoo",
-                    "etf":    "Yahoo",
-                    "forex":  "Yahoo",
-                    "crypto": "Binance"
-                }
-            },
-            "display": {
-                "date_format": "%Y-%m-%d",
-                "timezone":    "America/New_York"
-            }
-        }"#
-    }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Parse config
-    // ────────────────────────────────────────────────────────────────────────────
-
-    #[test]
-    fn parse_toml() {
-        let f = write_temp(config_as_toml(), "toml");
-        let cfg = parse_config(f.path()).unwrap();
-        assert_eq!(cfg.general.base_currency, Currency::USD);
-        assert_eq!(cfg.display.timezone, Some("America/New_York".to_owned()));
-        assert_eq!(cfg.display.date_format, "%Y-%m-%d");
-        assert_eq!(cfg.data.storage_path, PathBuf::from("/tmp/test.duckdb"));
-    }
-
-    #[test]
-    fn parse_json() {
-        let f = write_temp(config_as_json(), "json");
-        let cfg = parse_config(f.path()).unwrap();
-        assert_eq!(cfg.general.base_currency, Currency::USD);
-    }
-
-    #[test]
-    fn parse_yaml() {
-        let f = write_temp(config_as_yaml(), "yaml");
-        let cfg = parse_config(f.path()).unwrap();
-        assert_eq!(cfg.general.base_currency, Currency::USD);
-    }
-
-    #[test]
-    fn parse_yml_extension() {
-        let f = write_temp(config_as_yaml(), "yml");
-        let cfg = parse_config(f.path()).unwrap();
-        assert_eq!(cfg.general.base_currency, Currency::USD);
-    }
-
-    #[test]
-    fn parse_unsupported_extension() {
-        let f = write_temp("", "xml");
-        let err = parse_config(f.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::UnsupportedFormat(ext) if ext == "xml"));
-    }
-
-    #[test]
-    fn parse_no_extension() {
-        // NamedTempFile with no suffix has no extension.
-        let mut f = tempfile::Builder::new().tempfile().unwrap();
-        f.write_all(b"").unwrap();
-        let err = parse_config(f.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::UnsupportedFormat(ext) if ext.is_empty()));
-    }
-
-    #[test]
-    fn parse_missing_file() {
-        let err = parse_config(Path::new("/nonexistent/backtide.config.toml")).unwrap_err();
-        assert!(matches!(err, ConfigError::Io(_)));
-    }
-
-    #[test]
-    fn parse_malformed_toml() {
-        let f = write_temp("base_currency = [[[", "toml");
-        assert!(matches!(parse_config(f.path()).unwrap_err(), ConfigError::Toml(_)));
-    }
-
-    #[test]
-    fn parse_malformed_json() {
-        let f = write_temp("{bad json", "json");
-        assert!(matches!(parse_config(f.path()).unwrap_err(), ConfigError::Json(_)));
-    }
 }

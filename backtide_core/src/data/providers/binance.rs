@@ -6,11 +6,11 @@ use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
 use crate::utils::http::{HttpClient, HttpError};
 use async_trait::async_trait;
-use chrono::Utc;
 use serde::Deserialize;
 use tracing::{debug, info, instrument};
 
@@ -80,14 +80,12 @@ impl Binance {
             .ok_or_else(|| DataError::SymbolNotFound(symbol.to_owned()))
     }
 
-    /// Fetch klines for a symbol between optional Unix timestamps (seconds).
-    ///
-    /// Pass `start_time: Some(0)` with `limit: 1` to retrieve the single
-    /// oldest bar, which gives `earliest_ts`.
+    /// Fetch klines for a symbol between Unix timestamps `start_time` and `end_time`.
     #[instrument(skip(self), fields(%symbol, limit))]
     async fn get_bars(
         &self,
         symbol: &str,
+        interval: Interval,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: usize,
@@ -95,7 +93,7 @@ impl Binance {
         // Build query params dynamically so absent bounds are simply omitted.
         let mut params: Vec<(&str, String)> = vec![
             ("symbol", symbol.to_owned()),
-            ("interval", "1d".to_owned()),
+            ("interval", interval.to_string()),
             ("limit", limit.to_string()),
         ];
 
@@ -133,16 +131,36 @@ impl DataProvider for Binance {
         Self::require_crypto(asset_type)?;
 
         let symbol = Self::parse_canonical_symbol(symbol);
+        let info = self.fetch_symbol_info(&symbol).await?;
 
-        let (info, bars) = tokio::try_join!(
-            self.fetch_symbol_info(&symbol),
-            self.get_bars(&symbol, Some(0), None, 1),
+        Ok(Asset::try_from(info)?)
+    }
+
+    /// Returns the usable download range for an asset at a given interval.
+    #[instrument(skip(self), fields(symbol = %asset.symbol, ?interval))]
+    async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
+        Self::require_crypto(asset.asset_type)?;
+
+        let symbol = Self::parse_canonical_symbol(&asset.symbol);
+
+        let (first, last) = tokio::try_join!(
+            self.get_bars(&symbol, interval, Some(0), None, 1),
+            self.get_bars(&symbol, interval, None, None, 1),
         )?;
 
-        let bar = bars.first().unwrap();
-        let asset = Asset::try_from((info, *bar))?;
+        let earliest_ts = first
+            .into_iter()
+            .next()
+            .ok_or_else(|| DataError::SymbolNotFound(symbol.clone()))?
+            .open_time;
 
-        Ok(asset)
+        let latest_ts = last
+            .into_iter()
+            .next()
+            .ok_or_else(|| DataError::SymbolNotFound(symbol.clone()))?
+            .close_time;
+
+        Ok((earliest_ts, latest_ts))
     }
 
     /// List the spot crypto assets traded on Binance, capped at `limit`.
@@ -213,8 +231,6 @@ impl TryFrom<SymbolInfo> for Asset {
             quote,
             asset_type: AssetType::Crypto,
             exchange: "BINANCE".to_owned(), // Binance has no MIC code.
-            earliest_ts: None,
-            latest_ts: None,
             volume: None,
             price: None,
         })
@@ -262,28 +278,6 @@ impl TryFrom<serde_json::Value> for BinanceKline {
             open_time,
             close,
             close_time,
-        })
-    }
-}
-
-impl TryFrom<(SymbolInfo, BinanceKline)> for Asset {
-    type Error = DataError;
-
-    fn try_from((info, ticker): (SymbolInfo, BinanceKline)) -> DataResult<Self> {
-        let base = info.base_asset;
-        let quote = info.quote_asset;
-
-        Ok(Asset {
-            symbol: canonical_symbol(&info.symbol, &Some(base.clone()), &quote),
-            name: format!("{base}-{quote}"),
-            base: Some(base),
-            quote,
-            asset_type: AssetType::Crypto,
-            exchange: "BINANCE".to_owned(), // Binance has no MIC code.
-            earliest_ts: Some(ticker.open_time),
-            latest_ts: Some(Utc::now().timestamp() as u64),
-            volume: None,
-            price: None,
         })
     }
 }

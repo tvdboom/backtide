@@ -10,6 +10,12 @@ use strum::{EnumIter, EnumString};
 /// A standard forex currency pair.
 ///
 /// Variant names are the conventional 6-character symbols (base + quote).
+///
+/// See Also
+/// --------
+/// - backtide.data:Country
+/// - backtide.data:Currency
+/// - backtide.data:Exchange
 #[pyclass(skip_from_py_object)]
 #[derive(
     Clone,
@@ -184,6 +190,25 @@ impl Display for ForexPair {
 impl ForexPair {
     #[classattr]
     const __RUST_ENUM__: bool = true;
+
+    #[new]
+    pub fn new(s: &str) -> PyResult<Self> {
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown forex pair: {s}")))
+    }
+
+    /// Make the class pickable (required by streamlit).
+    pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
+        let cls = py.get_type::<Self>().into_any();
+        Ok((cls, (self.to_string(),)))
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn __hash__(&self) -> u64 {
+        *self as u64
+    }
 
     fn __repr__(&self) -> String {
         self.to_string()

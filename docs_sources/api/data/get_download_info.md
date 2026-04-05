@@ -1,7 +1,7 @@
-# validate_symbols
-------------------
+# get_download_info
+-------------------
 
-:: backtide.data:validate_symbols
+:: backtide.data:get_download_info
     :: signature
     :: head
     :: table:

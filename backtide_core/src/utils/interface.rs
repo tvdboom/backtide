@@ -1,13 +1,12 @@
 //! Python interface for the engine's utilities.
 
-use crate::config::LogLevel;
+use crate::config::models::log_level::LogLevel;
 use crate::engine::Engine;
 use pyo3::prelude::*;
 use std::sync::OnceLock;
 use tracing::info;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
-
 // ────────────────────────────────────────────────────────────────────────────
 // Private API
 // ────────────────────────────────────────────────────────────────────────────
@@ -18,7 +17,10 @@ static TRACING: OnceLock<()> = OnceLock::new();
 pub fn init_logging_with_level(level: LogLevel) {
     TRACING.get_or_init(|| {
         tracing_subscriber::registry()
-            .with(EnvFilter::new(level.to_string().to_lowercase()))
+            .with(EnvFilter::new(format!(
+                "{},h2=warn,hyper=warn,hyper_util=warn,reqwest=warn,cookie_store=warn",
+                level.to_string().to_lowercase()
+            )))
             .with(
                 fmt::layer()
                     .with_target(true)

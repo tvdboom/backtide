@@ -1,5 +1,3 @@
-//! Custom errors raised during data ingestion.
-
 use crate::constants::Symbol;
 use crate::data::models::asset_type::AssetType;
 use crate::utils::http::HttpError;
@@ -11,27 +9,42 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum DataError {
     /// Failed to authenticate (e.g. provider crumb fetch failed).
-    #[error("authentication failed: {0}")]
+    #[error("Authentication failed: {0}")]
     Auth(String),
 
     /// An HTTP client related error.
     #[error("HTTP error: {0}")]
     Http(#[from] HttpError),
 
-    /// The response body could not be parsed as valid JSON.
-    #[error("failed to parse JSON response: {0}")]
-    Json(#[from] serde_json::Error),
+    /// A triangulation leg doesn't cover the full history of its primary asset.
+    #[error(
+        "Required symbol '{leg_symbol}' (earliest: {leg_earliest:?}) starts after \
+         asset '{asset_symbol}' (earliest: {asset_earliest:?})"
+    )]
+    InsufficientLegHistory {
+        asset_symbol: String,
+        asset_earliest: Option<u64>,
+        leg_symbol: String,
+        leg_earliest: Option<u64>,
+    },
+
+    /// Direct conversion and all triangulation legs are degenerate for this pair.
+    #[error("No conversion path from '{from}' to '{to}'")]
+    NoConversionPath {
+        from: String,
+        to: String,
+    },
 
     /// The requested value does not exist or is not served.
     #[error("Symbol not found: {0}")]
     SymbolNotFound(Symbol),
 
     /// The response had an unexpected structure (e.g., missing fields).
-    #[error("unexpected response structure: {0}")]
+    #[error("Unexpected response structure: {0}")]
     UnexpectedResponse(String),
 
     /// The asset type is not supported by the provider.
-    #[error("unsupported asset type: {0}")]
+    #[error("Unsupported asset type: {0}")]
     UnsupportedAssetType(AssetType),
 }
 

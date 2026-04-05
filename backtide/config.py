@@ -10,6 +10,8 @@ from backtide.core.config import (
     DataConfig,
     DisplayConfig,
     GeneralConfig,
+    LogLevel,
+    TriangulationStrategy,
     get_config,
     load_config,
     set_config,

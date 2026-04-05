@@ -4,6 +4,7 @@ use crate::constants::Symbol;
 use crate::data::errors::DataResult;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::data::models::interval::Interval;
 use async_trait::async_trait;
 
 /// Abstraction over a market-data source.
@@ -11,6 +12,9 @@ use async_trait::async_trait;
 pub trait DataProvider: Send + Sync {
     /// Get a single asset given its symbol.
     async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset>;
+
+    /// Returns the usable download range for an asset at a given interval.
+    async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)>;
 
     /// List the most important assets for a given asset type.
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>>;

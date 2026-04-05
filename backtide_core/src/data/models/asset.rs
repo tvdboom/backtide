@@ -19,31 +19,25 @@ use serde::Deserialize;
 /// name : str
 ///     Human-readable name of the asset.
 ///
-/// base : str | [`Currency`] | None
+/// base : str | [Currency] | None
 ///     The currency of the tradeable asset. Only defined for forex and
 ///     crypto pairs.
 ///
-/// quote : str | [`Currency`]
+/// quote : str | [Currency]
 ///     The currency the asset trades on.
 ///
-/// asset_type : [`AssetType`]
+/// asset_type : [AssetType]
 ///     Asset type this asset belongs to.
 ///
-/// exchange : str | [`Exchange`]
+/// exchange : str | [Exchange]
 ///     The exchange this asset is listed in.
 ///
 /// exchange_name : str
 ///     Human-readable exchange name.
 ///
-/// earliest_ts : int | None
-///     Earliest timestamp for which there is data in UNIX timestamp.
-///
-/// latest_ts : int | None
-///     Most recent timestamp for which there is data in UNIX timestamp.
-///
 /// See Also
 /// --------
-/// - backtide.data:AssetType
+/// - backtide.data:AssetMeta
 /// - backtide.data:Bar
 /// - backtide.data:Interval
 #[pyclass(from_py_object, frozen, module = "backtide.data")]
@@ -61,10 +55,6 @@ pub struct Asset {
     pub asset_type: AssetType,
     #[pyo3(get)]
     pub exchange: String,
-    #[pyo3(get)]
-    pub earliest_ts: Option<u64>,
-    #[pyo3(get)]
-    pub latest_ts: Option<u64>,
 
     /// Traded volume during the most recent regular market session.
     pub volume: Option<u64>,
@@ -95,8 +85,6 @@ impl Asset {
         quote: String,
         asset_type: AssetType,
         exchange: String,
-        earliest_ts: Option<u64>,
-        latest_ts: Option<u64>,
     ) -> Self {
         Self {
             symbol,
@@ -105,8 +93,6 @@ impl Asset {
             quote,
             asset_type,
             exchange,
-            earliest_ts,
-            latest_ts,
             volume: None,
             price: None,
         }
@@ -115,10 +101,8 @@ impl Asset {
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(
-        Bound<'py, PyAny>,
-        (Symbol, String, Option<String>, String, AssetType, String, Option<u64>, Option<u64>),
-    )> {
+    ) -> PyResult<(Bound<'py, PyAny>, (Symbol, String, Option<String>, String, AssetType, String))>
+    {
         let cls = py.get_type::<Asset>().into_any();
         Ok((
             cls,
@@ -129,23 +113,19 @@ impl Asset {
                 self.quote.clone(),
                 self.asset_type,
                 self.exchange.clone(),
-                self.earliest_ts,
-                self.latest_ts,
             ),
         ))
     }
 
-    fn __repr__(&self) -> String {
+    pub fn __repr__(&self) -> String {
         format!(
-            "Asset(symbol={:?}, name={:?}, base={}, quote={:?}, asset_type={:?}, exchange={:?}, earliest_ts={}, latest_ts={})",
+            "Asset(symbol={:?}, name={:?}, base={}, quote={:?}, asset_type={:?}, exchange={:?})",
             self.symbol,
             self.name,
             self.base.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
             self.quote,
             self.asset_type.to_string(),
             self.exchange,
-            self.earliest_ts.map_or("None".to_owned(), |s| format!("{s:?}")),
-            self.latest_ts.map_or("None".to_owned(), |s| format!("{s:?}")),
         )
     }
 

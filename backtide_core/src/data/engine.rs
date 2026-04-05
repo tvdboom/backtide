@@ -1,13 +1,18 @@
 //! Implementation of data related methods for [`Engine`].
 
+use crate::config::models::triangulation_strategy::TriangulationStrategy;
 use crate::constants::Symbol;
-use crate::data::errors::DataResult;
+use crate::data::errors::{DataError, DataResult};
 use crate::data::models::asset::Asset;
+use crate::data::models::asset_meta::AssetMeta;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
+use crate::data::models::download_info::DownloadInfo;
+use crate::data::models::interval::Interval;
 use crate::engine::Engine;
 use futures::future::{join_all, try_join_all};
 use indexmap::IndexMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, instrument};
 
@@ -17,7 +22,7 @@ impl Engine {
     // ────────────────────────────────────────────────────────────────────────
 
     /// Fetch assets concurrently, using the cache where possible.
-    #[instrument(skip(self), fields(count = symbols.len(), ?asset_type))]
+    #[instrument(skip(self), fields(?asset_type))]
     pub fn get_assets(
         &self,
         symbols: Vec<Symbol>,
@@ -26,6 +31,105 @@ impl Engine {
         self.rt.block_on(async {
             let tasks: Vec<_> = symbols.iter().map(|s| self.load_asset(s, asset_type)).collect();
             join_all(tasks).await.into_iter().collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    /// Resolves all assets required to price the given symbols in the
+    /// portfolio base currency, including any triangulation intermediaries.
+    #[instrument(skip(self), fields(?asset_type, ?intervals))]
+    pub fn get_download_info(
+        &self,
+        symbols: Vec<Symbol>,
+        asset_type: AssetType,
+        intervals: Vec<Interval>,
+    ) -> DataResult<DownloadInfo> {
+        let base_currency = &self.config.general.base_currency.to_string();
+
+        let tri_strategy = self.config.general.triangulation_strategy;
+        let tri_fiat = &self.config.general.triangulation_fiat.to_string();
+        let tri_crypto = &self.config.general.triangulation_crypto;
+        let tri_crypto_pegged = &self.config.general.triangulation_crypto_pegged.to_string();
+
+        self.rt.block_on(async {
+            // Resolve the primary assets.
+            let tasks: Vec<_> = symbols.iter().map(|s| self.load_asset(s, asset_type)).collect();
+            let assets = join_all(tasks).await.into_iter().collect::<Result<Vec<_>, _>>()?;
+
+            let mut leg_map: IndexMap<String, Asset> = IndexMap::new();
+            let mut asset_leg_symbols: Vec<Vec<Symbol>> = Vec::new();
+
+            for asset in &assets {
+                let base = &asset.base;
+                let quote = &asset.quote;
+
+                // Skip if already denominated in base — no extra legs needed.
+                if base.as_ref().is_some_and(|b| b == base_currency) || quote == base_currency {
+                    asset_leg_symbols.push(vec![]);
+                    continue;
+                }
+
+                let is_fiat = quote.parse::<Currency>().is_ok();
+                let at = if is_fiat {
+                    AssetType::Forex
+                } else {
+                    AssetType::Crypto
+                };
+
+                let (mid, mid_pegged) = if is_fiat {
+                    (tri_fiat, tri_fiat)
+                } else {
+                    (tri_crypto, tri_crypto_pegged)
+                };
+
+                // Fetch the legs for this asset
+                let resolved = self
+                    .resolve_legs(
+                        quote,
+                        &base_currency,
+                        mid,
+                        mid_pegged,
+                        at,
+                        &intervals,
+                        tri_strategy,
+                    )
+                    .await?;
+
+                // Add the leg symbols to the asset's meta
+                asset_leg_symbols.push(resolved.iter().map(|l| l.symbol.clone()).collect());
+
+                for leg in resolved {
+                    leg_map.entry(leg.symbol.clone()).or_insert(leg);
+                }
+            }
+
+            let asset_metas = try_join_all(
+                assets.into_iter().zip(asset_leg_symbols.into_iter()).map(|(asset, legs)| async {
+                    let (earliest_ts, latest_ts) = self.load_range(&asset, &intervals).await?;
+                    Ok::<_, DataError>(AssetMeta {
+                        asset,
+                        earliest_ts,
+                        latest_ts,
+                        legs,
+                    })
+                }),
+            )
+            .await?;
+
+            let leg_metas = try_join_all(leg_map.into_values().map(|asset| async {
+                let (earliest_ts, latest_ts) = self.load_range(&asset, &intervals).await?;
+                Ok::<_, DataError>(AssetMeta {
+                    asset,
+                    earliest_ts,
+                    latest_ts,
+                    legs: vec![],
+                })
+            }))
+            .await?;
+
+            Ok(DownloadInfo {
+                assets: asset_metas,
+                legs: leg_metas,
+            })
         })
     }
 
@@ -38,116 +142,172 @@ impl Engine {
         self.rt.block_on(self.providers.get(&asset_type).unwrap().list_assets(asset_type, limit))
     }
 
-    /// Resolves all assets required to price the given symbols in the
-    /// portfolio base currency, including any triangulation intermediaries.
-    ///
-    /// For each symbol:
-    ///  - If quote == base currency → no conversion needed.
-    ///  - If quote is fiat          → triangulate via `triangulation_fiat`.
-    ///  - If quote is crypto        → triangulate via `triangulation_crypto`.
-    ///
-    /// Returns the full flat list of assets (originals + triangulation legs).
-    #[instrument(skip(self), fields(count = symbols.len(), ?asset_type))]
-    pub fn validate_symbols(
-        &self,
-        symbols: Vec<Symbol>,
-        asset_type: AssetType,
-    ) -> DataResult<Vec<Asset>> {
-        let base_currency = &self.config.general.base_currency.to_string();
-        let tri_fiat = &self.config.general.triangulation_fiat.to_string();
-        let tri_crypto = &self.config.general.triangulation_crypto;
-        let tri_crypto_pegged = &self.config.general.triangulation_crypto_pegged.to_string();
-
-        self.rt.block_on(async {
-            // Resolve all primary assets concurrently.
-            let assets: Vec<Asset> =
-                try_join_all(symbols.iter().map(|sym| self.load_asset(sym, asset_type))).await?;
-
-            // Compute which triangulation legs are needed.
-            // Use IndexMap to preserve insertion order while deduplicating by symbol.
-            let mut leg_symbols: IndexMap<String, (String, String, AssetType)> = IndexMap::new();
-
-            for asset in &assets {
-                let base = &asset.base;
-                let quote = &asset.quote;
-                let is_fiat = quote.parse::<Currency>().is_ok();
-
-                // Skip if already denominated in base — no extra legs needed.
-                if base.as_ref().is_some_and(|b| b == base_currency) || quote == base_currency {
-                    continue;
-                }
-
-                let at = if is_fiat {
-                    AssetType::Forex
-                } else {
-                    AssetType::Crypto
-                };
-
-                // Try direct conversion first.
-                if self.load_asset_bidirectional(&quote, &base_currency, at).await.is_ok() {
-                    leg_symbols
-                        .entry(format!("{quote}-{base_currency}"))
-                        .or_insert_with(|| (quote.clone(), base_currency.clone(), at));
-                    continue;
-                }
-
-                // Fall back to triangulation.
-                let (mid1, mid2) = if is_fiat {
-                    (tri_fiat, tri_fiat)
-                } else {
-                    (tri_crypto, tri_crypto_pegged)
-                };
-
-                let mut insert_leg = |a: &str, b: &str| {
-                    leg_symbols
-                        .entry(format!("{a}-{b}"))
-                        .or_insert_with(|| (a.to_string(), b.to_string(), at));
-                };
-
-                if quote != mid1 {
-                    insert_leg(&quote, mid1);
-                }
-                if mid2 != base_currency {
-                    insert_leg(mid2, &base_currency);
-                }
-            }
-
-            // Fetch each unique leg symbol exactly once, concurrently.
-            let legs: Vec<Asset> = try_join_all(
-                leg_symbols.values().map(|(a, b, at)| self.load_asset_bidirectional(a, b, *at)),
-            )
-            .await?;
-
-            Ok(assets.into_iter().chain(legs).collect())
-        })
-    }
-
     // ────────────────────────────────────────────────────────────────────────
     // Private interface
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Resolve an asset, returning the cached value if still live.
-    ///
-    /// On a cache miss the provider is queried and the result is inserted
-    /// before returning.
+    /// Resolve an asset using the engine's cache.
     async fn load_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
-        if let Some(asset) = self.asset_cache.get(symbol).await {
-            debug!(%symbol, "Asset cache hit");
+        if let Some(asset) = self.cache.asset_cache.get(symbol).await {
+            debug!(%symbol, "Asset cache hit.");
             return Ok(asset.as_ref().clone());
         }
 
         let provider = self.providers.get(&asset_type).unwrap();
         let asset = provider.get_asset(symbol, asset_type).await?;
-        self.asset_cache.insert(symbol.clone(), Arc::new(asset.clone())).await;
+        self.cache.asset_cache.insert(symbol.clone(), Arc::new(asset.clone())).await;
         debug!(%symbol, "Asset cached");
         Ok(asset)
     }
 
-    /// Try to load an asset from symbol format base-quote, else quote-base
-    async fn load_asset_bidirectional(&self, a: &str, b: &str, at: AssetType) -> DataResult<Asset> {
-        match self.load_asset(&format!("{a}-{b}"), at).await {
-            Ok(asset) => Ok(asset),
-            Err(_) => self.load_asset(&format!("{b}-{a}"), at).await,
+    /// Resolve an asset range for one or multiple intervals using the engine's cache.
+    async fn load_range(
+        &self,
+        asset: &Asset,
+        intervals: &[Interval],
+    ) -> DataResult<(HashMap<Interval, u64>, HashMap<Interval, u64>)> {
+        let provider = self.providers.get(&asset.asset_type).unwrap();
+
+        let ranges = try_join_all(intervals.iter().map(|&iv| async move {
+            let key = (asset.symbol.clone(), iv);
+
+            if let Some(range) = self.cache.range_cache.get(&key).await {
+                debug!(symbol = %asset.symbol, ?iv, "Range cache hit.");
+                return Ok::<_, DataError>((iv, range.0, range.1));
+            }
+
+            let (start, end) = provider.get_download_range(asset.clone(), iv).await?;
+            self.cache.range_cache.insert(key, (start, end)).await;
+            Ok::<_, DataError>((iv, start, end))
+        }))
+        .await?;
+
+        let mut earliest = HashMap::new();
+        let mut latest = HashMap::new();
+        for (iv, start, end) in ranges {
+            earliest.insert(iv, start);
+            latest.insert(iv, end);
+            debug!(symbol = %asset.symbol, ?iv, "Range cached.");
+        }
+
+        Ok((earliest, latest))
+    }
+
+    /// Try to load an asset from symbol format base-quote or quote-base.
+    ///
+    /// If both symbols exist, return the one with the longest history.
+    async fn load_asset_bidirectional(
+        &self,
+        base: &str,
+        quote: &str,
+        at: AssetType,
+        intervals: &[Interval],
+    ) -> DataResult<Asset> {
+        let base_quote = format!("{base}-{quote}");
+        let quote_base = format!("{quote}-{base}");
+
+        let (direct, inverse) =
+            tokio::join!(self.load_asset(&base_quote, at), self.load_asset(&quote_base, at),);
+
+        match (direct, inverse) {
+            (Ok(d), Ok(i)) => {
+                let d_start =
+                    self.load_range(&d, intervals).await?.0.into_values().min().unwrap_or(u64::MAX);
+                let i_start =
+                    self.load_range(&i, intervals).await?.0.into_values().min().unwrap_or(u64::MAX);
+                Ok(if d_start <= i_start {
+                    d
+                } else {
+                    i
+                })
+            },
+            (Ok(d), Err(_)) => Ok(d),
+            (Err(_), Ok(i)) => Ok(i),
+            (Err(e), Err(_)) => Err(e),
+        }
+    }
+
+    /// Resolve a two-leg triangulation path: `quote → mid` and `mid_pegged → base`.
+    ///
+    /// Legs that are identical to their target currency are omitted.
+    async fn triangulate(
+        &self,
+        quote: &str,
+        mid: &str,
+        mid_pegged: &str,
+        base: &str,
+        at: AssetType,
+        intervals: &[Interval],
+    ) -> DataResult<Vec<Asset>> {
+        let mut legs = Vec::new();
+
+        if quote != mid {
+            legs.push(self.load_asset_bidirectional(quote, mid, at, intervals).await?);
+        }
+
+        if mid_pegged != base {
+            legs.push(self.load_asset_bidirectional(mid_pegged, base, at, intervals).await?);
+        }
+
+        if legs.is_empty() {
+            return Err(DataError::NoConversionPath {
+                from: quote.to_string(),
+                to: base.to_string(),
+            });
+        }
+
+        Ok(legs)
+    }
+
+    /// Resolve the conversion legs needed to bring `quote` to `base`.
+    async fn resolve_legs(
+        &self,
+        quote: &str,
+        base: &str,
+        mid: &str,
+        mid_pegged: &str,
+        at: AssetType,
+        intervals: &[Interval],
+        strategy: TriangulationStrategy,
+    ) -> DataResult<Vec<Asset>> {
+        let direct = self.load_asset_bidirectional(quote, base, at, intervals).await;
+
+        match strategy {
+            TriangulationStrategy::Direct => match direct {
+                Ok(leg) => Ok(vec![leg]),
+                Err(_) => self.triangulate(quote, mid, mid_pegged, base, at, intervals).await,
+            },
+            TriangulationStrategy::Earliest => {
+                let tri = self.triangulate(quote, mid, mid_pegged, base, at, intervals).await;
+                match (direct, tri) {
+                    (Ok(d), Ok(t)) => {
+                        // Check the history of all legs
+                        let d_start = self
+                            .load_range(&d, intervals)
+                            .await?
+                            .0
+                            .into_values()
+                            .min()
+                            .unwrap_or(u64::MAX);
+
+                        let t_start = try_join_all(t.iter().map(|l| self.load_range(l, intervals)))
+                            .await?
+                            .into_iter()
+                            .flat_map(|(e, _)| e.into_values())
+                            .max()
+                            .unwrap_or(u64::MAX);
+
+                        Ok(if d_start <= t_start {
+                            vec![d]
+                        } else {
+                            t
+                        })
+                    },
+                    (Ok(d), Err(_)) => Ok(vec![d]),
+                    (Err(_), Ok(t)) => Ok(t),
+                    (Err(e), Err(_)) => Err(e),
+                }
+            },
         }
     }
 }

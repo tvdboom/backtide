@@ -1,9 +1,11 @@
-use crate::data::interface::{get_assets, list_assets, validate_symbols};
+use crate::data::interface::{get_assets, get_download_info, list_assets};
 use crate::data::models::asset::Asset;
+use crate::data::models::asset_meta::AssetMeta;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::bar::Bar;
 use crate::data::models::country::Country;
 use crate::data::models::currency::Currency;
+use crate::data::models::download_info::DownloadInfo;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
@@ -23,16 +25,18 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_class::<AssetType>()?;
     m.add_class::<Asset>()?;
+    m.add_class::<AssetMeta>()?;
     m.add_class::<Bar>()?;
     m.add_class::<Country>()?;
     m.add_class::<Currency>()?;
+    m.add_class::<DownloadInfo>()?;
     m.add_class::<Exchange>()?;
     m.add_class::<Interval>()?;
     m.add_class::<Provider>()?;
 
     m.add_function(wrap_pyfunction!(get_assets, &m)?)?;
+    m.add_function(wrap_pyfunction!(get_download_info, &m)?)?;
     m.add_function(wrap_pyfunction!(list_assets, &m)?)?;
-    m.add_function(wrap_pyfunction!(validate_symbols, &m)?)?;
 
     parent.add_submodule(&m)?;
 

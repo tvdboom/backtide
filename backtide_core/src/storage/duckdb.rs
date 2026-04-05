@@ -1,13 +1,14 @@
 //! DuckDB storage solution.
 
-use crate::storage::errors::StorageResult;
-use crate::storage::traits::Storage;
-use duckdb::Connection;
-use std::path::PathBuf;
-use std::sync::Mutex;
 use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
+use crate::storage::errors::StorageResult;
+use crate::storage::traits::Storage;
+use duckdb::Connection;
+use std::fs::create_dir_all;
+use std::path::PathBuf;
+use std::sync::Mutex;
 
 pub struct DuckDb {
     /// Connection to the database.
@@ -16,8 +17,10 @@ pub struct DuckDb {
 
 impl DuckDb {
     pub fn new(path: &PathBuf) -> StorageResult<Self> {
+        create_dir_all(&path)?;
+
         Ok(Self {
-            conn: Mutex::new(Connection::open(path)?),
+            conn: Mutex::new(Connection::open(path.join("database.duckdb"))?),
         })
     }
 }
@@ -49,7 +52,13 @@ impl Storage for DuckDb {
         Ok(())
     }
 
-    fn write_bars(&self, symbol: &str, provider: Provider, interval: Interval, bars: &[Bar]) -> StorageResult<()> {
+    fn write_bars(
+        &self,
+        symbol: &str,
+        provider: Provider,
+        interval: Interval,
+        bars: &[Bar],
+    ) -> StorageResult<()> {
         todo!()
     }
 }

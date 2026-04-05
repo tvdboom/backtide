@@ -116,6 +116,7 @@ nav:
     - Getting started: getting_started.md
     - User guide:
         - Nomenclature: user_guide/nomenclature.md
+        - Currencies: user_guide/currencies.md
         - Configuration: user_guide/configuration.md
     - API:
         - config:
@@ -125,9 +126,10 @@ nav:
         - data:
             - get_assets: api/data/get_assets.md
             - list_assets: api/data/list_assets.md
-            - validate_symbols: api/data/validate_symbols.md
+            - get_download_info: api/data/get_download_info.md
         - models:
             - Asset: api/models/asset.md
+            - AssetMeta: api/models/assetmeta.md
             - AssetType: api/models/assettype.md
             - Bar: api/models/bar.md
             - Config: api/models/config.md
@@ -135,10 +137,12 @@ nav:
             - Currency: api/models/currency.md
             - DataConfig: api/models/dataconfig.md
             - DisplayConfig: api/models/displayconfig.md
+            - DownloadInfo: api/models/downloadinfo.md
             - Exchange: api/models/exchange.md
             - GeneralConfig: api/models/generalconfig.md
             - Interval: api/models/interval.md
             - LogLevel: api/models/loglevel.md
+            - TriangulationStrategy: api/models/triangulationstrategy.md
         - utils:
             - clear_cache: api/utils/clear_cache.md
             - init_logging: api/utils/init_logging.md

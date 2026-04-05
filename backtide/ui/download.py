@@ -18,7 +18,7 @@ from backtide.core.data import (
     Exchange,
     Interval,
     list_assets,
-    validate_symbols,
+    get_download_info,
 )
 from backtide.ui.utils import (
     _fmt_number,
@@ -54,8 +54,8 @@ def draw_asset_df(assets: list[Asset]) -> int:
     total_rows = 0
     for asset in assets:
         # Determine the download range per asset
-        asset_start = datetime.fromtimestamp(asset.earliest_ts, tz=tz)
-        asset_end = datetime.fromtimestamp(asset.latest_ts, tz=tz)
+        asset_start = datetime.fromtimestamp(asset.earliest_ts[Interval.OneDay], tz=tz)
+        asset_end = datetime.fromtimestamp(asset.latest_ts[Interval.OneDay], tz=tz)
 
         if not is_intraday:
             asset_start = asset_start.date()
@@ -131,30 +131,30 @@ def draw_asset_df(assets: list[Asset]) -> int:
 
     if "Logo" in data.columns:
         data = data.set_index("Logo")
-        column_config["Logo"] = st.column_config.ImageColumn(width="small", pinned=True)
+        column_config["Logo"] = st.column_config.ImageColumn("", width="small", pinned=True)
 
     if "Name" in data.columns:
-        column_config["Name"] = st.column_config.TextColumn("Name")  # No width = stretch
+        column_config["Name"] = st.column_config.TextColumn()  # No width = stretch
         column_order.insert(1, "Name")
 
     if "Country" in data.columns:
-        column_config["Country"] = st.column_config.ImageColumn("Country", width=60)
+        column_config["Country"] = st.column_config.ImageColumn(width=60)
         column_order.insert(2, "Country")
 
     if "Exchange" in data.columns:
-        column_config["Exchange"] = st.column_config.TextColumn("Exchange", width="small")
+        column_config["Exchange"] = st.column_config.TextColumn(width="small")
         column_order.insert(3, "Exchange")
 
     if "Currency" in data.columns:
-        column_config["Currency"] = st.column_config.TextColumn("Currency", width="small")
+        column_config["Currency"] = st.column_config.TextColumn(width="small")
         column_order.insert(4, "Currency")
 
     if "Base" in data.columns:
-        column_config["Base"] = st.column_config.ImageColumn("Base", width=-50)
+        column_config["Base"] = st.column_config.ImageColumn(width=-50)
         column_order.insert(0, "Base")
 
     if "Quote" in data.columns:
-        column_config["Quote"] = st.column_config.ImageColumn("Quote", width=-50)
+        column_config["Quote"] = st.column_config.ImageColumn(width=-50)
         column_order.insert(2, "Quote")
 
     st.dataframe(
@@ -241,9 +241,12 @@ symbols = col1.multiselect(
     help=asset_d,
 )
 
+intervals = st.session_state.get("interval_download", [])
+
 try:
     # Convert custom symbols to assets and add triangulation currencies
-    assets = validate_symbols(symbols, asset_type)
+    download_info = get_download_info(symbols, asset_type, intervals)
+    assets = download_info.assets
 except RuntimeError as ex:
     assets = []
     st.error(ex, icon="❌")
@@ -260,19 +263,18 @@ full_history = st.toggle(
     label="Download full history",
     value=True,
     help=(
-        "Whether to download the maximum available history for all selected tickers. "
+        "Whether to download the maximum available history for all selected symbols and FX rates. "
         "If toggled off, select the start and end download dates."
     ),
 )
 
 if assets:
-    earliest_ts = datetime.fromtimestamp(min(asset.earliest_ts for asset in assets), tz=tz)
-    latest_ts = datetime.fromtimestamp(max(asset.latest_ts for asset in assets), tz=tz)
+    earliest_ts = datetime.fromtimestamp(min(min(a.earliest_ts.values()) for a in assets), tz=tz)
+    latest_ts = datetime.fromtimestamp(max(max(a.latest_ts.values()) for a in assets), tz=tz)
 else:
-    earliest_ts = datetime(1970, 1, 1, tzinfo=tz)
+    earliest_ts = datetime(2000, 1, 1, tzinfo=tz)
     latest_ts = datetime.now(tz=tz)
 
-intervals = st.session_state.get("interval_download", [])
 is_intraday = any(interval.is_intraday() for interval in intervals)
 
 if full_history:
@@ -349,12 +351,9 @@ if is_enabled:
     with st.expander("Download overview", icon=":material/archive:", expanded=True):
         total_rows = 0
 
-        if asset_type.is_equity:
-            n_symbols = len(symbols)
-            for assets in [assets[:n_symbols], assets[n_symbols:]]:
-                total_rows += draw_asset_df(assets)
-        else:
-            total_rows += draw_asset_df(assets)
+        total_rows += draw_asset_df(assets)
+        if download_info.legs:
+            total_rows += draw_asset_df(download_info.legs)
 
         estimated_memory = (total_rows * BYTES_PER_ROW) / (1024**2)
         estimated_seconds = int(total_rows / ROWS_PER_SECOND)

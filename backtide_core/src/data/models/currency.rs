@@ -1,4 +1,3 @@
-use crate::config::LogLevel;
 use crate::data::models::country::Country;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -27,6 +26,12 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// symbol_prefix : bool
 ///     Returns `true` if the currency symbol is conventionally placed before
 ///     the numeric amount, or `false` if it follows the amount.
+/// 
+/// See Also
+/// --------
+/// - backtide.data:Country
+/// - backtide.data:Exchange
+/// - backtide.data:Interval
 #[pyclass(skip_from_py_object, module = "backtide.data")]
 #[derive(
     Clone,
@@ -259,6 +264,25 @@ impl Currency {
 impl Currency {
     #[classattr]
     const __RUST_ENUM__: bool = true;
+
+    #[new]
+    pub fn new(s: &str) -> PyResult<Self> {
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown currency: {s}")))
+    }
+
+    /// Make the class pickable (required by streamlit).
+    pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
+        let cls = py.get_type::<Currency>().into_any();
+        Ok((cls, (self.to_string(),)))
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn __hash__(&self) -> u64 {
+        *self as u64
+    }
 
     fn __repr__(&self) -> String {
         self.to_string()

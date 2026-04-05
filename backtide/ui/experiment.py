@@ -14,6 +14,7 @@ from code_editor import code_editor
 import streamlit as st
 import yaml
 
+from backtide.data import AssetType, list_assets
 from backtide.ui.utils import (
     _get_asset_type_description,
     _prevent_deselection,
@@ -64,10 +65,13 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
 )
 
 if not st.session_state.get("asset_type"):
-    st.session_state.asset_type = AssetType.default()
+    st.session_state.asset_type = AssetType.get_default()
 
-with st.spinner("Loading assets..."):
-    all_assets: dict[str, Asset] = st.session_state.asset_type.list_assets()
+if not st.session_state.get(f"all_assets_{asset_type}"):
+    with st.spinner("Loading assets..."):
+        st.session_state[f"all_assets_{asset_type}"] = list_assets(
+            st.session_state.asset_type_download, MAX_PRELOADED_ASSETS
+        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -203,7 +207,7 @@ with tab2:
     start_date = col1.date_input(
         label="Start date",
         value=None,
-        min_value="1980-01-01",
+        min_value="2000-01-01",
         max_value=datetime.now().date(),
         help=(
             "Run backtest simulation starting from this date (inclusive). If the historical "

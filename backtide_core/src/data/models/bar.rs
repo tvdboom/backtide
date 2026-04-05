@@ -48,7 +48,7 @@ use serde::{Deserialize, Serialize};
 /// See Also
 /// --------
 /// - backtide.data:Asset
-/// - backtide.data:AssetType
+/// - backtide.data:DownloadInfo
 /// - backtide.data:Interval
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.data")]
 #[derive(Clone, Debug, Serialize, Deserialize)]

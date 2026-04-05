@@ -10,15 +10,16 @@ use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::forex::ForexPair;
+use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
 use crate::utils::http::{paginate, HttpClient};
 use async_trait::async_trait;
-use chrono::Utc;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::cmp::Ordering;
+use std::time::{SystemTime, UNIX_EPOCH};
 use strum::IntoEnumIterator;
 use tokio::try_join;
 use tracing::{debug, info, instrument};
@@ -198,7 +199,7 @@ impl YahooFinance {
             "ETF" => Ok(AssetType::Etf),
             "CURRENCY" => Ok(AssetType::Forex),
             "CRYPTOCURRENCY" => Ok(AssetType::Crypto),
-            other => Err(DataError::UnexpectedResponse(format!("unknown asset type: {other:?}"))),
+            other => Err(DataError::UnexpectedResponse(format!("Unknown asset type: {other:?}"))),
         }
     }
 
@@ -278,6 +279,76 @@ impl DataProvider for YahooFinance {
             .ok_or(DataError::UnexpectedResponse("empty chart result".to_owned()))??;
 
         Ok(asset)
+    }
+
+    /// Returns the usable download range for an asset at a given interval.
+    ///
+    /// For intraday intervals the start is clamped to the provider's rolling
+    /// history window (e.g. 7 days for 1m), so the value reflects what is actually
+    /// downloadable rather than the asset's listing date.
+    #[instrument(skip(self), fields(symbol = %asset.symbol, ?interval))]
+    async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
+        let symbol = Self::parse_canonical_symbol(&asset.symbol, asset.asset_type)?;
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+        let lookback = match interval {
+            Interval::OneWeek => 14 * 24 * 3600,
+            Interval::OneDay => 2 * 24 * 3600,
+            Interval::FourHours | Interval::OneHour => 2 * 24 * 3600,
+            _ => 24 * 3600,
+        };
+
+        let resp = self
+            .client
+            .get(
+                &format!("{}/{}", Self::CHART_URL, symbol),
+                Some(&[
+                    ("period1", (now - lookback).to_string().as_str()),
+                    ("period2", now.to_string().as_str()),
+                    ("interval", interval.to_string().as_str()),
+                    ("crumb", &self.crumb),
+                ]),
+            )
+            .await?;
+
+        let parsed = HttpClient::json::<ChartResponse>(resp).await?;
+
+        let meta = parsed
+            .chart
+            .result
+            .into_iter()
+            .next()
+            .map(|r| r.meta)
+            .ok_or_else(|| DataError::UnexpectedResponse("Empty chart result".to_owned()))?;
+
+        let latest_ts = meta.regular_market_time.map(|x| x.max(0) as u64).ok_or_else(|| {
+            DataError::UnexpectedResponse(format!("no latest_ts for symbol: {}", symbol))
+        })?;
+
+        let earliest_ts = meta
+            .first_trade_date
+            .map(|x| {
+                let cap_secs = match interval {
+                    Interval::OneMinute => Some(7 * 24 * 60 * 60),
+                    Interval::FiveMinutes | Interval::FifteenMinutes | Interval::ThirtyMinutes => {
+                        Some(60 * 24 * 60 * 60)
+                    },
+                    Interval::OneHour => Some(730 * 24 * 60 * 60),
+                    _ => None,
+                };
+
+                if let Some(cap_secs) = cap_secs {
+                    x.max(latest_ts as i64 - cap_secs).max(0) as u64
+                } else {
+                    x.max(0) as u64
+                }
+            })
+            .ok_or_else(|| {
+                DataError::UnexpectedResponse(format!("no earliest_ts for symbol: {}", symbol))
+            })?;
+
+        Ok((earliest_ts, latest_ts))
     }
 
     /// List the most liquid assets for a given asset type, capped at `limit`.
@@ -361,8 +432,6 @@ impl DataProvider for YahooFinance {
                             quote,
                             asset_type: AssetType::Forex,
                             exchange: "CCY".to_owned(), // "CCY" is Yahoo's placeholder code for the interbank FX market
-                            earliest_ts: Some(0),
-                            latest_ts: Some(Utc::now().timestamp() as u64),
                             volume: None,
                             price: None,
                         }
@@ -462,8 +531,6 @@ impl TryFrom<YahooQuote> for Asset {
             exchange,
             price: q.regular_market_price,
             volume: q.regular_market_volume,
-            earliest_ts: None,
-            latest_ts: None,
         })
     }
 }
@@ -578,8 +645,6 @@ impl TryFrom<ChartMeta> for Asset {
             exchange,
             price: m.regular_market_price,
             volume: m.regular_market_volume,
-            earliest_ts: m.first_trade_date.map(|v| v.max(0) as u64),
-            latest_ts: m.regular_market_time.map(|v| v.max(0) as u64),
         })
     }
 }

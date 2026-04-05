@@ -1,7 +1,8 @@
 use pyo3::exceptions::PyValueError;
-use pyo3::{pyclass, pymethods, Bound, Py, PyAny, PyResult, Python};
+use pyo3::{pyclass, pymethods, Borrowed, Bound, FromPyObject, Py, PyAny, PyErr, PyResult, Python};
 use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
+use std::fmt::Display;
+use strum::{EnumIter, IntoEnumIterator};
 
 /// The time resolution of a single [`Bar`].
 ///
@@ -12,21 +13,8 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// - backtide.data:Asset
 /// - backtide.data:AssetType
 /// - backtide.data:Bar
-#[pyclass(from_py_object, module = "backtide.data")]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    Eq,
-    Hash,
-    PartialEq,
-    Display,
-    EnumIter,
-    EnumString,
-    Serialize,
-    Deserialize,
-)]
+#[pyclass(skip_from_py_object, module = "backtide.data")]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, EnumIter, Serialize, Deserialize)]
 pub enum Interval {
     OneMinute,
     FiveMinutes,
@@ -39,6 +27,40 @@ pub enum Interval {
     OneWeek,
 }
 
+impl Display for Interval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            Interval::OneMinute => "1m".to_string(),
+            Interval::FiveMinutes => "5m".to_string(),
+            Interval::FifteenMinutes => "15m".to_string(),
+            Interval::ThirtyMinutes => "30m".to_string(),
+            Interval::OneHour => "1h".to_string(),
+            Interval::FourHours => "4h".to_string(),
+            Interval::OneDay => "1d".to_string(),
+            Interval::OneWeek => "1w".to_string(),
+        };
+        write!(f, "{}", str)
+    }
+}
+
+impl std::str::FromStr for Interval {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "1m" | "OneMinute" => Ok(Self::OneMinute),
+            "5m" | "FiveMinutes" => Ok(Self::FiveMinutes),
+            "15m" | "FifteenMinutes" => Ok(Self::FifteenMinutes),
+            "30m" | "ThirtyMinutes" => Ok(Self::ThirtyMinutes),
+            "1h" | "OneHour" => Ok(Self::OneHour),
+            "4h" | "FourHours" => Ok(Self::FourHours),
+            "1d" | "OneDay" => Ok(Self::OneDay),
+            "1w" | "OneWeek" => Ok(Self::OneWeek),
+            _ => Err(format!("Unknown interval: {s}")),
+        }
+    }
+}
+
 #[pymethods]
 impl Interval {
     #[classattr]
@@ -46,12 +68,12 @@ impl Interval {
 
     #[new]
     pub fn new(s: &str) -> PyResult<Self> {
-        s.parse().map_err(|_| PyValueError::new_err(format!("invalid Interval: {s}")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown interval: {s}")))
     }
 
     /// Make the class pickable (required by streamlit).
     pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
-        let cls = py.get_type::<Interval>().into_any();
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
     }
 
@@ -64,16 +86,7 @@ impl Interval {
     }
 
     fn __repr__(&self) -> String {
-        match self {
-            Interval::OneMinute => "1m".to_string(),
-            Interval::FiveMinutes => "5m".to_string(),
-            Interval::FifteenMinutes => "15m".to_string(),
-            Interval::ThirtyMinutes => "30m".to_string(),
-            Interval::OneHour => "1h".to_string(),
-            Interval::FourHours => "4h".to_string(),
-            Interval::OneDay => "1d".to_string(),
-            Interval::OneWeek => "1w".to_string(),
-        }
+        self.to_string()
     }
 
     /// Return the default variant.
@@ -115,5 +128,20 @@ impl Interval {
             Interval::OneDay => 24 * 60,
             Interval::OneWeek => 7 * 24 * 60,
         }
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for Interval {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+        // First try a direct downcast
+        if let Ok(bound) = obj.cast::<Interval>() {
+            return Ok(bound.borrow().clone());
+        }
+
+        // Else parse from string
+        let s: String = obj.extract()?;
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown interval {s:?}.")))
     }
 }

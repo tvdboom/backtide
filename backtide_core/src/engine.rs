@@ -4,10 +4,11 @@
 //! any part of the Python interface. Logic per module (download, backtest, etc...)
 //! are implemented directly on the engine.
 
-use crate::config::Config;
-use crate::constants::{Symbol, ASSET_CACHE_TTL};
+use crate::config::config::Config;
+use crate::constants::Symbol;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::data::models::interval::Interval;
 use crate::data::providers::binance::Binance;
 use crate::data::providers::provider::Provider;
 use crate::data::providers::traits::DataProvider;
@@ -19,12 +20,37 @@ use crate::utils::interface::init_logging_with_level;
 use moka::future::Cache;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use strum::IntoEnumIterator;
 use tokio::runtime::Runtime;
 use tracing::{debug, info};
 
 /// Process-wide configuration singleton.
 static ENGINE: OnceLock<Engine> = OnceLock::new();
+
+/// Cache storage for the engine.
+pub struct EngineCache {
+    /// TTL asset cache.
+    pub asset_cache: Cache<Symbol, Arc<Asset>>,
+
+    /// TTL asset range cache.
+    pub range_cache: Cache<(Symbol, Interval), (u64, u64)>,
+}
+
+impl EngineCache {
+    pub fn new() -> Self {
+        Self {
+            asset_cache: Cache::builder().time_to_live(Duration::from_secs(2 * 3600)).build(),
+            range_cache: Cache::builder().time_to_live(Duration::from_secs(1800)).build(),
+        }
+    }
+
+    /// Invalidate all cache.
+    pub fn clear(&self) {
+        self.asset_cache.invalidate_all();
+        self.range_cache.invalidate_all();
+    }
+}
 
 /// Backtide core engine.
 pub struct Engine {
@@ -37,11 +63,11 @@ pub struct Engine {
     /// One provider arc per asset type, potentially shared across types.
     pub providers: HashMap<AssetType, Arc<dyn DataProvider>>,
 
-    /// TTL asset cache keyed by symbol, avoiding redundant provider round-trips.
-    pub asset_cache: Cache<Symbol, Arc<Asset>>,
-
     /// Database which stores all data.
     pub db: Box<dyn Storage>,
+
+    /// In-memory cache.
+    pub cache: EngineCache,
 }
 
 impl Engine {
@@ -66,7 +92,7 @@ impl Engine {
 
     /// Invalidate all cache in the engine.
     pub fn clear_cache(&self) {
-        self.asset_cache.invalidate_all();
+        self.cache.clear();
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -118,8 +144,8 @@ impl Engine {
             config,
             providers,
             rt,
-            asset_cache: Cache::builder().time_to_live(ASSET_CACHE_TTL).build(),
             db: Box::new(db),
+            cache: EngineCache::new(),
         })
     }
 }

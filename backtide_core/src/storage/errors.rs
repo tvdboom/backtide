@@ -1,5 +1,3 @@
-//! Custom errors raised during data ingestion.
-
 use duckdb::Error;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;
@@ -11,6 +9,10 @@ pub enum StorageError {
     /// Failed to initialize the database.
     #[error("duckdb error: {0}")]
     DuckDB(#[from] Error),
+
+    /// A filesystem or I/O operation failed.
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;

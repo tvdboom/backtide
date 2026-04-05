@@ -1,6 +1,6 @@
 //! Custom errors raised during data ingestion.
 
-use crate::config::ConfigError;
+use crate::config::errors::ConfigError;
 use crate::data::errors::DataError;
 use crate::storage::errors::StorageError;
 use pyo3::exceptions::PyRuntimeError;

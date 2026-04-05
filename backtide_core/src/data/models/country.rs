@@ -1,4 +1,3 @@
-use crate::data::models::currency::Currency;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -21,6 +20,12 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 ///
 /// flag : str
 ///     The Unicode regional-indicator flag emoji for the country.
+///
+/// See Also
+/// --------
+/// - backtide.data:Bar
+/// - backtide.data:Currency
+/// - backtide.data:Exchange
 #[pyclass(skip_from_py_object, module = "backtide.data")]
 #[derive(
     Clone,
@@ -350,6 +355,25 @@ impl Country {
 impl Country {
     #[classattr]
     const __RUST_ENUM__: bool = true;
+
+    #[new]
+    pub fn new(s: &str) -> PyResult<Self> {
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown country: {s}")))
+    }
+
+    /// Make the class pickable (required by streamlit).
+    pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
+        let cls = py.get_type::<Self>().into_any();
+        Ok((cls, (self.to_string(),)))
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn __hash__(&self) -> u64 {
+        *self as u64
+    }
 
     fn __repr__(&self) -> String {
         self.to_string()
