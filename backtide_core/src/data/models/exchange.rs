@@ -29,7 +29,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 ///
 /// currency : [Currency]
 ///     The primary trading currency of the exchange.
-/// 
+///
 /// See Also
 /// --------
 /// - backtide.data:Country

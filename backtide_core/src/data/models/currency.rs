@@ -26,7 +26,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// symbol_prefix : bool
 ///     Returns `true` if the currency symbol is conventionally placed before
 ///     the numeric amount, or `false` if it follows the amount.
-/// 
+///
 /// See Also
 /// --------
 /// - backtide.data:Country

@@ -9,7 +9,7 @@ use serde::Deserialize;
 /// ----------
 /// assets : list[[AssetMeta]]
 ///     Assets with corresponding metadata to download.
-/// 
+///
 /// legs : list[[AssetMeta]]
 ///     Assets with metadata for the conversion legs that `assets` require
 ///     to convert their currencies to the base currency.

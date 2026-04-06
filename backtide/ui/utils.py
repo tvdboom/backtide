@@ -6,11 +6,12 @@ Description: Utility functions for the UI.
 """
 
 from typing import Any
-
+import re
 import streamlit as st
 
 from backtide.core.data import Asset, AssetType
 from backtide.utils.utils import to_list
+from backtide.constants import MOMENT_TO_STRFTIME
 
 
 def _get_asset_type_description(asset_type: AssetType) -> tuple[str, str]:
@@ -59,6 +60,9 @@ def _fmt_number(n: float) -> str:
 def _get_logokit_url(asset: Asset, api_key: str, *, use_quote: bool = False) -> str:
     """Retrieve the Logokit url to retrieve the logo for an asset."""
     match asset.asset_type:
+        case AssetType.Forex:
+            url = "ticker"
+            symbol = f"{asset.base}{asset.quote}:CUR"
         case AssetType.Crypto:
             url = "crypto"
             symbol = asset.base if not use_quote else asset.quote
@@ -67,6 +71,20 @@ def _get_logokit_url(asset: Asset, api_key: str, *, use_quote: bool = False) -> 
             symbol = asset.symbol
 
     return f"https://img.logokit.com/{url}/{symbol}?token={api_key}"
+
+
+def _moment_to_strftime(fmt: str) -> str:
+    """Convert a moment to strftime."""
+    regex = re.compile(
+        "|".join(sorted(map(re.escape, MOMENT_TO_STRFTIME.keys()), key=len, reverse=True))
+    )
+
+    def replace(match: re.Match) -> str:
+        """Replace a token in the string."""
+        token = match.group(0)
+        return MOMENT_TO_STRFTIME.get(token, token)
+
+    return regex.sub(replace, fmt)
 
 
 def _prevent_deselection(key: str, default: Any, reset: list[str] | None = None):

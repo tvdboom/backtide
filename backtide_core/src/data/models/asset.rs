@@ -130,7 +130,7 @@ impl Asset {
     }
 
     #[getter]
-    fn base(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+    pub fn base(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         match &self.base {
             None => Ok(None),
             Some(s) => Ok(Some(match s.parse::<Currency>() {
@@ -141,7 +141,7 @@ impl Asset {
     }
 
     #[getter]
-    fn quote(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    pub fn quote(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         Ok(match self.quote.parse::<Currency>() {
             Ok(c) => Py::new(py, c)?.into_any(),
             Err(_) => PyString::new(py, &self.quote).unbind().into_any(),
@@ -149,7 +149,7 @@ impl Asset {
     }
 
     #[getter]
-    fn exchange(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    pub fn exchange(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         Ok(match self.exchange.parse::<Exchange>() {
             Ok(c) => Py::new(py, c)?.into_any(),
             Err(_) => PyString::new(py, &self.exchange).unbind().into_any(),

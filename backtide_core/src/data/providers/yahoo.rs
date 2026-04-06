@@ -294,9 +294,15 @@ impl DataProvider for YahooFinance {
 
         let lookback = match interval {
             Interval::OneWeek => 14 * 24 * 3600,
-            Interval::OneDay => 2 * 24 * 3600,
-            Interval::FourHours | Interval::OneHour => 2 * 24 * 3600,
+            Interval::OneDay | Interval::FourHours | Interval::OneHour => 2 * 24 * 3600,
             _ => 24 * 3600,
+        };
+
+        // Yahoo uses 1wk instead of 1w
+        let iv = if interval == Interval::OneWeek {
+            "1wk".to_string()
+        } else {
+            interval.to_string()
         };
 
         let resp = self
@@ -306,7 +312,7 @@ impl DataProvider for YahooFinance {
                 Some(&[
                     ("period1", (now - lookback).to_string().as_str()),
                     ("period2", now.to_string().as_str()),
-                    ("interval", interval.to_string().as_str()),
+                    ("interval", iv.as_str()),
                     ("crumb", &self.crumb),
                 ]),
             )

@@ -103,19 +103,19 @@ impl AssetMeta {
         &self.asset.name
     }
     #[getter]
-    fn base(&self) -> Option<&str> {
-        self.asset.base.as_deref()
+    fn base(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.asset.base(py)
     }
     #[getter]
-    fn quote(&self) -> &str {
-        &self.asset.quote
+    fn quote(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        self.asset.quote(py)
     }
     #[getter]
     fn asset_type(&self) -> AssetType {
         self.asset.asset_type
     }
     #[getter]
-    fn exchange(&self) -> &str {
-        &self.asset.exchange
+    fn exchange(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        self.asset.exchange(py)
     }
 }

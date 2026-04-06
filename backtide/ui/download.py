@@ -5,7 +5,7 @@ Description: Page to download new data.
 
 """
 
-from datetime import datetime
+from datetime import datetime as dt
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -22,6 +22,7 @@ from backtide.core.data import (
 )
 from backtide.ui.utils import (
     _fmt_number,
+    _moment_to_strftime,
     _get_asset_type_description,
     _get_logokit_url,
     _prevent_deselection,
@@ -33,15 +34,203 @@ from backtide.utils.constants import MAX_ASSET_SELECTION, MAX_PRELOADED_ASSETS
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
+CARD_CSS = """
+<style>
+  .section {
+    font-size: 12px;
+    font-weight: 600;
+    color: #888;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 18px 0 8px;
+  }
 
-def draw_asset_df(assets: list[Asset]) -> int:
+ .card {
+      border: 1px solid rgba(0,0,0, 0.2);
+      border-radius: 12px;
+      padding: 1.2rem 1.4rem;
+      margin-bottom: 10px;
+    }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+
+  .flag {
+    height: 22px;
+    border-radius: 3px;
+  }
+
+  .title {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .symbol {
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .name {
+    font-size: 18px;
+    opacity: 0.7;
+  }
+
+  .meta-right {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    font-size: 16px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(250,250,250,0.07);
+    border: 1px solid rgba(250,250,250,0.1);
+    white-space: nowrap;
+  }
+
+  .badge.leg {
+    background: rgba(99,179,237,0.12);
+    color: #63b3ed;
+  }
+
+  .intervals {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-top: 1px solid rgba(250,250,250,0.08);
+    padding-top: 10px;
+  }
+
+  .interval-row {
+    display: grid;
+    grid-template-columns: 40px 200px auto;
+    gap: 12px;
+    font-size: 13px;
+  }
+
+  .iv-label {
+    font-weight: 600;
+    font-size: 18px;
+    opacity: 0.7;
+  }
+
+  .iv-range {
+    font-size: 18px;
+  }
+
+  .iv-rows {
+    font-size: 18px;
+    opacity: 0.6;
+  }
+
+  .legs-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(250,250,250,0.08);
+  }
+</style>
+"""
+
+def render_download_cards(assets) -> int:
+    html = f'<div class="section"></div>'
+
+    total_rows = 0
+    for asset in assets:
+        interval_rows = ""
+        for interval in Interval.variants():
+            start_iv = asset.earliest_ts.get(interval)
+            end_iv = asset.latest_ts.get(interval)
+            if not (start_iv and end_iv):
+                continue
+
+            iv_start = dt.fromtimestamp(start_iv, tz=tz).date()
+            iv_end = dt.fromtimestamp(end_iv, tz=tz).date()
+            if not full_history:
+                iv_start = max(start_ts, iv_start)
+                iv_end = min(end_ts, iv_end)
+
+            # Estimate rows for this interval
+            delta_minutes = max((iv_end - iv_start).total_seconds() / 60, 1)
+            delta_days = (iv_end - iv_start).days
+
+            if asset.asset_type.is_equity:
+                # Stocks / ETFs: 8/5
+                if interval.is_intraday():
+                    rows = max(int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1)
+                else:
+                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
+            elif asset_type == AssetType.Forex:
+                # Forex: 24/5
+                if interval.is_intraday():
+                    rows = max(int(delta_minutes * (5 / 7) // interval.minutes()), 1)
+                else:
+                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
+            else:
+                # Crypto: 24/7
+                rows = max(int(delta_minutes // interval.minutes()), 1)
+
+            total_rows += rows
+
+            parse_date = lambda x: x.strftime(_moment_to_strftime(cfg.display.date_format))
+
+            interval_rows += f"""
+                <div class="interval-row">
+                    <span class="iv-label">{interval}</span>
+                    <span class="iv-range">{parse_date(iv_start)} → {parse_date(iv_end)}</span>
+                    <span class="iv-rows">~{_fmt_number(rows)} rows</span>
+                </div>"""
+
+        # Header badges
+        exchange = str(asset.exchange)
+        quote = str(asset.quote)
+
+        if logokit_key:
+            logo = _get_logokit_url(asset, logokit_key)
+        else:
+            logo = ""
+
+        flag = f'<img src="{logo}" style="height:64px;border-radius:6px;">'
+        name = asset.name if asset.asset_type.is_equity else ""
+
+        legs = ""
+        if asset.legs:
+            badges = "".join(f'<span class="badge leg">{leg}</span>' for leg in asset.legs)
+            legs = f'<div class="legs-row"><span style="font-size:16px">via</span>{badges}</div>'
+
+        html += f"""
+            <div class="card">
+              <div class="card-header">
+                {flag}
+                <div><div class="symbol">{asset.symbol}</div><div class="name">{name}</div></div>
+                <span class="badge" style="margin-left:auto;">{exchange}</span>
+                <span class="badge">{quote}</span>
+              </div>
+              <div class="intervals">{interval_rows}</div>
+              {legs}
+            </div>"""
+
+    return html, total_rows
+
+
+def draw_asset_df(assets: list[AssetMeta]) -> int:
     """Draw a Streamlit dataframe of a list of assets.
 
     The display includes asset metadata and images.
 
     Parameters
     ----------
-    assets : list[Asset]
+    assets : list[AssetMeta]
         Assets to display in the table.
 
     Returns
@@ -53,20 +242,56 @@ def draw_asset_df(assets: list[Asset]) -> int:
     data = []
     total_rows = 0
     for asset in assets:
-        # Determine the download range per asset
-        asset_start = datetime.fromtimestamp(asset.earliest_ts[Interval.OneDay], tz=tz)
-        asset_end = datetime.fromtimestamp(asset.latest_ts[Interval.OneDay], tz=tz)
-
-        if not is_intraday:
-            asset_start = asset_start.date()
-            asset_end = asset_end.date()
-
-        if not full_history:
-            asset_start = max(start_ts, asset_start)
-            asset_end = min(end_ts, asset_end)
-
         # Add row to dataframe
-        row = {"Symbol": asset.symbol, "Start": asset_start, "End": asset_end}
+        row = {"Symbol": asset.symbol}
+
+        range_lines = []
+        for interval in Interval.variants():
+            start_iv = asset.earliest_ts.get(interval)
+            end_iv = asset.latest_ts.get(interval)
+            if not (start_iv and end_iv):
+                continue
+
+            iv_start = dt.fromtimestamp(start_iv, tz=tz).date()
+            iv_end = dt.fromtimestamp(end_iv, tz=tz).date()
+
+            if not full_history:
+                iv_start = max(start_ts, iv_start)
+                iv_end = min(end_ts, iv_end)
+
+            # Estimate rows for this interval
+            delta_minutes = max((iv_end - iv_start).total_seconds() / 60, 1)
+            delta_days = (iv_end - iv_start).days
+
+            if asset_type in (AssetType.Stocks, AssetType.Etf):
+                # Stocks / ETFs: 8/5
+                if interval.is_intraday():
+                    rows = max(int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1)
+                else:
+                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
+            elif asset_type == AssetType.Forex:
+                # Forex: 24/5
+                if interval.is_intraday():
+                    rows = max(int(delta_minutes * (5 / 7) // interval.minutes()), 1)
+                else:
+                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
+            else:
+                # Crypto: 24/7
+                rows = max(int(delta_minutes // interval.minutes()), 1)
+
+            total_rows += rows
+
+            date_str = f"{iv_start} → {iv_end}"
+            rows_str = f"~{_fmt_number(rows)} rows"
+
+            if len(intervals) == 1:
+                line = f"{date_str}  ({rows_str})"
+            else:
+                line = f"{interval}  {date_str}  ({rows_str})"
+
+            range_lines.append(line)
+
+        row["Range"] = "\n".join(range_lines)
 
         if logokit_key and asset.asset_type.is_equity:
             row["Logo"] = _get_logokit_url(asset, logokit_key)
@@ -91,43 +316,14 @@ def draw_asset_df(assets: list[Asset]) -> int:
 
         data.append(row)
 
-        # Calculate estimated number of rows for this asset per interval
-        delta_minutes = max((asset_end - asset_start).total_seconds() / 60, 1)
-        delta_days = (asset_end - asset_start).days
-
-        for interval in intervals:
-            if asset_type in (AssetType.Stocks, AssetType.Etf):
-                # Stocks / ETFs: 8/5
-                if interval.is_intraday():
-                    effective_minutes = delta_minutes * (5 / 7) * (8 / 24)
-                    total_rows += max(int(effective_minutes // interval.minutes()), 1)
-                else:
-                    trading_days = delta_days * (5 / 7)
-                    total_rows += max(int(trading_days // (interval.minutes() / 1440)), 1)
-
-            elif asset_type == AssetType.Forex:
-                # Forex: 24/5
-                if interval.is_intraday():
-                    effective_minutes = delta_minutes * (5 / 7)
-                    total_rows += max(int(effective_minutes // interval.minutes()), 1)
-                else:
-                    trading_days = delta_days * (5 / 7)
-                    total_rows += max(int(trading_days // (interval.minutes() / 1440)), 1)
-
-            else:
-                # Crypto: 24/7
-                total_rows += max(int(delta_minutes // interval.minutes()), 1)
-
     data = pd.DataFrame(data)
 
-    ts_format = cfg.display.datetime_format() if is_intraday else cfg.display.date_format
     column_config = {
-        "Symbol": st.column_config.TextColumn("Symbol", width="small"),
-        "Start": st.column_config.DatetimeColumn("Start", format=ts_format),
-        "End": st.column_config.DatetimeColumn("End", format=ts_format),
+        "Symbol": st.column_config.TextColumn(width="small"),
+        "Range": st.column_config.TextColumn(),
     }
 
-    column_order = ["Symbol", "Start", "End"]
+    column_order = ["Symbol", "Range"]
 
     if "Logo" in data.columns:
         data = data.set_index("Logo")
@@ -176,7 +372,7 @@ cfg = get_config()
 if cfg.display.timezone:
     tz = ZoneInfo(cfg.display.timezone)
 else:
-    tz = datetime.now().astimezone().tzinfo
+    tz = dt.now().astimezone().tzinfo
 
 st.set_page_config(page_title="Backtide - Download")
 
@@ -206,13 +402,14 @@ asset_type = st.segmented_control(
     help="Select the type of financial asset you want to backtest.",
 )
 
-if not st.session_state.get(f"all_assets_{asset_type}"):
-    with st.spinner("Loading assets..."):
-        st.session_state[f"all_assets_{asset_type}"] = list_assets(
-            st.session_state.asset_type_download, MAX_PRELOADED_ASSETS
-        )
 
-all_assets = st.session_state[f"all_assets_{asset_type}"]
+@st.cache_data(ttl=3600, show_spinner="Loading assets...")
+def list_symbols(asset_type: AssetType):
+    """Cache the major symbols per asset type."""
+    return list_assets(asset_type, MAX_PRELOADED_ASSETS)
+
+
+all_assets = list_symbols(st.session_state.asset_type_download)
 
 # Filter assets based on the selected currency
 if currency := st.session_state.get("currency_download"):
@@ -249,7 +446,7 @@ try:
     assets = download_info.assets
 except RuntimeError as ex:
     assets = []
-    st.error(ex, icon="❌")
+    st.error(ex, icon=":material/error:")
 
 col2.selectbox(
     label="Currency",
@@ -268,14 +465,12 @@ full_history = st.toggle(
     ),
 )
 
-if assets:
-    earliest_ts = datetime.fromtimestamp(min(min(a.earliest_ts.values()) for a in assets), tz=tz)
-    latest_ts = datetime.fromtimestamp(max(max(a.latest_ts.values()) for a in assets), tz=tz)
+if assets and intervals:
+    earliest_ts = dt.fromtimestamp(min(min(a.earliest_ts.values()) for a in assets), tz=tz).date()
+    latest_ts = dt.fromtimestamp(max(max(a.latest_ts.values()) for a in assets), tz=tz).date()
 else:
-    earliest_ts = datetime(2000, 1, 1, tzinfo=tz)
-    latest_ts = datetime.now(tz=tz)
-
-is_intraday = any(interval.is_intraday() for interval in intervals)
+    earliest_ts = dt(2000, 1, 1, tzinfo=tz).date()
+    latest_ts = dt.now(tz=tz).date()
 
 if full_history:
     start_ts = earliest_ts
@@ -283,49 +478,27 @@ if full_history:
 else:
     col1, col2 = st.columns(2)
 
-    if is_intraday:
-        # Clamp datetime steps between 15min and 1h
-        step = min(max(15, min(i.minutes() for i in intervals)), 60) * 60
+    # Use date widgets when there are no intraday intervals
+    start_ts = col1.date_input(
+        label="Start date",
+        value=earliest_ts,
+        min_value=earliest_ts,
+        max_value="today",
+        format=cfg.display.date_format,
+        help=(
+            "Download data starting from this date (inclusive). A download can start later "
+            "if the provider doesn't have the data this far back, but it can't start earlier.",
+        ),
+    )
 
-        # Use datetime widgets when there are intraday intervals
-        start_ts = col1.datetime_input(
-            label="Start date",
-            value=earliest_ts,
-            min_value=earliest_ts,
-            max_value=datetime.now(tz=tz),
-            step=step,
-            format=cfg.display.date_format,
-            help="Download data starting from this timestamp (inclusive).",
-        ).replace(tzinfo=tz)
-
-        end_ts = col2.datetime_input(
-            label="End date",
-            value=latest_ts,
-            min_value=start_ts,
-            max_value=datetime.now(tz=tz),
-            step=step,
-            format=cfg.display.date_format,
-            help="Download data up to this timestamp (exclusive).",
-        ).replace(tzinfo=tz)
-    else:
-        # Use date widgets when there are no intraday intervals
-        start_ts = col1.date_input(
-            label="Start date",
-            value=earliest_ts,
-            min_value=earliest_ts,
-            max_value="today",
-            format=cfg.display.date_format,
-            help="Download data starting from this date (inclusive).",
-        )
-
-        end_ts = col2.date_input(
-            label="End date",
-            value=latest_ts,
-            min_value=start_ts,
-            max_value="today",
-            format=cfg.display.date_format,
-            help="Download data up to this date (exclusive).",
-        )
+    end_ts = col2.date_input(
+        label="End date",
+        value=latest_ts,
+        min_value=start_ts,
+        max_value="today",
+        format=cfg.display.date_format,
+        help="Download data up to this date (exclusive).",
+    )
 
 intervals = st.pills(
     label="Interval",
@@ -351,9 +524,18 @@ if is_enabled:
     with st.expander("Download overview", icon=":material/archive:", expanded=True):
         total_rows = 0
 
-        total_rows += draw_asset_df(assets)
-        if download_info.legs:
-            total_rows += draw_asset_df(download_info.legs)
+        # total_rows += draw_asset_df(assets)
+        # if download_info.legs:
+        #     total_rows += draw_asset_df(download_info.legs)
+        css = f"<style>{CARD_CSS}</style>"
+        html, rows = render_download_cards(assets)
+
+        total_rows += rows
+
+        # if download_info.legs:
+        #     html += render_download_cards(download_info.legs, intervals, "Conversion legs")
+
+        st.markdown(css + html, unsafe_allow_html=True)
 
         estimated_memory = (total_rows * BYTES_PER_ROW) / (1024**2)
         estimated_seconds = int(total_rows / ROWS_PER_SECOND)
@@ -391,7 +573,7 @@ if st.button(
     disabled=not is_enabled,
     width="stretch",
 ):
-    if latest_ts > datetime.now(tz=tz):
+    if latest_ts > dt.now(tz=tz).date():
         st.error("End date cannot be in the future.", icon=":material/error:")
     elif start_ts > latest_ts:  # ty:ignore[unsupported-operator]
         st.error("Start date must be equal or prior to end date.", icon=":material/error:")
