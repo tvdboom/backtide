@@ -8,7 +8,8 @@ Description: Utility functions for the UI.
 from typing import Any
 import re
 import streamlit as st
-
+import base64
+from pathlib import Path
 from backtide.core.data import Asset, AssetType
 from backtide.utils.utils import to_list
 from backtide.constants import MOMENT_TO_STRFTIME
@@ -73,8 +74,16 @@ def _get_logokit_url(asset: Asset, api_key: str, *, use_quote: bool = False) -> 
     return f"https://img.logokit.com/{url}/{symbol}?token={api_key}"
 
 
+@st.cache_data
+def _load_provider_logo(provider: str) -> str:
+    """Load the logo image from a provider."""
+    path = Path(f"images/providers/{provider.lower()}.png")
+    data = base64.b64encode(path.read_bytes()).decode()
+    return f"data:image/png;base64,{data}"
+
+
 def _moment_to_strftime(fmt: str) -> str:
-    """Convert a moment to strftime."""
+    """Convert a momentjs string to strftime format."""
     regex = re.compile(
         "|".join(sorted(map(re.escape, MOMENT_TO_STRFTIME.keys()), key=len, reverse=True))
     )

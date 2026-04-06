@@ -218,8 +218,12 @@ impl YahooFinance {
             };
         }
 
-        if let Some((base, quote)) = symbol.split_once('-') {
-            return Ok((Some(base.to_owned()), quote.to_owned()));
+        // Only treat '-' as a base/quote delimiter if there's no exchange suffix.
+        // e.g., "BT-A.L" is an equity, not a pair — '-' can be part of the ticker name.
+        if !symbol.contains('.') {
+            if let Some((base, quote)) = symbol.split_once('-') {
+                return Ok((Some(base.to_owned()), quote.to_owned()));
+            }
         }
 
         Ok((None, currency.to_string()))
@@ -390,8 +394,8 @@ impl DataProvider for YahooFinance {
 
                 // Fan out across major exchanges concurrently.
                 let exchanges = [
-                    XAMS, XASX, XETR, XHKG, XJPX, XKRX, XLON, XNAS, XNSE, XNYS, XPAR, XSES, XSHG,
-                    XSHE, XSWX,
+                    XAMS, XASX, XETR, XHKG, XJPX, XKRX, XLON, XMAD, XNAS, XNSE, XNYS, XPAR, XSES,
+                    XSHG, XSHE, XSWX,
                 ];
 
                 let tasks: Vec<_> = exchanges
