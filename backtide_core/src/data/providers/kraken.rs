@@ -32,6 +32,9 @@ impl Kraken {
     /// Returns OHLC candlestick data.
     const OHLC_URL: &str = "https://api.kraken.com/0/public/OHLC";
 
+    /// Returns recent trades — used to discover the true first-trade timestamp.
+    const TRADES_URL: &str = "https://api.kraken.com/0/public/Trades";
+
     // ────────────────────────────────────────────────────────────────────────
     // Public API
     // ────────────────────────────────────────────────────────────────────────
@@ -52,7 +55,17 @@ impl Kraken {
 
     /// Convert a canonical symbol to Kraken format.
     fn parse_canonical_symbol(symbol: &str) -> String {
-        symbol.replace('-', "")
+        symbol.replace("BTC", "XBT").replace('-', "")
+    }
+
+    /// Normalize Kraken-specific tickers to industry-standard names.
+    ///
+    /// Kraken uses `XBT` for Bitcoin — everywhere else it is `BTC`.
+    fn normalize_ticker(ticker: &str) -> String {
+        match ticker {
+            "XBT" => "BTC".to_owned(),
+            other => other.to_owned(),
+        }
     }
 
     /// Convert an [`Interval`] to Kraken's integer-minutes representation.
@@ -137,6 +150,45 @@ impl Kraken {
 
         Ok(bars)
     }
+
+    /// Discover the true first-trade Unix timestamp for a pair.
+    ///
+    /// The OHLC endpoint only keeps the most recent 720 candles, so
+    /// `since=0` does **not** reach the beginning of history.
+    /// The Trades endpoint (`/0/public/Trades?since=0`) does return
+    /// from the very first trade.
+    #[instrument(skip(self), fields(%symbol))]
+    async fn get_first_trade_ts(&self, symbol: &str) -> DataResult<u64> {
+        let resp = self
+            .client
+            .get(Self::TRADES_URL, Some(&[("pair", symbol), ("since", "0"), ("count", "1")]))
+            .await?;
+
+        let parsed = HttpClient::json::<KrakenResponse<serde_json::Value>>(resp).await?;
+        let result = Self::unwrap_response(parsed, symbol)?;
+
+        let obj = result
+            .as_object()
+            .ok_or_else(|| DataError::UnexpectedResponse("Trades result is not an object".to_owned()))?;
+
+        // Find the first key that isn't "last".
+        let trades = obj
+            .iter()
+            .find(|(k, _)| *k != "last")
+            .and_then(|(_, v)| v.as_array())
+            .ok_or_else(|| DataError::UnexpectedResponse("no trades array found".to_owned()))?;
+
+        // Each trade: [price, volume, time, ...]  where time is a float.
+        let ts = trades
+            .first()
+            .and_then(|t| t.as_array())
+            .and_then(|t| t.get(2))
+            .and_then(|v| v.as_f64())
+            .map(|f| f as u64)
+            .ok_or_else(|| DataError::UnexpectedResponse("missing trade timestamp".to_owned()))?;
+
+        Ok(ts)
+    }
 }
 
 #[async_trait]
@@ -170,17 +222,12 @@ impl DataProvider for Kraken {
 
         let symbol = Self::parse_canonical_symbol(&asset.symbol);
 
-        let (first, last) = tokio::try_join!(
-            self.get_bars(&symbol, interval, Some(0)),
-            self.get_bars(&symbol, interval, None),
-        )?;
+        // The OHLC endpoint only keeps the last 720 candles, so `since=0`
+        // does NOT reach the true beginning of trading history.
+        // Use the Trades endpoint for the earliest ts and OHLC for the latest.
+        let earliest_ts = self.get_first_trade_ts(&symbol).await?;
 
-        let earliest_ts = first
-            .into_iter()
-            .next()
-            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol.clone()))?
-            .time;
-
+        let last = self.get_bars(&symbol, interval, None).await?;
         let latest_ts =
             last.into_iter().last().ok_or_else(|| DataError::SymbolNotFound(asset.symbol))?.time;
 
@@ -259,6 +306,10 @@ impl TryFrom<PairInfo> for Asset {
         } else {
             (info.base.clone(), info.quote.clone())
         };
+
+        // Normalize Kraken-specific tickers (e.g. XBT → BTC).
+        let base = Kraken::normalize_ticker(&base);
+        let quote = Kraken::normalize_ticker(&quote);
 
         let symbol = canonical_symbol(&info.altname, &Some(base.clone()), &quote);
 
