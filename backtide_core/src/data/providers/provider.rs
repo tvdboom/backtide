@@ -1,10 +1,10 @@
 //! Implementation of the [`Provider`] enum.
 
-use crate::data::models::currency::Currency;
+use crate::data::models::interval::Interval;
 use pyo3::exceptions::PyValueError;
 use pyo3::{pyclass, pymethods, Borrowed, FromPyObject, PyAny, PyErr};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use strum::{Display, EnumString};
+use strum::{Display, EnumString, IntoEnumIterator};
 
 /// A supported market data provider.
 #[pyclass(skip_from_py_object)]
@@ -32,6 +32,14 @@ pub enum Provider {
 impl Provider {
     fn __repr__(&self) -> String {
         self.to_string()
+    }
+
+    /// List the supported intervals.
+    fn intervals(&self) -> Vec<Interval> {
+        match self {
+            Provider::Coinbase => Interval::iter().filter(|i| *i != Interval::OneWeek).collect(),
+            _ => Interval::iter().collect(),
+        }
     }
 }
 

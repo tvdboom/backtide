@@ -11,6 +11,7 @@ use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
 use crate::utils::http::{HttpClient, HttpError};
 use async_trait::async_trait;
+use chrono::DateTime;
 use serde::Deserialize;
 use tracing::{debug, info, instrument};
 
@@ -28,9 +29,8 @@ impl Coinbase {
     /// Returns product metadata for a single trading pair.
     const PRODUCTS_URL: &str = "https://api.coinbase.com/api/v3/brokerage/market/products";
 
-    /// Returns candle (OHLCV) data for a product.
-    /// Usage: `{PRODUCTS_URL}/{product_id}/candles`
-    const CANDLES_SUFFIX: &str = "candles";
+    /// Maximum candles returned by the candles endpoint.
+    const MAX_CANDLES_PER_REQUEST: u64 = 350;
 
     // ────────────────────────────────────────────────────────────────────────
     // Public API
@@ -50,27 +50,17 @@ impl Coinbase {
     // Private API
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Convert a canonical symbol (`BTC-USD`) to the Coinbase product id
-    /// format, which is the same (`BTC-USD`).
-    fn parse_canonical_symbol(symbol: &str) -> String {
-        symbol.to_owned()
-    }
-
     /// Convert an [`Interval`] to Coinbase's granularity string.
-    ///
-    /// Coinbase Advanced Trade accepts:
-    /// `ONE_MINUTE`, `FIVE_MINUTE`, `FIFTEEN_MINUTE`, `THIRTY_MINUTE`,
-    /// `ONE_HOUR`, `TWO_HOUR`, `SIX_HOUR`, `ONE_DAY`.
-    fn interval_granularity(interval: Interval) -> &'static str {
+    fn interval_granularity(interval: Interval) -> DataResult<&'static str> {
         match interval {
-            Interval::OneMinute => "ONE_MINUTE",
-            Interval::FiveMinutes => "FIVE_MINUTE",
-            Interval::FifteenMinutes => "FIFTEEN_MINUTE",
-            Interval::ThirtyMinutes => "THIRTY_MINUTE",
-            Interval::OneHour => "ONE_HOUR",
-            Interval::FourHours => "SIX_HOUR", // closest available
-            Interval::OneDay => "ONE_DAY",
-            Interval::OneWeek => "ONE_DAY", // fetch daily, caller aggregates
+            Interval::OneMinute => Ok("ONE_MINUTE"),
+            Interval::FiveMinutes => Ok("FIVE_MINUTE"),
+            Interval::FifteenMinutes => Ok("FIFTEEN_MINUTE"),
+            Interval::ThirtyMinutes => Ok("THIRTY_MINUTE"),
+            Interval::OneHour => Ok("ONE_HOUR"),
+            Interval::FourHours => Ok("FOUR_HOUR"),
+            Interval::OneDay => Ok("ONE_DAY"),
+            Interval::OneWeek => Err(DataError::UnsupportedInterval(interval)),
         }
     }
 
@@ -84,14 +74,16 @@ impl Coinbase {
         }
     }
 
-    /// Build the candles URL for a given product id.
-    fn candles_url(product_id: &str) -> String {
-        format!("{}/{}/{}", Self::PRODUCTS_URL, product_id, Self::CANDLES_SUFFIX)
-    }
+    /// Fetch product metadata for a single symbol.
+    #[instrument(skip(self), fields(%product_id))]
+    async fn get_product_info(&self, product_id: &str) -> DataResult<ProductInfo> {
+        let resp = self
+            .client
+            .get(&format!("{}/{}", Self::PRODUCTS_URL, product_id), None)
+            .await
+            .map_err(|_| DataError::SymbolNotFound(product_id.to_owned()))?;
 
-    /// Build the single-product URL for a given product id.
-    fn product_url(product_id: &str) -> String {
-        format!("{}/{}", Self::PRODUCTS_URL, product_id)
+        Ok(HttpClient::json::<ProductInfo>(resp).await?)
     }
 
     /// Fetch candles for a product between Unix timestamps `start` and `end`.
@@ -103,8 +95,8 @@ impl Coinbase {
         start: Option<u64>,
         end: Option<u64>,
     ) -> DataResult<Vec<CoinbaseCandle>> {
-        let granularity = Self::interval_granularity(interval);
-        let url = Self::candles_url(product_id);
+        let granularity = Self::interval_granularity(interval)?;
+        let url = format!("{}/{}/candles", Self::PRODUCTS_URL, product_id);
 
         let mut params: Vec<(&str, String)> = vec![("granularity", granularity.to_owned())];
 
@@ -141,16 +133,7 @@ impl DataProvider for Coinbase {
     async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
         Self::require_crypto(asset_type)?;
 
-        let product_id = Self::parse_canonical_symbol(symbol);
-        let url = Self::product_url(&product_id);
-
-        let resp = self
-            .client
-            .get(&url, None)
-            .await
-            .map_err(|_| DataError::SymbolNotFound(symbol.to_owned()))?;
-
-        let info = HttpClient::json::<ProductInfo>(resp).await?;
+        let info = self.get_product_info(symbol).await?;
 
         Ok(Asset::try_from(info)?)
     }
@@ -160,26 +143,44 @@ impl DataProvider for Coinbase {
     async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
         Self::require_crypto(asset.asset_type)?;
 
-        let product_id = Self::parse_canonical_symbol(&asset.symbol);
+        let product_id = asset.symbol.clone();
+        let latest_bars = self.get_bars(&product_id, interval, None, None).await?;
 
-        // Earliest: request from epoch 0
-        // Latest: request without bounds (returns most recent candles)
-        let (first, last) = tokio::try_join!(
-            self.get_bars(&product_id, interval, Some(0), Some(1)),
-            self.get_bars(&product_id, interval, None, None),
-        )?;
+        let latest_ts = latest_bars
+            .iter()
+            .map(|bar| bar.start)
+            .max()
+            .ok_or_else(|| DataError::SymbolNotFound(product_id.clone()))?;
 
-        // Coinbase returns candles in descending order, so the earliest is
-        // the last element of the "from epoch" request and the latest is the
-        // first element of the unbounded request.
-        let earliest_ts = first
-            .into_iter()
-            .last()
-            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol.clone()))?
-            .start;
+        let product = self.get_product_info(&product_id).await?;
+        let fallback_earliest_ts =
+            latest_bars.iter().map(|bar| bar.start).min().unwrap_or(latest_ts);
 
-        let latest_ts =
-            last.into_iter().next().ok_or_else(|| DataError::SymbolNotFound(asset.symbol))?.start;
+        let earliest_ts = if let Some(new_at) = product.new_at.as_deref() {
+            let start = DateTime::parse_from_rfc3339(new_at)
+                .map(|ts| ts.timestamp().max(0) as u64)
+                .map_err(|_| {
+                    DataError::UnexpectedResponse(format!(
+                        "invalid Coinbase new_at timestamp: {new_at}"
+                    ))
+                })?;
+
+            let span = (interval.minutes() as u64 * 60)
+                .saturating_mul(Self::MAX_CANDLES_PER_REQUEST.saturating_sub(1));
+
+            match self
+                .get_bars(&product_id, interval, Some(start), Some(start.saturating_add(span)))
+                .await
+            {
+                Ok(bars) => bars.iter().map(|bar| bar.start).min().unwrap_or(fallback_earliest_ts),
+                Err(e) => {
+                    debug!(%product_id, ?interval, "Coinbase earliest window probe failed: {e}");
+                    fallback_earliest_ts
+                },
+            }
+        } else {
+            fallback_earliest_ts
+        };
 
         Ok((earliest_ts, latest_ts))
     }
@@ -242,6 +243,9 @@ struct ProductInfo {
 
     /// Product lifecycle status — only `"online"` products are usable.
     status: Option<String>,
+
+    /// Product launch timestamp used to anchor historical candle requests.
+    new_at: Option<String>,
 }
 
 impl TryFrom<ProductInfo> for Asset {

@@ -1,5 +1,6 @@
 use crate::constants::Symbol;
 use crate::data::models::asset_type::AssetType;
+use crate::data::models::interval::Interval;
 use crate::utils::http::HttpError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;
@@ -34,6 +35,10 @@ pub enum DataError {
     /// The asset type is not supported by the provider.
     #[error("Unsupported asset type: {0}")]
     UnsupportedAssetType(AssetType),
+
+    /// The interval is not supported by the provider.
+    #[error("Unsupported interval: {0}")]
+    UnsupportedInterval(Interval),
 }
 
 pub type DataResult<T> = Result<T, DataError>;

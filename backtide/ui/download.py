@@ -200,6 +200,12 @@ CARD_CSS = """
     """
 
 
+@st.cache_data(ttl=3600, show_spinner="Loading assets...")
+def list_symbols(asset_type: AssetType):
+    """Cache the major symbols per asset type."""
+    return list_assets(asset_type, MAX_PRELOADED_ASSETS)
+
+
 def draw_cards(assets: list[AssetMeta]) -> int:
     """Generate HTML code to draw the asset cards."""
     html = f"<div class='section'></div>"
@@ -378,13 +384,6 @@ asset_type = st.segmented_control(
     help="Select the type of financial asset you want to backtest.",
 )
 
-
-@st.cache_data(ttl=3600, show_spinner="Loading assets...")
-def list_symbols(asset_type: AssetType):
-    """Cache the major symbols per asset type."""
-    return list_assets(asset_type, MAX_PRELOADED_ASSETS)
-
-
 all_assets = list_symbols(st.session_state.asset_type_download)
 
 # Filter assets based on the selected currency
@@ -483,7 +482,7 @@ else:
 intervals = st.pills(
     label="Interval",
     key="interval_download",
-    options=Interval.variants(),
+    options=cfg.data.providers[asset_type].intervals(),
     selection_mode="multi",
     default=Interval.get_default(),
     help=(

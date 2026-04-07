@@ -32,8 +32,8 @@ impl Kraken {
     /// Returns OHLC candlestick data.
     const OHLC_URL: &str = "https://api.kraken.com/0/public/OHLC";
 
-    /// Returns recent trades — used to discover the true first-trade timestamp.
-    const TRADES_URL: &str = "https://api.kraken.com/0/public/Trades";
+    /// Mapping from-to kraken specific symbols to canonical symbols.
+    const TICKER_MAPPINGS: &[(&str, &str)] = &[("BTC", "XBT"), ("DOGE", "XDG")];
 
     // ────────────────────────────────────────────────────────────────────────
     // Public API
@@ -53,19 +53,27 @@ impl Kraken {
     // Private API
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Convert a canonical symbol to Kraken format.
-    fn parse_canonical_symbol(symbol: &str) -> String {
-        symbol.replace("BTC", "XBT").replace('-', "")
+    /// Convert a canonical pair (e.g. `"BTC-USD"`) to Kraken format (e.g. `"XBTUSD"`).
+    fn parse_canonical_symbol(&self, symbol: &str) -> String {
+        symbol
+            .split('-')
+            .map(|part| {
+                Self::TICKER_MAPPINGS
+                    .iter()
+                    .find(|(canonical, _)| *canonical == part)
+                    .map(|(_, kraken)| *kraken)
+                    .unwrap_or(part)
+            })
+            .collect()
     }
 
-    /// Normalize Kraken-specific tickers to industry-standard names.
-    ///
-    /// Kraken uses `XBT` for Bitcoin — everywhere else it is `BTC`.
-    fn normalize_ticker(ticker: &str) -> String {
-        match ticker {
-            "XBT" => "BTC".to_owned(),
-            other => other.to_owned(),
-        }
+    /// Normalize Kraken-specific ticker to their canonical names.
+    pub fn normalize_ticker(ticker: &str) -> String {
+        Self::TICKER_MAPPINGS
+            .iter()
+            .find(|(_, kraken)| *kraken == ticker)
+            .map(|(canonical, _)| (*canonical).to_string())
+            .unwrap_or_else(|| ticker.to_string())
     }
 
     /// Convert an [`Interval`] to Kraken's integer-minutes representation.
@@ -102,9 +110,9 @@ impl Kraken {
 
     /// Fetch OHLC bars for a pair.
     ///
-    /// `since` is an optional Unix-seconds timestamp; when `Some(0)` the
-    /// exchange returns the earliest available data.  When `None` it
-    /// returns the most recent 720 candles.
+    /// `since` is an optional Unix-seconds timestamp. When `Some(0)` the
+    /// exchange returns the earliest 720 candles.  When `None` it returns
+    /// the most recent 720 candles.
     #[instrument(skip(self), fields(%symbol, %interval))]
     async fn get_bars(
         &self,
@@ -127,8 +135,6 @@ impl Kraken {
         let parsed = HttpClient::json::<KrakenResponse<serde_json::Value>>(resp).await?;
         let result = Self::unwrap_response(parsed, symbol)?;
 
-        // Result is `{"<PAIR>": [[...], ...], "last": <ts>}`.
-        // Find the first key that isn't `"last"`.
         let obj = result.as_object().ok_or_else(|| {
             DataError::UnexpectedResponse("OHLC result is not an object".to_owned())
         })?;
@@ -150,45 +156,6 @@ impl Kraken {
 
         Ok(bars)
     }
-
-    /// Discover the true first-trade Unix timestamp for a pair.
-    ///
-    /// The OHLC endpoint only keeps the most recent 720 candles, so
-    /// `since=0` does **not** reach the beginning of history.
-    /// The Trades endpoint (`/0/public/Trades?since=0`) does return
-    /// from the very first trade.
-    #[instrument(skip(self), fields(%symbol))]
-    async fn get_first_trade_ts(&self, symbol: &str) -> DataResult<u64> {
-        let resp = self
-            .client
-            .get(Self::TRADES_URL, Some(&[("pair", symbol), ("since", "0"), ("count", "1")]))
-            .await?;
-
-        let parsed = HttpClient::json::<KrakenResponse<serde_json::Value>>(resp).await?;
-        let result = Self::unwrap_response(parsed, symbol)?;
-
-        let obj = result
-            .as_object()
-            .ok_or_else(|| DataError::UnexpectedResponse("Trades result is not an object".to_owned()))?;
-
-        // Find the first key that isn't "last".
-        let trades = obj
-            .iter()
-            .find(|(k, _)| *k != "last")
-            .and_then(|(_, v)| v.as_array())
-            .ok_or_else(|| DataError::UnexpectedResponse("no trades array found".to_owned()))?;
-
-        // Each trade: [price, volume, time, ...]  where time is a float.
-        let ts = trades
-            .first()
-            .and_then(|t| t.as_array())
-            .and_then(|t| t.get(2))
-            .and_then(|v| v.as_f64())
-            .map(|f| f as u64)
-            .ok_or_else(|| DataError::UnexpectedResponse("missing trade timestamp".to_owned()))?;
-
-        Ok(ts)
-    }
 }
 
 #[async_trait]
@@ -198,7 +165,7 @@ impl DataProvider for Kraken {
     async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
         Self::require_crypto(asset_type)?;
 
-        let pair = Self::parse_canonical_symbol(symbol);
+        let pair = self.parse_canonical_symbol(symbol);
 
         let resp = self
             .client
@@ -220,16 +187,23 @@ impl DataProvider for Kraken {
     async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
         Self::require_crypto(asset.asset_type)?;
 
-        let symbol = Self::parse_canonical_symbol(&asset.symbol);
+        let symbol = self.parse_canonical_symbol(&asset.symbol);
 
-        // The OHLC endpoint only keeps the last 720 candles, so `since=0`
-        // does NOT reach the true beginning of trading history.
-        // Use the Trades endpoint for the earliest ts and OHLC for the latest.
-        let earliest_ts = self.get_first_trade_ts(&symbol).await?;
+        let earliest_ts = self
+            .get_bars(&symbol, interval, Some(0))
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol.clone()))?
+            .time;
 
-        let last = self.get_bars(&symbol, interval, None).await?;
-        let latest_ts =
-            last.into_iter().last().ok_or_else(|| DataError::SymbolNotFound(asset.symbol))?.time;
+        let latest_ts = self
+            .get_bars(&symbol, interval, None)
+            .await?
+            .into_iter()
+            .last()
+            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol))?
+            .time;
 
         Ok((earliest_ts, latest_ts))
     }
@@ -307,7 +281,7 @@ impl TryFrom<PairInfo> for Asset {
             (info.base.clone(), info.quote.clone())
         };
 
-        // Normalize Kraken-specific tickers (e.g. XBT → BTC).
+        // Normalize Kraken-specific tickers (e.g., XBT → BTC).
         let base = Kraken::normalize_ticker(&base);
         let quote = Kraken::normalize_ticker(&quote);
 

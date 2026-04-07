@@ -58,7 +58,7 @@ fn parse_interval(interval: Bound<'_, PyAny>) -> PyResult<Vec<Interval>> {
 /// ----------
 /// symbols : str | [Asset] | list[str | [Asset]]
 ///     Symbols for which to get the assets. The symbols should be of the
-///     [canonical form][nom-symbol] expected by backtide.
+///     [canonical form][canonical-symbols] expected by backtide.
 ///
 /// asset_type : str | [AssetType]
 ///     For which [asset type] to get the assets.
@@ -99,7 +99,7 @@ pub fn get_assets(symbols: Bound<'_, PyAny>, asset_type: Bound<'_, PyAny>) -> Py
 /// ----------
 /// symbols : str | [Asset] | list[str | [Asset]]
 ///     Symbols for which to get the assets. The symbols should be of the
-///     [canonical form][nom-symbol] expected by backtide.
+///     [canonical form][canonical-symbols] expected by backtide.
 ///
 /// asset_type : str | [AssetType]
 ///     For which [asset type] to get the assets.
