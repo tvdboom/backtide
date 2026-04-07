@@ -116,7 +116,7 @@ nav:
     - Getting started: getting_started.md
     - User guide:
         - Nomenclature: user_guide/nomenclature.md
-        - Currencies: user_guide/currencies.md
+        - Data: user_guide/data.md
         - Configuration: user_guide/configuration.md
     - API:
         - config:

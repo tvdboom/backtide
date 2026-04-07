@@ -1,6 +1,9 @@
 use crate::config::config::Config;
 use crate::config::errors::{ConfigError, ConfigResult};
 use crate::constants::CONFIG_FILE_NAME;
+use crate::data::models::asset_type::AssetType;
+use crate::data::providers::provider::Provider;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Search CWD or its parent for a recognized config file.
@@ -35,4 +38,21 @@ pub fn parse_config(path: &Path) -> ConfigResult<Config> {
 /// Load the config without updating the singleton.
 pub fn fetch_config() -> ConfigResult<Config> {
     find_config_file().map(|path| parse_config(&path)).unwrap_or(Ok(Config::default()))
+}
+
+/// Deserialize providers, filling in missing asset types with their defaults.
+pub fn deserialize_providers<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<AssetType, Provider>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    use strum::IntoEnumIterator;
+
+    let explicit: HashMap<AssetType, Provider> = HashMap::deserialize(deserializer)?;
+    let mut providers: HashMap<AssetType, Provider> =
+        AssetType::iter().map(|at| (at, at.default())).collect();
+    providers.extend(explicit);
+    Ok(providers)
 }

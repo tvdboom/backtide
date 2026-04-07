@@ -24,6 +24,7 @@ use strum::{Display, EnumString};
 pub enum Provider {
     Yahoo,
     Binance,
+    Coinbase,
     Kraken,
 }
 

@@ -16,18 +16,6 @@ pub enum DataError {
     #[error("HTTP error: {0}")]
     Http(#[from] HttpError),
 
-    /// A triangulation leg doesn't cover the full history of its primary asset.
-    #[error(
-        "Required symbol '{leg_symbol}' (earliest: {leg_earliest:?}) starts after \
-         asset '{asset_symbol}' (earliest: {asset_earliest:?})"
-    )]
-    InsufficientLegHistory {
-        asset_symbol: String,
-        asset_earliest: Option<u64>,
-        leg_symbol: String,
-        leg_earliest: Option<u64>,
-    },
-
     /// Direct conversion and all triangulation legs are degenerate for this pair.
     #[error("No conversion path from '{from}' to '{to}'")]
     NoConversionPath {
@@ -40,7 +28,7 @@ pub enum DataError {
     SymbolNotFound(Symbol),
 
     /// The response had an unexpected structure (e.g., missing fields).
-    #[error("Unexpected response structure: {0}")]
+    #[error("Unexpected response: {0}")]
     UnexpectedResponse(String),
 
     /// The asset type is not supported by the provider.

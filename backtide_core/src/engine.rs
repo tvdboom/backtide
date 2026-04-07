@@ -10,6 +10,8 @@ use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::binance::Binance;
+use crate::data::providers::coinbase::Coinbase;
+use crate::data::providers::kraken::Kraken;
 use crate::data::providers::provider::Provider;
 use crate::data::providers::traits::DataProvider;
 use crate::data::providers::yahoo::YahooFinance;
@@ -127,7 +129,8 @@ impl Engine {
                 let p: Arc<dyn DataProvider> = match provider {
                     Provider::Yahoo => Arc::new(rt.block_on(YahooFinance::new())?),
                     Provider::Binance => Arc::new(rt.block_on(Binance::new())?),
-                    _ => unreachable!(),
+                    Provider::Coinbase => Arc::new(rt.block_on(Coinbase::new())?),
+                    Provider::Kraken => Arc::new(rt.block_on(Kraken::new())?),
                 };
                 cache.insert(*provider, p.clone());
                 p

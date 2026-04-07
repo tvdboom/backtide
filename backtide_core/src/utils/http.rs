@@ -1,7 +1,7 @@
 //! Utilities for HTTP requests.
 
 use reqwest::cookie::Jar;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::Serialize;
 use std::future::Future;
 use std::sync::Arc;
@@ -51,10 +51,13 @@ pub struct HttpClient {
 
 impl HttpClient {
     /// Number of times to retry a failed HTTP request.
-    const MAX_RETRIES: u32 = 3;
+    const MAX_RETRIES: u32 = 5;
 
     /// How long to wait between retry attempts.
     const RETRY_SLEEP: Duration = Duration::from_millis(100);
+
+    /// Base delay for 429 rate-limit back-off (doubles each attempt).
+    const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(1);
 
     /// User-agent sent with every request.
     const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
@@ -121,6 +124,26 @@ impl HttpClient {
 
                     if status.is_success() {
                         return Ok(resp);
+                    } else if status == StatusCode::TOO_MANY_REQUESTS {
+                        // 429: honor Retry-After header or use exponential back-off.
+                        let retry_after = resp
+                            .headers()
+                            .get(reqwest::header::RETRY_AFTER)
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .map(Duration::from_secs);
+
+                        let delay = retry_after.unwrap_or_else(|| {
+                            Self::RATE_LIMIT_BACKOFF * 2u32.saturating_pow(attempt)
+                        });
+
+                        last_err = Some(HttpError::Status {
+                            status,
+                            source: resp.error_for_status().unwrap_err(),
+                        });
+
+                        sleep(delay).await;
+                        continue;
                     } else if status.is_client_error() {
                         // 4xx: no point retrying, the request itself is wrong.
                         return Err(HttpError::Status {

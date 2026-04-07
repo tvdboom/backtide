@@ -53,6 +53,18 @@ impl Binance {
         symbol.replace('-', "")
     }
 
+    /// Unwrap the Binance response envelope, returning the inner data
+    /// or converting a Binance error into [`DataError`].
+    fn unwrap_response<T>(resp: BinanceResponse<T>) -> DataResult<T> {
+        match resp {
+            BinanceResponse::Ok(data) => Ok(data),
+            BinanceResponse::Err {
+                code,
+                msg,
+            } => Err(DataError::UnexpectedResponse(format!("Binance error {code}: {msg}"))),
+        }
+    }
+
     /// Guard: return [`DataError::UnsupportedAssetType`] for anything except
     /// [`AssetType::Crypto`].
     fn require_crypto(asset_type: AssetType) -> DataResult<()> {
@@ -61,23 +73,6 @@ impl Binance {
         } else {
             Err(DataError::UnsupportedAssetType(asset_type))
         }
-    }
-
-    /// Fetch exchange info for a single symbol.
-    async fn fetch_symbol_info(&self, symbol: &str) -> DataResult<SymbolInfo> {
-        let resp = self
-            .client
-            .get(Self::EXCHANGE_INFO_URL, Some(&[("symbol", symbol)]))
-            .await
-            .map_err(|_| DataError::SymbolNotFound(symbol.to_owned()))?;
-
-        let parsed = HttpClient::json::<ExchangeInfoResponse>(resp).await?;
-
-        parsed
-            .symbols
-            .into_iter()
-            .next()
-            .ok_or_else(|| DataError::SymbolNotFound(symbol.to_owned()))
     }
 
     /// Fetch klines for a symbol between Unix timestamps `start_time` and `end_time`.
@@ -107,7 +102,8 @@ impl Binance {
         let params_ref: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
         let resp = self.client.get(Self::KLINES_URL, Some(&params_ref)).await?;
-        let rows = HttpClient::json::<Vec<serde_json::Value>>(resp).await?;
+        let parsed = HttpClient::json::<BinanceResponse<Vec<serde_json::Value>>>(resp).await?;
+        let rows = Self::unwrap_response(parsed)?;
 
         if rows.is_empty() {
             return Err(HttpError::UnexpectedPayload(format!(
@@ -130,8 +126,22 @@ impl DataProvider for Binance {
     async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
         Self::require_crypto(asset_type)?;
 
-        let symbol = Self::parse_canonical_symbol(symbol);
-        let info = self.fetch_symbol_info(&symbol).await?;
+        let binance_symbol = Self::parse_canonical_symbol(symbol);
+
+        let resp = self
+            .client
+            .get(Self::EXCHANGE_INFO_URL, Some(&[("symbol", &binance_symbol)]))
+            .await
+            .map_err(|_| DataError::SymbolNotFound(symbol.to_owned()))?;
+
+        let parsed = HttpClient::json::<BinanceResponse<ExchangeInfo>>(resp).await?;
+        let info = Self::unwrap_response(parsed)?;
+
+        let info = info
+            .symbols
+            .into_iter()
+            .next()
+            .ok_or_else(|| DataError::SymbolNotFound(symbol.to_owned()))?;
 
         Ok(Asset::try_from(info)?)
     }
@@ -151,13 +161,13 @@ impl DataProvider for Binance {
         let earliest_ts = first
             .into_iter()
             .next()
-            .ok_or_else(|| DataError::SymbolNotFound(symbol.clone()))?
+            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol.clone()))?
             .open_time;
 
         let latest_ts = last
             .into_iter()
             .next()
-            .ok_or_else(|| DataError::SymbolNotFound(symbol.clone()))?
+            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol))?
             .close_time;
 
         Ok((earliest_ts, latest_ts))
@@ -170,7 +180,8 @@ impl DataProvider for Binance {
 
         let resp =
             self.client.get(Self::EXCHANGE_INFO_URL, Some(&[("permissions", "SPOT")])).await?;
-        let info = HttpClient::json::<ExchangeInfoResponse>(resp).await?;
+        let parsed = HttpClient::json::<BinanceResponse<ExchangeInfo>>(resp).await?;
+        let info = Self::unwrap_response(parsed)?;
 
         let assets: Vec<Asset> = info
             .symbols
@@ -195,8 +206,23 @@ impl DataProvider for Binance {
 // Binance API objects
 // ────────────────────────────────────────────────────────────────────────────
 
+/// Standard Binance REST response envelope.
+///
+/// On success the payload is returned directly; on error Binance responds
+/// with `{"code": <i32>, "msg": "<string>"}`.
 #[derive(Debug, Deserialize)]
-struct ExchangeInfoResponse {
+#[serde(untagged)]
+enum BinanceResponse<T> {
+    Err {
+        code: i32,
+        msg: String,
+    },
+    Ok(T),
+}
+
+/// Exchange-info payload from `/api/v3/exchangeInfo`.
+#[derive(Debug, Deserialize)]
+struct ExchangeInfo {
     symbols: Vec<SymbolInfo>,
 }
 
@@ -224,9 +250,11 @@ impl TryFrom<SymbolInfo> for Asset {
         let base = info.base_asset;
         let quote = info.quote_asset;
 
+        let symbol = canonical_symbol(&info.symbol, &Some(base.clone()), &quote);
+
         Ok(Asset {
-            symbol: canonical_symbol(&info.symbol, &Some(base.clone()), &quote),
-            name: format!("{base}-{quote}"),
+            symbol: symbol.clone(),
+            name: symbol,
             base: Some(base),
             quote,
             asset_type: AssetType::Crypto,

@@ -1,5 +1,6 @@
-# Backtide database
+# Backtide
 .backtide/
+backtide.config.toml
 
 # IDE
 .idea/

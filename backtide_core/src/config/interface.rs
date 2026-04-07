@@ -167,7 +167,7 @@ impl PyConfig {
 /// - backtide.config:load_config
 /// - backtide.config:set_config
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.config")]
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneralConfig {
     pub base_currency: Currency,
@@ -176,6 +176,19 @@ pub struct GeneralConfig {
     pub triangulation_crypto: String,
     pub triangulation_crypto_pegged: Currency,
     pub log_level: LogLevel,
+}
+
+impl Default for GeneralConfig {
+    fn default() -> Self {
+        Self {
+            base_currency: Currency::default(),
+            triangulation_strategy: TriangulationStrategy::default(),
+            triangulation_fiat: Currency::default(),
+            triangulation_crypto: "USDT".to_owned(),
+            triangulation_crypto_pegged: Currency::default(),
+            log_level: LogLevel::default(),
+        }
+    }
 }
 
 #[pymethods]
@@ -259,6 +272,7 @@ impl GeneralConfig {
 #[serde(default)]
 pub struct DataConfig {
     pub storage_path: PathBuf,
+    #[serde(deserialize_with = "crate::config::utils::deserialize_providers")]
     pub providers: HashMap<AssetType, Provider>,
 }
 

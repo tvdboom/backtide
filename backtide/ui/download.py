@@ -170,7 +170,7 @@ CARD_CSS = """
         }
 
         .provider img {
-            height: 22px;
+            width: 60px;
             border-radius: 2px;
         }
 
@@ -284,7 +284,7 @@ def draw_cards(assets: list[AssetMeta]) -> int:
 
         provider = str(cfg.data.providers[asset.asset_type])
         provider_html = f"""
-            <div class="provider" style="margin-left:auto;margin-top:0px;">
+            <div class="provider">
                 <img src="{_load_provider_logo(provider)}" alt="{provider}">
             </div>"""
 
@@ -308,14 +308,17 @@ def draw_cards(assets: list[AssetMeta]) -> int:
         elif asset.asset_type == AssetType.Crypto:
             if isinstance(asset.quote, Currency):
                 img = get_flag(asset.quote.country.alpha2)
-            else:
+            elif logokit_key:
                 img = _get_logokit_url(asset, logokit_key, use_quote=True)
+            else:
+                img = ""
 
-            meta_inline = f"""
-                <div class="meta-inline">
-                    <span class="meta-label">Quote</span>
-                    <span class="meta-value"><img src='{img}' class='quote'></span>
-                </div>"""
+            if img:
+                meta_inline = f"""
+                    <div class="meta-inline">
+                        <span class="meta-label">Quote</span>
+                        <span class="meta-value"><img src='{img}' class='quote'></span>
+                    </div>"""
 
         html += f"""
             <div class="card">
@@ -495,36 +498,36 @@ if is_enabled:
     BYTES_PER_ROW = 150  # Estimated memory required per OHLC bar
     ROWS_PER_SECOND = 40_000  # Estimated number of rows downloaded per second
 
-    with st.expander("Download overview", icon=":material/archive:", expanded=True):
+    with st.expander("Download details", icon=":material/archive:", expanded=False):
         html, total_rows = draw_cards(assets + download_info.legs)
         st.html(CARD_CSS + html)
 
-        estimated_memory = (total_rows * BYTES_PER_ROW) / (1024**2)
-        estimated_seconds = int(total_rows / ROWS_PER_SECOND)
+    estimated_memory = (total_rows * BYTES_PER_ROW) / (1024**2)
+    estimated_seconds = int(total_rows / ROWS_PER_SECOND)
 
-        hours, remainder = divmod(estimated_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
+    hours, remainder = divmod(estimated_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
 
-        if hours:
-            time_str = f"{hours}h {minutes}m"
-        elif minutes:
-            time_str = f"{minutes}m {seconds}s"
-        elif seconds:
-            time_str = f"{seconds}s"
-        else:
-            time_str = "<1s"
+    if hours:
+        time_str = f"{hours}h {minutes}m"
+    elif minutes:
+        time_str = f"{minutes}m {seconds}s"
+    elif seconds:
+        time_str = f"{seconds}s"
+    else:
+        time_str = "<1s"
 
-        if estimated_memory >= 1024:
-            size_str = f"{estimated_memory / 1024:.2f} GB"
-        elif estimated_memory >= 1:
-            size_str = f"{estimated_memory:.1f} MB"
-        else:
-            size_str = "<0.1 MB"
+    if estimated_memory >= 1024:
+        size_str = f"{estimated_memory / 1024:.2f} GB"
+    elif estimated_memory >= 1:
+        size_str = f"{estimated_memory:.1f} MB"
+    else:
+        size_str = "<0.1 MB"
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric(":material/table_rows: Estimated rows", _fmt_number(total_rows), border=True)
-        col2.metric(":material/timer: Estimated time", time_str, border=True)
-        col3.metric(":material/memory: Estimated memory", size_str, border=True)
+    col1, col2, col3 = st.columns(3)
+    col1.metric(":material/table_rows: Estimated rows", _fmt_number(total_rows), border=True)
+    col2.metric(":material/timer: Estimated time", time_str, border=True)
+    col3.metric(":material/memory: Estimated memory", size_str, border=True)
 
 st.divider()
 
