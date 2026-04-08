@@ -1,10 +1,9 @@
 //! DuckDB storage solution.
 
-use crate::data::models::asset_type::AssetType;
-use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
 use crate::storage::errors::StorageResult;
+use crate::storage::models::bars_group::BarsGroup;
 use crate::storage::models::storage_summary::StorageSummary;
 use crate::storage::traits::Storage;
 use duckdb::params;
@@ -50,49 +49,71 @@ impl Storage for DuckDb {
                 adj_close         DOUBLE NOT NULL,
                 volume            DOUBLE NOT NULL,
                 n_trades          INTEGER,
-                PRIMARY KEY (symbol, provider, interval, open_ts)
             );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_bars_pk
+                ON bars (symbol, provider, interval, open_ts);
         ",
         )?;
 
         Ok(())
     }
 
-    /// Store OHLC data.
-    fn write_bars(
-        &self,
-        symbol: &str,
-        asset_type: AssetType,
-        interval: Interval,
-        provider: Provider,
-        bars: &[Bar],
-    ) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "INSERT OR REPLACE INTO bars (
-                symbol, asset_type, interval, provider, open_ts, close_ts, open_ts_exchange,
-                open, high, low, close, adj_close, volume, n_trades
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )?;
-
-        for bar in bars {
-            stmt.execute(params![
-                symbol,
-                asset_type.to_string(),
-                interval.to_string(),
-                provider.to_string(),
-                bar.open_ts,
-                bar.close_ts,
-                bar.open_ts_exchange,
-                bar.open,
-                bar.high,
-                bar.low,
-                bar.close,
-                bar.adj_close,
-                bar.volume,
-                bar.n_trades,
-            ])?;
+    /// Store multiple groups of OHLC data in one bulk operation.
+    ///
+    /// 1. Removes overlapping rows for every group in a single transaction.
+    /// 2. Bulk-inserts all rows from every group via DuckDB's `Appender`.
+    fn write_bars_bulk(&self, groups: &[BarsGroup]) -> StorageResult<()> {
+        // Filter out empty groups early.
+        let non_empty: Vec<&BarsGroup> = groups.iter().filter(|g| !g.bars.is_empty()).collect();
+        if non_empty.is_empty() {
+            return Ok(());
         }
+
+        let conn = self.conn.lock().unwrap();
+
+        // Phase 1: delete all overlapping ranges in a single transaction.
+        conn.execute_batch("BEGIN TRANSACTION")?;
+        for group in &non_empty {
+            let iv = group.interval.to_string();
+            let prov = group.provider.to_string();
+            let min_ts = group.bars.iter().map(|b| b.open_ts).min().unwrap();
+            let max_ts = group.bars.iter().map(|b| b.open_ts).max().unwrap();
+            conn.execute(
+                "DELETE FROM bars
+                 WHERE symbol = ? AND interval = ? AND provider = ?
+                    AND open_ts >= ? AND open_ts <= ?",
+                params![&group.symbol, iv, prov, min_ts as i64, max_ts as i64],
+            )?;
+        }
+        conn.execute_batch("COMMIT")?;
+
+        // Phase 2: bulk-insert every row via the Appender (one flush).
+        let mut appender = conn.appender("bars")?;
+        for group in &non_empty {
+            let at = group.asset_type.to_string();
+            let iv = group.interval.to_string();
+            let prov = group.provider.to_string();
+            for bar in &group.bars {
+                appender.append_row(params![
+                    &group.symbol,
+                    &at,
+                    &iv,
+                    &prov,
+                    bar.open_ts as i64,
+                    bar.close_ts as i64,
+                    bar.open_ts_exchange as i64,
+                    bar.open,
+                    bar.high,
+                    bar.low,
+                    bar.close,
+                    bar.adj_close,
+                    bar.volume,
+                    bar.n_trades,
+                ])?;
+            }
+        }
+        appender.flush()?;
 
         Ok(())
     }
@@ -112,7 +133,7 @@ impl Storage for DuckDb {
         )?;
 
         let result =
-            stmt.query_row(params![symbol, provider.to_string(), interval.to_string()], |row| {
+            stmt.query_row(params![symbol, interval.to_string(), provider.to_string()], |row| {
                 let min_ts: Option<u64> = row.get(0)?;
                 let max_ts: Option<u64> = row.get(1)?;
                 Ok((min_ts, max_ts))

@@ -128,6 +128,7 @@ nav:
             - get_assets: api/data/get_assets.md
             - list_assets: api/data/list_assets.md
             - get_download_info: api/data/get_download_info.md
+            - download_assets: api/data/download_assets.md
         - storage:
             - get_summary: api/storage/get_summary.md
             - delete_rows: api/storage/delete_rows.md
@@ -142,6 +143,7 @@ nav:
             - DataConfig: api/models/dataconfig.md
             - DisplayConfig: api/models/displayconfig.md
             - DownloadInfo: api/models/downloadinfo.md
+            - DownloadResult: api/models/downloadresult.md
             - Exchange: api/models/exchange.md
             - GeneralConfig: api/models/generalconfig.md
             - Interval: api/models/interval.md

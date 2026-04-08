@@ -255,6 +255,105 @@ impl YahooFinance {
             _ => Ok(symbol.to_owned()),
         }
     }
+
+    /// Download one chunk of bars from the Yahoo chart endpoint.
+    ///
+    /// `chunk_start`/`chunk_end` define the HTTP request window, while
+    /// `filter_start`/`filter_end` are the overall requested range used to
+    /// filter out bars that fall outside the caller's interest.
+    async fn download_chart_chunk(
+        &self,
+        yahoo_symbol: &str,
+        iv: &str,
+        chunk_start: u64,
+        chunk_end: u64,
+        filter_start: u64,
+        filter_end: u64,
+    ) -> DataResult<Vec<Bar>> {
+        let resp = self
+            .client
+            .get(
+                &format!("{}/{}", Self::CHART_URL, yahoo_symbol),
+                Some(&[
+                    ("period1", chunk_start.to_string().as_str()),
+                    ("period2", chunk_end.to_string().as_str()),
+                    ("interval", iv),
+                    ("crumb", &self.crumb),
+                ]),
+            )
+            .await?;
+
+        let parsed = HttpClient::json::<ChartResponse>(resp).await?;
+
+        if let Some(err) = parsed.chart.error {
+            let msg = err
+                .description
+                .unwrap_or_else(|| "unknown chart error".to_owned());
+            return Err(DataError::UnexpectedResponse(msg));
+        }
+
+        let result = parsed
+            .chart
+            .result
+            .into_iter()
+            .next()
+            .ok_or_else(|| DataError::UnexpectedResponse("empty chart result".to_owned()))?;
+
+        let timestamps = result.timestamp.unwrap_or_default();
+        let indicators = result.indicators.ok_or_else(|| {
+            DataError::UnexpectedResponse("no indicators in chart result".to_owned())
+        })?;
+
+        let quote = indicators
+            .quote
+            .into_iter()
+            .next()
+            .ok_or_else(|| DataError::UnexpectedResponse("no quote indicators".to_owned()))?;
+
+        let adj_close_arr = indicators
+            .adjclose
+            .and_then(|v| v.into_iter().next())
+            .map(|a| a.adjclose)
+            .unwrap_or_default();
+
+        let len = timestamps.len();
+        let mut bars = Vec::with_capacity(len);
+
+        for i in 0..len {
+            let raw_ts = timestamps[i];
+            if raw_ts < 0 {
+                continue;
+            }
+            let open_ts = raw_ts as u64;
+            let open = quote.open.get(i).and_then(|v| *v);
+            let high = quote.high.get(i).and_then(|v| *v);
+            let low = quote.low.get(i).and_then(|v| *v);
+            let close = quote.close.get(i).and_then(|v| *v);
+            let volume = quote.volume.get(i).and_then(|v| *v);
+            let adj = adj_close_arr.get(i).and_then(|v| *v);
+
+            if let (Some(o), Some(h), Some(l), Some(c), Some(v)) = (open, high, low, close, volume)
+            {
+                if open_ts >= filter_start && open_ts < filter_end {
+                    bars.push(Bar {
+                        open_ts,
+                        close_ts: open_ts,
+                        open_ts_exchange: open_ts,
+                        open: o,
+                        high: h,
+                        low: l,
+                        close: c,
+                        adj_close: adj.unwrap_or(c),
+                        volume: v,
+                        n_trades: None,
+                    });
+                }
+            }
+        }
+
+        debug!("Chunk [{chunk_start}–{chunk_end}] returned {} bars", bars.len());
+        Ok(bars)
+    }
 }
 
 #[async_trait]
@@ -274,6 +373,13 @@ impl DataProvider for YahooFinance {
             .map_err(|_| DataError::SymbolNotFound(symbol.clone()))?;
 
         let parsed = HttpClient::json::<ChartResponse>(resp).await?;
+
+        if let Some(err) = parsed.chart.error {
+            let msg = err
+                .description
+                .unwrap_or_else(|| "unknown chart error".to_owned());
+            return Err(DataError::UnexpectedResponse(msg));
+        }
 
         let asset = parsed
             .chart
@@ -325,6 +431,13 @@ impl DataProvider for YahooFinance {
 
         let parsed = HttpClient::json::<ChartResponse>(resp).await?;
 
+        if let Some(err) = parsed.chart.error {
+            let msg = err
+                .description
+                .unwrap_or_else(|| "unknown chart error".to_owned());
+            return Err(DataError::UnexpectedResponse(msg));
+        }
+
         let meta = parsed
             .chart
             .result
@@ -337,35 +450,39 @@ impl DataProvider for YahooFinance {
             DataError::UnexpectedResponse(format!("no latest_ts for symbol: {}", symbol))
         })?;
 
+        let cap_secs = match interval {
+            Interval::OneMinute => Some(7 * 24 * 3600_i64),
+            Interval::FiveMinutes | Interval::FifteenMinutes | Interval::ThirtyMinutes => {
+                Some(60 * 24 * 3600)
+            },
+            Interval::OneHour | Interval::FourHours => Some(730 * 24 * 3600),
+            _ => None,
+        };
+
+        let earliest_ts = match meta.first_trade_date {
+            Some(x) => {
+                // Yahoo enforces rolling windows relative to the current wall-clock time,
+                // not `regular_market_time` (which can be hours behind if the market
+                // hasn't opened yet today).
+                if let Some(cap) = cap_secs {
+                    x.max(now as i64 - cap).max(0) as u64
+                } else {
+                    x.max(0) as u64
+                }
+            },
+            None => {
+                // Some instruments omit `firstTradeDate`. Fall back to the rolling-window
+                // cap when available, otherwise assume data may exist from the Unix epoch
+                // and let Yahoo return whatever it has.
+                debug!("firstTradeDate missing for symbol {symbol}. Using fallback.");
+                cap_secs.map(|cap| (now as i64 - cap).max(0) as u64).unwrap_or(0)
+            },
+        };
+
         // End is exclusive — step back one interval so the current (potentially incomplete)
         // bar is excluded and the requested range stays strictly within the provider's
         // rolling window.
         let latest_ts = latest_ts.saturating_sub(interval.minutes() * 60);
-
-        let earliest_ts = meta
-            .first_trade_date
-            .map(|x| {
-                // Yahoo enforces rolling windows relative to the current wall-clock time,
-                // not `regular_market_time` (which can be hours behind if the market
-                // hasn't opened yet today).
-                let cap_secs = match interval {
-                    Interval::OneMinute => Some(7 * 24 * 60 * 60),
-                    Interval::FiveMinutes | Interval::FifteenMinutes | Interval::ThirtyMinutes => {
-                        Some(60 * 24 * 60 * 60)
-                    },
-                    Interval::OneHour | Interval::FourHours => Some(730 * 24 * 60 * 60),
-                    _ => None,
-                };
-
-                if let Some(cap_secs) = cap_secs {
-                    x.max(now as i64 - cap_secs).max(0) as u64
-                } else {
-                    x.max(0) as u64
-                }
-            })
-            .ok_or_else(|| {
-                DataError::UnexpectedResponse(format!("no earliest_ts for symbol: {}", symbol))
-            })?;
 
         Ok((earliest_ts, latest_ts))
     }
@@ -480,6 +597,10 @@ impl DataProvider for YahooFinance {
     }
 
     /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
+    ///
+    /// For large date ranges the request is split into chunks (≈ 5 years each
+    /// for daily bars) so that Yahoo never has to return an excessively large
+    /// payload in a single response.  Results are merged and deduplicated.
     #[instrument(skip(self), fields(%symbol, ?interval, start, end))]
     async fn download_batch(
         &self,
@@ -498,85 +619,73 @@ impl DataProvider for YahooFinance {
             interval.to_string()
         };
 
-        let resp = self
-            .client
-            .get(
-                &format!("{}/{}", Self::CHART_URL, yahoo_symbol),
-                Some(&[
-                    ("period1", start.to_string().as_str()),
-                    ("period2", end.to_string().as_str()),
-                    ("interval", iv.as_str()),
-                    ("crumb", &self.crumb),
-                ]),
-            )
-            .await?;
+        // Clamp `start` to the provider's rolling window at download time, since
+        // `get_download_range` may have been called much earlier.
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let buffer = interval.minutes() * 60;
+        let start = match interval {
+            Interval::OneMinute => start.max(now.saturating_sub(7 * 24 * 3600 - buffer)),
+            Interval::FiveMinutes | Interval::FifteenMinutes | Interval::ThirtyMinutes => {
+                start.max(now.saturating_sub(60 * 24 * 3600 - buffer))
+            },
+            Interval::OneHour | Interval::FourHours => {
+                start.max(now.saturating_sub(730 * 24 * 3600 - buffer))
+            },
+            _ => start,
+        };
 
-        let parsed = HttpClient::json::<ChartResponse>(resp).await?;
+        // Yahoo's chart API can return ~10 000 bars per request.  Choose
+        // chunk sizes that keep most real-world downloads to a single request
+        // while still splitting truly enormous ranges.
+        let chunk_secs: u64 = if interval.minutes() >= 24 * 60 {
+            20 * 365 * 86400 // ~20 years  (≈5 000 daily bars)
+        } else if interval.minutes() >= 60 {
+            2 * 365 * 86400 // ~2 years   (≈4 400 hourly bars)
+        } else {
+            30 * 86400 // 30 days
+        };
 
-        let result = parsed
-            .chart
-            .result
-            .into_iter()
-            .next()
-            .ok_or_else(|| DataError::UnexpectedResponse("empty chart result".to_owned()))?;
+        // Build all chunk ranges up-front so they can be fetched concurrently.
+        let mut chunks: Vec<(u64, u64)> = Vec::new();
+        let mut cursor = start;
+        while cursor < end {
+            let chunk_end = (cursor + chunk_secs).min(end);
+            chunks.push((cursor, chunk_end));
+            cursor = chunk_end;
+        }
 
-        let timestamps = result.timestamp.unwrap_or_default();
-        let indicators = result.indicators.ok_or_else(|| {
-            DataError::UnexpectedResponse("no indicators in chart result".to_owned())
-        })?;
+        let results =
+            join_all(chunks.iter().map(|&(cs, ce)| {
+                self.download_chart_chunk(&yahoo_symbol, &iv, cs, ce, start, end)
+            }))
+            .await;
 
-        let quote = indicators
-            .quote
-            .into_iter()
-            .next()
-            .ok_or_else(|| DataError::UnexpectedResponse("no quote indicators".to_owned()))?;
-
-        let adj_close_arr = indicators
-            .adjclose
-            .and_then(|v| v.into_iter().next())
-            .map(|a| a.adjclose)
-            .unwrap_or_default();
-
-        let len = timestamps.len();
-        let mut bars = Vec::with_capacity(len);
-
-        for i in 0..len {
-            let raw_ts = timestamps[i];
-            if raw_ts < 0 {
-                continue; // skip pre-epoch timestamps
-            }
-            let open_ts = raw_ts as u64;
-            let open = quote.open.get(i).and_then(|v| *v);
-            let high = quote.high.get(i).and_then(|v| *v);
-            let low = quote.low.get(i).and_then(|v| *v);
-            let close = quote.close.get(i).and_then(|v| *v);
-            let volume = quote.volume.get(i).and_then(|v| *v);
-            let adj = adj_close_arr.get(i).and_then(|v| *v);
-
-            // Skip bars with missing essential data
-            if let (Some(o), Some(h), Some(l), Some(c), Some(v)) = (open, high, low, close, volume)
-            {
-                if open_ts >= start && open_ts < end {
-                    bars.push(Bar {
-                        open_ts,
-                        close_ts: open_ts,
-                        open_ts_exchange: open_ts,
-                        open: o,
-                        high: h,
-                        low: l,
-                        close: c,
-                        adj_close: adj.unwrap_or(c),
-                        volume: v as f64,
-                        n_trades: None,
-                    });
-                }
+        let mut all_bars: Vec<Bar> = Vec::new();
+        let mut first_err: Option<DataError> = None;
+        for result in results {
+            match result {
+                Ok(mut b) => all_bars.append(&mut b),
+                Err(e) => {
+                    debug!("Yahoo chunk download error: {e}");
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                },
             }
         }
 
-        bars.sort_by_key(|b| b.open_ts);
-        bars.dedup_by_key(|b| b.open_ts);
+        // If every chunk failed, propagate the first error.
+        if all_bars.is_empty() {
+            if let Some(e) = first_err {
+                return Err(e);
+            }
+        }
 
-        Ok(bars)
+        all_bars.sort_by_key(|b| b.open_ts);
+        all_bars.dedup_by_key(|b| b.open_ts);
+
+        info!("Downloaded {} bars.", all_bars.len());
+        Ok(all_bars)
     }
 }
 
@@ -680,7 +789,16 @@ struct ChartResponse {
 
 #[derive(Debug, Deserialize)]
 struct ChartBody {
+    #[serde(default)]
     result: Vec<ChartResult>,
+    error: Option<ChartError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartError {
+    #[allow(dead_code)]
+    code: Option<String>,
+    description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -787,7 +905,7 @@ struct ChartQuote {
     high: Vec<Option<f64>>,
     low: Vec<Option<f64>>,
     close: Vec<Option<f64>>,
-    volume: Vec<Option<u64>>,
+    volume: Vec<Option<f64>>,
 }
 
 #[derive(Debug, Deserialize)]

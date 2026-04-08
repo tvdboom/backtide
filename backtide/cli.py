@@ -5,13 +5,13 @@ Description: Entry point for the CLI application.
 
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import click
 from streamlit.web.bootstrap import run
 
-from backtide.core.utils import init_logging
 from backtide.core.config import get_config
+from backtide.core.utils import init_logging
 
 
 @click.group()
@@ -110,27 +110,27 @@ def download(symbols, asset_type, interval, start, end, log_level):
 
     SYMBOLS are canonical symbol names, e.g. BTC-USDT AAPL.
 
-    Examples:
-
+    Examples
+    --------
         backtide download BTC-USDT ETH-USDT -t crypto -i 1d -s 2020-01-01
 
         backtide download AAPL MSFT -t stocks -i 1d -i 1h -s 2023-01-01 -e 2024-01-01
     """
-    from backtide.data import get_download_info, download_assets as do_download
+    from backtide.data import download_assets as do_download
+    from backtide.data import get_download_info
 
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
 
     # Parse dates
     start_ts = _parse_timestamp(start)
-    end_ts = _parse_timestamp(end) if end else int(datetime.now(timezone.utc).timestamp())
+    end_ts = _parse_timestamp(end) if end else None
 
     intervals = list(interval)
     symbols = list(symbols)
 
     click.echo(
-        f"📊  Resolving download info for {symbols} "
-        f"({asset_type}, {intervals}) ..."
+        f"📊  Resolving download info for {symbols} ({asset_type}, {intervals}) ...",
     )
 
     info = get_download_info(symbols, asset_type, intervals)
@@ -139,18 +139,20 @@ def download(symbols, asset_type, interval, start, end, log_level):
     n_legs = len(info.legs)
     click.echo(f"   {n_assets} asset(s), {n_legs} leg(s)")
 
-    def _progress(symbol, iv, task_idx, total_tasks, n_bars, error):
-        if error:
-            click.echo(f"   ⚠️  {symbol} {iv}: {error}", err=True)
-        else:
-            click.echo(
-                f"   [{task_idx}/{total_tasks}] {symbol} {iv}: "
-                f"{n_bars} bars stored"
-            )
-
     click.echo("⬇️  Downloading …")
-    do_download(info, callback=_progress)
-    click.echo("✅  Done.")
+    result = do_download(info, start=start_ts, end=end_ts)
+
+    for warn in result.warnings:
+        click.echo(f"   ⚠️  {warn}", err=True)
+
+    if result.n_failed and result.n_succeeded:
+        click.echo(
+            f"✅  Done ({result.n_succeeded}/{result.n_succeeded + result.n_failed} tasks succeeded).",
+        )
+    elif result.n_failed:
+        click.echo(f"❌  All {result.n_failed} tasks failed.", err=True)
+    else:
+        click.echo("✅  Done.")
 
 
 def _parse_timestamp(value: str) -> int:
@@ -160,11 +162,11 @@ def _parse_timestamp(value: str) -> int:
     except ValueError:
         pass
     try:
-        dt = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        dt = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=UTC)
         return int(dt.timestamp())
     except ValueError:
         raise click.BadParameter(
-            f"Cannot parse '{value}' as YYYY-MM-DD or Unix timestamp."
+            f"Cannot parse '{value}' as YYYY-MM-DD or Unix timestamp.",
         )
 
 

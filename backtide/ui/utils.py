@@ -5,16 +5,18 @@ Description: Utility functions for the UI.
 
 """
 
-from typing import Any
-import re
-from zoneinfo import ZoneInfo
-from datetime import datetime as dt
-import streamlit as st
 import base64
+from datetime import datetime as dt
 from pathlib import Path
+import re
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import streamlit as st
+
+from backtide.constants import MOMENT_TO_STRFTIME
 from backtide.core.data import AssetType
 from backtide.utils.utils import to_list
-from backtide.constants import MOMENT_TO_STRFTIME
 
 
 def _get_asset_type_description(asset_type: AssetType) -> tuple[str, str]:
@@ -48,7 +50,7 @@ def _get_asset_type_description(asset_type: AssetType) -> tuple[str, str]:
     return asset_description, currency_description
 
 
-def _fmt_number(n: int | float) -> str:
+def _fmt_number(n: float) -> str:
     """Nicely format a number."""
     if n > 10_000_000:
         return f"{n / 1_000_000:.1f}M"
@@ -88,7 +90,7 @@ def _get_provider_logo(provider: str) -> str:
 def _moment_to_strftime(fmt: str) -> str:
     """Convert a momentjs string to strftime format."""
     regex = re.compile(
-        "|".join(sorted(map(re.escape, MOMENT_TO_STRFTIME.keys()), key=len, reverse=True))
+        "|".join(sorted(map(re.escape, MOMENT_TO_STRFTIME.keys()), key=len, reverse=True)),
     )
 
     def replace(match: re.Match) -> str:

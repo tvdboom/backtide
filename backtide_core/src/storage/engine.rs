@@ -1,24 +1,16 @@
 //! Implementation of storage related methods for [`Engine`].
 
-use crate::data::models::asset_type::AssetType;
-use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
 use crate::engine::Engine;
 use crate::storage::errors::StorageResult;
+use crate::storage::models::bars_group::BarsGroup;
 use crate::storage::models::storage_summary::StorageSummary;
 
 impl Engine {
-    /// Writes the given bars to storage for the specified group.
-    pub fn write_bars(
-        &self,
-        symbol: &str,
-        asset_type: AssetType,
-        interval: Interval,
-        provider: Provider,
-        bars: &[Bar],
-    ) -> StorageResult<()> {
-        self.db.write_bars(symbol, asset_type, interval, provider, bars)
+    /// Writes many groups of bars to storage in a single transaction.
+    pub fn write_bars_bulk(&self, groups: &[BarsGroup]) -> StorageResult<()> {
+        self.db.write_bars_bulk(groups)
     }
 
     /// Returns the earliest and latest stored timestamps for the given group.

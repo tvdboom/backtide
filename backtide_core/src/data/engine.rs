@@ -8,13 +8,14 @@ use crate::data::models::asset_meta::AssetMeta;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
 use crate::data::models::download_info::DownloadInfo;
+use crate::data::models::download_result::DownloadResult;
 use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
 use crate::engine::Engine;
-use crate::errors::EngineError;
+use crate::errors::EngineResult;
+use crate::storage::models::bars_group::BarsGroup;
 use futures::future::{join_all, try_join_all};
 use indexmap::IndexMap;
-use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
@@ -150,16 +151,19 @@ impl Engine {
     /// * Checks what is already in storage — skips completed ranges and only downloads
     ///   the missing head/tail (or both) for partial ones.
     /// * Downloads concurrently across symbols and intervals.
-    /// * Calls `callback(symbol, interval, task_idx, total_tasks, n_bars, error)` after each task.
-    ///   `error` is `None` on success or a string message on failure.
+    /// * Writes **all** downloaded data in a single bulk transaction.
     /// * Only writes contiguous (gap-free) bars starting from the beginning of the range.
     /// * Idempotent, i.e., re-calling with the same `DownloadInfo` is a no-op.
-    #[instrument(skip(self, callback))]
+    ///
+    /// When `start` or `end` is provided, the per-asset range is clamped so that
+    /// no data before `start` or after `end` is requested from the provider.
+    #[instrument(skip(self))]
     pub fn download_symbols(
         &self,
         download_info: &DownloadInfo,
-        callback: Option<Py<PyAny>>,
-    ) -> Result<(), EngineError> {
+        start: Option<u64>,
+        end: Option<u64>,
+    ) -> EngineResult<DownloadResult> {
         // Collect all assets and legs pairs to treat them uniformly.
         let all_metas: Vec<&AssetMeta> =
             download_info.assets.iter().chain(download_info.legs.iter()).collect();
@@ -173,33 +177,42 @@ impl Engine {
                 let asset_type = meta.asset.asset_type;
                 let provider = self.provider(asset_type);
 
-                for (interval, start) in &meta.earliest_ts {
-                    let end = meta.latest_ts.get(interval).unwrap();
+                for (interval, meta_start) in &meta.earliest_ts {
+                    let meta_end = meta.latest_ts.get(interval).unwrap();
+
+                    // Clamp to the user-requested range when provided.
+                    let start = start.map_or(*meta_start, |s| s.max(*meta_start));
+                    let end = end.map_or(*meta_end, |e| e.min(*meta_end));
+
+                    if start >= end {
+                        debug!(%symbol, ?interval, "User range does not overlap provider range, skipping.");
+                        continue;
+                    }
 
                     // Check what's in storage and only download the missing portions.
                     if let Some((db_min, db_max)) =
                         self.get_stored_range(symbol, *interval, provider)?
                     {
-                        if db_min <= *start && db_max >= *end {
+                        if db_min <= start && db_max >= end {
                             debug!(%symbol, ?interval, "Already in database, skipping download.");
                             continue;
                         }
 
                         // Missing head: requested start is before what the database has.
-                        if *start < db_min {
-                            let head_end = db_min.min(*end);
+                        if start < db_min {
+                            let head_end = db_min.min(end);
                             debug!(%symbol, ?interval, head_end, "Downloading missing head.");
-                            tasks.push((symbol.clone(), asset_type, *interval, *start, head_end));
+                            tasks.push((symbol.clone(), asset_type, *interval, start, head_end));
                         }
 
                         // Missing tail: requested end is beyond what the database has.
-                        if *end > db_max {
-                            let tail_start = db_max.max(*start);
+                        if end > db_max {
+                            let tail_start = db_max.max(start);
                             debug!(%symbol, ?interval, tail_start, "Downloading missing tail.");
-                            tasks.push((symbol.clone(), asset_type, *interval, tail_start, *end));
+                            tasks.push((symbol.clone(), asset_type, *interval, tail_start, end));
                         }
                     } else {
-                        tasks.push((symbol.clone(), asset_type, *interval, *start, *end));
+                        tasks.push((symbol.clone(), asset_type, *interval, start, end));
                     };
                 }
             }
@@ -207,100 +220,69 @@ impl Engine {
             let total_tasks = tasks.len();
             info!("Download plan: {total_tasks} symbol x interval tasks");
 
-            // Wrap callback in Arc so it can be shared across concurrent tasks.
-            let callback: Option<Arc<Py<PyAny>>> = callback.map(Arc::new);
-
-            // Download concurrently, grouped by symbol for progress reporting.
-            let results = join_all(tasks.into_iter().enumerate().map(
-                |(idx, (symbol, at, interval, start, end))| {
-                    let cb = callback.clone();
-
-                    async move {
-                        let provider = self.providers.get(&at).unwrap();
-                        let provider_enum = self.provider(at);
-
-                        info!(%symbol, ?interval, start, end, "Downloading...");
-
-                        match provider.download_batch(&symbol, at, interval, start, end).await {
-                            Ok(bars) => {
-                                // Ensure bars are sorted.
-                                let mut bars = bars;
-                                bars.sort_by_key(|b| b.open_ts);
-
-                                // Gap-free check: only keep the contiguous prefix
-                                // starting from the first bar.
-                                let contiguous_count =
-                                    Self::contiguous_prefix_len(&bars, interval.minutes() * 60);
-                                let bars = &bars[..contiguous_count];
-
-                                if !bars.is_empty() {
-                                    if let Err(e) =
-                                        self.write_bars(&symbol, at, interval, provider_enum, bars)
-                                    {
-                                        warn!(%symbol, ?interval, "Storage write failed: {e}");
-                                        return Err(EngineError::Storage(e));
-                                    }
-                                }
-
-                                info!(
-                                    %symbol,
-                                    ?interval,
-                                    bars = bars.len(),
-                                    "Downloaded and stored"
-                                );
-
-                                // Call the Python progress callback if provided.
-                                if let Some(ref cb) = cb {
-                                    let n_bars = bars.len();
-                                    Python::attach(|py| {
-                                        let args = (
-                                            symbol.clone(),
-                                            interval.to_string(),
-                                            idx + 1,
-                                            total_tasks,
-                                            n_bars,
-                                            py.None(),
-                                        );
-                                        let _: Result<Py<PyAny>, _> = cb.call(py, args, None);
-                                    });
-                                }
-
-                                Ok(())
-                            },
-                            Err(e) => {
-                                warn!(%symbol, ?interval, "Download failed: {e}");
-
-                                // Fire the callback with the error so Python can
-                                // report it while still advancing the progress counter.
-                                if let Some(ref cb) = cb {
-                                    let msg = e.to_string();
-                                    Python::attach(|py| {
-                                        let args = (
-                                            symbol.clone(),
-                                            interval.to_string(),
-                                            idx + 1,
-                                            total_tasks,
-                                            0usize,
-                                            msg,
-                                        );
-                                        let _: Result<Py<PyAny>, _> = cb.call(py, args, None);
-                                    });
-                                }
-
-                                Ok(())
-                            },
-                        }
-                    }
+            // ── Phase 1: download all tasks concurrently ─────────────────
+            let downloaded: Vec<_> = join_all(tasks.into_iter().enumerate().map(
+                |(idx, (symbol, at, interval, start, end))| async move {
+                    let provider = self.providers.get(&at).unwrap();
+                    info!(%symbol, ?interval, start, end, "Downloading...");
+                    let result = provider.download_batch(&symbol, at, interval, start, end).await;
+                    (idx, symbol, at, interval, result)
                 },
             ))
             .await;
 
-            // Check for any storage errors.
-            for result in results {
-                result?;
+            // ── Phase 2: collect results and build one bulk write ────────
+            // Separate successes from failures so we can write all successes
+            // in a single transaction and still report individual errors.
+            let mut groups: Vec<BarsGroup> = Vec::new();
+            let mut outcomes: Vec<(usize, String, Interval, Result<usize, String>)> = Vec::new();
+
+            for (idx, symbol, at, interval, result) in downloaded {
+                let provider_enum = self.provider(at);
+                match result {
+                    Ok(bars) => {
+                        let n_bars = bars.len();
+                        info!(%symbol, ?interval, bars = n_bars, "Downloaded.");
+                        groups.push(BarsGroup {
+                            symbol: symbol.clone(),
+                            asset_type: at,
+                            interval,
+                            provider: provider_enum,
+                            bars,
+                        });
+                        outcomes.push((idx, symbol, interval, Ok(n_bars)));
+                    },
+                    Err(e) => {
+                        warn!(%symbol, ?interval, "Download failed: {e}");
+                        outcomes.push((idx, symbol, interval, Err(e.to_string())));
+                    },
+                }
             }
 
-            Ok(())
+            // Single bulk write — one BEGIN / COMMIT for every downloaded group.
+            if !groups.is_empty() {
+                info!(groups = groups.len(), "Writing all downloaded data to database...");
+                self.write_bars_bulk(&groups)?;
+                info!("Bulk write complete.");
+            }
+
+            // ── Phase 3: build result summary ────────────────────────────
+            let mut n_succeeded = 0usize;
+            let mut warnings = Vec::new();
+
+            for (_idx, symbol, interval, outcome) in outcomes {
+                match outcome {
+                    Ok(_) => n_succeeded += 1,
+                    Err(msg) => warnings.push(format!("{symbol} ({interval}): {msg}")),
+                }
+            }
+
+            let n_failed = warnings.len();
+            Ok(DownloadResult {
+                n_succeeded,
+                n_failed,
+                warnings,
+            })
         })
     }
 
@@ -476,37 +458,5 @@ impl Engine {
                 }
             },
         }
-    }
-
-    /// Return the length of the longest contiguous prefix of bars.
-    ///
-    /// Bars must be sorted by `open_ts`. A bar at index `i+1` is considered
-    /// contiguous when its `open_ts` equals `bars[i].open_ts + interval_secs`.
-    /// For weekly/daily intervals we allow a tolerance of ±10% to handle
-    /// weekends and market holidays.
-    fn contiguous_prefix_len(bars: &[crate::data::models::bar::Bar], interval_secs: u64) -> usize {
-        if bars.is_empty() {
-            return 0;
-        }
-
-        // For daily and weekly intervals, market closures (weekends, holidays)
-        // create natural gaps that are not data errors.  We allow up to
-        // 3× the expected interval to bridge those.
-        let tolerance = if interval_secs >= 86400 {
-            interval_secs * 3
-        } else {
-            // Intraday: allow exactly one missed bar (2× the interval).
-            interval_secs * 2
-        };
-
-        let mut count = 1;
-        for i in 1..bars.len() {
-            let gap = bars[i].open_ts - bars[i - 1].open_ts;
-            if gap > tolerance {
-                break;
-            }
-            count += 1;
-        }
-        count
     }
 }

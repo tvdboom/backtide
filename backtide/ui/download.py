@@ -6,32 +6,33 @@ Description: Page to download new data.
 """
 
 from datetime import datetime as dt
-from typing import Any
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 import streamlit as st
 
 from backtide.core.config import get_config
 from backtide.core.data import (
+    Asset,
     AssetMeta,
     AssetType,
+    Currency,
     Exchange,
     Interval,
     download_assets,
+    get_download_info,
     list_assets,
-    get_download_info, Currency,
 )
 from backtide.ui.utils import (
     _fmt_number,
-    _moment_to_strftime,
     _get_asset_type_description,
-    _get_provider_logo,
     _get_logokit_url,
+    _get_provider_logo,
+    _moment_to_strftime,
     _prevent_deselection,
     _to_upper_values,
 )
 from backtide.utils.constants import MAX_ASSET_SELECTION, MAX_PRELOADED_ASSETS
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
@@ -202,15 +203,9 @@ CARD_CSS = """
     """
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading assets...")
-def list_symbols(asset_type: AssetType):
-    """Cache the major symbols per asset type."""
-    return list_assets(asset_type, MAX_PRELOADED_ASSETS)
-
-
 def draw_cards(assets: list[AssetMeta]) -> int:
     """Generate HTML code to draw the asset cards."""
-    html = f"<div class='section'></div>"
+    html = "<div class='section'></div>"
 
     get_flag = lambda code: f"https://flagcdn.com/80x60/{code.lower()}.png"
     parse_date = lambda date: date.strftime(_moment_to_strftime(cfg.display.date_format))
@@ -349,6 +344,12 @@ def draw_cards(assets: list[AssetMeta]) -> int:
     return html, total_rows
 
 
+@st.cache_resource(ttl=3600, show_spinner=False)
+def list_symbols(asset_type: AssetType) -> list[Asset]:
+    """Cache the major symbols per asset type."""
+    return list_assets(asset_type, MAX_PRELOADED_ASSETS)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Download interface
 # ─────────────────────────────────────────────────────────────────────────────
@@ -365,7 +366,7 @@ st.title("Download", text_alignment="center")
 
 st.text(
     "Perform bulk download of historical OHLC market data for multiple assets and/or intervals "
-    "at once. FX rates for historical conversion rates are automatically downloaded if required."
+    "at once. FX rates for historical conversion rates are automatically downloaded if required.",
 )
 
 st.divider()
@@ -419,8 +420,12 @@ intervals = st.session_state.get("interval_download", [])
 
 try:
     # Convert custom symbols to assets and add triangulation currencies
-    download_info = get_download_info(symbols, asset_type, intervals)
-    assets = download_info.assets
+    if symbols and intervals:
+        download_info = get_download_info(symbols, asset_type, intervals)
+        assets = download_info.assets
+    else:
+        download_info = None
+        assets = []
 except RuntimeError as ex:
     assets = []
     st.error(ex, icon=":material/error:")
@@ -459,7 +464,6 @@ if full_history:
 else:
     col1, col2 = st.columns(2)
 
-    # Use date widgets when there are no intraday intervals
     start_ts = col1.date_input(
         label="Start date",
         value=earliest_ts,
@@ -475,8 +479,8 @@ else:
     end_ts = col2.date_input(
         label="End date",
         value=latest_ts,
-        min_value=start_ts,
-        max_value=today,
+        min_value=start_ts + timedelta(days=1),
+        max_value="today",
         format=cfg.display.date_format,
         help="Download data up to this date (exclusive).",
     )
@@ -496,8 +500,8 @@ intervals = st.pills(
 is_enabled = assets and start_ts and latest_ts and intervals
 
 if is_enabled:
-    BYTES_PER_ROW = 150  # Estimated memory required per OHLC bar
-    ROWS_PER_SECOND = 4_000  # Estimated number of rows downloaded per second
+    BYTES_PER_ROW = 120  # Estimated memory required per OHLC bar
+    ROWS_PER_SECOND = 40_000  # Estimated number of rows downloaded per second
 
     st.divider()
 
@@ -505,7 +509,7 @@ if is_enabled:
         html, n_bars = draw_cards(assets + download_info.legs)
         st.html(CARD_CSS + html)
 
-    estimated_memory = (n_bars * BYTES_PER_ROW) / (1024 ** 2)
+    estimated_memory = (n_bars * BYTES_PER_ROW) / (1024**2)
     estimated_seconds = int(n_bars / ROWS_PER_SECOND)
 
     hours, remainder = divmod(estimated_seconds, 3600)
@@ -555,103 +559,37 @@ if st.button(
     elif start_ts > latest_ts:  # ty:ignore[unsupported-operator]
         st.error("Start date must be equal or prior to end date.", icon=":material/error:")
     else:
-        # Collect all symbol labels for status lines.
-        all_metas = assets + download_info.legs
-        symbol_labels = [m.symbol for m in all_metas]
-
-        # Build a mapping from (symbol, interval_str) → symbol index and
-        # count the number of intervals per symbol for per-symbol fractions.
-        task_lookup: dict[tuple[str, str], int] = {}
-        tasks_per_symbol: dict[int, int] = {}
-        for sym_idx, meta in enumerate(all_metas):
-            count = 0
-            for iv in meta.earliest_ts:
-                task_lookup[(meta.symbol, str(iv))] = sym_idx
-                count += 1
-            tasks_per_symbol[sym_idx] = count
-
-        done_per_symbol: dict[int, int] = {i: 0 for i in range(len(all_metas))}
-
-        # Render status UI — one updatable line per asset.
-        status = st.status("Downloading market data…", expanded=True, state="running")
-        status_lines: dict[int, Any] = {}
-
-        for sym_idx, label in enumerate(symbol_labels):
-            status_lines[sym_idx] = status.empty()
-            status_lines[sym_idx].markdown(f"⏳ **{label}** — downloading…")
-
-        errors = False
-        warnings: list[str] = []
-        warned_symbols: set[int] = set()
-
-        def _on_progress(
-            symbol: str, interval: str, task_idx: int, total_tasks: int,
-            n_bars: int, error: str | None,
-        ):
-            """Callback invoked by Rust after each (symbol, interval) task."""
-            sym_idx = task_lookup.get((symbol, interval))
-            if sym_idx is None:
-                return
-
-            if error is not None:
-                warnings.append(f"**{symbol}** ({interval}): {error}")
-                warned_symbols.add(sym_idx)
-                status_lines[sym_idx].markdown(
-                    f"⚠️ **{symbol}** — {interval} failed"
-                )
-                return
-
-            done_per_symbol[sym_idx] = done_per_symbol.get(sym_idx, 0) + 1
-            sym_total = tasks_per_symbol.get(sym_idx, 1)
-
-            if done_per_symbol[sym_idx] >= sym_total:
-                status_lines[sym_idx].markdown(f"✅ **{symbol}**")
-            else:
-                status_lines[sym_idx].markdown(
-                    f"💾 **{symbol}** — {interval}: {_fmt_number(n_bars)} bars stored"
-                )
-
         try:
-            download_assets(download_info, callback=_on_progress)
-        except Exception as exc:
-            errors = True
-            status.update(label="Download failed", state="error", expanded=True)
-            st.error(f"Download error: {exc}", icon=":material/error:")
-
-        if not errors:
-            # Mark any assets that didn't receive a callback (already stored / skipped).
-            for sym_idx in status_lines:
-                if done_per_symbol[sym_idx] == 0 and sym_idx not in warned_symbols:
-                    status_lines[sym_idx].markdown(
-                        f"✅ **{symbol_labels[sym_idx]}** — already up to date"
-                    )
-                elif sym_idx not in warned_symbols:
-                    status_lines[sym_idx].markdown(f"✅ **{symbol_labels[sym_idx]}**")
-
-            n_total = len(all_metas)
-            n_warned = len(warned_symbols)
-            n_succeeded = n_total - n_warned
-
-            if warnings:
-                status.update(label="Download finished", expanded=True, state="complete")
-
-                for warn in warnings:
-                    st.warning(warn, icon=":material/warning:")
-
-                if n_succeeded > 0:
-                    st.success(
-                        f"Successfully downloaded {n_succeeded} of {n_total} assets.",
-                        icon=":material/check_circle:",
-                    )
-                else:
-                    st.error(
-                        f"All {n_total} assets had warnings during download.",
-                        icon=":material/error:",
-                    )
+            # Convert date range to Unix timestamps for the download.
+            # When full_history is on, pass None to use the full provider range.
+            if full_history:
+                dl_start = dl_end = None
             else:
-                status.update(label="Download finished", expanded=False, state="complete")
+                dl_start = int(dt.combine(start_ts, dt.min.time(), tzinfo=tz).timestamp())
+                dl_end = int(dt.combine(end_ts, dt.min.time(), tzinfo=tz).timestamp())
 
+            with st.spinner("Downloading data..."):
+                result = download_assets(download_info, start=dl_start, end=dl_end)
+        except Exception as ex:
+            st.error(f"Download error: {ex}", icon=":material/error:")
+        else:
+            for warn in result.warnings:
+                st.warning(warn, icon=":material/warning:")
+
+            n_total = result.n_succeeded + result.n_failed
+
+            if result.n_failed and result.n_succeeded:
                 st.success(
-                    f"Successfully downloaded {n_succeeded} assets.",
+                    f"Successfully downloaded {result.n_succeeded} of {n_total} tasks.",
+                    icon=":material/check_circle:",
+                )
+            elif result.n_failed:
+                st.error(
+                    f"All {n_total} tasks had warnings during download.",
+                    icon=":material/error:",
+                )
+            else:
+                st.success(
+                    f"Successfully downloaded {result.n_succeeded} tasks.",
                     icon=":material/check_circle:",
                 )

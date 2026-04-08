@@ -16,15 +16,15 @@ from backtide.core.data import AssetType
 from backtide.core.storage import delete_rows, get_summary
 from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @st.dialog("Confirm deletion", width="medium")
 def _confirm_delete(groups: list[dict[str, str]]):
     """Show a modal asking the user to confirm deletion of selected groups."""
-    text = '\n'.join([f"* {g['Symbol']}  -  {g['Interval']}" for g in groups])
+    text = "\n".join([f"* {g['Symbol']}  -  {g['Interval']}" for g in groups])
     st.warning(
         f"You are about to **permanently delete** the following "
         f"group{'s' if len(groups) > 1 else ''} from the database.\n\n{text}",
@@ -58,7 +58,7 @@ st.title("Storage", text_alignment="center")
 
 st.text(
     "Overview of all OHLCV data stored in the local database. Each row represents one "
-    "(symbol, interval) group. Select one or more rows to delete them from the database."
+    "(symbol, interval) group. Select one or more rows to delete them from the database.",
 )
 
 st.divider()
@@ -86,7 +86,7 @@ for s in summaries:
             "Last date": _parse_date(s.last_ts, cfg.display.date_format, tz),
             "Bars": s.n_rows,
             "Price": s.sparkline if s.sparkline else None,
-        }
+        },
     )
 
 df = pd.DataFrame(rows)
@@ -119,8 +119,8 @@ event = st.dataframe(
 
 if indices := event.selection.rows if event and event.selection else None:
     if st.button(
-            label=f"Delete {len(indices)} group{'s' if len(indices) > 1 else ''}",
-            type="primary",
-            icon=":material/delete:",
+        label=f"Delete {len(indices)} group{'s' if len(indices) > 1 else ''}",
+        type="primary",
+        icon=":material/delete:",
     ):
         _confirm_delete([rows[i] for i in indices])

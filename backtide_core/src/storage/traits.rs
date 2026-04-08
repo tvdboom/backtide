@@ -1,10 +1,9 @@
 //! Trait that storage solutions must implement.
 
-use crate::data::models::asset_type::AssetType;
-use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
 use crate::storage::errors::StorageResult;
+use crate::storage::models::bars_group::BarsGroup;
 use crate::storage::models::storage_summary::StorageSummary;
 use async_trait::async_trait;
 
@@ -14,15 +13,8 @@ pub trait Storage: Send + Sync {
     /// Initialize all tables in the database.
     fn init(&self) -> StorageResult<()>;
 
-    /// Store OHLC data.
-    fn write_bars(
-        &self,
-        symbol: &str,
-        asset_type: AssetType,
-        interval: Interval,
-        provider: Provider,
-        bars: &[Bar],
-    ) -> StorageResult<()>;
+    /// Store multiple groups of OHLC data in a single transaction.
+    fn write_bars_bulk(&self, groups: &[BarsGroup]) -> StorageResult<()>;
 
     /// Get the (min_ts, max_ts) of stored bars for a given symbol/provider/interval.
     /// Returns `None` if no data exists.

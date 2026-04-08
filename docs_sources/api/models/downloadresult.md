@@ -1,7 +1,7 @@
-# StorageSummary
+# DownloadResult
 ----------------
 
-:: backtide.storage:StorageSummary
+:: backtide.data:DownloadResult
     :: signature
     :: head
     :: table:

@@ -4,12 +4,12 @@ use crate::constants::Symbol;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::download_info::DownloadInfo;
+use crate::data::models::download_result::DownloadResult;
 use crate::data::models::interval::Interval;
 use crate::engine::Engine;
-use crate::storage::models::storage_summary::StorageSummary;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
-use pyo3::{pyfunction, Bound, Py, PyAny, PyResult};
+use pyo3::{pyfunction, Bound, PyAny, PyResult};
 
 /// Parse input from Python into a list of symbols.
 fn parse_asset(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
@@ -191,10 +191,20 @@ pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<A
 /// download_info : [DownloadInfo]
 ///     Resolved download plan (from [`get_download_info`]).
 ///
-/// callback : callable or None, default=None
-///     Optional callback invoked after each task. Must have signature:
-///     `callback(symbol, interval, task_idx, total_tasks, n_bars, error)`.
-///     `error` is `None` on success or a string message on failure.
+/// start : int or None, default=None
+///     Optional start of the download window (Unix timestamp, inclusive). When
+///     given, per-asset ranges are clamped so that no data before this timestamp
+///     is requested. If `None`, it uses the provider's earliest available date.
+///
+/// end : int or None, default=None
+///     Optional end of the download window (Unix timestamp, exclusive). When
+///     given, per-asset ranges are clamped so that no data after this timestamp
+///     is requested. If `None`, it uses the provider's latest available date.
+///
+/// Returns
+/// -------
+/// [DownloadResult]
+///     Summary of the download: succeeded/failed counts and per-task warnings.
 ///
 /// Examples
 /// --------
@@ -202,11 +212,15 @@ pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<A
 /// from backtide.data import get_download_info, download_assets
 ///
 /// info = get_download_info(["AAPL", "MSFT"], "stocks", "1d")
-/// download_assets(info)  # no run
+/// result = download_assets(info)  # no run
 /// ```
 #[pyfunction]
-#[pyo3(signature = (download_info, callback=None))]
-pub fn download_assets(download_info: DownloadInfo, callback: Option<Py<PyAny>>) -> PyResult<()> {
+#[pyo3(signature = (download_info, start=None, end=None))]
+pub fn download_assets(
+    download_info: DownloadInfo,
+    start: Option<u64>,
+    end: Option<u64>,
+) -> PyResult<DownloadResult> {
     let engine = Engine::get()?;
-    Ok(engine.download_symbols(&download_info, callback)?)
+    Ok(engine.download_symbols(&download_info, start, end)?)
 }

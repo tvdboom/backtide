@@ -427,7 +427,7 @@ class AutoDocs:
                                 raise ValueError(
                                     f"Default value {real.default} of parameter {param} "
                                     f"of object {self.obj} doesn't match the value "
-                                    f"in the docstring: {default}."
+                                    f"in the docstring: {default}.",
                                 )
                         except KeyError:
                             pass
@@ -685,7 +685,10 @@ def clean_search(config: MkDocsConfig):
 
         # Remove mkdocs-jupyter css
         elem["text"] = re.sub(
-            r"\(function \(global, factory.*?(?=Example:)", "", elem["text"], flags=re.S
+            r"\(function \(global, factory.*?(?=Example:)",
+            "",
+            elem["text"],
+            flags=re.S,
         )
 
     with open(f"{config.data['site_dir']}/search/search_index.json", "w") as f:

@@ -50,7 +50,7 @@ st.text(
     """
     Run a new backtest experiment on historical data for one or more symbols. The results
     of the experiment are automatically stored and can be reviewed in the results page.
-    """
+    """,
 )
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
@@ -61,7 +61,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         ":material/psychology: Strategy",
         ":material/storefront: Exchange",
         ":material/build: Engine",
-    ]
+    ],
 )
 
 if not st.session_state.get("asset_type"):
@@ -70,7 +70,8 @@ if not st.session_state.get("asset_type"):
 if not st.session_state.get(f"all_assets_{asset_type}"):
     with st.spinner("Loading assets..."):
         st.session_state[f"all_assets_{asset_type}"] = list_assets(
-            st.session_state.asset_type_download, MAX_PRELOADED_ASSETS
+            st.session_state.asset_type_download,
+            MAX_PRELOADED_ASSETS,
         )
 
 
@@ -111,7 +112,7 @@ with tab1:
             else:
                 st.error(
                     f"Invalid tag: {tag}. Tags must must be one word with ≤15 chars consisting "
-                    f"only of alphanumeric characters, underscores or dashes."
+                    f"only of alphanumeric characters, underscores or dashes.",
                 )
 
         tags = sorted(set(valid_tags))
@@ -276,7 +277,7 @@ with tab3:
     with st.expander("Starting positions"):
         st.caption(
             "Pre-load the portfolio with existing holdings at the start of the simulation. "
-            "Each row represents one position."
+            "Each row represents one position.",
         )
 
         if symbols:
@@ -373,7 +374,7 @@ with tab4:
                         else:
                             st.error(
                                 "Function `strategy` doesn't have signature: "
-                                "`strategy(data, state, indicators)`."
+                                "`strategy(data, state, indicators)`.",
                             )
                             break
 

@@ -96,4 +96,3 @@ set_config(cfg)  # norun
 ```
 
 [DuckDB]: https://duckdb.org
-

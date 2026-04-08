@@ -1,7 +1,7 @@
-# delete_rows
--------------
+# download_assets
+-----------------
 
-:: backtide.storage:delete_rows
+:: backtide.data:download_assets
     :: signature
     :: head
     :: table:

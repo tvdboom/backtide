@@ -13,4 +13,3 @@
 ## Example
 
 :: examples
-
