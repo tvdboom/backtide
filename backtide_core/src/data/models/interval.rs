@@ -117,7 +117,7 @@ impl Interval {
     /// -------
     /// int
     ///     Number of minutes.
-    pub fn minutes(&self) -> u32 {
+    pub fn minutes(&self) -> u64 {
         match self {
             Interval::OneMinute => 1,
             Interval::FiveMinutes => 5,

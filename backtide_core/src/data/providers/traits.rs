@@ -4,6 +4,7 @@ use crate::constants::Symbol;
 use crate::data::errors::DataResult;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
 use async_trait::async_trait;
 
@@ -19,14 +20,15 @@ pub trait DataProvider: Send + Sync {
     /// List the most important assets for a given asset type.
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>>;
 
-    // /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
-    // /// Returns an empty `Vec` when the symbol had no trading activity that period
-    // /// (e.g. before listing date), which is distinct from a `IngestionError`.
-    // async fn download_batch(
-    //     &self,
-    //     symbol: &str,
-    //     interval: Interval,
-    //     start: i64,
-    //     end: i64,
-    // ) -> IngestionResult<Vec<Bar>>;
+    /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
+    /// Returns an empty `Vec` when the symbol had no trading activity that period
+    /// (e.g., before listing date), which is distinct from a [`DataResult`].
+    async fn download_batch(
+        &self,
+        symbol: &str,
+        asset_type: AssetType,
+        interval: Interval,
+        start: u64,
+        end: u64,
+    ) -> DataResult<Vec<Bar>>;
 }

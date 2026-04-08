@@ -6,6 +6,7 @@ use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
@@ -76,13 +77,6 @@ impl Kraken {
             .unwrap_or_else(|| ticker.to_string())
     }
 
-    /// Convert an [`Interval`] to Kraken's integer-minutes representation.
-    ///
-    /// Kraken expects one of `1, 5, 15, 30, 60, 240, 1440, 10080`.
-    fn interval_minutes(interval: Interval) -> u32 {
-        interval.minutes()
-    }
-
     /// Guard: return [`DataError::UnsupportedAssetType`] for anything except
     /// [`AssetType::Crypto`].
     fn require_crypto(asset_type: AssetType) -> DataResult<()> {
@@ -120,10 +114,8 @@ impl Kraken {
         interval: Interval,
         since: Option<u64>,
     ) -> DataResult<Vec<KrakenOHLC>> {
-        let interval_str = Self::interval_minutes(interval).to_string();
-
         let mut params: Vec<(&str, String)> =
-            vec![("pair", symbol.to_owned()), ("interval", interval_str)];
+            vec![("pair", symbol.to_owned()), ("interval", interval.minutes().to_string())];
 
         if let Some(s) = since {
             params.push(("since", s.to_string()));
@@ -233,6 +225,62 @@ impl DataProvider for Kraken {
 
         Ok(assets)
     }
+
+    /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
+    #[instrument(skip(self), fields(%symbol, ?interval, start, end))]
+    async fn download_batch(
+        &self,
+        symbol: &str,
+        _asset_type: AssetType,
+        interval: Interval,
+        start: u64,
+        end: u64,
+    ) -> DataResult<Vec<Bar>> {
+        let kraken_symbol = self.parse_canonical_symbol(symbol);
+        let interval_secs = interval.minutes() * 60;
+        let mut all_bars: Vec<Bar> = Vec::new();
+        let mut cursor = start;
+
+        loop {
+            let bars = self.get_bars(&kraken_symbol, interval, Some(cursor)).await;
+
+            let bars = match bars {
+                Ok(b) => b,
+                Err(_) => break,
+            };
+
+            if bars.is_empty() {
+                break;
+            }
+
+            let last_time = bars.last().unwrap().time;
+            let mut added = false;
+
+            for k in bars {
+                let bar = Bar::from(k);
+                if bar.open_ts >= start && bar.open_ts < end {
+                    all_bars.push(bar);
+                    added = true;
+                }
+            }
+
+            // Kraken returns bars from `since` onwards. Advance cursor.
+            let new_cursor = last_time + interval_secs;
+            if new_cursor <= cursor || last_time >= end {
+                break;
+            }
+            cursor = new_cursor;
+
+            if !added && cursor >= end {
+                break;
+            }
+        }
+
+        all_bars.sort_by_key(|b| b.open_ts);
+        all_bars.dedup_by_key(|b| b.open_ts);
+
+        Ok(all_bars)
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -309,8 +357,40 @@ struct KrakenOHLC {
     /// Bar open time in Unix seconds.
     time: u64,
 
+    /// Bar open price.
+    open: f64,
+
+    /// Highest price in the bar.
+    high: f64,
+
+    /// Lowest price in the bar.
+    low: f64,
+
     /// Bar close price.
     close: f64,
+
+    /// Traded volume.
+    volume: f64,
+
+    /// Number of trades during the bar.
+    count: Option<i32>,
+}
+
+impl From<KrakenOHLC> for Bar {
+    fn from(k: KrakenOHLC) -> Self {
+        Bar {
+            open_ts: k.time,
+            close_ts: k.time,
+            open_ts_exchange: k.time,
+            open: k.open,
+            high: k.high,
+            low: k.low,
+            close: k.close,
+            adj_close: k.close,
+            volume: k.volume,
+            n_trades: k.count,
+        }
+    }
 }
 
 impl TryFrom<serde_json::Value> for KrakenOHLC {
@@ -326,15 +406,46 @@ impl TryFrom<serde_json::Value> for KrakenOHLC {
             .and_then(|v| v.as_u64())
             .ok_or_else(|| DataError::UnexpectedResponse("missing OHLC time".to_owned()))?;
 
+        let open = arr
+            .get(1)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| DataError::UnexpectedResponse("missing OHLC open".to_owned()))?;
+
+        let high = arr
+            .get(2)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| DataError::UnexpectedResponse("missing OHLC high".to_owned()))?;
+
+        let low = arr
+            .get(3)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| DataError::UnexpectedResponse("missing OHLC low".to_owned()))?;
+
         let close = arr
             .get(4)
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<f64>().ok())
             .ok_or_else(|| DataError::UnexpectedResponse("missing OHLC close".to_owned()))?;
 
+        let volume = arr
+            .get(6)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| DataError::UnexpectedResponse("missing OHLC volume".to_owned()))?;
+
+        let count = arr.get(7).and_then(|v| v.as_i64()).map(|n| n as i32);
+
         Ok(Self {
             time,
+            open,
+            high,
+            low,
             close,
+            volume,
+            count,
         })
     }
 }

@@ -1,4 +1,4 @@
-use crate::data::interface::{get_assets, get_download_info, list_assets};
+use crate::data::interface::{download_assets, get_assets, get_download_info, list_assets};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_meta::AssetMeta;
 use crate::data::models::asset_type::AssetType;
@@ -37,6 +37,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_assets, &m)?)?;
     m.add_function(wrap_pyfunction!(get_download_info, &m)?)?;
     m.add_function(wrap_pyfunction!(list_assets, &m)?)?;
+    m.add_function(wrap_pyfunction!(download_assets, &m)?)?;
 
     parent.add_submodule(&m)?;
 

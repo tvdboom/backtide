@@ -56,7 +56,7 @@ Important caveats:
 - Yahoo intraday availability is clamped to the following rolling windows:
   - `1m`: Last 7 days.
   - `5m`, `15m`, `30m`: Last 60 days.
-  - `1h`: Last 730 days.
+  - `1h`, `4h`: Last 730 days.
 - Daily and weekly history usually go back to the instrument's first trade
   date.
 

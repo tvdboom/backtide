@@ -6,9 +6,10 @@ use crate::data::models::asset_type::AssetType;
 use crate::data::models::download_info::DownloadInfo;
 use crate::data::models::interval::Interval;
 use crate::engine::Engine;
+use crate::storage::models::storage_summary::StorageSummary;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
-use pyo3::{pyfunction, Bound, PyAny, PyResult};
+use pyo3::{pyfunction, Bound, Py, PyAny, PyResult};
 
 /// Parse input from Python into a list of symbols.
 fn parse_asset(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
@@ -176,4 +177,36 @@ pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<A
 
     let engine = Engine::get()?;
     Ok(engine.list_assets(asset_type, limit)?)
+}
+
+/// Download OHLCV data for the symbols described in a [`DownloadInfo`].
+///
+/// Concurrently downloads all assets and legs, skipping data already stored
+/// in the database.  The download is gap-free: if the connection drops
+/// mid-way, only the contiguous prefix is persisted so a subsequent call
+/// can resume cleanly.
+///
+/// Parameters
+/// ----------
+/// download_info : [DownloadInfo]
+///     Resolved download plan (from [`get_download_info`]).
+///
+/// callback : callable or None, default=None
+///     Optional callback invoked after each task. Must have signature:
+///     `callback(symbol, interval, task_idx, total_tasks, n_bars, error)`.
+///     `error` is `None` on success or a string message on failure.
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.data import get_download_info, download_assets
+///
+/// info = get_download_info(["AAPL", "MSFT"], "stocks", "1d")
+/// download_assets(info)  # no run
+/// ```
+#[pyfunction]
+#[pyo3(signature = (download_info, callback=None))]
+pub fn download_assets(download_info: DownloadInfo, callback: Option<Py<PyAny>>) -> PyResult<()> {
+    let engine = Engine::get()?;
+    Ok(engine.download_symbols(&download_info, callback)?)
 }

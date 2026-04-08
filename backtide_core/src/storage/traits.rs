@@ -1,9 +1,11 @@
 //! Trait that storage solutions must implement.
 
+use crate::data::models::asset_type::AssetType;
 use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
 use crate::storage::errors::StorageResult;
+use crate::storage::models::storage_summary::StorageSummary;
 use async_trait::async_trait;
 
 /// Abstraction over a storage solution.
@@ -16,19 +18,29 @@ pub trait Storage: Send + Sync {
     fn write_bars(
         &self,
         symbol: &str,
-        provider: Provider,
+        asset_type: AssetType,
         interval: Interval,
+        provider: Provider,
         bars: &[Bar],
     ) -> StorageResult<()>;
 
-    // /// Load OHLC data.
-    // fn load_bars(
-    //     &self,
-    //     symbol: &str,
-    //     start: Option<DateTime<Utc>>,
-    //     end: Option<DateTime<Utc>>,
-    // ) -> StorageResult<Vec<Bar>>;
-    //
-    // /// Delete bars from the database.
-    // fn drop_bars(&self);
+    /// Get the (min_ts, max_ts) of stored bars for a given symbol/provider/interval.
+    /// Returns `None` if no data exists.
+    fn get_stored_range(
+        &self,
+        symbol: &str,
+        interval: Interval,
+        provider: Provider,
+    ) -> StorageResult<Option<(u64, u64)>>;
+
+    /// Return a summary for every (symbol, provider, interval) group in the database.
+    fn get_summary(&self) -> StorageResult<Vec<StorageSummary>>;
+
+    /// Delete all bars for a given (symbol, provider, interval) group.
+    fn delete_rows(
+        &self,
+        symbol: &str,
+        interval: Option<Interval>,
+        provider: Option<Provider>,
+    ) -> StorageResult<u64>;
 }

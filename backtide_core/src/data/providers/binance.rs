@@ -6,6 +6,7 @@ use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
@@ -29,6 +30,9 @@ impl Binance {
     const EXCHANGE_INFO_URL: &str = "https://api.binance.com/api/v3/exchangeInfo";
 
     const KLINES_URL: &str = "https://api.binance.com/api/v3/klines";
+
+    /// Maximum klines returned per request by the Binance API.
+    const MAX_KLINES_PER_REQUEST: usize = 1000;
 
     // ────────────────────────────────────────────────────────────────────────
     // Public API
@@ -200,6 +204,64 @@ impl DataProvider for Binance {
 
         Ok(assets)
     }
+
+    /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
+    #[instrument(skip(self), fields(%symbol, ?interval, start, end))]
+    async fn download_batch(
+        &self,
+        symbol: &str,
+        _asset_type: AssetType,
+        interval: Interval,
+        start: u64,
+        end: u64,
+    ) -> DataResult<Vec<Bar>> {
+        let binance_symbol = Self::parse_canonical_symbol(symbol);
+        let interval_secs = interval.minutes() * 60;
+        let mut all_bars: Vec<Bar> = Vec::new();
+        let mut cursor = start;
+
+        while cursor < end {
+            let bars = self
+                .get_bars(
+                    &binance_symbol,
+                    interval,
+                    Some(cursor as i64),
+                    Some(end as i64),
+                    Self::MAX_KLINES_PER_REQUEST,
+                )
+                .await;
+
+            let bars = match bars {
+                Ok(b) => b,
+                Err(_) => break, // no more data
+            };
+
+            if bars.is_empty() {
+                break;
+            }
+
+            let last_open_ts = bars.last().unwrap().open_time;
+
+            for k in bars {
+                let bar = Bar::from(k);
+                if bar.open_ts >= start && bar.open_ts < end {
+                    all_bars.push(bar);
+                }
+            }
+
+            // Advance cursor past the last bar
+            cursor = last_open_ts + interval_secs;
+            if cursor <= last_open_ts {
+                break; // safety: avoid infinite loop
+            }
+        }
+
+        // Sort by open_ts and deduplicate
+        all_bars.sort_by_key(|b| b.open_ts);
+        all_bars.dedup_by_key(|b| b.open_ts);
+
+        Ok(all_bars)
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -268,14 +330,46 @@ impl TryFrom<SymbolInfo> for Asset {
 /// One row from `/api/v3/klines`.
 #[derive(Debug, Copy, Clone)]
 struct BinanceKline {
-    /// Bar open time in Unix milliseconds.
+    /// Bar open time in Unix seconds.
     open_time: u64,
+
+    /// Bar open price.
+    open: f64,
+
+    /// Highest price in the bar.
+    high: f64,
+
+    /// Lowest price in the bar.
+    low: f64,
 
     /// Bar close price.
     close: f64,
 
-    /// Bar close time in Unix milliseconds.
+    /// Traded volume.
+    volume: f64,
+
+    /// Bar close time in Unix seconds.
     close_time: u64,
+
+    /// Number of trades during the bar.
+    n_trades: Option<i32>,
+}
+
+impl From<BinanceKline> for Bar {
+    fn from(k: BinanceKline) -> Self {
+        Bar {
+            open_ts: k.open_time,
+            close_ts: k.close_time,
+            open_ts_exchange: k.open_time,
+            open: k.open,
+            high: k.high,
+            low: k.low,
+            close: k.close,
+            adj_close: k.close,
+            volume: k.volume,
+            n_trades: k.n_trades,
+        }
+    }
 }
 
 impl TryFrom<serde_json::Value> for BinanceKline {
@@ -291,21 +385,52 @@ impl TryFrom<serde_json::Value> for BinanceKline {
                 || DataError::UnexpectedResponse("missing kline open_time".to_owned()),
             )?;
 
+        let open = arr
+            .get(1)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| DataError::UnexpectedResponse("missing kline open".to_owned()))?;
+
+        let high = arr
+            .get(2)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| DataError::UnexpectedResponse("missing kline high".to_owned()))?;
+
+        let low = arr
+            .get(3)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| DataError::UnexpectedResponse("missing kline low".to_owned()))?;
+
         let close = arr
             .get(4)
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<f64>().ok())
             .ok_or_else(|| DataError::UnexpectedResponse("missing kline close".to_owned()))?;
 
+        let volume = arr
+            .get(5)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| DataError::UnexpectedResponse("missing kline volume".to_owned()))?;
+
         let close_time =
             arr.get(6).and_then(|v| v.as_i64()).map(|ms| (ms / 1_000).max(0) as u64).ok_or_else(
                 || DataError::UnexpectedResponse("missing kline close_time".to_owned()),
             )?;
 
+        let n_trades = arr.get(8).and_then(|v| v.as_i64()).map(|n| n as i32);
+
         Ok(Self {
             open_time,
+            open,
+            high,
+            low,
             close,
+            volume,
             close_time,
+            n_trades,
         })
     }
 }

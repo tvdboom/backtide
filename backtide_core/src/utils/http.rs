@@ -1,7 +1,8 @@
 //! Utilities for HTTP requests.
 
 use reqwest::cookie::Jar;
-use reqwest::{Client, StatusCode};
+use reqwest::{Client, Response, StatusCode};
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::future::Future;
 use std::sync::Arc;
@@ -25,12 +26,14 @@ pub enum HttpError {
     },
 
     /// The server returned a non-2xx status code.
-    /// Not retried — a 4xx/5xx is a definitive answer from the server.
-    #[error("Server returned {status}: {source}")]
+    ///
+    /// `body` contains a human-readable error message extracted from the
+    /// response body when possible (e.g. Yahoo's `chart.error.description`),
+    /// falling back to the raw status + body text.
+    #[error("{body}")]
     Status {
-        status: reqwest::StatusCode,
-        #[source]
-        source: reqwest::Error,
+        status: StatusCode,
+        body: String,
     },
 
     /// The response body could not be decoded (e.g. invalid JSON or charset).
@@ -84,7 +87,7 @@ impl HttpClient {
         &self,
         url: &str,
         params: Option<&[(&str, &str)]>,
-    ) -> Result<reqwest::Response, HttpError> {
+    ) -> Result<Response, HttpError> {
         self.retry(|| {
             let mut req = self.inner.get(url);
             if let Some(p) = params {
@@ -101,8 +104,13 @@ impl HttpClient {
         url: &str,
         params: &[(&str, &str)],
         body: &B,
-    ) -> Result<reqwest::Response, HttpError> {
+    ) -> Result<Response, HttpError> {
         self.retry(|| self.inner.post(url).query(params).json(body).send()).await
+    }
+
+    /// Deserialize a response body as JSON, mapping failures to [`HttpError::Decode`].
+    pub async fn json<T: DeserializeOwned>(resp: Response) -> Result<T, HttpError> {
+        resp.json::<T>().await.map_err(HttpError::Decode)
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -110,10 +118,10 @@ impl HttpClient {
     // ────────────────────────────────────────────────────────────────────────
 
     /// Execute an async request factory up to [`Self::MAX_RETRIES`] times.
-    async fn retry<F, Fut>(&self, mut f: F) -> Result<reqwest::Response, HttpError>
+    async fn retry<F, Fut>(&self, mut f: F) -> Result<Response, HttpError>
     where
         F: FnMut() -> Fut,
-        Fut: Future<Output = Result<reqwest::Response, reqwest::Error>>,
+        Fut: Future<Output = Result<Response, reqwest::Error>>,
     {
         let mut last_err: Option<HttpError> = None;
 
@@ -139,22 +147,28 @@ impl HttpClient {
 
                         last_err = Some(HttpError::Status {
                             status,
-                            source: resp.error_for_status().unwrap_err(),
+                            body: format!("Rate limited ({status})"),
                         });
 
                         sleep(delay).await;
                         continue;
                     } else if status.is_client_error() {
                         // 4xx: no point retrying, the request itself is wrong.
+                        // Read the body first — APIs like Yahoo embed the real
+                        // error description in the JSON response.
+                        let body = resp.text().await.unwrap_or_default();
+                        let body = Self::extract_api_message(&body)
+                            .unwrap_or(format!("Server returned {status}: {body}"));
+
                         return Err(HttpError::Status {
                             status,
-                            source: resp.error_for_status().unwrap_err(),
+                            body,
                         });
                     } else {
                         // 5xx: server-side problem, worth retrying.
                         last_err = Some(HttpError::Status {
                             status,
-                            source: resp.error_for_status().unwrap_err(),
+                            body: format!("Server error ({status})"),
                         });
                     }
                 },
@@ -174,11 +188,27 @@ impl HttpClient {
         Err(last_err.expect("loop runs at least once"))
     }
 
-    /// Deserialize a response body as JSON, mapping failures to [`HttpError::Decode`].
-    pub async fn json<T: serde::de::DeserializeOwned>(
-        resp: reqwest::Response,
-    ) -> Result<T, HttpError> {
-        resp.json::<T>().await.map_err(HttpError::Decode)
+    /// Try to extract a human-readable error message from a JSON error body.
+    fn extract_api_message(body: &str) -> Option<String> {
+        let json: serde_json::Value = serde_json::from_str(body).ok()?;
+
+        // Traverse known patterns to find the descriptive message.
+        let candidates = [
+            // Yahoo: {"chart":{"error":{"description":"..."}}}
+            json.pointer("/chart/error/description"),
+            // Generic: {"error":{"description":"..."}}
+            json.pointer("/error/description"),
+            // Generic: {"error":{"message":"..."}}
+            json.pointer("/error/message"),
+            // Generic: {"error":"..."}
+            json.pointer("/error"),
+            // Generic: {"message":"..."}
+            json.pointer("/message"),
+        ];
+
+        let result =
+            candidates.into_iter().flatten().find_map(|v| v.as_str().map(|s| s.to_owned()));
+        result
     }
 }
 

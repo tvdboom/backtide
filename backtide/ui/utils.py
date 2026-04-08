@@ -7,10 +7,12 @@ Description: Utility functions for the UI.
 
 from typing import Any
 import re
+from zoneinfo import ZoneInfo
+from datetime import datetime as dt
 import streamlit as st
 import base64
 from pathlib import Path
-from backtide.core.data import Asset, AssetType
+from backtide.core.data import AssetType
 from backtide.utils.utils import to_list
 from backtide.constants import MOMENT_TO_STRFTIME
 
@@ -46,7 +48,7 @@ def _get_asset_type_description(asset_type: AssetType) -> tuple[str, str]:
     return asset_description, currency_description
 
 
-def _fmt_number(n: float) -> str:
+def _fmt_number(n: int | float) -> str:
     """Nicely format a number."""
     if n > 10_000_000:
         return f"{n / 1_000_000:.1f}M"
@@ -58,24 +60,25 @@ def _fmt_number(n: float) -> str:
         return str(n)
 
 
-def _get_logokit_url(asset: Asset, api_key: str, *, use_quote: bool = False) -> str:
-    """Retrieve the Logokit url to retrieve the logo for an asset."""
-    match asset.asset_type:
+def _get_logokit_url(symbol: str, at: AssetType, api_key: str, *, use_quote: bool = False) -> str:
+    """Build a Logokit URL from a canonical symbol and its asset type."""
+    match at:
         case AssetType.Forex:
-            url = "ticker"
-            symbol = f"{asset.base}{asset.quote}:CUR"
+            domain = "ticker"
+            base, quote = symbol.split("-")  # Canonical forex symbol has form base-quote
+            symbol = f"{base}{quote}:CUR"
         case AssetType.Crypto:
-            url = "crypto"
-            symbol = asset.base if not use_quote else asset.quote
+            domain = "crypto"
+            base, quote = symbol.split("-")  # Canonical crypto symbol has form base-quote
+            symbol = base if not use_quote else quote
         case _:
-            url = "ticker"
-            symbol = asset.symbol
+            domain = "ticker"
 
-    return f"https://img.logokit.com/{url}/{symbol}?token={api_key}"
+    return f"https://img.logokit.com/{domain}/{symbol}?token={api_key}"
 
 
 @st.cache_data
-def _load_provider_logo(provider: str) -> str:
+def _get_provider_logo(provider: str) -> str:
     """Load the logo image from a provider."""
     path = Path(f"images/providers/{provider.lower()}.png")
     data = base64.b64encode(path.read_bytes()).decode()
@@ -94,6 +97,12 @@ def _moment_to_strftime(fmt: str) -> str:
         return MOMENT_TO_STRFTIME.get(token, token)
 
     return regex.sub(replace, fmt)
+
+
+def _parse_date(ts: int, fmt: str, tz: ZoneInfo) -> str:
+    """Format a Unix timestamp into the user's date format."""
+    fmt = _moment_to_strftime(fmt)
+    return dt.fromtimestamp(ts, tz=tz).strftime(fmt)
 
 
 def _prevent_deselection(key: str, default: Any, reset: list[str] | None = None):

@@ -6,6 +6,7 @@ use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
@@ -165,7 +166,7 @@ impl DataProvider for Coinbase {
                     ))
                 })?;
 
-            let span = (interval.minutes() as u64 * 60)
+            let span = (interval.minutes() * 60)
                 .saturating_mul(Self::MAX_CANDLES_PER_REQUEST.saturating_sub(1));
 
             match self
@@ -216,6 +217,54 @@ impl DataProvider for Coinbase {
             .collect();
 
         Ok(assets)
+    }
+
+    /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
+    #[instrument(skip(self), fields(%symbol, ?interval, start, end))]
+    async fn download_batch(
+        &self,
+        symbol: &str,
+        _asset_type: AssetType,
+        interval: Interval,
+        start: u64,
+        end: u64,
+    ) -> DataResult<Vec<Bar>> {
+        let interval_secs = interval.minutes() * 60;
+        let window = interval_secs * (Self::MAX_CANDLES_PER_REQUEST - 1);
+        let mut all_bars: Vec<Bar> = Vec::new();
+        let mut cursor = start;
+
+        while cursor < end {
+            let batch_end = (cursor + window).min(end);
+
+            let bars = self.get_bars(symbol, interval, Some(cursor), Some(batch_end)).await;
+
+            let bars = match bars {
+                Ok(b) => b,
+                Err(_) => break,
+            };
+
+            if bars.is_empty() {
+                break;
+            }
+
+            for c in &bars {
+                let bar = Bar::from(*c);
+                if bar.open_ts >= start && bar.open_ts < end {
+                    all_bars.push(bar);
+                }
+            }
+
+            cursor = batch_end;
+            if cursor <= start && !bars.is_empty() {
+                break;
+            }
+        }
+
+        all_bars.sort_by_key(|b| b.open_ts);
+        all_bars.dedup_by_key(|b| b.open_ts);
+
+        Ok(all_bars)
     }
 }
 
@@ -285,8 +334,20 @@ struct CoinbaseCandleRaw {
     /// Bar open time as a string of Unix seconds.
     start: String,
 
+    /// Open price as a string.
+    open: String,
+
+    /// Highest price as a string.
+    high: String,
+
+    /// Lowest price as a string.
+    low: String,
+
     /// Close price as a string.
     close: String,
+
+    /// Volume as a string.
+    volume: String,
 }
 
 /// Parsed candle.
@@ -295,8 +356,37 @@ struct CoinbaseCandle {
     /// Bar open time in Unix seconds.
     start: u64,
 
+    /// Bar open price.
+    open: f64,
+
+    /// Highest price in the bar.
+    high: f64,
+
+    /// Lowest price in the bar.
+    low: f64,
+
     /// Bar close price.
     close: f64,
+
+    /// Traded volume.
+    volume: f64,
+}
+
+impl From<CoinbaseCandle> for Bar {
+    fn from(c: CoinbaseCandle) -> Self {
+        Bar {
+            open_ts: c.start,
+            close_ts: c.start, // Coinbase only gives open ts
+            open_ts_exchange: c.start,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            adj_close: c.close,
+            volume: c.volume,
+            n_trades: None,
+        }
+    }
 }
 
 impl TryFrom<CoinbaseCandleRaw> for CoinbaseCandle {
@@ -307,14 +397,38 @@ impl TryFrom<CoinbaseCandleRaw> for CoinbaseCandle {
             DataError::UnexpectedResponse("invalid candle start timestamp".to_owned())
         })?;
 
+        let open = raw
+            .open
+            .parse::<f64>()
+            .map_err(|_| DataError::UnexpectedResponse("invalid candle open price".to_owned()))?;
+
+        let high = raw
+            .high
+            .parse::<f64>()
+            .map_err(|_| DataError::UnexpectedResponse("invalid candle high price".to_owned()))?;
+
+        let low = raw
+            .low
+            .parse::<f64>()
+            .map_err(|_| DataError::UnexpectedResponse("invalid candle low price".to_owned()))?;
+
         let close = raw
             .close
             .parse::<f64>()
             .map_err(|_| DataError::UnexpectedResponse("invalid candle close price".to_owned()))?;
 
+        let volume = raw
+            .volume
+            .parse::<f64>()
+            .map_err(|_| DataError::UnexpectedResponse("invalid candle volume".to_owned()))?;
+
         Ok(Self {
             start,
+            open,
+            high,
+            low,
             close,
+            volume,
         })
     }
 }

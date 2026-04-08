@@ -6,6 +6,7 @@ Description: Page to download new data.
 """
 
 from datetime import datetime as dt
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import streamlit as st
@@ -16,6 +17,7 @@ from backtide.core.data import (
     AssetType,
     Exchange,
     Interval,
+    download_assets,
     list_assets,
     get_download_info, Currency,
 )
@@ -23,7 +25,7 @@ from backtide.ui.utils import (
     _fmt_number,
     _moment_to_strftime,
     _get_asset_type_description,
-    _load_provider_logo,
+    _get_provider_logo,
     _get_logokit_url,
     _prevent_deselection,
     _to_upper_values,
@@ -273,11 +275,12 @@ def draw_cards(assets: list[AssetMeta]) -> int:
                         {parse_date(iv_start)} &nbsp → &nbsp {parse_date(iv_end)}
                     </span>
                     <span class="iv-range">{n_days_str}</span>
-                    <span class="iv-rows">~{_fmt_number(rows)} rows</span>
+                    <span class="iv-rows">~{_fmt_number(rows)} bars</span>
                 </div>"""
 
         if logokit_key := cfg.display.logokit_api_key:
-            logo = f"<img src='{_get_logokit_url(asset, logokit_key)}' class='logo'>"
+            url = _get_logokit_url(asset.symbol, asset.asset_type, logokit_key)
+            logo = f"<img src='{url}' class='logo'>"
         else:
             logo = ""
 
@@ -291,7 +294,7 @@ def draw_cards(assets: list[AssetMeta]) -> int:
         provider = str(cfg.data.providers[asset.asset_type])
         provider_html = f"""
             <div class="provider">
-                <img src="{_load_provider_logo(provider)}" alt="{provider}">
+                <img src="{_get_provider_logo(provider)}" alt="{provider}">
             </div>"""
 
         flag = ""
@@ -315,7 +318,7 @@ def draw_cards(assets: list[AssetMeta]) -> int:
             if isinstance(asset.quote, Currency):
                 img = get_flag(asset.quote.country.alpha2)
             elif logokit_key:
-                img = _get_logokit_url(asset, logokit_key, use_quote=True)
+                img = _get_logokit_url(asset.symbol, asset.asset_type, logokit_key, use_quote=True)
             else:
                 img = ""
 
@@ -347,7 +350,7 @@ def draw_cards(assets: list[AssetMeta]) -> int:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Streamlit page
+# Download interface
 # ─────────────────────────────────────────────────────────────────────────────
 
 cfg = get_config()
@@ -361,13 +364,12 @@ st.set_page_config(page_title="Backtide - Download")
 st.title("Download", text_alignment="center")
 
 st.text(
-    """
-    Perform bulk download of historical OHLC market data for multiple assets and/or intervals
-    at once. FX rates for historical conversion rates are automatically downloaded if required.
-    """
+    "Perform bulk download of historical OHLC market data for multiple assets and/or intervals "
+    "at once. FX rates for historical conversion rates are automatically downloaded if required."
 )
 
 st.divider()
+
 if not st.session_state.get("asset_type_download"):
     st.session_state.asset_type_download = AssetType.get_default()
 
@@ -379,7 +381,7 @@ asset_type = st.segmented_control(
     on_change=_prevent_deselection(
         key="asset_type_download",
         default=AssetType.get_default(),
-        reset=["assets_download", "currency_download"],
+        reset=["symbols_download", "currency_download"],
     ),
     help="Select the type of financial asset you want to backtest.",
 )
@@ -401,7 +403,7 @@ asset_d, currency_d = _get_asset_type_description(st.session_state.asset_type_do
 
 symbols = col1.multiselect(
     label="Symbols",
-    key="assets_download",
+    key="symbols_download",
     options=sorted(filtered_assets, key=lambda a: a.symbol),
     format_func=lambda a: (
         f"{a.symbol} - {a.name}" if a.asset_type in (AssetType.Stocks, AssetType.Etf) else a.symbol
@@ -409,7 +411,7 @@ symbols = col1.multiselect(
     placeholder="Select one or more symbols...",
     max_selections=MAX_ASSET_SELECTION,
     accept_new_options=True,
-    on_change=_to_upper_values("assets_download"),
+    on_change=_to_upper_values("symbols_download"),
     help=asset_d,
 )
 
@@ -495,14 +497,16 @@ is_enabled = assets and start_ts and latest_ts and intervals
 
 if is_enabled:
     BYTES_PER_ROW = 150  # Estimated memory required per OHLC bar
-    ROWS_PER_SECOND = 40_000  # Estimated number of rows downloaded per second
+    ROWS_PER_SECOND = 4_000  # Estimated number of rows downloaded per second
+
+    st.divider()
 
     with st.expander("Download details", icon=":material/archive:", expanded=False):
-        html, total_rows = draw_cards(assets + download_info.legs)
+        html, n_bars = draw_cards(assets + download_info.legs)
         st.html(CARD_CSS + html)
 
-    estimated_memory = (total_rows * BYTES_PER_ROW) / (1024**2)
-    estimated_seconds = int(total_rows / ROWS_PER_SECOND)
+    estimated_memory = (n_bars * BYTES_PER_ROW) / (1024 ** 2)
+    estimated_seconds = int(n_bars / ROWS_PER_SECOND)
 
     hours, remainder = divmod(estimated_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
@@ -524,27 +528,130 @@ if is_enabled:
         size_str = "<0.1 MB"
 
     col1, col2, col3 = st.columns(3)
-    col1.metric(":material/table_rows: Estimated rows", _fmt_number(total_rows), border=True)
+    col1.metric(":material/candlestick_chart: Estimated bars", _fmt_number(n_bars), border=True)
     col2.metric(":material/timer: Estimated time", time_str, border=True)
     col3.metric(":material/memory: Estimated memory", size_str, border=True)
 
 st.divider()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Download logic
+# ─────────────────────────────────────────────────────────────────────────────
+
+downloading = st.session_state.get("downloading", False)
+
 if st.button(
-    label="Download",
+    label="Downloading…" if downloading else "Download",
     icon=":material/get_app:",
     type="primary",
-    disabled=not is_enabled,
+    disabled=not is_enabled or downloading,
+    shortcut="Enter",
     width="stretch",
+    key="downloading",
 ):
     if latest_ts > dt.now(tz=tz).date():
         st.error("End date cannot be in the future.", icon=":material/error:")
     elif start_ts > latest_ts:  # ty:ignore[unsupported-operator]
         st.error("Start date must be equal or prior to end date.", icon=":material/error:")
     else:
-        with st.spinner("Downloading data..."):
-            # TODO: implement download logic
-            st.success(
-                f"Successfully downloaded {len(assets)} tickers.",
-                icon=":material/check_circle:",
-            )
+        # Collect all symbol labels for status lines.
+        all_metas = assets + download_info.legs
+        symbol_labels = [m.symbol for m in all_metas]
+
+        # Build a mapping from (symbol, interval_str) → symbol index and
+        # count the number of intervals per symbol for per-symbol fractions.
+        task_lookup: dict[tuple[str, str], int] = {}
+        tasks_per_symbol: dict[int, int] = {}
+        for sym_idx, meta in enumerate(all_metas):
+            count = 0
+            for iv in meta.earliest_ts:
+                task_lookup[(meta.symbol, str(iv))] = sym_idx
+                count += 1
+            tasks_per_symbol[sym_idx] = count
+
+        done_per_symbol: dict[int, int] = {i: 0 for i in range(len(all_metas))}
+
+        # Render status UI — one updatable line per asset.
+        status = st.status("Downloading market data…", expanded=True, state="running")
+        status_lines: dict[int, Any] = {}
+
+        for sym_idx, label in enumerate(symbol_labels):
+            status_lines[sym_idx] = status.empty()
+            status_lines[sym_idx].markdown(f"⏳ **{label}** — downloading…")
+
+        errors = False
+        warnings: list[str] = []
+        warned_symbols: set[int] = set()
+
+        def _on_progress(
+            symbol: str, interval: str, task_idx: int, total_tasks: int,
+            n_bars: int, error: str | None,
+        ):
+            """Callback invoked by Rust after each (symbol, interval) task."""
+            sym_idx = task_lookup.get((symbol, interval))
+            if sym_idx is None:
+                return
+
+            if error is not None:
+                warnings.append(f"**{symbol}** ({interval}): {error}")
+                warned_symbols.add(sym_idx)
+                status_lines[sym_idx].markdown(
+                    f"⚠️ **{symbol}** — {interval} failed"
+                )
+                return
+
+            done_per_symbol[sym_idx] = done_per_symbol.get(sym_idx, 0) + 1
+            sym_total = tasks_per_symbol.get(sym_idx, 1)
+
+            if done_per_symbol[sym_idx] >= sym_total:
+                status_lines[sym_idx].markdown(f"✅ **{symbol}**")
+            else:
+                status_lines[sym_idx].markdown(
+                    f"💾 **{symbol}** — {interval}: {_fmt_number(n_bars)} bars stored"
+                )
+
+        try:
+            download_assets(download_info, callback=_on_progress)
+        except Exception as exc:
+            errors = True
+            status.update(label="Download failed", state="error", expanded=True)
+            st.error(f"Download error: {exc}", icon=":material/error:")
+
+        if not errors:
+            # Mark any assets that didn't receive a callback (already stored / skipped).
+            for sym_idx in status_lines:
+                if done_per_symbol[sym_idx] == 0 and sym_idx not in warned_symbols:
+                    status_lines[sym_idx].markdown(
+                        f"✅ **{symbol_labels[sym_idx]}** — already up to date"
+                    )
+                elif sym_idx not in warned_symbols:
+                    status_lines[sym_idx].markdown(f"✅ **{symbol_labels[sym_idx]}**")
+
+            n_total = len(all_metas)
+            n_warned = len(warned_symbols)
+            n_succeeded = n_total - n_warned
+
+            if warnings:
+                status.update(label="Download finished", expanded=True, state="complete")
+
+                for warn in warnings:
+                    st.warning(warn, icon=":material/warning:")
+
+                if n_succeeded > 0:
+                    st.success(
+                        f"Successfully downloaded {n_succeeded} of {n_total} assets.",
+                        icon=":material/check_circle:",
+                    )
+                else:
+                    st.error(
+                        f"All {n_total} assets had warnings during download.",
+                        icon=":material/error:",
+                    )
+            else:
+                status.update(label="Download finished", expanded=False, state="complete")
+
+                st.success(
+                    f"Successfully downloaded {n_succeeded} assets.",
+                    icon=":material/check_circle:",
+                )

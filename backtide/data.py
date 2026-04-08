@@ -18,4 +18,5 @@ from backtide.core.data import (
     get_assets,
     list_assets,
     get_download_info,
+    download_assets,
 )

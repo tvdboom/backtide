@@ -7,6 +7,7 @@ use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
+use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::forex::ForexPair;
@@ -336,20 +337,28 @@ impl DataProvider for YahooFinance {
             DataError::UnexpectedResponse(format!("no latest_ts for symbol: {}", symbol))
         })?;
 
+        // End is exclusive — step back one interval so the current (potentially incomplete)
+        // bar is excluded and the requested range stays strictly within the provider's
+        // rolling window.
+        let latest_ts = latest_ts.saturating_sub(interval.minutes() * 60);
+
         let earliest_ts = meta
             .first_trade_date
             .map(|x| {
+                // Yahoo enforces rolling windows relative to the current wall-clock time,
+                // not `regular_market_time` (which can be hours behind if the market
+                // hasn't opened yet today).
                 let cap_secs = match interval {
                     Interval::OneMinute => Some(7 * 24 * 60 * 60),
                     Interval::FiveMinutes | Interval::FifteenMinutes | Interval::ThirtyMinutes => {
                         Some(60 * 24 * 60 * 60)
                     },
-                    Interval::OneHour => Some(730 * 24 * 60 * 60),
+                    Interval::OneHour | Interval::FourHours => Some(730 * 24 * 60 * 60),
                     _ => None,
                 };
 
                 if let Some(cap_secs) = cap_secs {
-                    x.max(latest_ts as i64 - cap_secs).max(0) as u64
+                    x.max(now as i64 - cap_secs).max(0) as u64
                 } else {
                     x.max(0) as u64
                 }
@@ -469,6 +478,106 @@ impl DataProvider for YahooFinance {
             },
         }
     }
+
+    /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
+    #[instrument(skip(self), fields(%symbol, ?interval, start, end))]
+    async fn download_batch(
+        &self,
+        symbol: &str,
+        asset_type: AssetType,
+        interval: Interval,
+        start: u64,
+        end: u64,
+    ) -> DataResult<Vec<Bar>> {
+        let yahoo_symbol = Self::parse_canonical_symbol(symbol, asset_type)?;
+
+        // Yahoo uses 1wk instead of 1w
+        let iv = if interval == Interval::OneWeek {
+            "1wk".to_string()
+        } else {
+            interval.to_string()
+        };
+
+        let resp = self
+            .client
+            .get(
+                &format!("{}/{}", Self::CHART_URL, yahoo_symbol),
+                Some(&[
+                    ("period1", start.to_string().as_str()),
+                    ("period2", end.to_string().as_str()),
+                    ("interval", iv.as_str()),
+                    ("crumb", &self.crumb),
+                ]),
+            )
+            .await?;
+
+        let parsed = HttpClient::json::<ChartResponse>(resp).await?;
+
+        let result = parsed
+            .chart
+            .result
+            .into_iter()
+            .next()
+            .ok_or_else(|| DataError::UnexpectedResponse("empty chart result".to_owned()))?;
+
+        let timestamps = result.timestamp.unwrap_or_default();
+        let indicators = result.indicators.ok_or_else(|| {
+            DataError::UnexpectedResponse("no indicators in chart result".to_owned())
+        })?;
+
+        let quote = indicators
+            .quote
+            .into_iter()
+            .next()
+            .ok_or_else(|| DataError::UnexpectedResponse("no quote indicators".to_owned()))?;
+
+        let adj_close_arr = indicators
+            .adjclose
+            .and_then(|v| v.into_iter().next())
+            .map(|a| a.adjclose)
+            .unwrap_or_default();
+
+        let len = timestamps.len();
+        let mut bars = Vec::with_capacity(len);
+
+        for i in 0..len {
+            let raw_ts = timestamps[i];
+            if raw_ts < 0 {
+                continue; // skip pre-epoch timestamps
+            }
+            let open_ts = raw_ts as u64;
+            let open = quote.open.get(i).and_then(|v| *v);
+            let high = quote.high.get(i).and_then(|v| *v);
+            let low = quote.low.get(i).and_then(|v| *v);
+            let close = quote.close.get(i).and_then(|v| *v);
+            let volume = quote.volume.get(i).and_then(|v| *v);
+            let adj = adj_close_arr.get(i).and_then(|v| *v);
+
+            // Skip bars with missing essential data
+            if let (Some(o), Some(h), Some(l), Some(c), Some(v)) = (open, high, low, close, volume)
+            {
+                if open_ts >= start && open_ts < end {
+                    bars.push(Bar {
+                        open_ts,
+                        close_ts: open_ts,
+                        open_ts_exchange: open_ts,
+                        open: o,
+                        high: h,
+                        low: l,
+                        close: c,
+                        adj_close: adj.unwrap_or(c),
+                        volume: v as f64,
+                        n_trades: None,
+                    });
+                }
+            }
+        }
+
+        bars.sort_by_key(|b| b.open_ts);
+        bars.dedup_by_key(|b| b.open_ts);
+
+        Ok(bars)
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -576,7 +685,14 @@ struct ChartBody {
 
 #[derive(Debug, Deserialize)]
 struct ChartResult {
+    /// Symbol metadata.
     meta: ChartMeta,
+
+    /// Bar open timestamps (Unix seconds).
+    timestamp: Option<Vec<i64>>,
+
+    /// OHLCV indicator arrays.
+    indicators: Option<ChartIndicators>,
 }
 
 /// Symbol metadata returned by the Yahoo chart endpoint.
@@ -657,4 +773,24 @@ impl TryFrom<ChartMeta> for Asset {
             volume: m.regular_market_volume,
         })
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartIndicators {
+    quote: Vec<ChartQuote>,
+    adjclose: Option<Vec<ChartAdjClose>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartQuote {
+    open: Vec<Option<f64>>,
+    high: Vec<Option<f64>>,
+    low: Vec<Option<f64>>,
+    close: Vec<Option<f64>>,
+    volume: Vec<Option<u64>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartAdjClose {
+    adjclose: Vec<Option<f64>>,
 }

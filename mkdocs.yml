@@ -117,6 +117,7 @@ nav:
     - User guide:
         - Nomenclature: user_guide/nomenclature.md
         - Data: user_guide/data.md
+        - Storage: user_guide/storage.md
         - Configuration: user_guide/configuration.md
     - API:
         - config:
@@ -127,6 +128,9 @@ nav:
             - get_assets: api/data/get_assets.md
             - list_assets: api/data/list_assets.md
             - get_download_info: api/data/get_download_info.md
+        - storage:
+            - get_summary: api/storage/get_summary.md
+            - delete_rows: api/storage/delete_rows.md
         - models:
             - Asset: api/models/asset.md
             - AssetMeta: api/models/assetmeta.md
@@ -142,6 +146,7 @@ nav:
             - GeneralConfig: api/models/generalconfig.md
             - Interval: api/models/interval.md
             - LogLevel: api/models/loglevel.md
+            - StorageSummary: api/models/storagesummary.md
             - TriangulationStrategy: api/models/triangulationstrategy.md
         - utils:
             - clear_cache: api/utils/clear_cache.md

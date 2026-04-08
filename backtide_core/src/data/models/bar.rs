@@ -3,14 +3,8 @@ use serde::{Deserialize, Serialize};
 
 /// A single OHLCV candle for one symbol at one interval.
 ///
-/// Two timestamps are carried per bar:
-/// - `ts_utc` — the bar's open time in UTC; use this as the join key across
-///   exchanges when aligning a multi-asset universe.
-/// - `ts_exchange` — the open time in the exchange's local timezone; use this
-///   for session-relative filtering (e.g. "first 30 minutes of the session").
-///
-/// `adj_close` is always populated. For assets where price adjustment is
-/// meaningless (crypto, forex) it is set equal to `close`.
+/// The `adj_close` field is always populated. For assets where price
+/// adjustment is meaningless (crypto, forex) it's set equal to `close`.
 ///
 /// Attributes
 /// ----------
@@ -53,9 +47,9 @@ use serde::{Deserialize, Serialize};
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.data")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Bar {
-    pub open_ts: i64,
-    pub close_ts: i64,
-    pub open_ts_exchange: i64,
+    pub open_ts: u64,
+    pub close_ts: u64,
+    pub open_ts_exchange: u64,
     pub open: f64,
     pub high: f64,
     pub low: f64,
