@@ -580,16 +580,16 @@ if st.button(
 
             if result.n_failed and result.n_succeeded:
                 st.success(
-                    f"Successfully downloaded {result.n_succeeded} of {n_total} tasks.",
+                    f"Successfully downloaded {result.n_succeeded} of {n_total} assets.",
                     icon=":material/check_circle:",
                 )
             elif result.n_failed:
                 st.error(
-                    f"All {n_total} tasks had warnings during download.",
+                    f"All {n_total} assets had warnings during download.",
                     icon=":material/error:",
                 )
             else:
                 st.success(
-                    f"Successfully downloaded {result.n_succeeded} tasks.",
+                    f"Successfully downloaded {result.n_succeeded} assets.",
                     icon=":material/check_circle:",
                 )

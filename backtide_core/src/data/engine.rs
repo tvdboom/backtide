@@ -200,16 +200,17 @@ impl Engine {
 
                         // Missing head: requested start is before what the database has.
                         if start < db_min {
-                            let head_end = db_min.min(end);
-                            debug!(%symbol, ?interval, head_end, "Downloading missing head.");
-                            tasks.push((symbol.clone(), asset_type, *interval, start, head_end));
+                            debug!(%symbol, ?interval, head_end = db_min, "Downloading missing head.");
+                            tasks.push((symbol.clone(), asset_type, *interval, start, db_min));
                         }
 
                         // Missing tail: requested end is beyond what the database has.
+                        // Always start from db_max (not from `start`) so the new data connects
+                        // to what is already stored, no gap is left even when the requested
+                        // range begins after the stored range.
                         if end > db_max {
-                            let tail_start = db_max.max(start);
-                            debug!(%symbol, ?interval, tail_start, "Downloading missing tail.");
-                            tasks.push((symbol.clone(), asset_type, *interval, tail_start, end));
+                            debug!(%symbol, ?interval, tail_start = db_max, "Downloading missing tail.");
+                            tasks.push((symbol.clone(), asset_type, *interval, db_max, end));
                         }
                     } else {
                         tasks.push((symbol.clone(), asset_type, *interval, start, end));

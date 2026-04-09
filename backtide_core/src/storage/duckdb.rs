@@ -32,6 +32,8 @@ impl Storage for DuckDb {
     /// Initialize all tables in the database.
     fn init(&self) -> StorageResult<()> {
         let conn = self.conn.lock().unwrap();
+
+        // Use UNIQUE instead of KEYS since appender doesn't play well with keys
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS bars (
@@ -49,10 +51,8 @@ impl Storage for DuckDb {
                 adj_close         DOUBLE NOT NULL,
                 volume            DOUBLE NOT NULL,
                 n_trades          INTEGER,
+                UNIQUE (symbol, provider, interval, open_ts)
             );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_bars_pk
-                ON bars (symbol, provider, interval, open_ts);
         ",
         )?;
 

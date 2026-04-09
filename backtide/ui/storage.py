@@ -16,18 +16,17 @@ from backtide.core.data import AssetType
 from backtide.core.storage import delete_rows, get_summary
 from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
 # ─────────────────────────────────────────────────────────────────────────────
 
-
 @st.dialog("Confirm deletion", width="medium")
-def _confirm_delete(groups: list[dict[str, str]]):
-    """Show a modal asking the user to confirm deletion of selected groups."""
-    text = "\n".join([f"* {g['Symbol']}  -  {g['Interval']}" for g in groups])
+def _confirm_delete(series: list[dict[str, str]]):
+    """Show a modal asking the user to confirm deletion of selected series."""
+    text = "\n".join([f"* {g['Symbol']}  -  {g['Interval']}" for g in series])
     st.warning(
-        f"You are about to **permanently delete** the following "
-        f"group{'s' if len(groups) > 1 else ''} from the database.\n\n{text}",
+        f"You are about to **permanently delete** the following series:\n\n{text}",
         icon=":material/warning:",
     )
 
@@ -37,7 +36,7 @@ def _confirm_delete(groups: list[dict[str, str]]):
         st.rerun()
 
     if col2.button("Delete", width="stretch", type="primary", icon=":material/delete:"):
-        for g in groups:
+        for g in series:
             delete_rows(g["Symbol"], interval=g["Interval"], provider=g["Provider"])
         st.rerun()
 
@@ -57,8 +56,8 @@ st.set_page_config(page_title="Backtide - Storage")
 st.title("Storage", text_alignment="center")
 
 st.text(
-    "Overview of all OHLCV data stored in the local database. Each row represents one "
-    "(symbol, interval) group. Select one or more rows to delete them from the database.",
+    "Overview of all OHLCV data stored in the local database. Each row represents one (symbol "
+    "- interval) data series. Select one or more rows to delete the series from the database.",
 )
 
 st.divider()
@@ -93,7 +92,7 @@ df = pd.DataFrame(rows)
 
 col1, col2, col3 = st.columns(3)
 col1.metric(":material/trending_up: Number of symbols", df["Symbol"].nunique(), border=True)
-col2.metric(":material/view_list: Number of groups", _fmt_number(len(df)), border=True)
+col2.metric(":material/view_list: Number of series", _fmt_number(len(df)), border=True)
 col3.metric(":material/candlestick_chart: Total bars", _fmt_number(df["Bars"].sum()), border=True)
 
 column_config = {
@@ -118,9 +117,5 @@ event = st.dataframe(
 )
 
 if indices := event.selection.rows if event and event.selection else None:
-    if st.button(
-        label=f"Delete {len(indices)} group{'s' if len(indices) > 1 else ''}",
-        type="primary",
-        icon=":material/delete:",
-    ):
+    if st.button(f"Delete {len(indices)} series", type="primary", icon=":material/delete:"):
         _confirm_delete([rows[i] for i in indices])

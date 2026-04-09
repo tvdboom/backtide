@@ -74,9 +74,6 @@ python-source = "."
 module-name = "backtide.core"
 manifest-path = "backtide_core/Cargo.toml"
 
-[tool.setuptools.packages.find]
-include = ["backtide"]
-
 [tool.ruff]
 cache-dir = ".cache/ruff"
 line-length = 99

@@ -286,9 +286,7 @@ impl YahooFinance {
         let parsed = HttpClient::json::<ChartResponse>(resp).await?;
 
         if let Some(err) = parsed.chart.error {
-            let msg = err
-                .description
-                .unwrap_or_else(|| "unknown chart error".to_owned());
+            let msg = err.description.unwrap_or_else(|| "unknown chart error".to_owned());
             return Err(DataError::UnexpectedResponse(msg));
         }
 
@@ -375,9 +373,7 @@ impl DataProvider for YahooFinance {
         let parsed = HttpClient::json::<ChartResponse>(resp).await?;
 
         if let Some(err) = parsed.chart.error {
-            let msg = err
-                .description
-                .unwrap_or_else(|| "unknown chart error".to_owned());
+            let msg = err.description.unwrap_or_else(|| "unknown chart error".to_owned());
             return Err(DataError::UnexpectedResponse(msg));
         }
 
@@ -432,9 +428,7 @@ impl DataProvider for YahooFinance {
         let parsed = HttpClient::json::<ChartResponse>(resp).await?;
 
         if let Some(err) = parsed.chart.error {
-            let msg = err
-                .description
-                .unwrap_or_else(|| "unknown chart error".to_owned());
+            let msg = err.description.unwrap_or_else(|| "unknown chart error".to_owned());
             return Err(DataError::UnexpectedResponse(msg));
         }
 
@@ -893,13 +887,15 @@ impl TryFrom<ChartMeta> for Asset {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct ChartIndicators {
     quote: Vec<ChartQuote>,
     adjclose: Option<Vec<ChartAdjClose>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct ChartQuote {
     open: Vec<Option<f64>>,
     high: Vec<Option<f64>>,
@@ -908,7 +904,8 @@ struct ChartQuote {
     volume: Vec<Option<f64>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct ChartAdjClose {
     adjclose: Vec<Option<f64>>,
 }
