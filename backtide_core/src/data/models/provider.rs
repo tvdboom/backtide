@@ -1,8 +1,6 @@
-//! Implementation of the [`Provider`] enum.
-
 use crate::data::models::interval::Interval;
 use pyo3::exceptions::PyValueError;
-use pyo3::{pyclass, pymethods, Borrowed, FromPyObject, PyAny, PyErr};
+use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumString, IntoEnumIterator};
 
@@ -46,7 +44,7 @@ impl Provider {
 impl<'a, 'py> FromPyObject<'a, 'py> for Provider {
     type Error = PyErr;
 
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         // First try a direct downcast
         if let Ok(bound) = obj.cast::<Provider>() {
             return Ok(*bound.borrow());

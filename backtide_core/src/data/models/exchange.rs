@@ -269,7 +269,7 @@ impl Exchange {
 impl<'a, 'py> FromPyObject<'a, 'py> for Exchange {
     type Error = PyErr;
 
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         // First try a direct downcast
         if let Ok(bound) = obj.cast::<Exchange>() {
             return Ok(*bound.borrow());

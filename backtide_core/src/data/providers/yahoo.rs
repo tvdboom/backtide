@@ -207,10 +207,15 @@ impl YahooFinance {
     /// Derive `(base, quote)` currency strings from a Yahoo symbol.
     ///
     /// - Equity `"AAPL"`    → `(None, currency)`
+    /// - Equity `"PBR-A"`   → `(None, currency)`  (dash is part of the ticker)
     /// - Forex `"EURUSD=X"` → `(Some("EUR"), "USD")`
     /// - Forex `"JPY=X"`    → `(Some("USD"), "JPY")` (implicit USD base)
     /// - Crypto `"BTC-USD"` → `(Some("BTC"), "USD")`
-    fn parse_base_quote(symbol: &str, currency: &str) -> DataResult<(Option<String>, String)> {
+    fn parse_base_quote(
+        symbol: &str,
+        currency: &str,
+        asset_type: AssetType,
+    ) -> DataResult<(Option<String>, String)> {
         if let Some(symbol) = symbol.strip_suffix("=X") {
             return match symbol.len() {
                 3 => Ok((Some(Currency::USD.to_string()), symbol.to_owned())),
@@ -219,9 +224,9 @@ impl YahooFinance {
             };
         }
 
-        // Only treat '-' as a base/quote delimiter if there's no exchange suffix.
-        // e.g., "BT-A.L" is an equity, not a pair — '-' can be part of the ticker name.
-        if !symbol.contains('.') {
+        // Only treat '-' as a base/quote delimiter for crypto pairs.
+        // Stock tickers can contain dashes as part of the name (e.g., "PBR-A", "BRK-B").
+        if asset_type == AssetType::Crypto {
             if let Some((base, quote)) = symbol.split_once('-') {
                 return Ok((Some(base.to_owned()), quote.to_owned()));
             }
@@ -725,8 +730,6 @@ impl TryFrom<YahooQuote> for Asset {
             q.symbol
         )))?;
 
-        let (base, quote) = YahooFinance::parse_base_quote(&q.symbol, &currency)?;
-
         let asset_type = q
             .quote_type
             .as_deref()
@@ -734,6 +737,8 @@ impl TryFrom<YahooQuote> for Asset {
                 DataError::UnexpectedResponse(format!("no quote_type for symbol: {}", q.symbol))
             })
             .and_then(YahooFinance::parse_asset_type)?;
+
+        let (base, quote) = YahooFinance::parse_base_quote(&q.symbol, &currency, asset_type)?;
 
         let exchange = {
             let s = q.exchange.ok_or_else(|| {
@@ -852,8 +857,6 @@ impl TryFrom<ChartMeta> for Asset {
             m.symbol
         )))?;
 
-        let (base, quote) = YahooFinance::parse_base_quote(&m.symbol, &currency)?;
-
         let asset_type = m
             .instrument_type
             .as_deref()
@@ -864,6 +867,8 @@ impl TryFrom<ChartMeta> for Asset {
                 ))
             })
             .and_then(YahooFinance::parse_asset_type)?;
+
+        let (base, quote) = YahooFinance::parse_base_quote(&m.symbol, &currency, asset_type)?;
 
         let exchange = {
             let s = m.exchange_name.ok_or_else(|| {

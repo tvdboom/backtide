@@ -8,15 +8,23 @@ Description: Run a new backtest page.
 import ast
 from datetime import datetime
 import json
-import time
 import tomllib
 
 from code_editor import code_editor
 import streamlit as st
 import yaml
 
-from backtide.data import AssetType, Currency, Interval
+from backtide.backtest import (
+    CommissionType,
+    ConversionPeriod,
+    CurrencyConversionMode,
+    EmptyBarPolicy,
+    IndicatorType,
+    OrderType,
+    StrategyType,
+)
 from backtide.config import get_config
+from backtide.data import AssetType, Currency, Interval
 from backtide.ui.utils import (
     _get_asset_type_description,
     _list_symbols,
@@ -26,27 +34,9 @@ from backtide.ui.utils import (
 from backtide.utils.constants import (
     INDICATOR_PLACEHOLDER,
     MAX_ASSET_SELECTION,
-    ORDER_TYPES,
     STRATEGY_PLACEHOLDER,
     TAG_PATTERN,
 )
-
-INDICATORS = [
-    "SMA - Simple Moving Average",
-    "EMA - Exponential Moving Average",
-    "WMA - Weighted Moving Average",
-    "RSI - Relative Strength Index",
-    "MACD - Moving Avg. Convergence Divergence",
-    "BB - Bollinger Bands",
-    "ATR - Average True Range",
-    "OBV - On-Balance Volume",
-    "VWAP - Volume-Weighted Average Price",
-    "STOCH - Stochastic Oscillator",
-    "CCI - Commodity Channel Index",
-    "ADX - Average Directional Index",
-]
-
-FEE_MODES = ["Percentage (%)", "Fixed amount", "Percentage + Fixed"]
 
 cfg = get_config()
 
@@ -55,7 +45,7 @@ st.title("Experiment", text_alignment="center")
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
-        ":material/dashboard: Overview",
+        ":material/dashboard: General",
         ":material/analytics: Data",
         ":material/account_balance_wallet: Portfolio",
         ":material/psychology: Strategy",
@@ -67,7 +57,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 1. Overview
+# 1. General
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab1:
@@ -110,8 +100,8 @@ with tab1:
 
     description = st.text_area(
         label="Description",
-        height="stretch",
-        max_chars=500,
+        height=200,
+        max_chars=1500,
         placeholder="Add a description...",
         help=(
             "Summarize the purpose and setup of this run to help you understand and compare "
@@ -148,7 +138,7 @@ with tab1:
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab2:
-    if not st.session_state.get("asset_type"):
+    if st.session_state.get("asset_type") is None:
         _cache = st.session_state.get("_cache", {})
         st.session_state.asset_type = _cache.get("asset_type", AssetType.get_default())
 
@@ -242,7 +232,6 @@ with tab2:
     interval = st.pills(
         label="Interval",
         options=Interval.variants(),
-        format_func=lambda x: str(x),
         selection_mode="single",
         default=Interval.get_default(),
         help=(
@@ -292,7 +281,7 @@ with tab3:
         if symbols:
             positions_data = st.data_editor(
                 data=[
-                    {"Symbol": a.symbol if hasattr(a, "symbol") else str(a), "Quantity": 0.0}
+                    {"Symbol": a.symbol if hasattr(a, "symbol") else str(a), "Quantity": 0}
                     for a in symbols
                 ],
                 num_rows="fixed",
@@ -301,8 +290,7 @@ with tab3:
                     "Symbol": st.column_config.TextColumn("Symbol", width="medium", disabled=True),
                     "Quantity": st.column_config.NumberColumn(
                         "Quantity",
-                        min_value=0.0,
-                        format="%.2f",
+                        min_value=0,
                     ),
                 },
             )
@@ -315,92 +303,146 @@ with tab3:
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab4:
-    if st.session_state.get("strategy_source") is None:
-        st.session_state.strategy_source = "Code editor"
 
-    strategy_source = st.segmented_control(
-        label="Strategy source",
-        key="strategy_source",
-        options=["Code editor", "Upload file"],
-        on_change=_prevent_deselection(
-            key="strategy_source",
-            default="Code editor",
-        ),
-        help="Provide your strategy as inline code or by uploading a Python file.",
+    def _check_strategy_code(code: str, idx: int) -> bool:
+        """Check whether the code contains the expected strategy function."""
+        try:
+            tree = ast.parse(code)
+
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef) and node.name == "strategy":
+                    if [a.arg for a in node.args.args] == ["data", "state", "indicators"]:
+                        return True
+                    else:
+                        st.error(
+                            f"**Strategy {idx + 1}:** Function `strategy` doesn't have "
+                            f"signature: `strategy(data, state, indicators)`.",
+                        )
+                        return False
+
+            st.error(
+                f"**Strategy {idx + 1}:** No function `strategy(data, state, indicators)` "
+                f"found in the code.",
+            )
+        except SyntaxError as ex:
+            st.error(f"**Strategy {idx + 1}:** Syntax error:\n\n{ex}")
+
+        return False
+
+    st.markdown("**Predefined strategies**")
+    st.caption(
+        "Select one or more built-in strategies to include in the experiment. "
+        "Useful for benchmarking against your own strategies.",
     )
 
-    strategy_code: str | None = None
-    if strategy_source == "Code editor":
-        st.caption("Write your strategy function below.")
-        code_editor_resp = code_editor(
-            code=STRATEGY_PLACEHOLDER,
-            buttons=[
-                {
-                    "name": "Copy",
-                    "feather": "Copy",
-                    "hasText": True,
-                    "commands": ["copyAll"],
-                    "style": {"top": "0.46rem", "right": "0.4rem"},
-                },
-                {
-                    "name": "Save",
-                    "feather": "Save",
-                    "hasText": True,
-                    "commands": ["save-state", ["response", "saved"]],
-                    "response": "saved",
-                    "style": {"top": "2.25rem", "right": "0.4rem"},
-                },
-            ],
+    selected_predefined = st.multiselect(
+        label="Built-in strategies",
+        options=StrategyType.variants(),
+        format_func=lambda s: s.name,
+        default=[],
+        placeholder="Select strategies...",
+        help="Choose built-in strategies to run alongside your custom ones.",
+    )
+
+    if selected_predefined:
+        with st.expander("Strategy descriptions", icon=":material/info:"):
+            for strategy in selected_predefined:
+                category = "Portfolio Rotation" if strategy.is_rotation else "Single asset"
+                st.markdown(f"**{strategy.name}** · _{category}_")
+                st.caption(strategy.description())
+
+    st.divider()
+
+    if "custom_strategies" not in st.session_state:
+        st.session_state.custom_strategies = []
+
+    st.markdown("**Strategies**")
+    st.caption(
+        "Add one or more custom strategy functions. Each strategy is evaluated "
+        "independently during the simulation.",
+    )
+
+    custom_strategy_codes: list[str] = []
+
+    for i, strategy_entry in enumerate(st.session_state.custom_strategies):
+        with st.container(border=True):
+            header_col, remove_col = st.columns([5, 1], vertical_alignment="center")
+            header_col.markdown(f"**Strategy {i + 1}**")
+
+            if remove_col.button(
+                label="Remove",
+                key=f"remove_strategy_{i}",
+                icon=":material/close:",
+                type="tertiary",
+            ):
+                st.session_state.custom_strategies.pop(i)
+                st.rerun()
+
+            source = st.segmented_control(
+                label="Source",
+                key=f"strategy_source_{i}",
+                options=[":material/code: Code editor", ":material/upload_file: Upload file"],
+                default=strategy_entry.get("source", ":material/code: Code editor"),
+                label_visibility="collapsed",
+            )
+
+            strategy_code: str | None = None
+            if source == ":material/code: Code editor":
+                resp = code_editor(
+                    code=strategy_entry.get("code") or STRATEGY_PLACEHOLDER,
+                    key=f"strategy_code_editor_{i}",
+                    buttons=[
+                        {
+                            "name": "Copy",
+                            "feather": "Copy",
+                            "hasText": True,
+                            "commands": ["copyAll"],
+                            "style": {"top": "0.46rem", "right": "0.4rem"},
+                        },
+                        {
+                            "name": "Save",
+                            "feather": "Save",
+                            "hasText": True,
+                            "commands": ["save-state", ["response", "saved"]],
+                            "response": "saved",
+                            "style": {"top": "2.25rem", "right": "0.4rem"},
+                        },
+                    ],
+                )
+                strategy_code = resp["text"]
+            else:
+                uploaded_file = st.file_uploader(
+                    label="Strategy file",
+                    key=f"strategy_file_{i}",
+                    type=["py"],
+                    accept_multiple_files=False,
+                    label_visibility="collapsed",
+                    help=(
+                        "Upload a Python file that defines a top-level function with signature: "
+                        "`strategy(data, state, indicators)`."
+                    ),
+                )
+
+                if uploaded_file is not None:
+                    strategy_code = uploaded_file.read().decode("utf-8")
+                    with st.expander("Preview uploaded file"):
+                        st.code(strategy_code, language="python", line_numbers=True)
+                else:
+                    st.info("No file uploaded yet.", icon=":material/upload_file:")
+
+            if strategy_code:
+                if _check_strategy_code(strategy_code, i):
+                    custom_strategy_codes.append(strategy_code)
+
+    if st.button(
+        label="Add strategy",
+        icon=":material/add:",
+        type="secondary",
+    ):
+        st.session_state.custom_strategies.append(
+            {"source": ":material/code: Code editor", "code": ""},
         )
-
-        strategy_code = code_editor_resp["text"]
-    else:
-        uploaded_file = st.file_uploader(
-            label="Strategy file",
-            type=["py"],
-            accept_multiple_files=False,
-            help=(
-                "Upload a Python file that defines a top-level function with signature: "
-                "`strategy(data, state, indicators)`."
-            ),
-        )
-
-        if uploaded_file is not None:
-            strategy_code = uploaded_file.read().decode("utf-8")
-            with st.expander("Preview uploaded file"):
-                st.code(strategy_code, language="python", line_numbers=True)
-        else:
-            st.info("No file uploaded yet.", icon=":material/upload_file:")
-
-    if strategy_code:
-
-        def check_strategy_code(code: str) -> bool:
-            """Check whether the code contains the expected function."""
-            try:
-                tree = ast.parse(code)
-
-                for node in tree.body:
-                    if isinstance(node, ast.FunctionDef) and node.name == "strategy":
-                        if [a.arg for a in node.args.args] == ["data", "state", "indicators"]:
-                            return True
-                        else:
-                            st.error(
-                                "Function `strategy` doesn't have signature: "
-                                "`strategy(data, state, indicators)`.",
-                            )
-                            break
-
-                    st.error("No function `strategy(data, state, indicators)` found in the code.")
-            except SyntaxError as ex:
-                st.error(f"Syntax error:\n\n{ex}")
-
-            return False
-
-        if check_strategy_code(strategy_code):
-            # Show success message for 2 seconds
-            success = st.success("Strategy successfully saved.")
-            time.sleep(1.5)
-            success.empty()
+        st.rerun()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -409,13 +451,16 @@ with tab4:
 
 with tab5:
     st.caption(
-        "Select built-in indicators and/or provide your own custom indicator function. "
-        "Every selected indicator is computed once per interval for each symbol.",
+        "Indicators are mathematical functions applied to price and volume data that "
+        "quantify trends, momentum, volatility and other market characteristics. All "
+        "selected indicators are computed up-front over the full dataset before the "
+        "simulation begins, so they add no per-tick overhead and keep your strategy fast.",
     )
 
     selected_indicators = st.multiselect(
         label="Built-in indicators",
-        options=INDICATORS,
+        options=IndicatorType.variants(),
+        format_func=lambda i: f"{i} - {i.name}",
         default=[],
         placeholder="Select indicators...",
         help=(
@@ -426,95 +471,121 @@ with tab5:
 
     st.divider()
 
-    if st.session_state.get("indicator_source") is None:
-        st.session_state.indicator_source = "None"
+    def _check_indicator_code(code: str, idx: int) -> bool:
+        """Check whether the code contains the expected indicator function."""
+        try:
+            tree = ast.parse(code)
 
-    indicator_source = st.segmented_control(
-        label="Custom indicator",
-        key="indicator_source",
-        options=["None", "Code editor", "Upload file"],
-        on_change=_prevent_deselection(
-            key="indicator_source",
-            default="None",
-        ),
-        help=(
-            "Optionally provide a custom indicator function. Its return values "
-            "are merged with the built-in indicators and passed to your strategy."
-        ),
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef) and node.name == "indicator":
+                    if [a.arg for a in node.args.args] == ["data"]:
+                        return True
+                    else:
+                        st.error(
+                            f"**Indicator {idx + 1}:** Function `indicator` doesn't have "
+                            f"signature: `indicator(data)`.",
+                        )
+                        return False
+
+            st.error(
+                f"**Indicator {idx + 1}:** No function `indicator(data)` found in the code.",
+            )
+        except SyntaxError as ex:
+            st.error(f"**Indicator {idx + 1}:** Syntax error:\n\n{ex}")
+
+        return False
+
+    # Initialize session state for custom indicators
+    if "custom_indicators" not in st.session_state:
+        st.session_state.custom_indicators = []
+
+    st.markdown("**Custom indicators**")
+    st.caption(
+        "Add one or more indicator functions. Each function's return values "
+        "are merged with the built-in indicators and passed to your strategy.",
     )
 
-    custom_indicator_code: str | None = None
-    if indicator_source == "Code editor":
-        st.caption("Write your custom indicator function below.")
-        indicator_editor_resp = code_editor(
-            code=INDICATOR_PLACEHOLDER,
-            key="indicator_code_editor",
-            buttons=[
-                {
-                    "name": "Copy",
-                    "feather": "Copy",
-                    "hasText": True,
-                    "commands": ["copyAll"],
-                    "style": {"top": "0.46rem", "right": "0.4rem"},
-                },
-                {
-                    "name": "Save",
-                    "feather": "Save",
-                    "hasText": True,
-                    "commands": ["save-state", ["response", "saved"]],
-                    "response": "saved",
-                    "style": {"top": "2.25rem", "right": "0.4rem"},
-                },
-            ],
+    custom_indicator_codes: list[str] = []
+
+    for i, indicator_entry in enumerate(st.session_state.custom_indicators):
+        with st.container(border=True):
+            header_col, remove_col = st.columns([5, 1], vertical_alignment="center")
+            header_col.markdown(f"**Indicator {i + 1}**")
+
+            if remove_col.button(
+                label="Remove",
+                key=f"remove_indicator_{i}",
+                icon=":material/close:",
+                type="tertiary",
+            ):
+                st.session_state.custom_indicators.pop(i)
+                st.rerun()
+
+            source = st.segmented_control(
+                label="Source",
+                key=f"indicator_source_{i}",
+                options=[":material/code: Code editor", ":material/upload_file: Upload file"],
+                default=indicator_entry.get("source", ":material/code: Code editor"),
+                label_visibility="collapsed",
+            )
+
+            code: str | None = None
+            if source == ":material/code: Code editor":
+                resp = code_editor(
+                    code=indicator_entry.get("code") or INDICATOR_PLACEHOLDER,
+                    key=f"indicator_code_editor_{i}",
+                    buttons=[
+                        {
+                            "name": "Copy",
+                            "feather": "Copy",
+                            "hasText": True,
+                            "commands": ["copyAll"],
+                            "style": {"top": "0.46rem", "right": "0.4rem"},
+                        },
+                        {
+                            "name": "Save",
+                            "feather": "Save",
+                            "hasText": True,
+                            "commands": ["save-state", ["response", "saved"]],
+                            "response": "saved",
+                            "style": {"top": "2.25rem", "right": "0.4rem"},
+                        },
+                    ],
+                )
+                code = resp["text"]
+            else:
+                indicator_file = st.file_uploader(
+                    label="Indicator file",
+                    key=f"indicator_file_{i}",
+                    type=["py"],
+                    accept_multiple_files=False,
+                    label_visibility="collapsed",
+                    help=(
+                        "Upload a Python file that defines a top-level function with signature: "
+                        "`indicator(data)` returning `dict[str, float]`."
+                    ),
+                )
+
+                if indicator_file is not None:
+                    code = indicator_file.read().decode("utf-8")
+                    with st.expander("Preview uploaded file"):
+                        st.code(code, language="python", line_numbers=True)
+                else:
+                    st.info("No file uploaded yet.", icon=":material/upload_file:")
+
+            if code:
+                if _check_indicator_code(code, i):
+                    custom_indicator_codes.append(code)
+
+    if st.button(
+        label="Add indicator",
+        icon=":material/add:",
+        type="secondary",
+    ):
+        st.session_state.custom_indicators.append(
+            {"source": ":material/code: Code editor", "code": ""},
         )
-
-        custom_indicator_code = indicator_editor_resp["text"]
-    elif indicator_source == "Upload file":
-        indicator_file = st.file_uploader(
-            label="Indicator file",
-            type=["py"],
-            accept_multiple_files=False,
-            help=(
-                "Upload a Python file that defines a top-level function with signature: "
-                "`indicator(data)` returning `dict[str, float]`."
-            ),
-        )
-
-        if indicator_file is not None:
-            custom_indicator_code = indicator_file.read().decode("utf-8")
-            with st.expander("Preview uploaded file"):
-                st.code(custom_indicator_code, language="python", line_numbers=True)
-        else:
-            st.info("No file uploaded yet.", icon=":material/upload_file:")
-
-    if custom_indicator_code:
-
-        def check_indicator_code(code: str) -> bool:
-            """Check whether the code contains the expected indicator function."""
-            try:
-                tree = ast.parse(code)
-
-                for node in tree.body:
-                    if isinstance(node, ast.FunctionDef) and node.name == "indicator":
-                        if [a.arg for a in node.args.args] == ["data"]:
-                            return True
-                        else:
-                            st.error(
-                                "Function `indicator` doesn't have signature: "
-                                "`indicator(data)`.",
-                            )
-                            break
-
-                    st.error("No function `indicator(data)` found in the code.")
-            except SyntaxError as ex:
-                st.error(f"Syntax error:\n\n{ex}")
-
-            return False
-
-        if check_indicator_code(custom_indicator_code):
-            success = st.success("Custom indicator saved.")
-            time.sleep(1.5)
-            success.empty()
+        st.rerun()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -525,95 +596,105 @@ with tab6:
     base_cur = st.session_state.get("base_currency", Currency.get_default())
 
     with st.container(border=True):
-        fee_mode = st.radio(
-            label="Fee type",
-            options=FEE_MODES,
-            index=0,
-            horizontal=True,
-            help=(
-                "How trading fees are calculated. **Percentage** charges a fraction of "
-                "the trade notional value. **Fixed amount** charges a flat fee per order. "
-                "**Percentage + Fixed** applies both a percentage-based and a flat fee to "
-                "every trade."
-            ),
-        )
+        st.markdown("**Commission**")
 
-        is_pct = fee_mode == FEE_MODES[0]
-        is_fixed = fee_mode == FEE_MODES[1]
-        is_combo = fee_mode == FEE_MODES[2]
+        col_radio, col_inputs = st.columns([2, 3], vertical_alignment="top")
 
-        if is_pct:
-            fee_pct = st.number_input(
-                label="Fee (% per trade)",
-                min_value=0.0,
-                max_value=100.0,
-                value=0.1,
-                step=0.01,
-                format="%.4f",
+        with col_radio:
+            commission_mode = st.radio(
+                label="Commission type",
+                options=CommissionType.variants(),
+                index=0,
+                horizontal=False,
                 help=(
-                    "Fee charged per executed order, applied as a percentage of the trade's "
-                    "notional value."
+                    "How trading commissions are calculated. **Percentage** charges a fraction "
+                    "of the trade notional value. **Fixed amount** charges a flat commission per "
+                    "order. **Percentage + Fixed** applies both a percentage-based and a flat "
+                    "commission to every trade."
                 ),
             )
-            fee_fixed_value = 0.0
-        elif is_fixed:
-            fee_fixed_value = st.number_input(
-                label=f"Fee ({base_cur} per trade)",
-                min_value=0.0,
-                value=1.0,
-                step=0.5,
-                format="%.4f",
-                help=f"Flat fee charged per executed order in {base_cur}.",
-            )
-            fee_pct = 0.0
-        else:
-            col_pct, col_fixed = st.columns(2)
 
-            fee_pct = col_pct.number_input(
-                label="Fee (% per trade)",
-                min_value=0.0,
-                max_value=100.0,
-                value=0.1,
-                step=0.01,
-                format="%.4f",
-                help="Percentage portion of the fee, applied to the trade's notional value.",
-            )
+        is_pct = commission_mode == CommissionType("Percentage")
+        is_fixed = commission_mode == CommissionType("Fixed")
 
-            fee_fixed_value = col_fixed.number_input(
-                label=f"Fee ({base_cur} per trade)",
-                min_value=0.0,
-                value=1.0,
-                step=0.5,
-                format="%.4f",
-                help=f"Fixed portion of the fee in {base_cur}, added on top of the percentage fee.",
-            )
+        with col_inputs:
+            if is_pct:
+                commission_pct = st.number_input(
+                    label="Commission (% per trade)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=0.1,
+                    step=0.01,
+                    format="%.2f",
+                    help=(
+                        "Commission charged per executed order, applied as a percentage of "
+                        "the trade's notional value."
+                    ),
+                )
+                commission_fixed = 0.0
+            elif is_fixed:
+                commission_fixed = st.number_input(
+                    label=f"Commission ({base_cur} per trade)",
+                    min_value=0.0,
+                    value=1.0,
+                    step=0.5,
+                    format="%.2f",
+                    help=f"Flat commission charged per executed order in {base_cur}.",
+                )
+                commission_pct = 0.0
+            else:
+                commission_pct = st.number_input(
+                    label="Commission (% per trade)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=0.1,
+                    step=0.01,
+                    format="%.2f",
+                    help="Percentage of the commission, applied to the trade's notional value.",
+                )
+                commission_fixed = st.number_input(
+                    label=f"Commission ({base_cur} per trade)",
+                    min_value=0.0,
+                    value=1.0,
+                    step=0.5,
+                    format="%.2f",
+                    help=(
+                        f"Fixed portion of the commission in {base_cur}, added on top of the "
+                        "percentage commission."
+                    ),
+                )
 
-    slippage = st.number_input(
-        label="Slippage (% of price per trade)",
-        min_value=0.0,
-        max_value=100.0,
-        value=0.05,
-        step=0.01,
-        format="%.4f",
-        help=(
-            "Simulated market impact. Each fill price is moved adversely by this percentage "
-            "(buys filled higher, sells filled lower)."
-        ),
-    )
+    with st.container(border=True):
+        st.markdown("**Slippage**")
+
+        slippage = st.number_input(
+            label="Slippage (% of price per trade)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.05,
+            step=0.01,
+            format="%.2f",
+            help=(
+                "Simulated market impact. Each fill price is moved adversely by this percentage "
+                "(buys filled higher, sells filled lower)."
+            ),
+        )
 
     with st.container(border=True):
         st.markdown("**Order execution**")
 
         allowed_order_types = st.multiselect(
             label="Allowed order types",
-            options=ORDER_TYPES,
-            default=["Market"],
+            options=OrderType.variants(),
+            default=[OrderType.get_default()],
             help=(
-                "Which order types the strategy is allowed to submit. "
+                "Which order types the engine accepts during the simulation. "
                 "**Market** orders fill immediately at the current price. "
                 "**Limit** orders fill only at the specified price or better. "
-                "**Stop** orders become market orders once the stop price is hit. "
-                "**Stop-Limit** orders become limit orders once the stop price is hit."
+                "**Stop-Loss / Take-Profit** become market orders when the trigger price is hit. "
+                "**Trailing-Stop** adjusts the stop price as the market moves in your favour. "
+                "**Settle-Position** closes an open position at the current market price. "
+                "Orders of a type not listed here will raise a hard error."
             ),
         )
 
@@ -626,35 +707,25 @@ with tab6:
             ),
         )
 
+    # ── Margin trading ─────────────────────────────────────────────────────
     with st.container(border=True):
-        st.markdown("**Position constraints**")
+        st.markdown("**Margin trading**")
 
-        allow_short_selling = st.toggle(
-            label="Allow short selling",
-            value=False,
-            help="Allow the strategy to open short positions (sell assets not currently held).",
-        )
+        col_toggle, col_input = st.columns([3, 2], vertical_alignment="center")
 
-        max_position_size = st.number_input(
-            label="Max position size (% of portfolio)",
-            min_value=1,
-            max_value=100,
-            value=100,
-            step=5,
+        enable_margin = col_toggle.toggle(
+            label="Allow margin trading",
+            value=True,
             help=(
-                "Maximum allocation to a single position as a percentage of total portfolio value. "
-                "Set to 100% for no concentration limit."
+                "Safety guardrail for margin usage. When enabled (default), the strategy "
+                "may use leverage if it chooses to — the actual decision is made in your "
+                "strategy code. When disabled, any attempt to exceed the available cash "
+                "balance will raise a hard error and abort the simulation."
             ),
         )
 
-        enable_margin = st.toggle(
-            label="Enable margin trading",
-            value=False,
-            help="Allow the strategy to use leverage by borrowing funds.",
-        )
-
         if enable_margin:
-            max_leverage = st.number_input(
+            max_leverage = col_input.number_input(
                 label="Max leverage",
                 min_value=1.0,
                 max_value=10.0,
@@ -663,11 +734,150 @@ with tab6:
                 format="%.1f",
                 help=(
                     "Maximum leverage ratio. A value of 2.0 means the strategy can borrow "
-                    "up to 1× the portfolio value on top of its own capital."
+                    "up to 1x the portfolio value on top of its own capital. Exceeding this "
+                    "limit raises a hard error."
+                ),
+            )
+
+            col_im, col_mm = st.columns(2)
+
+            initial_margin = col_im.number_input(
+                label="Initial margin (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=50.0,
+                step=5.0,
+                format="%.1f",
+                help=(
+                    "Minimum equity as a percentage of position value required when opening "
+                    "a new leveraged position. For example, 50% means you must put up at "
+                    "least half the position's value from your own capital."
+                ),
+            )
+
+            maintenance_margin = col_mm.number_input(
+                label="Maintenance margin (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=25.0,
+                step=5.0,
+                format="%.1f",
+                help=(
+                    "Minimum equity as a percentage of position value that must be maintained. "
+                    "If equity drops below this threshold a margin call is triggered."
+                ),
+            )
+
+            margin_interest = st.number_input(
+                label="Margin interest rate (% annual)",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.0,
+                step=0.5,
+                format="%.2f",
+                help=(
+                    "Annualized interest rate charged on borrowed funds. Accrued daily and "
+                    "deducted from the portfolio cash balance."
                 ),
             )
         else:
             max_leverage = 1.0
+
+    # ── Short selling ──────────────────────────────────────────────────────
+    with st.container(border=True):
+        st.markdown("**Short selling**")
+
+        allow_short_selling = st.toggle(
+            label="Allow short selling",
+            value=True,
+            help=(
+                "Safety guardrail for short positions. When enabled (default), the strategy "
+                "may open short positions if it chooses to — the actual decision is made in "
+                "your strategy code. When disabled, any attempt to sell assets not currently "
+                "held will raise a hard error and abort the simulation."
+            ),
+        )
+
+        if allow_short_selling:
+            borrow_rate = st.number_input(
+                label="Borrow rate (% annual)",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.0,
+                step=0.5,
+                format="%.2f",
+                help=(
+                    "Annualized cost of borrowing shares for short positions. Accrued daily "
+                    "and deducted from the portfolio cash balance."
+                ),
+            )
+
+    # ── Position limits ────────────────────────────────────────────────────
+    with st.container(border=True):
+        st.markdown("**Position limits**")
+
+        max_position_size = st.number_input(
+            label="Max position size (% of portfolio)",
+            min_value=1,
+            max_value=100,
+            value=100,
+            step=5,
+            help=(
+                "Maximum allocation to a single position as a percentage of total "
+                "portfolio value. Applies to both long and short positions. Set to "
+                "100% for no concentration limit. Exceeding this limit raises a hard error."
+            ),
+        )
+
+    # ── Currency conversion ────────────────────────────────────────────────
+    with st.container(border=True):
+        st.markdown("**Currency conversion**")
+
+        conversion_mode = st.selectbox(
+            label="Foreign currency handling",
+            options=CurrencyConversionMode.variants(),
+            format_func=lambda x: x.description(),
+            index=CurrencyConversionMode.variants().index(CurrencyConversionMode.get_default()),
+            help=(
+                "Determines how proceeds in a foreign currency are converted back to "
+                "the base currency. **Immediately** converts at the time of the trade. "
+                "**Hold until threshold** keeps the foreign balance until it reaches a "
+                "specified amount. **End of period** batches conversions at a chosen "
+                "frequency (day, week or month). **Custom interval** lets you specify "
+                "the number of bars between conversions."
+            ),
+        )
+
+        if conversion_mode == CurrencyConversionMode("HoldUntilThreshold"):
+            conversion_threshold = st.number_input(
+                label=f"Conversion threshold ({base_cur})",
+                min_value=0.0,
+                value=1_000.0,
+                step=100.0,
+                format="%.2f",
+                help=(
+                    f"Foreign currency balances are converted to {base_cur} once their "
+                    f"equivalent value reaches this threshold."
+                ),
+            )
+        elif conversion_mode == CurrencyConversionMode("EndOfPeriod"):
+            conversion_period = st.selectbox(
+                label="Conversion period",
+                options=ConversionPeriod.variants(),
+                index=0,
+                help="How often foreign currency balances are converted to the base currency.",
+            )
+        elif conversion_mode == CurrencyConversionMode("CustomInterval"):
+            conversion_interval = st.number_input(
+                label="Conversion interval (bars)",
+                min_value=1,
+                value=5,
+                step=1,
+                help=(
+                    "Number of bars between automatic conversions of foreign currency "
+                    "balances to the base currency."
+                ),
+            )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -675,75 +885,101 @@ with tab6:
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab7:
-    warmup_period = st.number_input(
-        label="Warmup period (bars)",
-        min_value=0,
-        value=0,
-        step=1,
-        help=(
-            "Number of initial bars to skip before the strategy starts executing. "
-            "During the warmup window indicators are computed but no orders are placed. "
-            "Use this to let moving averages and other lagging indicators stabilize."
-        ),
-    )
+    with st.container(border=True):
+        st.markdown("**Timing**")
 
-    risk_free_rate = st.number_input(
-        label="Risk-free rate (%)",
-        min_value=0.0,
-        max_value=100.0,
-        value=0.0,
-        step=0.1,
-        format="%.2f",
-        help=(
-            "Annualized risk-free rate used for computing the Sharpe ratio and other "
-            "risk-adjusted performance metrics."
-        ),
-    )
+        warmup_period = st.number_input(
+            label="Warmup period (bars)",
+            min_value=0,
+            value=0,
+            step=1,
+            help=(
+                "Number of initial bars to skip before the strategy starts executing. "
+                "During the warmup window indicators are computed but no orders are placed. "
+                "Use this to let moving averages and other lagging indicators stabilize."
+            ),
+        )
 
-    benchmark = st.text_input(
-        label="Benchmark symbol",
-        placeholder="e.g. SPY",
-        max_chars=20,
-        help=(
-            "Optional benchmark ticker for relative performance comparison. Leave empty "
-            "to skip benchmark tracking."
-        ),
-    )
+        trade_on_close = st.toggle(
+            label="Trade on close",
+            value=False,
+            help=(
+                "When enabled, orders are filled at the current bar's close price. "
+                "When disabled (default), orders are filled at the next bar's open price, "
+                "which is more realistic."
+            ),
+        )
 
-    random_seed = st.number_input(
-        label="Random seed",
-        min_value=0,
-        value=None,
-        step=1,
-        placeholder="Leave empty for non-deterministic",
-        help=(
-            "Fixed seed for the random number generator to ensure reproducible results. "
-            "Leave empty for non-deterministic execution."
-        ),
-    )
+    with st.container(border=True):
+        st.markdown("**Benchmark & metrics**")
 
-    trade_on_close = st.toggle(
-        label="Trade on close",
-        value=False,
-        help=(
-            "When enabled, orders are filled at the current bar's close price. "
-            "When disabled (default), orders are filled at the next bar's open price, "
-            "which is more realistic."
-        ),
-    )
+        risk_free_rate = st.number_input(
+            label="Risk-free rate (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.0,
+            step=0.1,
+            format="%.2f",
+            help=(
+                "Annualized risk-free rate used for computing the Sharpe ratio and other "
+                "risk-adjusted performance metrics."
+            ),
+        )
 
-    exclusive_orders = st.toggle(
-        label="Exclusive orders",
-        value=False,
-        help=(
-            "When enabled, submitting a new order automatically cancels all pending "
-            "orders. Useful for strategies that should only have one active order at a time."
-        ),
-    )
+        benchmark = st.text_input(
+            label="Benchmark symbol",
+            placeholder="e.g. SPY",
+            max_chars=20,
+            help=(
+                "Optional benchmark ticker for relative performance comparison. Leave empty "
+                "to skip benchmark tracking."
+            ),
+        )
 
+    with st.container(border=True):
+        st.markdown("**Execution behaviour**")
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Launch
+        exclusive_orders = st.toggle(
+            label="Exclusive orders",
+            value=False,
+            help=(
+                "When enabled, submitting a new order automatically cancels all pending "
+                "orders. Useful for strategies that should only have one active order at a time."
+            ),
+        )
+
+        random_seed = st.number_input(
+            label="Random seed",
+            min_value=0,
+            value=None,
+            step=1,
+            placeholder="Leave empty for non-deterministic",
+            help=(
+                "Fixed seed for the random number generator to ensure reproducible results. "
+                "Leave empty for non-deterministic execution."
+            ),
+        )
+
+    # ── Data handling ──────────────────────────────────────────────────────
+    with st.container(border=True):
+        st.markdown("**Data handling**")
+
+        empty_bar_policy = st.selectbox(
+            label="Empty bar policy",
+            options=EmptyBarPolicy.variants(),
+            index=1,
+            help=(
+                "How to handle bars with no trading activity (e.g. market closures during "
+                "intraday backtests, holidays or illiquid periods).\n\n"
+                "**Skip** — the bar is dropped entirely; the strategy is not called and "
+                "the simulation clock jumps to the next bar with data.\n\n"
+                "**Forward-fill** — OHLC values are copied from the last valid bar and "
+                "volume is set to zero. The strategy runs as normal, which keeps a "
+                "consistent tick cadence (recommended for most use cases).\n\n"
+                "**Fill with NaN** — the bar is kept but all fields are set to NaN. "
+                "Your strategy must handle missing values explicitly."
+            ),
+        )
 # ═════════════════════════════════════════════════════════════════════════════
 
 st.divider()
@@ -772,4 +1008,3 @@ if st.button(
                 f"starting cash {base_cur} {starting_amount:,.2f}.",
                 icon=":material/check_circle:",
             )
-

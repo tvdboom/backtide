@@ -46,6 +46,7 @@ def strategy(data, state, indicators):
     return orders
 """
 
+
 INDICATOR_PLACEHOLDER = """\
 def indicator(data):
     '''Compute a custom indicator value for the current bar.
@@ -68,6 +69,3 @@ def indicator(data):
 
     return result
 """
-
-ORDER_TYPES = ["Market", "Limit", "Stop", "Stop-Limit"]
-

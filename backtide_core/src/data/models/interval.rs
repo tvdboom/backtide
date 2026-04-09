@@ -134,7 +134,7 @@ impl Interval {
 impl<'a, 'py> FromPyObject<'a, 'py> for Interval {
     type Error = PyErr;
 
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         // First try a direct downcast
         if let Ok(bound) = obj.cast::<Interval>() {
             return Ok(*bound.borrow());

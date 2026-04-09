@@ -137,19 +137,26 @@ nav:
             - AssetMeta: api/models/assetmeta.md
             - AssetType: api/models/assettype.md
             - Bar: api/models/bar.md
+            - CommissionType: api/models/commissiontype.md
             - Config: api/models/config.md
+            - ConversionPeriod: api/models/conversionperiod.md
             - Country: api/models/country.md
             - Currency: api/models/currency.md
+            - CurrencyConversionMode: api/models/currencyconversionmode.md
             - DataConfig: api/models/dataconfig.md
             - DisplayConfig: api/models/displayconfig.md
             - DownloadInfo: api/models/downloadinfo.md
             - DownloadResult: api/models/downloadresult.md
+            - EmptyBarPolicy: api/models/emptybarpolicy.md
             - Exchange: api/models/exchange.md
             - GeneralConfig: api/models/generalconfig.md
+            - IndicatorType: api/models/indicatortype.md
             - Interval: api/models/interval.md
             - LogLevel: api/models/loglevel.md
+            - OrderType: api/models/ordertype.md
             - Provider: api/models/provider.md
             - StorageSummary: api/models/storagesummary.md
+            - StrategyType: api/models/strategytype.md
             - TriangulationStrategy: api/models/triangulationstrategy.md
         - utils:
             - clear_cache: api/utils/clear_cache.md

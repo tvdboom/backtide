@@ -48,7 +48,7 @@ impl TriangulationStrategy {
 impl<'a, 'py> FromPyObject<'a, 'py> for TriangulationStrategy {
     type Error = PyErr;
 
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         // First try a direct downcast
         if let Ok(bound) = obj.cast::<TriangulationStrategy>() {
             return Ok(*bound.borrow());

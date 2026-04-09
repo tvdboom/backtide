@@ -91,6 +91,8 @@ def _get_provider_logo(provider: str) -> str:
 @st.cache_resource(ttl=3600, show_spinner=False)
 def _list_symbols(asset_type: AssetType) -> list[Asset]:
     """Cache the major symbols per asset type."""
+    if asset_type is None:
+        asset_type = AssetType.get_default()
     return list_assets(asset_type, MAX_PRELOADED_ASSETS)
 
 
@@ -140,4 +142,3 @@ def _to_upper_values(key: str):
         st.session_state[key] = [
             s.upper() if isinstance(s, str) else s for s in to_list(st.session_state[key])
         ]
-

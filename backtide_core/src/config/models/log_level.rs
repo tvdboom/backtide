@@ -51,7 +51,7 @@ impl LogLevel {
 impl<'a, 'py> FromPyObject<'a, 'py> for LogLevel {
     type Error = PyErr;
 
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         // First try a direct downcast
         if let Ok(bound) = obj.cast::<LogLevel>() {
             return Ok(*bound.borrow());

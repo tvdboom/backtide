@@ -6,17 +6,26 @@ use pyo3::pyclass;
 ///
 /// Individual task failures are captured as warnings rather than aborting
 /// the entire download, so callers can report partial success.
+///
+/// Attributes
+/// ----------
+/// n_succeeded : int
+///     Number of download tasks that succeeded.
+///
+/// n_failed : int
+///     Number of download tasks that failed.
+///
+/// warnings : list[str]
+///     Human-readable warning for each failed task.
+///
+/// See Also
+/// --------
+/// - backtide.data:DownloadInfo
+/// - backtide.data:download_assets
 #[derive(Debug, Clone)]
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.core.data")]
 pub struct DownloadResult {
-    /// Number of (symbol, interval) tasks that succeeded.
     pub n_succeeded: usize,
-
-    /// Number of (symbol, interval) tasks that failed.
     pub n_failed: usize,
-
-    /// Human-readable warning for each failed task.
-    ///
-    /// Format: `"SYMBOL (interval): error message"`.
     pub warnings: Vec<String>,
 }

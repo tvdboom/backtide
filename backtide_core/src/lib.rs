@@ -1,3 +1,4 @@
+mod backtest;
 mod config;
 mod constants;
 mod data;
@@ -23,6 +24,7 @@ extern "system" {}
 /// Register the Python interface for `backtide.core`.
 #[pymodule]
 fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    backtest::register(m)?;
     config::register(m)?;
     data::register(m)?;
     storage::register(m)?;

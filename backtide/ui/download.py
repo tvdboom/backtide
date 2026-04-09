@@ -359,7 +359,7 @@ st.title("Download", text_alignment="center")
 
 st.divider()
 
-if not st.session_state.get("asset_type"):
+if st.session_state.get("asset_type") is None:
     _cache = st.session_state.get("_cache", {})
     st.session_state.asset_type = _cache.get("asset_type", AssetType.get_default())
 
@@ -367,19 +367,19 @@ asset_type = st.segmented_control(
     label="Asset type",
     key="asset_type",
     options=AssetType.variants(),
-    format_func=lambda asset_type: f"{asset_type.icon()} {asset_type}",
+    format_func=lambda at: f"{at.icon()} {at}",
     on_change=_prevent_deselection(
         key="asset_type",
         default=AssetType.get_default(),
         reset=["symbols_download", "currency_download", "symbols", "currency"],
     ),
-    help="Select the type of financial asset you want to backtest.",
+    help="Select the type of financial asset you want to download.",
 )
 
 all_assets = _list_symbols(st.session_state.asset_type)
 
 # Filter assets based on the selected currency
-if currency := st.session_state.get("currency_download"):
+if currency := st.session_state.get("currency"):
     filtered_assets = [
         asset
         for asset in all_assets
@@ -405,7 +405,7 @@ symbols = col1.multiselect(
     help=asset_d,
 )
 
-intervals = st.session_state.get("interval_download", [])
+intervals = st.session_state.get("intervals", [])
 
 try:
     # Convert custom symbols to assets and add triangulation currencies
@@ -421,7 +421,7 @@ except RuntimeError as ex:
 
 col2.selectbox(
     label="Currency",
-    key="currency_download",  # Use key to filter tickers
+    key="currency",  # Use key to filter tickers
     options=["All", *sorted(dict.fromkeys(str(a.quote) for a in all_assets))],
     placeholder="All",
     help=currency_d,
@@ -476,7 +476,7 @@ else:
 
 intervals = st.pills(
     label="Interval",
-    key="interval_download",
+    key="intervals",
     options=cfg.data.providers[asset_type].intervals(),
     selection_mode="multi",
     default=Interval.get_default(),

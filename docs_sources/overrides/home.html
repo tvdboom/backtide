@@ -38,6 +38,15 @@
         text-align: left;
     }
 
+    .description-wide {
+        padding-bottom: 2rem;
+        width: 90%;
+        max-width: 1200px;
+        margin: 0 auto;
+        font-size: 2em;
+        text-align: left;
+    }
+
     .button {
         color: #FFF;
         background: #2094f3;
@@ -116,10 +125,11 @@
     <h1>A refreshingly simple trading backtester for beginner retail investors</h1>
     <div class="description">
         <p style="margin-bottom: 2em">
-            Backtide is an open-source, high-performance trading backtesting platform for Python.
-            Backtide combines a Rust-powered core engine with an intuitive interface, enabling
-            the user to go from raw multi-exchange data to validated trading strategies with just
-            a few lines of code.
+            Backtide is an open-source backtesting platform for Python, built for retail
+            investors who want to test trading ideas without drowning in complexity. A
+            Rust-powered core keeps simulations fast, while sensible defaults let you go
+            from raw multi-exchange data to validated strategies in just a few lines of
+            code. Every setting can still be fine-tuned when needed, but you never have to.
         </p>
         <a href="about" class="button">Read more</a>
         <a href="getting_started" class="button button-secondary">Get started</a>
@@ -128,11 +138,15 @@
 
 <section>
     <h1 style="margin-bottom: -10px">Why you should use Backtide</h1>
-    <div class="description" style="display: flex; justify-content: center;">
-        <ul>
-            <li>Multiple data cleaning and feature engineering classes</li>
-            <li>55+ classification, regression and forecast models to choose from</li>
-            <li>Possibility to train multiple models with one line of code</li>
+    <div class="description-wide" style="display: flex; justify-content: center;">
+        <ul style="display: inline-block; text-align: left;">
+            <li><strong>Fast</strong> &mdash; Rust-powered engine runs backtests orders of magnitude faster than pure-Python alternatives.</li>
+            <li><strong>Simple</strong> &mdash; Sensible defaults mean a working backtest in minutes, not hours of configuration.</li>
+            <li><strong>Flexible</strong> &mdash; Every parameter is exposed and customizable when you need full control.</li>
+            <li><strong>Multi-exchange</strong> &mdash; Stocks, ETFs, forex and crypto from Yahoo, Binance, Kraken and more.</li>
+            <li><strong>Built-in strategies &amp; indicators</strong> &mdash; 20 predefined strategies and 12 technical indicators out of the box.</li>
+            <li><strong>Interactive UI</strong> &mdash; Optional Streamlit dashboard to configure, run and analyze experiments visually.</li>
+            <li><strong>Open source</strong> &mdash; MIT-licensed, community-driven and free forever.</li>
         </ul>
     </div>
 </section>
