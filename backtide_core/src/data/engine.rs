@@ -8,12 +8,13 @@ use crate::data::models::asset_meta::AssetMeta;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
 use crate::data::models::download_info::DownloadInfo;
+use crate::data::models::forex_pair::ForexPair;
 use crate::data::models::download_result::DownloadResult;
 use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
 use crate::engine::Engine;
 use crate::errors::EngineResult;
-use crate::storage::models::bars_group::BarsGroup;
+use crate::storage::models::bar_series::BarSeries;
 use futures::future::{join_all, try_join_all};
 use indexmap::IndexMap;
 use std::collections::HashMap;
@@ -235,7 +236,7 @@ impl Engine {
             // ── Phase 2: collect results and build one bulk write ────────
             // Separate successes from failures so we can write all successes
             // in a single transaction and still report individual errors.
-            let mut groups: Vec<BarsGroup> = Vec::new();
+            let mut series: Vec<BarSeries> = Vec::new();
             let mut outcomes: Vec<(usize, String, Interval, Result<usize, String>)> = Vec::new();
 
             for (idx, symbol, at, interval, result) in downloaded {
@@ -244,7 +245,7 @@ impl Engine {
                     Ok(bars) => {
                         let n_bars = bars.len();
                         info!(%symbol, ?interval, bars = n_bars, "Downloaded.");
-                        groups.push(BarsGroup {
+                        series.push(BarSeries {
                             symbol: symbol.clone(),
                             asset_type: at,
                             interval,
@@ -260,17 +261,16 @@ impl Engine {
                 }
             }
 
-            // Single bulk write — one BEGIN / COMMIT for every downloaded group.
-            if !groups.is_empty() {
-                info!(groups = groups.len(), "Writing all downloaded data to database...");
-                self.write_bars_bulk(&groups)?;
+            if !series.is_empty() {
+                info!(n_series = series.len(), "Writing all data to the database...");
+                self.write_bars_bulk(&series)?;
                 info!("Bulk write complete.");
             }
 
             // ── Phase 3: build result summary ────────────────────────────
+
             let mut n_succeeded = 0usize;
             let mut warnings = Vec::new();
-
             for (_idx, symbol, interval, outcome) in outcomes {
                 match outcome {
                     Ok(_) => n_succeeded += 1,
@@ -278,10 +278,9 @@ impl Engine {
                 }
             }
 
-            let n_failed = warnings.len();
             Ok(DownloadResult {
                 n_succeeded,
-                n_failed,
+                n_failed: warnings.len(),
                 warnings,
             })
         })
@@ -345,7 +344,9 @@ impl Engine {
 
     /// Try to load an asset from symbol format base-quote or quote-base.
     ///
-    /// If both symbols exist, return the one with the longest history.
+    /// When both orderings exist, prefer the one whose concatenated symbol
+    /// matches a known [`ForexPair`] variant (e.g. `EURAUD` over `AUDEUR`).
+    /// If neither (or both) match, fall back to the one with the longest history.
     async fn load_asset_bidirectional(
         &self,
         base: &str,
@@ -361,10 +362,23 @@ impl Engine {
 
         match (direct, inverse) {
             (Ok(d), Ok(i)) => {
+                // Prefer the ordering that matches a canonical pair variant.
+                let bq_is_forex = format!("{base}{quote}").parse::<ForexPair>().is_ok();
+                let qb_is_forex = format!("{quote}{base}").parse::<ForexPair>().is_ok();
+
+                if bq_is_forex && !qb_is_forex {
+                    return Ok(d);
+                }
+                if qb_is_forex && !bq_is_forex {
+                    return Ok(i);
+                }
+
+                // Neither or both match — fall back to longest history.
                 let d_start =
                     self.load_range(&d, intervals).await?.0.into_values().min().unwrap_or(u64::MAX);
                 let i_start =
                     self.load_range(&i, intervals).await?.0.into_values().min().unwrap_or(u64::MAX);
+
                 Ok(if d_start <= i_start {
                     d
                 } else {

@@ -148,6 +148,7 @@ nav:
             - GeneralConfig: api/models/generalconfig.md
             - Interval: api/models/interval.md
             - LogLevel: api/models/loglevel.md
+            - Provider: api/models/provider.md
             - StorageSummary: api/models/storagesummary.md
             - TriangulationStrategy: api/models/triangulationstrategy.md
         - utils:

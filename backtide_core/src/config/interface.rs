@@ -159,7 +159,7 @@ impl PyConfig {
 ///     as the crossing pair at parity 1:1.
 ///
 /// log_level : str, defeault="warn"
-///     Minimum tracing log level. Choose from: "error", "warn", "info", "trace".
+///     Minimum tracing log level. Choose from: "error", "warn", "info", "debug".
 ///
 /// See Also
 /// --------

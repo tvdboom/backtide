@@ -1,2 +1,2 @@
-pub mod bars_group;
+pub mod bar_series;
 pub mod storage_summary;

@@ -4,16 +4,16 @@ use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
 use crate::engine::Engine;
 use crate::storage::errors::StorageResult;
-use crate::storage::models::bars_group::BarsGroup;
+use crate::storage::models::bar_series::BarSeries;
 use crate::storage::models::storage_summary::StorageSummary;
 
 impl Engine {
-    /// Writes many groups of bars to storage in a single transaction.
-    pub fn write_bars_bulk(&self, groups: &[BarsGroup]) -> StorageResult<()> {
-        self.db.write_bars_bulk(groups)
+    /// Writes many bar series to storage in a single transaction.
+    pub fn write_bars_bulk(&self, series: &[BarSeries]) -> StorageResult<()> {
+        self.db.write_bars_bulk(series)
     }
 
-    /// Returns the earliest and latest stored timestamps for the given group.
+    /// Returns the earliest and latest stored timestamps for the given series.
     pub fn get_stored_range(
         &self,
         symbol: &str,

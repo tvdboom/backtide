@@ -16,6 +16,7 @@ from backtide.core.data import (
     DownloadResult,
     Exchange,
     Interval,
+    Provider,
     download_assets,
     get_assets,
     get_download_info,

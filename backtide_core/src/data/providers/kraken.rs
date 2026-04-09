@@ -7,6 +7,7 @@ use crate::data::errors::{DataError, DataResult};
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::bar::Bar;
+use crate::data::models::currency::Currency;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
@@ -19,8 +20,6 @@ use tracing::{debug, info, instrument};
 /// Kraken spot-market data provider.
 ///
 /// Wraps Kraken's public REST API behind the [`DataProvider`] trait.
-/// Only [`AssetType::Crypto`] is supported; all other asset types return
-/// [`DataError::UnsupportedAssetType`].
 pub struct Kraken {
     /// Shared async HTTP client.
     client: HttpClient,
@@ -77,13 +76,11 @@ impl Kraken {
             .unwrap_or_else(|| ticker.to_string())
     }
 
-    /// Guard: return [`DataError::UnsupportedAssetType`] for anything except
-    /// [`AssetType::Crypto`].
-    fn require_crypto(asset_type: AssetType) -> DataResult<()> {
-        if asset_type == AssetType::Crypto {
-            Ok(())
-        } else {
-            Err(DataError::UnsupportedAssetType(asset_type))
+    /// Checks whether the asset type is supported by the provider.
+    fn check_asset_type(asset_type: AssetType) -> DataResult<()> {
+        match asset_type {
+            AssetType::Crypto | AssetType::Forex => Ok(()),
+            _ => Err(DataError::UnsupportedAssetType(asset_type)),
         }
     }
 
@@ -155,7 +152,7 @@ impl DataProvider for Kraken {
     /// Fetch metadata for a single symbol.
     #[instrument(skip(self), fields(%symbol))]
     async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
-        Self::require_crypto(asset_type)?;
+        Self::check_asset_type(asset_type)?;
 
         let pair = self.parse_canonical_symbol(symbol);
 
@@ -177,7 +174,7 @@ impl DataProvider for Kraken {
     /// Returns the usable download range for an asset at a given interval.
     #[instrument(skip(self), fields(symbol = %asset.symbol, ?interval))]
     async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
-        Self::require_crypto(asset.asset_type)?;
+        Self::check_asset_type(asset.asset_type)?;
 
         let symbol = self.parse_canonical_symbol(&asset.symbol);
 
@@ -200,10 +197,14 @@ impl DataProvider for Kraken {
         Ok((earliest_ts, latest_ts))
     }
 
-    /// List the spot crypto assets traded on Kraken, capped at `limit`.
+    /// List assets traded on Kraken, filtered by `asset_type` and capped at `limit`.
+    ///
+    /// The asset type (Forex vs Crypto) is determined during [`PairInfo`]
+    /// conversion — pairs where both sides are fiat [`Currency`] variants are
+    /// classified as Forex, everything else as Crypto.
     #[instrument(skip(self), fields(?asset_type, limit))]
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
-        Self::require_crypto(asset_type)?;
+        Self::check_asset_type(asset_type)?;
 
         let resp = self.client.get(Self::ASSET_PAIRS_URL, None).await?;
         let parsed = HttpClient::json::<KrakenResponse<HashMap<String, PairInfo>>>(resp).await?;
@@ -220,6 +221,7 @@ impl DataProvider for Kraken {
                     })
                     .ok()
             })
+            .filter(|a| a.asset_type == asset_type)
             .take(limit)
             .collect();
 
@@ -335,12 +337,19 @@ impl TryFrom<PairInfo> for Asset {
 
         let symbol = canonical_symbol(&info.altname, &Some(base.clone()), &quote);
 
+        // Classify as Forex when both sides are fiat currencies, Crypto otherwise.
+        let asset_type = if base.parse::<Currency>().is_ok() && quote.parse::<Currency>().is_ok() {
+            AssetType::Forex
+        } else {
+            AssetType::Crypto
+        };
+
         Ok(Asset {
             symbol: symbol.clone(),
             name: symbol,
             base: Some(base),
             quote,
-            asset_type: AssetType::Crypto,
+            asset_type,
             exchange: "KRAKEN".to_owned(),
             volume: None,
             price: None,

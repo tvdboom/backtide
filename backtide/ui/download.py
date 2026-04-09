@@ -364,30 +364,26 @@ st.set_page_config(page_title="Backtide - Download")
 
 st.title("Download", text_alignment="center")
 
-st.text(
-    "Perform bulk download of historical OHLC market data for multiple assets and/or intervals "
-    "at once. FX rates for historical conversion rates are automatically downloaded if required.",
-)
-
 st.divider()
 
-if not st.session_state.get("asset_type_download"):
-    st.session_state.asset_type_download = AssetType.get_default()
+if not st.session_state.get("at_download"):
+    _cache = st.session_state.get("_cache", {})
+    st.session_state.at_download = _cache.get("at_download", AssetType.get_default())
 
 asset_type = st.segmented_control(
     label="Asset type",
-    key="asset_type_download",
+    key="at_download",
     options=AssetType.variants(),
     format_func=lambda asset_type: f"{asset_type.icon()} {asset_type}",
     on_change=_prevent_deselection(
-        key="asset_type_download",
+        key="at_download",
         default=AssetType.get_default(),
         reset=["symbols_download", "currency_download"],
     ),
     help="Select the type of financial asset you want to backtest.",
 )
 
-all_assets = list_symbols(st.session_state.asset_type_download)
+all_assets = list_symbols(st.session_state.at_download)
 
 # Filter assets based on the selected currency
 if currency := st.session_state.get("currency_download"):
@@ -400,7 +396,7 @@ else:
     filtered_assets = all_assets
 
 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
-asset_d, currency_d = _get_asset_type_description(st.session_state.asset_type_download)
+asset_d, currency_d = _get_asset_type_description(st.session_state.at_download)
 
 symbols = col1.multiselect(
     label="Symbols",

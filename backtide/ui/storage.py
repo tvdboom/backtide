@@ -55,13 +55,7 @@ st.set_page_config(page_title="Backtide - Storage")
 
 st.title("Storage", text_alignment="center")
 
-st.text(
-    "Overview of all OHLCV data stored in the local database. Each row represents one (symbol "
-    "- interval) data series. Select one or more rows to delete the series from the database.",
-)
-
 st.divider()
-
 
 summaries = get_summary()
 
@@ -90,10 +84,7 @@ for s in summaries:
 
 df = pd.DataFrame(rows)
 
-col1, col2, col3 = st.columns(3)
-col1.metric(":material/trending_up: Number of symbols", df["Symbol"].nunique(), border=True)
-col2.metric(":material/view_list: Number of series", _fmt_number(len(df)), border=True)
-col3.metric(":material/candlestick_chart: Total bars", _fmt_number(df["Bars"].sum()), border=True)
+metrics_container = st.container()
 
 column_config = {
     "Bars": st.column_config.NumberColumn(format="%d"),
@@ -108,7 +99,7 @@ if logokit_key := cfg.display.logokit_api_key:
     column_config["Logo"] = st.column_config.ImageColumn(label="", width="small")
 
 event = st.dataframe(
-    df.drop("Provider", axis=1).sort_values(["Symbol", "Interval"], ascending=True),
+    df.sort_values(["Symbol", "Interval"], ascending=True),
     height="stretch",
     column_config=column_config,
     hide_index=df.index.name is None,
@@ -116,6 +107,15 @@ event = st.dataframe(
     on_select="rerun",
 )
 
-if indices := event.selection.rows if event and event.selection else None:
+indices = event.selection.rows if event and event.selection else None
+selected = df.iloc[indices] if indices else df
+
+with metrics_container:
+    col1, col2, col3 = st.columns(3)
+    col1.metric(":material/trending_up: Number of symbols", selected["Symbol"].nunique(), border=True)
+    col2.metric(":material/view_list: Number of series", _fmt_number(len(selected)), border=True)
+    col3.metric(":material/candlestick_chart: Total bars", _fmt_number(selected["Bars"].sum()), border=True)
+
+if indices:
     if st.button(f"Delete {len(indices)} series", type="primary", icon=":material/delete:"):
         _confirm_delete([rows[i] for i in indices])

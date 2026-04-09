@@ -65,12 +65,13 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
 )
 
 if not st.session_state.get("asset_type"):
-    st.session_state.asset_type = AssetType.get_default()
+    _cache = st.session_state.get("_cache", {})
+    st.session_state.asset_type = _cache.get("asset_type", AssetType.get_default())
 
 if not st.session_state.get(f"all_assets_{asset_type}"):
     with st.spinner("Loading assets..."):
         st.session_state[f"all_assets_{asset_type}"] = list_assets(
-            st.session_state.asset_type_download,
+            st.session_state.asset_type,
             MAX_PRELOADED_ASSETS,
         )
 

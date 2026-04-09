@@ -43,7 +43,8 @@ translations are an internal implementation detail handled by Backtide.
 ## Providers
 
 Backtide currently supports four market-data providers. Yahoo can serve all
-asset classes, while Binance, Coinbase, and Kraken are crypto-only.
+asset classes, while Binance, Coinbase, and Kraken are primarily crypto
+providers (though some, like Kraken, also list major forex pairs).
 
 ### Yahoo Finance
 
@@ -85,7 +86,7 @@ Important caveats:
 
 ### Kraken
 
-- Supports crypto only.
+- Supports crypto and forex.
 - Kraken-specific ticker aliases are normalized back to canonical names, e.g.,
   `XBT` → `BTC` and `XDG` → `DOGE`.
 
@@ -94,6 +95,20 @@ Important caveats:
 - Kraken history is effectively bounded by a 720-bar window per interval, so
   high-frequency intervals have a much shorter accessible history than daily
   or weekly intervals.
+
+!!! tip "Kraken as a forex provider"
+
+    Kraken lists major forex pairs such as `EUR-USD` and `GBP-USD` alongside
+    its crypto offerings. You can point the [forex provider][nom-provider] at
+    Kraken so that [currency-conversion] legs are sourced from the same exchange
+    as your crypto trades. This is useful when you want to model a Kraken-only
+    portfolio and keep all price data consistent with a single provider.
+
+    ```toml
+    [data.providers]
+    forex  = "kraken"
+    crypto = "kraken"
+    ```
 
 <br>
 

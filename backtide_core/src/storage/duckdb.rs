@@ -3,7 +3,7 @@
 use crate::data::models::interval::Interval;
 use crate::data::providers::provider::Provider;
 use crate::storage::errors::StorageResult;
-use crate::storage::models::bars_group::BarsGroup;
+use crate::storage::models::bar_series::BarSeries;
 use crate::storage::models::storage_summary::StorageSummary;
 use crate::storage::traits::Storage;
 use duckdb::params;
@@ -59,13 +59,13 @@ impl Storage for DuckDb {
         Ok(())
     }
 
-    /// Store multiple groups of OHLC data in one bulk operation.
+    /// Store multiple series of OHLC data in one bulk operation.
     ///
-    /// 1. Removes overlapping rows for every group in a single transaction.
-    /// 2. Bulk-inserts all rows from every group via DuckDB's `Appender`.
-    fn write_bars_bulk(&self, groups: &[BarsGroup]) -> StorageResult<()> {
-        // Filter out empty groups early.
-        let non_empty: Vec<&BarsGroup> = groups.iter().filter(|g| !g.bars.is_empty()).collect();
+    /// 1. Removes overlapping rows for every series in a single transaction.
+    /// 2. Bulk-inserts all rows from every series via DuckDB's `Appender`.
+    fn write_bars_bulk(&self, series: &[BarSeries]) -> StorageResult<()> {
+        // Filter out empty series early.
+        let non_empty: Vec<&BarSeries> = series.iter().filter(|s| !s.bars.is_empty()).collect();
         if non_empty.is_empty() {
             return Ok(());
         }
@@ -74,29 +74,29 @@ impl Storage for DuckDb {
 
         // Phase 1: delete all overlapping ranges in a single transaction.
         conn.execute_batch("BEGIN TRANSACTION")?;
-        for group in &non_empty {
-            let iv = group.interval.to_string();
-            let prov = group.provider.to_string();
-            let min_ts = group.bars.iter().map(|b| b.open_ts).min().unwrap();
-            let max_ts = group.bars.iter().map(|b| b.open_ts).max().unwrap();
+        for s in &non_empty {
+            let iv = s.interval.to_string();
+            let prov = s.provider.to_string();
+            let min_ts = s.bars.iter().map(|b| b.open_ts).min().unwrap();
+            let max_ts = s.bars.iter().map(|b| b.open_ts).max().unwrap();
             conn.execute(
                 "DELETE FROM bars
                  WHERE symbol = ? AND interval = ? AND provider = ?
                     AND open_ts >= ? AND open_ts <= ?",
-                params![&group.symbol, iv, prov, min_ts as i64, max_ts as i64],
+                params![&s.symbol, iv, prov, min_ts as i64, max_ts as i64],
             )?;
         }
         conn.execute_batch("COMMIT")?;
 
         // Phase 2: bulk-insert every row via the Appender (one flush).
         let mut appender = conn.appender("bars")?;
-        for group in &non_empty {
-            let at = group.asset_type.to_string();
-            let iv = group.interval.to_string();
-            let prov = group.provider.to_string();
-            for bar in &group.bars {
+        for s in &non_empty {
+            let at = s.asset_type.to_string();
+            let iv = s.interval.to_string();
+            let prov = s.provider.to_string();
+            for bar in &s.bars {
                 appender.append_row(params![
-                    &group.symbol,
+                    &s.symbol,
                     &at,
                     &iv,
                     &prov,
@@ -145,11 +145,11 @@ impl Storage for DuckDb {
         }
     }
 
-    /// Return a summary for every (symbol, provider, interval) group in the database.
+    /// Return a summary for every (symbol, provider, interval) series in the database.
     fn get_summary(&self) -> StorageResult<Vec<StorageSummary>> {
         let conn = self.conn.lock().unwrap();
 
-        // Step 1: get groups with their stats
+        // Step 1: get each series with its stats
         let mut stmt = conn.prepare(
             "SELECT symbol, interval, asset_type, provider, MIN(open_ts), MAX(open_ts), COUNT(*)
              FROM bars
@@ -157,7 +157,7 @@ impl Storage for DuckDb {
              ORDER BY symbol, interval, provider",
         )?;
 
-        let groups: Vec<(String, String, String, String, u64, u64, u64)> = stmt
+        let rows: Vec<(String, String, String, String, u64, u64, u64)> = stmt
             .query_map([], |row| {
                 Ok((
                     row.get(0)?,
@@ -171,7 +171,7 @@ impl Storage for DuckDb {
             })?
             .collect::<Result<_, _>>()?;
 
-        // Step 2: for each group, fetch last 365 adj_close values
+        // Step 2: for each series, fetch last 365 adj_close values
         let mut sparkline_stmt = conn.prepare(
             "SELECT adj_close FROM (
                 SELECT adj_close, open_ts FROM bars
@@ -181,8 +181,8 @@ impl Storage for DuckDb {
             ) sub ORDER BY open_ts ASC",
         )?;
 
-        let mut summaries = Vec::with_capacity(groups.len());
-        for (symbol, interval, at, provider, first_ts, last_ts, n_rows) in groups {
+        let mut summaries = Vec::with_capacity(rows.len());
+        for (symbol, interval, at, provider, first_ts, last_ts, n_rows) in rows {
             let sparkline: Vec<f64> = sparkline_stmt
                 .query_map(params![symbol, provider, interval], |row| row.get(0))?
                 .collect::<Result<_, _>>()?;
@@ -202,7 +202,7 @@ impl Storage for DuckDb {
         Ok(summaries)
     }
 
-    /// Delete all bars for a given (symbol, provider, interval) group.
+    /// Delete all bars for a given (symbol, provider, interval) series.
     fn delete_rows(
         &self,
         symbol: &str,

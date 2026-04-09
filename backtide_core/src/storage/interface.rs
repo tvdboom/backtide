@@ -62,12 +62,10 @@ pub fn get_summary() -> PyResult<Vec<StorageSummary>> {
 /// from backtide.storage import delete_rows
 ///
 /// # Delete all stored data for a single symbol
-/// n = delete_rows("AAPL")  # norun
-/// print(f"Deleted {n} rows")  # norun
+/// delete_rows("AAPL")  # norun
 ///
-/// # Delete only daily bars from Binance for multiple symbols
-/// n = delete_rows(["BTC-USDT", "ETH-USDT"], interval="1d", provider="binance")  # norun
-/// print(f"Deleted {n} rows")  # norun
+/// # Delete all daily bars from for multiple symbols
+/// delete_rows(["BTC-USDT", "ETH-USDT"], interval="1d")  # norun
 /// ```
 #[pyfunction]
 #[pyo3(signature = (symbol: "str | Sequence[str]", interval: "str | Interval | None"=None, provider: "str | Provider | None"=None))]

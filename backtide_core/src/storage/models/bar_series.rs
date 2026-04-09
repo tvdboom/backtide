@@ -5,12 +5,12 @@ use crate::data::providers::provider::Provider;
 
 /// One batch of bars sharing the same keys.
 ///
-/// Used by `write_bars_bulk` to write many groups in a single database transaction.
-pub struct BarsGroup {
+/// Used by `write_bars_bulk` to write many series in a single database transaction.
+pub struct BarSeries {
     /// Canonical ticker symbol (e.g. `"AAPL"`, `"BTC-USD"`).
     pub symbol: String,
 
-    /// The asset class this group belongs to (stocks, crypto, forex, …).
+    /// The asset class this series belongs to (stocks, crypto, forex, …).
     pub asset_type: AssetType,
 
     /// Bar frequency / time-frame (e.g. `1m`, `1h`, `1d`).
@@ -19,6 +19,7 @@ pub struct BarsGroup {
     /// Data provider that sourced the bars (e.g. Yahoo, Binance).
     pub provider: Provider,
 
-    /// OHLCV bars to persist. May be empty, in which case the group is skipped.
+    /// OHLCV bars to persist. May be empty, in which case the series is skipped.
     pub bars: Vec<Bar>,
 }
+

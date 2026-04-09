@@ -116,8 +116,7 @@ def download(symbols, asset_type, interval, start, end, log_level):
 
         backtide download AAPL MSFT -t stocks -i 1d -i 1h -s 2023-01-01 -e 2024-01-01
     """
-    from backtide.data import download_assets as do_download
-    from backtide.data import get_download_info
+    from backtide.data import download_assets, get_download_info
 
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
@@ -129,28 +128,28 @@ def download(symbols, asset_type, interval, start, end, log_level):
     intervals = list(interval)
     symbols = list(symbols)
 
-    click.echo(
-        f"📊  Resolving download info for {symbols} ({asset_type}, {intervals}) ...",
-    )
+    click.echo(f"📊  Resolving downloads...")
 
     info = get_download_info(symbols, asset_type, intervals)
 
     n_assets = len(info.assets)
     n_legs = len(info.legs)
-    click.echo(f"   {n_assets} asset(s), {n_legs} leg(s)")
+    click.echo(f"   --> {n_assets} assets.")
+    click.echo(f"   --> {n_legs} legs.")
 
     click.echo("⬇️  Downloading …")
-    result = do_download(info, start=start_ts, end=end_ts)
+    result = download_assets(info, start=start_ts, end=end_ts)
 
     for warn in result.warnings:
         click.echo(f"   ⚠️  {warn}", err=True)
 
     if result.n_failed and result.n_succeeded:
         click.echo(
-            f"✅  Done ({result.n_succeeded}/{result.n_succeeded + result.n_failed} tasks succeeded).",
+            f"✅  Done ({result.n_succeeded}/{result.n_succeeded + result.n_failed} "
+            f"assets downloaded)."
         )
     elif result.n_failed:
-        click.echo(f"❌  All {result.n_failed} tasks failed.", err=True)
+        click.echo(f"❌  All {result.n_failed} downloads failed.", err=True)
     else:
         click.echo("✅  Done.")
 
