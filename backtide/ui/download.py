@@ -13,7 +13,6 @@ import streamlit as st
 
 from backtide.core.config import get_config
 from backtide.core.data import (
-    Asset,
     AssetMeta,
     AssetType,
     Currency,
@@ -21,18 +20,18 @@ from backtide.core.data import (
     Interval,
     download_assets,
     get_download_info,
-    list_assets,
 )
 from backtide.ui.utils import (
     _fmt_number,
     _get_asset_type_description,
     _get_logokit_url,
     _get_provider_logo,
+    _list_symbols,
     _moment_to_strftime,
     _prevent_deselection,
     _to_upper_values,
 )
-from backtide.utils.constants import MAX_ASSET_SELECTION, MAX_PRELOADED_ASSETS
+from backtide.utils.constants import MAX_ASSET_SELECTION
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
@@ -230,19 +229,19 @@ def draw_cards(assets: list[AssetMeta]) -> int:
             delta_days = (iv_end - iv_start).days
 
             if asset.asset_type.is_equity:
-                # Stocks / ETFs: 8/5
+                # Stocks / ETF markets open 8/5
                 if interval.is_intraday():
                     rows = max(int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1)
                 else:
                     rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
             elif asset_type == AssetType.Forex:
-                # Forex: 24/5
+                # Forex markets open 24/5
                 if interval.is_intraday():
                     rows = max(int(delta_minutes * (5 / 7) // interval.minutes()), 1)
                 else:
                     rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
             else:
-                # Crypto: 24/7
+                # Crypto markets open 24/7
                 rows = max(int(delta_minutes // interval.minutes()), 1)
 
             total_rows += rows
@@ -344,12 +343,6 @@ def draw_cards(assets: list[AssetMeta]) -> int:
     return html, total_rows
 
 
-@st.cache_resource(ttl=3600, show_spinner=False)
-def list_symbols(asset_type: AssetType) -> list[Asset]:
-    """Cache the major symbols per asset type."""
-    return list_assets(asset_type, MAX_PRELOADED_ASSETS)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Download interface
 # ─────────────────────────────────────────────────────────────────────────────
@@ -366,24 +359,24 @@ st.title("Download", text_alignment="center")
 
 st.divider()
 
-if not st.session_state.get("at_download"):
+if not st.session_state.get("asset_type"):
     _cache = st.session_state.get("_cache", {})
-    st.session_state.at_download = _cache.get("at_download", AssetType.get_default())
+    st.session_state.asset_type = _cache.get("asset_type", AssetType.get_default())
 
 asset_type = st.segmented_control(
     label="Asset type",
-    key="at_download",
+    key="asset_type",
     options=AssetType.variants(),
     format_func=lambda asset_type: f"{asset_type.icon()} {asset_type}",
     on_change=_prevent_deselection(
-        key="at_download",
+        key="asset_type",
         default=AssetType.get_default(),
-        reset=["symbols_download", "currency_download"],
+        reset=["symbols_download", "currency_download", "symbols", "currency"],
     ),
     help="Select the type of financial asset you want to backtest.",
 )
 
-all_assets = list_symbols(st.session_state.at_download)
+all_assets = _list_symbols(st.session_state.asset_type)
 
 # Filter assets based on the selected currency
 if currency := st.session_state.get("currency_download"):
@@ -396,7 +389,7 @@ else:
     filtered_assets = all_assets
 
 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
-asset_d, currency_d = _get_asset_type_description(st.session_state.at_download)
+asset_d, currency_d = _get_asset_type_description(st.session_state.asset_type)
 
 symbols = col1.multiselect(
     label="Symbols",
@@ -467,8 +460,8 @@ else:
         max_value="today",
         format=cfg.display.date_format,
         help=(
-            "Download data starting from this date (inclusive). A download can start later "
-            "if the provider doesn't have the data this far back, but it can't start earlier."
+            "Download data starting from this date. A download can start later if the "
+            "provider doesn't have the data this far back, but it can't start earlier."
         ),
     )
 
@@ -478,7 +471,7 @@ else:
         min_value=start_ts + timedelta(days=1),
         max_value="today",
         format=cfg.display.date_format,
-        help="Download data up to this date (exclusive).",
+        help="Download data up to this date.",
     )
 
 intervals = st.pills(
@@ -566,7 +559,7 @@ if st.button(
 
             with st.spinner("Downloading data..."):
                 result = download_assets(download_info, start=dl_start, end=dl_end)
-        except Exception as ex:
+        except RuntimeError as ex:
             st.error(f"Download error: {ex}", icon=":material/error:")
         else:
             for warn in result.warnings:

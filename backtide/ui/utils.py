@@ -15,7 +15,8 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 from backtide.constants import MOMENT_TO_STRFTIME
-from backtide.core.data import AssetType
+from backtide.core.data import Asset, AssetType, list_assets
+from backtide.utils.constants import MAX_PRELOADED_ASSETS
 from backtide.utils.utils import to_list
 
 
@@ -87,6 +88,12 @@ def _get_provider_logo(provider: str) -> str:
     return f"data:image/png;base64,{data}"
 
 
+@st.cache_resource(ttl=3600, show_spinner=False)
+def _list_symbols(asset_type: AssetType) -> list[Asset]:
+    """Cache the major symbols per asset type."""
+    return list_assets(asset_type, MAX_PRELOADED_ASSETS)
+
+
 def _moment_to_strftime(fmt: str) -> str:
     """Convert a momentjs string to strftime format."""
     regex = re.compile(
@@ -133,3 +140,4 @@ def _to_upper_values(key: str):
         st.session_state[key] = [
             s.upper() if isinstance(s, str) else s for s in to_list(st.session_state[key])
         ]
+

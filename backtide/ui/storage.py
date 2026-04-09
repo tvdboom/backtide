@@ -66,21 +66,19 @@ if not summaries:
     )
     st.stop()
 
-
-rows = []
-for s in summaries:
-    rows.append(
-        {
-            "Symbol": s.symbol,
-            "Interval": s.interval,
-            "Asset type": s.asset_type,
-            "Provider": s.provider,
-            "First date": _parse_date(s.first_ts, cfg.display.date_format, tz),
-            "Last date": _parse_date(s.last_ts, cfg.display.date_format, tz),
-            "Bars": s.n_rows,
-            "Price": s.sparkline if s.sparkline else None,
-        },
-    )
+rows = [
+    {
+        "Symbol": s.symbol,
+        "Interval": s.interval,
+        "Asset type": s.asset_type,
+        "Provider": s.provider,
+        "First date": _parse_date(s.first_ts, cfg.display.date_format, tz),
+        "Last date": _parse_date(s.last_ts, cfg.display.date_format, tz),
+        "Bars": s.n_rows,
+        "Price": s.sparkline if s.sparkline else None,
+    }
+    for s in summaries
+]
 
 df = pd.DataFrame(rows)
 
@@ -113,11 +111,15 @@ selected = df.iloc[indices] if indices else df
 with metrics_container:
     col1, col2, col3 = st.columns(3)
     col1.metric(
-        ":material/trending_up: Number of symbols", selected["Symbol"].nunique(), border=True
+        ":material/trending_up: Number of symbols",
+        selected["Symbol"].nunique(),
+        border=True,
     )
     col2.metric(":material/view_list: Number of series", _fmt_number(len(selected)), border=True)
     col3.metric(
-        ":material/candlestick_chart: Total bars", _fmt_number(selected["Bars"].sum()), border=True
+        ":material/candlestick_chart: Total bars",
+        _fmt_number(selected["Bars"].sum()),
+        border=True,
     )
 
 if indices:

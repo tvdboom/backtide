@@ -118,6 +118,7 @@ select = [
     "RUF",  # ruff
 ]
 ignore = [
+    "COM812",  # Trailing comma — conflicts with the ruff formatter
     "E731",  # Do not use a lambda expression
 ]
 

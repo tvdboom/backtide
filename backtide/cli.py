@@ -166,7 +166,7 @@ def _parse_timestamp(value: str) -> int:
     except ValueError:
         raise click.BadParameter(
             f"Cannot parse '{value}' as YYYY-MM-DD or Unix timestamp.",
-        )
+        ) from None
 
 
 if __name__ == "__main__":

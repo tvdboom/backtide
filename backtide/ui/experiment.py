@@ -9,14 +9,16 @@ import ast
 from datetime import datetime
 import json
 import time
+import tomllib
 
 from code_editor import code_editor
 import streamlit as st
 import yaml
 
-from backtide.data import AssetType, list_assets
+from backtide.data import AssetType, Currency, Interval
 from backtide.ui.utils import (
     _get_asset_type_description,
+    _list_symbols,
     _prevent_deselection,
     _to_upper_values,
 )
@@ -41,17 +43,10 @@ INDICATORS = [
     "ADX - Average Directional Index",
 ]
 
-FEE_MODES = ["Percentage (%)", "Fixed amount"]
+FEE_MODES = ["Percentage (%)", "Fixed amount", "Percentage + Fixed"]
 
 st.set_page_config(page_title="Backtide - Experiment", layout="centered")
 st.title("Experiment", text_alignment="center")
-
-st.text(
-    """
-    Run a new backtest experiment on historical data for one or more symbols. The results
-    of the experiment are automatically stored and can be reviewed in the results page.
-    """,
-)
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
@@ -63,17 +58,6 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         ":material/build: Engine",
     ],
 )
-
-if not st.session_state.get("asset_type"):
-    _cache = st.session_state.get("_cache", {})
-    st.session_state.asset_type = _cache.get("asset_type", AssetType.get_default())
-
-if not st.session_state.get(f"all_assets_{asset_type}"):
-    with st.spinner("Loading assets..."):
-        st.session_state[f"all_assets_{asset_type}"] = list_assets(
-            st.session_state.asset_type,
-            MAX_PRELOADED_ASSETS,
-        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -132,23 +116,24 @@ with tab1:
 
     uploaded = st.file_uploader(
         label="Import configuration",
-        type=["yaml", "yml", "json"],
-        help="Upload a YAML or JSON file to pre-fill the experiment configuration.",
+        type=["toml", "yaml", "yml", "json"],
+        help="Upload a TOML, YAML or JSON file to pre-fill the experiment configuration.",
     )
 
     if uploaded is not None:
         try:
             if uploaded.name.endswith(".json"):
                 config = json.load(uploaded)
+            elif uploaded.name.endswith(".toml"):
+                config = tomllib.loads(uploaded.read().decode("utf-8"))
             else:
                 config = yaml.safe_load(uploaded)
 
-            experiment = Experiment(**config)
-            st.session_state["experiment_name"] = experiment.name
-            st.session_state["tags"] = experiment.tags
-            st.session_state["description"] = experiment.description
+            st.session_state["experiment_name"] = config.get("name", "")
+            st.session_state["tags"] = config.get("tags", [])
+            st.session_state["description"] = config.get("description", "")
             st.success(f"Loaded configuration from `{uploaded.name}`.")
-        except (yaml.YAMLError, json.JSONDecodeError, TypeError) as ex:
+        except (yaml.YAMLError, json.JSONDecodeError, tomllib.TOMLDecodeError, TypeError) as ex:
             st.error(f"Failed to parse file: {ex}")
 
 
@@ -157,26 +142,35 @@ with tab1:
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab2:
+    if not st.session_state.get("asset_type"):
+        _cache = st.session_state.get("_cache", {})
+        st.session_state.asset_type = _cache.get("asset_type", AssetType.get_default())
+
     asset_type = st.segmented_control(
         label="Asset type",
         key="asset_type",
-        options=AssetType,
-        format_func=lambda asset_type: f"{asset_type.icon()} {asset_type.value}",
+        options=AssetType.variants(),
+        format_func=lambda at: f"{at.icon()} {at}",
         on_change=_prevent_deselection(
             key="asset_type",
-            default=AssetType.default(),
-            reset=["symbols", "currency"],
+            default=AssetType.get_default(),
+            reset=["symbols", "currency", "symbols_download", "currency_download"],
         ),
         help="Select the type of financial asset you want to backtest.",
     )
 
+    # Reload assets when asset type changes
+    all_assets = _list_symbols(st.session_state.asset_type)
+
     # Filter assets based on the selected currency
     if currency := st.session_state.get("currency"):
-        assets = {
-            k: v for k, v in all_assets.items() if currency == "All" or v.currency == currency
-        }
+        filtered_assets = [
+            asset
+            for asset in all_assets
+            if currency == "All" or asset.base == currency or str(asset.quote) == currency
+        ]
     else:
-        assets = all_assets
+        filtered_assets = all_assets
 
     col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
     symbol_d, currency_d = _get_asset_type_description(st.session_state.asset_type)
@@ -184,8 +178,12 @@ with tab2:
     symbols = col1.multiselect(
         label="Symbols",
         key="symbols",
-        options=sorted([asset.symbol for asset in assets.values()]),
-        format_func=lambda x: f"{x} - {assets[x].name}" if asset_type != AssetType.CRYPTO else x,
+        options=sorted(filtered_assets, key=lambda a: a.symbol),
+        format_func=lambda a: (
+            f"{a.symbol} - {a.name}"
+            if st.session_state.asset_type in (AssetType.Stocks, AssetType.Etf)
+            else a.symbol
+        ),
         placeholder="Select one or more symbols...",
         max_selections=MAX_ASSET_SELECTION,
         accept_new_options=True,
@@ -196,41 +194,51 @@ with tab2:
     col2.selectbox(
         label="Currency",
         key="currency",  # Use key to filter tickers
-        options=[
-            "All",
-            *sorted(dict.fromkeys(asset.currency for asset in all_assets.values())),
-        ],
+        options=["All", *sorted(dict.fromkeys(str(a.quote) for a in all_assets))],
         placeholder="All",
         help=currency_d,
     )
 
-    col1, col2 = st.columns(2)
-
-    start_date = col1.date_input(
-        label="Start date",
-        value=None,
-        min_value="2000-01-01",
-        max_value=datetime.now().date(),
+    full_history = st.toggle(
+        label="Use full available history",
+        value=True,
         help=(
-            "Run backtest simulation starting from this date (inclusive). If the historical "
-            "data does not go so far back, it starts from the available history for that ticker."
+            "Whether to use the maximum available history for all selected symbols. "
+            "If toggled off, select the start and end dates for the simulation."
         ),
     )
 
-    end_date = col2.date_input(
-        label="End date",
-        value="today",
-        min_value=start_date,
-        max_value="today",
-        help="Run backtest simulation up to this date (inclusive).",
-    )
+    if not full_history:
+        col1, col2 = st.columns(2)
+
+        start_date = col1.date_input(
+            label="Start date",
+            value=None,
+            min_value="2000-01-01",
+            max_value=datetime.now().date(),
+            help=(
+                "Run backtest simulation starting from this date. If the historical data "
+                "does not go so far back, it starts from the available history for that symbol."
+            ),
+        )
+
+        end_date = col2.date_input(
+            label="End date",
+            value="today",
+            min_value=start_date,
+            max_value="today",
+            help="Run backtest simulation up to this date.",
+        )
+    else:
+        start_date = None
+        end_date = None
 
     interval = st.pills(
         label="Interval",
-        options=Interval,
-        format_func=lambda x: x.value,
+        options=Interval.variants(),
+        format_func=lambda x: str(x),
         selection_mode="single",
-        default=Interval.OneHour,
+        default=Interval.get_default(),
         help=(
             "The frequency of the data points. Each interval is one tick of the simulation. "
             "After every tick, the strategy is evaluated and orders are resolved. The interval "
@@ -246,17 +254,13 @@ with tab2:
 with tab3:
     col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
 
-    if asset_type != AssetType.CRYPTO:
-        base = CURRENCIES["USD"]
-        options = CURRENCIES.values()
-    else:
-        base = CRYPTOS["USDT"]
-        options = sorted(list(CURRENCIES.values()) + list(CRYPTOS.values()), key=lambda x: x.name)
+    currency_options = Currency.variants()
+    base_default = Currency.get_default()
 
-    base_currency = st.session_state.get("base_currency", base)
+    base_currency = st.session_state.get("base_currency", base_default)
     starting_amount = col1.number_input(
         label="Initial cash",
-        min_value=1 / base_currency.decimals,
+        min_value=10**-base_currency.decimals,
         value=10_000.0,
         step=1_000.0,
         format="%.2f",
@@ -267,7 +271,8 @@ with tab3:
     base_currency = col2.selectbox(
         label="Base currency",
         key="base_currency",
-        options=options,
+        options=currency_options,
+        format_func=lambda c: f"{c} — {c.name}",
         help=(
             "The currency your portfolio is denominated in during the backtest. All trades, "
             "P&L, margin, leverage and position sizing are tracked in this currency. Asset "
@@ -283,7 +288,10 @@ with tab3:
 
         if symbols:
             positions_data = st.data_editor(
-                data=[{"Symbol": symbol, "Quantity": 0.0} for symbol in symbols],
+                data=[
+                    {"Symbol": a.symbol if hasattr(a, "symbol") else str(a), "Quantity": 0.0}
+                    for a in symbols
+                ],
                 num_rows="fixed",
                 hide_index=True,
                 column_config={
@@ -366,7 +374,7 @@ with tab4:
         def check_strategy_code(code: str) -> bool:
             """Check whether the code contains the expected function."""
             try:
-                tree = ast.parse(strategy_code)
+                tree = ast.parse(code)
 
                 for node in tree.body:
                     if isinstance(node, ast.FunctionDef) and node.name == "strategy":
@@ -391,111 +399,94 @@ with tab4:
             time.sleep(1.5)
             success.empty()
 
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 5. Exchange
 # ═════════════════════════════════════════════════════════════════════════════
 
-# fee_mode_col, fee_val_col, slippage_col = st.columns(3)
-#
-# fee_mode = fee_mode_col.radio(
-#     label="Fee type",
-#     options=FEE_MODES,
-#     index=0,
-#     horizontal=False,
-#     help=(
-#         "How trading fees are calculated. *Percentage* charges a fraction of the trade "
-#         "notional value; *Fixed amount* charges a flat fee per order."
-#     ),
-# )
-#
-# is_pct_fee = fee_mode == FEE_MODES[0]
-#
-# fee_value = fee_val_col.number_input(
-#     label=f"Fee ({'%' if is_pct_fee else quote_currency} per trade)",
-#     min_value=0.0,
-#     max_value=100.0 if is_pct_fee else None,
-#     value=0.1 if is_pct_fee else 1.0,
-#     step=0.01 if is_pct_fee else 0.5,
-#     format="%.4f",
-#     help=(
-#         "Fee charged per executed order. Applied as a percentage of notional value "
-#         if is_pct_fee
-#         else f"Fee charged per executed order as a fixed amount in {quote_currency}."
-#     ),
-# )
-#
-# slippage = slippage_col.number_input(
-#     label="Slippage (% of price per trade)",
-#     min_value=0.0,
-#     max_value=100.0,
-#     value=0.05,
-#     step=0.01,
-#     format="%.4f",
-#     help=(
-#         "Simulated market impact. Each fill price is moved adversely by this percentage "
-#         "(buys filled higher, sells filled lower)."
-#     ),
-# )
-#
-#
-# # ══════════════════════════════════════════════════════════════════════════════
-# # 4 · STRATEGY
-# # ══════════════════════════════════════════════════════════════════════════════
-#
-# # ── Indicators ───────────────────────────────────────────────────────────────
-#
-# indicator_toggle_col, indicator_select_col = st.columns([1, 3], vertical_alignment="bottom")
-#
-# use_indicators = indicator_toggle_col.toggle(
-#     label="Enable indicators",
-#     value=True,
-#     help="Pre-compute technical indicators and make them available inside your strategy function.",
-# )
-#
-# if use_indicators:
-#     selected_indicators = indicator_select_col.multiselect(
-#         label="Indicators",
-#         options=INDICATORS,
-#         default=["SMA - Simple Moving Average", "EMA - Exponential Moving Average"],
-#         placeholder="Select indicators...",
-#         help="Chosen indicators are computed before each strategy call and passed via the `indicators` dict.",
-#     )
-#
-#     quick_col_all, quick_col_none, _ = st.columns([1, 1, 6])
-#     if quick_col_all.button("Select all", use_container_width=True):
-#         selected_indicators = INDICATORS
-#     if quick_col_none.button("Clear", use_container_width=True):
-#         selected_indicators = []
-# else:
-#     selected_indicators = []
-#
-# st.markdown("")  # spacing
-#
-#
-# # ══════════════════════════════════════════════════════════════════════════════
-# # LAUNCH
-# # ══════════════════════════════════════════════════════════════════════════════
-#
-# st.divider()
-#
-# ready = all([bt_name, tickers, start_date, end_date, intervals, strategy_code])
-#
-# if not ready:
-#     missing = [
-#         label
-#         for label, ok in [
-#             ("experiment name", bool(bt_name)),
-#             ("symbols", bool(tickers)),
-#             ("start date", bool(start_date)),
-#             ("intervals", bool(intervals)),
-#             ("strategy", bool(strategy_code)),
-#         ]
-#         if not ok
-#     ]
-#     st.warning(
-#         f"Please provide: {', '.join(missing)}.",
-#         icon=":material/warning:",
-#     )
+with tab5:
+    base_cur = st.session_state.get("base_currency", Currency.get_default())
+
+    fee_mode = st.radio(
+        label="Fee type",
+        options=FEE_MODES,
+        index=0,
+        horizontal=True,
+        help=(
+            "How trading fees are calculated. **Percentage** charges a fraction of "
+            "the trade notional value. **Fixed amount** charges a flat fee per order. "
+            "**Percentage + Fixed** applies both a percentage-based and a flat fee to "
+            "every trade."
+        ),
+    )
+
+    is_pct = fee_mode == FEE_MODES[0]
+    is_fixed = fee_mode == FEE_MODES[1]
+    is_combo = fee_mode == FEE_MODES[2]
+
+    if is_pct:
+        fee_pct = st.number_input(
+            label="Fee (% per trade)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.1,
+            step=0.01,
+            format="%.4f",
+            help=(
+                "Fee charged per executed order, applied as a percentage of the trade's "
+                "notional value."
+            ),
+        )
+        fee_fixed_value = 0.0
+    elif is_fixed:
+        fee_fixed_value = st.number_input(
+            label=f"Fee ({base_cur} per trade)",
+            min_value=0.0,
+            value=1.0,
+            step=0.5,
+            format="%.4f",
+            help=f"Flat fee charged per executed order in {base_cur}.",
+        )
+        fee_pct = 0.0
+    else:
+        col_pct, col_fixed = st.columns(2)
+
+        fee_pct = col_pct.number_input(
+            label="Fee (% per trade)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.1,
+            step=0.01,
+            format="%.4f",
+            help="Percentage portion of the fee, applied to the trade's notional value.",
+        )
+
+        fee_fixed_value = col_fixed.number_input(
+            label=f"Fee ({base_cur} per trade)",
+            min_value=0.0,
+            value=1.0,
+            step=0.5,
+            format="%.4f",
+            help=f"Fixed portion of the fee in {base_cur}, added on top of the percentage fee.",
+        )
+
+    slippage = st.number_input(
+        label="Slippage (% of price per trade)",
+        min_value=0.0,
+        max_value=100.0,
+        value=0.05,
+        step=0.01,
+        format="%.4f",
+        help=(
+            "Simulated market impact. Each fill price is moved adversely by this percentage "
+            "(buys filled higher, sells filled lower)."
+        ),
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Launch
+# ═════════════════════════════════════════════════════════════════════════════
 
 st.divider()
 
@@ -503,19 +494,23 @@ if st.button(
     label="Run experiment",
     icon=":material/play_circle:",
     type="primary",
-    disabled=not (symbols and start_date and end_date and interval),
+    disabled=not (symbols and interval and (full_history or (start_date and end_date))),
+    shortcut="Enter",
     width="stretch",
 ):
-    if end_date > datetime.now().date():
+    if not full_history and end_date > datetime.now().date():
         st.error("End date cannot be in the future.", icon=":material/error:")
-    elif start_date > end_date:  # ty:ignore[unsupported-operator]
+    elif not full_history and start_date > end_date:  # ty:ignore[unsupported-operator]
         st.error("Start date must be equal or prior to end date.", icon=":material/error:")
     else:
-        with st.spinner(f'Running "{bt_name}"...'):
+        display_name = experiment_name or "(unnamed)"
+        base_cur = st.session_state.get("base_currency", Currency.get_default())
+        date_range = f"{start_date} → {end_date}" if not full_history else "full history"
+        with st.spinner(f'Running "{display_name}"...'):
             # TODO: implement backtest execution logic
             st.success(
-                f"Backtest **{bt_name}** queued successfully — "
-                f"{len(tickers)} symbol(s), {start_date} → {end_date}, "
-                f"starting cash {quote_currency} {starting_amount:,.2f}.",
+                f"Backtest **{display_name}** queued successfully — "
+                f"{len(symbols)} symbol(s), {date_range}, "
+                f"starting cash {base_cur} {starting_amount:,.2f}.",
                 icon=":material/check_circle:",
             )
