@@ -2,6 +2,7 @@
 headless = false
 showEmailPrompt = false
 runOnSave = true
+maxUploadSize = 10
 
 [theme]
 primaryColor = "#00c4e8"

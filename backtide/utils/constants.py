@@ -45,3 +45,29 @@ def strategy(data, state, indicators):
 
     return orders
 """
+
+INDICATOR_PLACEHOLDER = """\
+def indicator(data):
+    '''Compute a custom indicator value for the current bar.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Historical OHLCV data up to and including the current bar.
+
+    Returns
+    -------
+    dict[str, float]
+        A mapping of indicator name(s) to their computed value(s).
+        Example: {"my_signal": 0.75, "my_trend": 1.0}
+
+    '''
+    result = {}
+
+    # ── Write your logic here ──────────────────────────
+
+    return result
+"""
+
+ORDER_TYPES = ["Market", "Limit", "Stop", "Stop-Limit"]
+

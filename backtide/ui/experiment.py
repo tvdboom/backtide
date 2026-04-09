@@ -16,6 +16,7 @@ import streamlit as st
 import yaml
 
 from backtide.data import AssetType, Currency, Interval
+from backtide.config import get_config
 from backtide.ui.utils import (
     _get_asset_type_description,
     _list_symbols,
@@ -23,7 +24,9 @@ from backtide.ui.utils import (
     _to_upper_values,
 )
 from backtide.utils.constants import (
+    INDICATOR_PLACEHOLDER,
     MAX_ASSET_SELECTION,
+    ORDER_TYPES,
     STRATEGY_PLACEHOLDER,
     TAG_PATTERN,
 )
@@ -45,15 +48,18 @@ INDICATORS = [
 
 FEE_MODES = ["Percentage (%)", "Fixed amount", "Percentage + Fixed"]
 
+cfg = get_config()
+
 st.set_page_config(page_title="Backtide - Experiment", layout="centered")
 st.title("Experiment", text_alignment="center")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
         ":material/dashboard: Overview",
         ":material/analytics: Data",
         ":material/account_balance_wallet: Portfolio",
         ":material/psychology: Strategy",
+        ":material/show_chart: Indicators",
         ":material/storefront: Exchange",
         ":material/build: Engine",
     ],
@@ -252,18 +258,15 @@ with tab2:
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab3:
+    base_currency = st.session_state.get("base_currency", cfg.general.base_currency)
+
     col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
 
-    currency_options = Currency.variants()
-    base_default = Currency.get_default()
-
-    base_currency = st.session_state.get("base_currency", base_default)
     starting_amount = col1.number_input(
         label="Initial cash",
-        min_value=10**-base_currency.decimals,
-        value=10_000.0,
-        step=1_000.0,
-        format="%.2f",
+        min_value=100,
+        value=10_000,
+        step=1_000,
         placeholder="Insert the initial cash...",
         help="Cash balance available at the start of the simulation.",
     )
@@ -271,8 +274,8 @@ with tab3:
     base_currency = col2.selectbox(
         label="Base currency",
         key="base_currency",
-        options=currency_options,
-        format_func=lambda c: f"{c} — {c.name}",
+        options=Currency.variants(),
+        index=Currency.variants().index(base_currency),
         help=(
             "The currency your portfolio is denominated in during the backtest. All trades, "
             "P&L, margin, leverage and position sizing are tracked in this currency. Asset "
@@ -401,74 +404,189 @@ with tab4:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 5. Exchange
+# 5. Indicators
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab5:
-    base_cur = st.session_state.get("base_currency", Currency.get_default())
+    st.caption(
+        "Select built-in indicators and/or provide your own custom indicator function. "
+        "Every selected indicator is computed once per interval for each symbol.",
+    )
 
-    fee_mode = st.radio(
-        label="Fee type",
-        options=FEE_MODES,
-        index=0,
-        horizontal=True,
+    selected_indicators = st.multiselect(
+        label="Built-in indicators",
+        options=INDICATORS,
+        default=[],
+        placeholder="Select indicators...",
         help=(
-            "How trading fees are calculated. **Percentage** charges a fraction of "
-            "the trade notional value. **Fixed amount** charges a flat fee per order. "
-            "**Percentage + Fixed** applies both a percentage-based and a flat fee to "
-            "every trade."
+            "Choose zero or more premade indicators to compute on each bar. "
+            "They will be available in your strategy function via the `indicators` argument."
         ),
     )
 
-    is_pct = fee_mode == FEE_MODES[0]
-    is_fixed = fee_mode == FEE_MODES[1]
-    is_combo = fee_mode == FEE_MODES[2]
+    st.divider()
 
-    if is_pct:
-        fee_pct = st.number_input(
-            label="Fee (% per trade)",
-            min_value=0.0,
-            max_value=100.0,
-            value=0.1,
-            step=0.01,
-            format="%.4f",
+    if st.session_state.get("indicator_source") is None:
+        st.session_state.indicator_source = "None"
+
+    indicator_source = st.segmented_control(
+        label="Custom indicator",
+        key="indicator_source",
+        options=["None", "Code editor", "Upload file"],
+        on_change=_prevent_deselection(
+            key="indicator_source",
+            default="None",
+        ),
+        help=(
+            "Optionally provide a custom indicator function. Its return values "
+            "are merged with the built-in indicators and passed to your strategy."
+        ),
+    )
+
+    custom_indicator_code: str | None = None
+    if indicator_source == "Code editor":
+        st.caption("Write your custom indicator function below.")
+        indicator_editor_resp = code_editor(
+            code=INDICATOR_PLACEHOLDER,
+            key="indicator_code_editor",
+            buttons=[
+                {
+                    "name": "Copy",
+                    "feather": "Copy",
+                    "hasText": True,
+                    "commands": ["copyAll"],
+                    "style": {"top": "0.46rem", "right": "0.4rem"},
+                },
+                {
+                    "name": "Save",
+                    "feather": "Save",
+                    "hasText": True,
+                    "commands": ["save-state", ["response", "saved"]],
+                    "response": "saved",
+                    "style": {"top": "2.25rem", "right": "0.4rem"},
+                },
+            ],
+        )
+
+        custom_indicator_code = indicator_editor_resp["text"]
+    elif indicator_source == "Upload file":
+        indicator_file = st.file_uploader(
+            label="Indicator file",
+            type=["py"],
+            accept_multiple_files=False,
             help=(
-                "Fee charged per executed order, applied as a percentage of the trade's "
-                "notional value."
+                "Upload a Python file that defines a top-level function with signature: "
+                "`indicator(data)` returning `dict[str, float]`."
             ),
         )
-        fee_fixed_value = 0.0
-    elif is_fixed:
-        fee_fixed_value = st.number_input(
-            label=f"Fee ({base_cur} per trade)",
-            min_value=0.0,
-            value=1.0,
-            step=0.5,
-            format="%.4f",
-            help=f"Flat fee charged per executed order in {base_cur}.",
-        )
-        fee_pct = 0.0
-    else:
-        col_pct, col_fixed = st.columns(2)
 
-        fee_pct = col_pct.number_input(
-            label="Fee (% per trade)",
-            min_value=0.0,
-            max_value=100.0,
-            value=0.1,
-            step=0.01,
-            format="%.4f",
-            help="Percentage portion of the fee, applied to the trade's notional value.",
+        if indicator_file is not None:
+            custom_indicator_code = indicator_file.read().decode("utf-8")
+            with st.expander("Preview uploaded file"):
+                st.code(custom_indicator_code, language="python", line_numbers=True)
+        else:
+            st.info("No file uploaded yet.", icon=":material/upload_file:")
+
+    if custom_indicator_code:
+
+        def check_indicator_code(code: str) -> bool:
+            """Check whether the code contains the expected indicator function."""
+            try:
+                tree = ast.parse(code)
+
+                for node in tree.body:
+                    if isinstance(node, ast.FunctionDef) and node.name == "indicator":
+                        if [a.arg for a in node.args.args] == ["data"]:
+                            return True
+                        else:
+                            st.error(
+                                "Function `indicator` doesn't have signature: "
+                                "`indicator(data)`.",
+                            )
+                            break
+
+                    st.error("No function `indicator(data)` found in the code.")
+            except SyntaxError as ex:
+                st.error(f"Syntax error:\n\n{ex}")
+
+            return False
+
+        if check_indicator_code(custom_indicator_code):
+            success = st.success("Custom indicator saved.")
+            time.sleep(1.5)
+            success.empty()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 6. Exchange
+# ═════════════════════════════════════════════════════════════════════════════
+
+with tab6:
+    base_cur = st.session_state.get("base_currency", Currency.get_default())
+
+    with st.container(border=True):
+        fee_mode = st.radio(
+            label="Fee type",
+            options=FEE_MODES,
+            index=0,
+            horizontal=True,
+            help=(
+                "How trading fees are calculated. **Percentage** charges a fraction of "
+                "the trade notional value. **Fixed amount** charges a flat fee per order. "
+                "**Percentage + Fixed** applies both a percentage-based and a flat fee to "
+                "every trade."
+            ),
         )
 
-        fee_fixed_value = col_fixed.number_input(
-            label=f"Fee ({base_cur} per trade)",
-            min_value=0.0,
-            value=1.0,
-            step=0.5,
-            format="%.4f",
-            help=f"Fixed portion of the fee in {base_cur}, added on top of the percentage fee.",
-        )
+        is_pct = fee_mode == FEE_MODES[0]
+        is_fixed = fee_mode == FEE_MODES[1]
+        is_combo = fee_mode == FEE_MODES[2]
+
+        if is_pct:
+            fee_pct = st.number_input(
+                label="Fee (% per trade)",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.1,
+                step=0.01,
+                format="%.4f",
+                help=(
+                    "Fee charged per executed order, applied as a percentage of the trade's "
+                    "notional value."
+                ),
+            )
+            fee_fixed_value = 0.0
+        elif is_fixed:
+            fee_fixed_value = st.number_input(
+                label=f"Fee ({base_cur} per trade)",
+                min_value=0.0,
+                value=1.0,
+                step=0.5,
+                format="%.4f",
+                help=f"Flat fee charged per executed order in {base_cur}.",
+            )
+            fee_pct = 0.0
+        else:
+            col_pct, col_fixed = st.columns(2)
+
+            fee_pct = col_pct.number_input(
+                label="Fee (% per trade)",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.1,
+                step=0.01,
+                format="%.4f",
+                help="Percentage portion of the fee, applied to the trade's notional value.",
+            )
+
+            fee_fixed_value = col_fixed.number_input(
+                label=f"Fee ({base_cur} per trade)",
+                min_value=0.0,
+                value=1.0,
+                step=0.5,
+                format="%.4f",
+                help=f"Fixed portion of the fee in {base_cur}, added on top of the percentage fee.",
+            )
 
     slippage = st.number_input(
         label="Slippage (% of price per trade)",
@@ -480,6 +598,146 @@ with tab5:
         help=(
             "Simulated market impact. Each fill price is moved adversely by this percentage "
             "(buys filled higher, sells filled lower)."
+        ),
+    )
+
+    with st.container(border=True):
+        st.markdown("**Order execution**")
+
+        allowed_order_types = st.multiselect(
+            label="Allowed order types",
+            options=ORDER_TYPES,
+            default=["Market"],
+            help=(
+                "Which order types the strategy is allowed to submit. "
+                "**Market** orders fill immediately at the current price. "
+                "**Limit** orders fill only at the specified price or better. "
+                "**Stop** orders become market orders once the stop price is hit. "
+                "**Stop-Limit** orders become limit orders once the stop price is hit."
+            ),
+        )
+
+        partial_fills = st.toggle(
+            label="Partial fills",
+            value=False,
+            help=(
+                "Simulate partial order fills based on available bar volume. When disabled, "
+                "orders are filled entirely or not at all."
+            ),
+        )
+
+    with st.container(border=True):
+        st.markdown("**Position constraints**")
+
+        allow_short_selling = st.toggle(
+            label="Allow short selling",
+            value=False,
+            help="Allow the strategy to open short positions (sell assets not currently held).",
+        )
+
+        max_position_size = st.number_input(
+            label="Max position size (% of portfolio)",
+            min_value=1,
+            max_value=100,
+            value=100,
+            step=5,
+            help=(
+                "Maximum allocation to a single position as a percentage of total portfolio value. "
+                "Set to 100% for no concentration limit."
+            ),
+        )
+
+        enable_margin = st.toggle(
+            label="Enable margin trading",
+            value=False,
+            help="Allow the strategy to use leverage by borrowing funds.",
+        )
+
+        if enable_margin:
+            max_leverage = st.number_input(
+                label="Max leverage",
+                min_value=1.0,
+                max_value=10.0,
+                value=1.0,
+                step=0.5,
+                format="%.1f",
+                help=(
+                    "Maximum leverage ratio. A value of 2.0 means the strategy can borrow "
+                    "up to 1× the portfolio value on top of its own capital."
+                ),
+            )
+        else:
+            max_leverage = 1.0
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 7. Engine
+# ═════════════════════════════════════════════════════════════════════════════
+
+with tab7:
+    warmup_period = st.number_input(
+        label="Warmup period (bars)",
+        min_value=0,
+        value=0,
+        step=1,
+        help=(
+            "Number of initial bars to skip before the strategy starts executing. "
+            "During the warmup window indicators are computed but no orders are placed. "
+            "Use this to let moving averages and other lagging indicators stabilize."
+        ),
+    )
+
+    risk_free_rate = st.number_input(
+        label="Risk-free rate (%)",
+        min_value=0.0,
+        max_value=100.0,
+        value=0.0,
+        step=0.1,
+        format="%.2f",
+        help=(
+            "Annualized risk-free rate used for computing the Sharpe ratio and other "
+            "risk-adjusted performance metrics."
+        ),
+    )
+
+    benchmark = st.text_input(
+        label="Benchmark symbol",
+        placeholder="e.g. SPY",
+        max_chars=20,
+        help=(
+            "Optional benchmark ticker for relative performance comparison. Leave empty "
+            "to skip benchmark tracking."
+        ),
+    )
+
+    random_seed = st.number_input(
+        label="Random seed",
+        min_value=0,
+        value=None,
+        step=1,
+        placeholder="Leave empty for non-deterministic",
+        help=(
+            "Fixed seed for the random number generator to ensure reproducible results. "
+            "Leave empty for non-deterministic execution."
+        ),
+    )
+
+    trade_on_close = st.toggle(
+        label="Trade on close",
+        value=False,
+        help=(
+            "When enabled, orders are filled at the current bar's close price. "
+            "When disabled (default), orders are filled at the next bar's open price, "
+            "which is more realistic."
+        ),
+    )
+
+    exclusive_orders = st.toggle(
+        label="Exclusive orders",
+        value=False,
+        help=(
+            "When enabled, submitting a new order automatically cancels all pending "
+            "orders. Useful for strategies that should only have one active order at a time."
         ),
     )
 
@@ -514,3 +772,4 @@ if st.button(
                 f"starting cash {base_cur} {starting_amount:,.2f}.",
                 icon=":material/check_circle:",
             )
+
