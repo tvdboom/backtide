@@ -49,7 +49,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Provider {
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
         // First try a direct downcast
         if let Ok(bound) = obj.cast::<Provider>() {
-            return Ok(bound.borrow().clone());
+            return Ok(*bound.borrow());
         }
 
         // Else parse from string

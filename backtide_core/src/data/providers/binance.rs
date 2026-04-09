@@ -69,9 +69,8 @@ impl Binance {
         }
     }
 
-    /// Guard: return [`DataError::UnsupportedAssetType`] for anything except
-    /// [`AssetType::Crypto`].
-    fn require_crypto(asset_type: AssetType) -> DataResult<()> {
+    /// Checks whether the asset type is supported by the provider.
+    fn check_asset_type(asset_type: AssetType) -> DataResult<()> {
         if asset_type == AssetType::Crypto {
             Ok(())
         } else {
@@ -116,10 +115,7 @@ impl Binance {
             )))?;
         }
 
-        let bars: Vec<BinanceKline> =
-            rows.into_iter().map(|row| BinanceKline::try_from(row)).collect::<DataResult<_>>()?;
-
-        Ok(bars)
+        rows.into_iter().map(BinanceKline::try_from).collect()
     }
 }
 
@@ -128,7 +124,7 @@ impl DataProvider for Binance {
     /// Fetch metadata for a single symbol.
     #[instrument(skip(self), fields(%symbol))]
     async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
-        Self::require_crypto(asset_type)?;
+        Self::check_asset_type(asset_type)?;
 
         let binance_symbol = Self::parse_canonical_symbol(symbol);
 
@@ -153,7 +149,7 @@ impl DataProvider for Binance {
     /// Returns the usable download range for an asset at a given interval.
     #[instrument(skip(self), fields(symbol = %asset.symbol, ?interval))]
     async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
-        Self::require_crypto(asset.asset_type)?;
+        Self::check_asset_type(asset.asset_type)?;
 
         let symbol = Self::parse_canonical_symbol(&asset.symbol);
 
@@ -180,7 +176,7 @@ impl DataProvider for Binance {
     /// List the spot crypto assets traded on Binance, capped at `limit`.
     #[instrument(skip(self), fields(?asset_type, limit))]
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
-        Self::require_crypto(asset_type)?;
+        Self::check_asset_type(asset_type)?;
 
         let resp =
             self.client.get(Self::EXCHANGE_INFO_URL, Some(&[("permissions", "SPOT")])).await?;

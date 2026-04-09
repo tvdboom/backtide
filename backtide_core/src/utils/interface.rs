@@ -46,7 +46,8 @@ pub fn init_logging_with_level(level: LogLevel) {
 /// - backtide.utils:init_logging
 #[pyfunction]
 pub fn clear_cache() -> PyResult<()> {
-    Ok(Engine::get()?.clear_cache())
+    Engine::get()?.clear_cache();
+    Ok(())
 }
 
 /// Initialize the global logging subscriber.

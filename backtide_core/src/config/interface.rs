@@ -1,12 +1,25 @@
-use crate::config::config::{Config, CONFIG};
-use crate::config::errors::ConfigError;
+//! Configuration module.
+//!
+//! Config is loaded once into a process-wide singleton ([`Config::get`]) from
+//! the first `backtide.{toml,yaml,yml,json}` file found in the working
+//! directory or its parent. If no file is found, defaults are used.
+//!
+//! ## Structure
+//!
+//! | Section     | Purpose                                              |
+//! |-------------|------------------------------------------------------|
+//! | `[general]` | Portfolio-wide settings                              |
+//! | `[data]`    | Data fetching and storage settings                   |
+//! | `[display]` | UI / Streamlit app                                   |
+
+use crate::config::errors::{ConfigError, ConfigResult};
 use crate::config::models::log_level::LogLevel;
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
 use crate::config::utils::{fetch_config, parse_config};
 use crate::constants::DEFAULT_STORAGE_PATH;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -15,7 +28,48 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::OnceLock;
 use strum::IntoEnumIterator;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Singleton logic
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Process-wide configuration singleton.
+pub static CONFIG: OnceLock<Config> = OnceLock::new();
+
+/// Backtide configuration.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    /// Portfolio-wide settings.
+    pub general: GeneralConfig,
+
+    /// Settings that control how market data is fetched and stored.
+    pub data: DataConfig,
+
+    /// Settings that control how values are presented in the frontend.
+    pub display: DisplayConfig,
+}
+
+impl Config {
+    /// Return a `&'static` reference to the global configuration.
+    ///
+    /// Initializes from disk on first call; subsequent calls are free.
+    pub fn get() -> ConfigResult<&'static Config> {
+        // Replace block with get_or_try_init when it becomes stable
+        if let Some(cfg) = CONFIG.get() {
+            Ok(cfg)
+        } else {
+            let _ = CONFIG.set(fetch_config()?);
+            Ok(CONFIG.get().unwrap())
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Python API
+// ────────────────────────────────────────────────────────────────────────────
 
 /// Backtide configuration.
 ///
@@ -214,13 +268,12 @@ impl GeneralConfig {
         log_level: Option<LogLevel>,
     ) -> PyResult<Self> {
         Ok(Self {
-            base_currency: base_currency.unwrap_or(Currency::USD),
-            triangulation_strategy: triangulation_strategy
-                .unwrap_or(TriangulationStrategy::default()),
-            triangulation_fiat: triangulation_fiat.unwrap_or(Currency::USD),
+            base_currency: base_currency.unwrap_or_default(),
+            triangulation_strategy: triangulation_strategy.unwrap_or_default(),
+            triangulation_fiat: triangulation_fiat.unwrap_or_default(),
             triangulation_crypto: triangulation_crypto.to_owned(),
-            triangulation_crypto_pegged: triangulation_crypto_pegged.unwrap_or(Currency::USD),
-            log_level: log_level.unwrap_or(LogLevel::default()),
+            triangulation_crypto_pegged: triangulation_crypto_pegged.unwrap_or_default(),
+            log_level: log_level.unwrap_or_default(),
         })
     }
 
@@ -298,9 +351,9 @@ impl DataConfig {
                 .into_iter()
                 .map(|(k, v)| {
                     let asset_type = AssetType::from_str(&k)
-                        .map_err(|_| PyValueError::new_err(format!("Invalid asset type: {k}")))?;
+                        .map_err(|_| PyValueError::new_err(format!("Unknown asset type: {k}")))?;
                     let provider = Provider::from_str(&v)
-                        .map_err(|_| PyValueError::new_err(format!("Invalid provider: {v}")))?;
+                        .map_err(|_| PyValueError::new_err(format!("Unknown provider: {v}")))?;
                     Ok((asset_type, provider))
                 })
                 .collect::<PyResult<HashMap<_, _>>>()?,

@@ -1,7 +1,7 @@
 //! Implementation of storage related methods for [`Engine`].
 
 use crate::data::models::interval::Interval;
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use crate::storage::errors::StorageResult;
 use crate::storage::models::bar_series::BarSeries;

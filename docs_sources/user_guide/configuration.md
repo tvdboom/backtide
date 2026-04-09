@@ -22,6 +22,10 @@ If no file is found, the built-in defaults are used.
     ```toml title="backtide.config.toml"
     [general]
     base_currency = "USD"
+    triangulation_strategy = "direct"
+    triangulation_fiat = "USD"
+    triangulation_crypto = "USDT"
+    triangulation_crypto_pegged = "USD"
     log_level = "warn"
 
     [data]
@@ -43,6 +47,10 @@ If no file is found, the built-in defaults are used.
     ```yaml title="backtide.config.yaml"
     general:
         base_currency: USD
+        triangulation_strategy: direct
+        triangulation_fiat: USD
+        triangulation_crypto: USDT
+        triangulation_crypto_pegged: USD
         log_level: warn
 
     data:
@@ -57,6 +65,7 @@ If no file is found, the built-in defaults are used.
         date_format: "YYYY-MM-DD"
         time_format: "HH:MM"
         timezone: null
+        logokit_api_key: null
         address: null
         port: 8501
     ```
@@ -66,7 +75,11 @@ If no file is found, the built-in defaults are used.
     {
         "general": {
             "base_currency": "USD",
-            "log_level": "warn",
+            "triangulation_strategy": "direct",
+            "triangulation_fiat": "USD",
+            "triangulation_crypto": "USDT",
+            "triangulation_crypto_pegged": "USD",
+            "log_level": "warn"
         },
         "data": {
             "storage_path": ".backtide",
@@ -81,8 +94,9 @@ If no file is found, the built-in defaults are used.
             "date_format": "YYYY-MM-DD",
             "time_format": "HH:MM",
             "timezone": null,
+            "logokit_api_key": null,
             "address": null,
-            "port": 8501,
+            "port": 8501
         }
     }
     ```

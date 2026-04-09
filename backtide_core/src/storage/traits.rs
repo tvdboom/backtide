@@ -1,7 +1,7 @@
 //! Trait that storage solutions must implement.
 
 use crate::data::models::interval::Interval;
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 use crate::storage::errors::StorageResult;
 use crate::storage::models::bar_series::BarSeries;
 use crate::storage::models::storage_summary::StorageSummary;

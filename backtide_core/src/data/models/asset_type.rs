@@ -1,4 +1,4 @@
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 use pyo3::exceptions::PyValueError;
 use pyo3::{pyclass, pymethods, Borrowed, Bound, FromPyObject, Py, PyAny, PyErr, PyResult, Python};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -114,7 +114,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for AssetType {
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
         // First try a direct downcast
         if let Ok(bound) = obj.cast::<AssetType>() {
-            return Ok(bound.borrow().clone());
+            return Ok(*bound.borrow());
         }
 
         // Else parse from string

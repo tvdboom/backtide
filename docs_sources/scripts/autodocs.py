@@ -526,7 +526,7 @@ class AutoDocs:
 # Functions ======================================================== >>
 
 
-def render(markdown: str, **kwargs) -> str:
+def render(markdown: str, **kwargs) -> str:  # noqa: ARG001
     """Render the markdown page.
 
     This function is the landing point for the mkdocs-simple-hooks

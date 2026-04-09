@@ -9,3 +9,4 @@ pub mod download_result;
 pub mod exchange;
 pub mod forex_pair;
 pub mod interval;
+pub mod provider;

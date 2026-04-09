@@ -128,7 +128,7 @@ def download(symbols, asset_type, interval, start, end, log_level):
     intervals = list(interval)
     symbols = list(symbols)
 
-    click.echo(f"📊  Resolving downloads...")
+    click.echo("📊  Resolving downloads...")
 
     info = get_download_info(symbols, asset_type, intervals)
 
@@ -146,7 +146,7 @@ def download(symbols, asset_type, interval, start, end, log_level):
     if result.n_failed and result.n_succeeded:
         click.echo(
             f"✅  Done ({result.n_succeeded}/{result.n_succeeded + result.n_failed} "
-            f"assets downloaded)."
+            f"assets downloaded).",
         )
     elif result.n_failed:
         click.echo(f"❌  All {result.n_failed} downloads failed.", err=True)

@@ -16,4 +16,3 @@
     toc_only: False
     include:
         - intervals
-

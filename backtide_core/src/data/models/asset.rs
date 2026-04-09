@@ -98,6 +98,7 @@ impl Asset {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,

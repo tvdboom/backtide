@@ -65,9 +65,8 @@ impl Coinbase {
         }
     }
 
-    /// Guard: return [`DataError::UnsupportedAssetType`] for anything except
-    /// [`AssetType::Crypto`].
-    fn require_crypto(asset_type: AssetType) -> DataResult<()> {
+    /// Checks whether the asset type is supported by the provider.
+    fn check_asset_type(asset_type: AssetType) -> DataResult<()> {
         if asset_type == AssetType::Crypto {
             Ok(())
         } else {
@@ -132,7 +131,7 @@ impl DataProvider for Coinbase {
     /// Fetch metadata for a single symbol.
     #[instrument(skip(self), fields(%symbol))]
     async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
-        Self::require_crypto(asset_type)?;
+        Self::check_asset_type(asset_type)?;
 
         let info = self.get_product_info(symbol).await?;
 
@@ -142,7 +141,7 @@ impl DataProvider for Coinbase {
     /// Returns the usable download range for an asset at a given interval.
     #[instrument(skip(self), fields(symbol = %asset.symbol, ?interval))]
     async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
-        Self::require_crypto(asset.asset_type)?;
+        Self::check_asset_type(asset.asset_type)?;
 
         let product_id = asset.symbol.clone();
         let latest_bars = self.get_bars(&product_id, interval, None, None).await?;
@@ -189,7 +188,7 @@ impl DataProvider for Coinbase {
     /// List the spot crypto assets traded on Coinbase, capped at `limit`.
     #[instrument(skip(self), fields(?asset_type, limit))]
     async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
-        Self::require_crypto(asset_type)?;
+        Self::check_asset_type(asset_type)?;
 
         let resp = self
             .client

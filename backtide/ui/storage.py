@@ -16,10 +16,10 @@ from backtide.core.data import AssetType
 from backtide.core.storage import delete_rows, get_summary
 from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @st.dialog("Confirm deletion", width="medium")
 def _confirm_delete(series: list[dict[str, str]]):
@@ -112,9 +112,13 @@ selected = df.iloc[indices] if indices else df
 
 with metrics_container:
     col1, col2, col3 = st.columns(3)
-    col1.metric(":material/trending_up: Number of symbols", selected["Symbol"].nunique(), border=True)
+    col1.metric(
+        ":material/trending_up: Number of symbols", selected["Symbol"].nunique(), border=True
+    )
     col2.metric(":material/view_list: Number of series", _fmt_number(len(selected)), border=True)
-    col3.metric(":material/candlestick_chart: Total bars", _fmt_number(selected["Bars"].sum()), border=True)
+    col3.metric(
+        ":material/candlestick_chart: Total bars", _fmt_number(selected["Bars"].sum()), border=True
+    )
 
 if indices:
     if st.button(f"Delete {len(indices)} series", type="primary", icon=":material/delete:"):

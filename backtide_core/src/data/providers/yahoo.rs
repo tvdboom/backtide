@@ -137,7 +137,7 @@ impl YahooFinance {
         })
         .await?;
 
-        Ok(quotes.into_iter().map(Asset::try_from).collect::<DataResult<_>>()?)
+        quotes.into_iter().map(Asset::try_from).collect()
     }
 
     /// Paginate the custom POST screener with an arbitrary query predicate.
@@ -177,7 +177,7 @@ impl YahooFinance {
         })
         .await?;
 
-        Ok(quotes.into_iter().map(Asset::try_from).collect::<DataResult<_>>()?)
+        quotes.into_iter().map(Asset::try_from).collect()
     }
 
     /// Validate HTTP status then deserialize a screener response into quotes.
@@ -314,14 +314,12 @@ impl YahooFinance {
             .map(|a| a.adjclose)
             .unwrap_or_default();
 
-        let len = timestamps.len();
-        let mut bars = Vec::with_capacity(len);
-
-        for i in 0..len {
-            let raw_ts = timestamps[i];
+        let mut bars = vec![];
+        for (i, raw_ts) in timestamps.into_iter().enumerate() {
             if raw_ts < 0 {
                 continue;
             }
+
             let open_ts = raw_ts as u64;
             let open = quote.open.get(i).and_then(|v| *v);
             let high = quote.high.get(i).and_then(|v| *v);

@@ -1,7 +1,7 @@
 //! Python interface for the storage module.
 
 use crate::data::models::interval::Interval;
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use crate::storage::models::storage_summary::StorageSummary;
 use pyo3::prelude::*;

@@ -4,7 +4,7 @@
 //! any part of the Python interface. Logic per module (download, backtest, etc...)
 //! are implemented directly on the engine.
 
-use crate::config::config::Config;
+use crate::config::interface::Config;
 use crate::constants::Symbol;
 use crate::data::models::asset::Asset;
 use crate::data::models::asset_type::AssetType;
@@ -12,7 +12,7 @@ use crate::data::models::interval::Interval;
 use crate::data::providers::binance::Binance;
 use crate::data::providers::coinbase::Coinbase;
 use crate::data::providers::kraken::Kraken;
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 use crate::data::providers::traits::DataProvider;
 use crate::data::providers::yahoo::YahooFinance;
 use crate::errors::EngineResult;

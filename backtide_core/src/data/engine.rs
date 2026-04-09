@@ -8,10 +8,10 @@ use crate::data::models::asset_meta::AssetMeta;
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
 use crate::data::models::download_info::DownloadInfo;
-use crate::data::models::forex_pair::ForexPair;
 use crate::data::models::download_result::DownloadResult;
+use crate::data::models::forex_pair::ForexPair;
 use crate::data::models::interval::Interval;
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use crate::errors::EngineResult;
 use crate::storage::models::bar_series::BarSeries;
@@ -90,9 +90,8 @@ impl Engine {
                 let resolved = self
                     .resolve_legs(
                         quote,
-                        &base_currency,
-                        mid,
-                        mid_pegged,
+                        base_currency,
+                        (mid, mid_pegged),
                         at,
                         &intervals,
                         tri_strategy,
@@ -397,20 +396,19 @@ impl Engine {
     async fn triangulate(
         &self,
         quote: &str,
-        mid: &str,
-        mid_pegged: &str,
+        mid: (&str, &str),
         base: &str,
         at: AssetType,
         intervals: &[Interval],
     ) -> DataResult<Vec<Asset>> {
         let mut legs = Vec::new();
 
-        if quote != mid {
-            legs.push(self.load_asset_bidirectional(quote, mid, at, intervals).await?);
+        if quote != mid.0 {
+            legs.push(self.load_asset_bidirectional(quote, mid.0, at, intervals).await?);
         }
 
-        if mid_pegged != base {
-            legs.push(self.load_asset_bidirectional(mid_pegged, base, at, intervals).await?);
+        if mid.1 != base {
+            legs.push(self.load_asset_bidirectional(mid.1, base, at, intervals).await?);
         }
 
         if legs.is_empty() {
@@ -428,8 +426,7 @@ impl Engine {
         &self,
         quote: &str,
         base: &str,
-        mid: &str,
-        mid_pegged: &str,
+        mid: (&str, &str),
         at: AssetType,
         intervals: &[Interval],
         strategy: TriangulationStrategy,
@@ -439,10 +436,10 @@ impl Engine {
         match strategy {
             TriangulationStrategy::Direct => match direct {
                 Ok(leg) => Ok(vec![leg]),
-                Err(_) => self.triangulate(quote, mid, mid_pegged, base, at, intervals).await,
+                Err(_) => self.triangulate(quote, mid, base, at, intervals).await,
             },
             TriangulationStrategy::Earliest => {
-                let tri = self.triangulate(quote, mid, mid_pegged, base, at, intervals).await;
+                let tri = self.triangulate(quote, mid, base, at, intervals).await;
                 match (direct, tri) {
                     (Ok(d), Ok(t)) => {
                         // Check the history of all legs

@@ -1,8 +1,8 @@
-use crate::config::config::Config;
 use crate::config::errors::{ConfigError, ConfigResult};
+use crate::config::interface::Config;
 use crate::constants::CONFIG_FILE_NAME;
 use crate::data::models::asset_type::AssetType;
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

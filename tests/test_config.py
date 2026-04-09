@@ -64,11 +64,11 @@ def test_config_repr():
 
 def test_invalid_provider_raises():
     """Invalid provider raises ValueError."""
-    with pytest.raises(ValueError, match=r".*Invalid provider.*"):
+    with pytest.raises(ValueError, match=r".*Unknown provider.*"):
         DataConfig(providers={"crypto": "invalid"})
 
 
 def test_invalid_currency_raises():
     """Invalid base currency raises ValueError."""
-    with pytest.raises(ValueError, match=r".*Invalid base_currency.*"):
+    with pytest.raises(ValueError, match=r".*Unknown currency.*"):
         Config(GeneralConfig(base_currency="invalid"))

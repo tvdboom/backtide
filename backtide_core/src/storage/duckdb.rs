@@ -1,7 +1,7 @@
 //! DuckDB storage solution.
 
 use crate::data::models::interval::Interval;
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 use crate::storage::errors::StorageResult;
 use crate::storage::models::bar_series::BarSeries;
 use crate::storage::models::storage_summary::StorageSummary;
@@ -20,7 +20,7 @@ pub struct DuckDb {
 
 impl DuckDb {
     pub fn new(path: &PathBuf) -> StorageResult<Self> {
-        create_dir_all(&path)?;
+        create_dir_all(path)?;
 
         Ok(Self {
             conn: Mutex::new(Connection::open(path.join("database.duckdb"))?),

@@ -3,7 +3,6 @@ use crate::config::models::log_level::LogLevel;
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
 use pyo3::prelude::*;
 
-pub mod config;
 pub mod errors;
 pub mod interface;
 pub mod models;

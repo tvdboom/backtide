@@ -9,7 +9,7 @@ use crate::data::models::download_info::DownloadInfo;
 use crate::data::models::download_result::DownloadResult;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::interval::Interval;
-use crate::data::providers::provider::Provider;
+use models::provider::Provider;
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 

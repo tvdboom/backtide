@@ -126,7 +126,6 @@ section-order = [
     "future",
     "standard-library",
     "third-party",
-    "known-first-party",
     "first-party",
     "local-folder",
 ]

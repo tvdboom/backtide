@@ -1,7 +1,7 @@
 use crate::data::models::asset_type::AssetType;
 use crate::data::models::bar::Bar;
 use crate::data::models::interval::Interval;
-use crate::data::providers::provider::Provider;
+use crate::data::models::provider::Provider;
 
 /// One batch of bars sharing the same keys.
 ///
@@ -22,4 +22,3 @@ pub struct BarSeries {
     /// OHLCV bars to persist. May be empty, in which case the series is skipped.
     pub bars: Vec<Bar>,
 }
-

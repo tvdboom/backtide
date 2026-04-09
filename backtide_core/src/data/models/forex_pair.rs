@@ -31,6 +31,7 @@ use strum::{EnumIter, EnumString};
     DeserializeFromStr,
 )]
 #[strum(ascii_case_insensitive)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum ForexPair {
     AUDCAD,
     AUDCHF,
@@ -221,7 +222,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ForexPair {
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, PyErr> {
         // First try a direct downcast
         if let Ok(bound) = obj.cast::<ForexPair>() {
-            return Ok(bound.borrow().clone());
+            return Ok(*bound.borrow());
         }
 
         // Else parse from string
