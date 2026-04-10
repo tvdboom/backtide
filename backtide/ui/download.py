@@ -367,6 +367,7 @@ asset_type = st.segmented_control(
     label="Asset type",
     key="asset_type",
     options=AssetType.variants(),
+    default=AssetType.get_default(),
     format_func=lambda at: f"{at.icon()} {at}",
     on_change=_prevent_deselection(
         key="asset_type",
@@ -376,7 +377,7 @@ asset_type = st.segmented_control(
     help="Select the type of financial asset you want to download.",
 )
 
-all_assets = _list_symbols(st.session_state.asset_type)
+all_assets = _list_symbols(asset_type)
 
 # Filter assets based on the selected currency
 if currency := st.session_state.get("currency"):
@@ -389,7 +390,7 @@ else:
     filtered_assets = all_assets
 
 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
-asset_d, currency_d = _get_asset_type_description(st.session_state.asset_type)
+asset_d, currency_d = _get_asset_type_description(asset_type)
 
 symbols = col1.multiselect(
     label="Symbols",
