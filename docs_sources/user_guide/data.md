@@ -75,15 +75,6 @@ Important caveats:
 - Binance symbol formatting differs from Backtide's canonical format, but the
   translation is handled automatically.
 
-### Coinbase
-
-- Supports crypto only.
-- Asset discovery only includes online spot products.
-
-Important caveats:
-
-- Coinbase does not support the `1w` interval.
-
 ### Kraken
 
 - Supports crypto and forex.
@@ -100,7 +91,7 @@ Important caveats:
 
     Kraken lists major forex pairs such as `EUR-USD` and `GBP-USD` alongside
     its crypto offerings. You can point the [forex provider][nom-provider] at
-    Kraken so that [currency-conversion] legs are sourced from the same exchange
+    Kraken so that [currency conversion] legs are sourced from the same exchange
     as your crypto trades. This is useful when you want to model a Kraken-only
     portfolio and keep all price data consistent with a single provider.
 
@@ -109,6 +100,15 @@ Important caveats:
     forex  = "kraken"
     crypto = "kraken"
     ```
+
+### Coinbase
+
+- Supports crypto only.
+- Asset discovery only includes online spot products.
+
+Important caveats:
+
+- Coinbase does not support the `1w` interval.
 
 <br>
 

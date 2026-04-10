@@ -135,6 +135,7 @@ force-sort-within-sections = true
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Unused imports
 "app.py" = ["E501"]  # Line too long
+"backtest.py" = ["F401"]  # Unused imports
 "config.py" = ["F401"]  # Unused imports
 "data.py" = ["F401"]  # Unused imports
 "storage.py" = ["F401"]  # Unused imports

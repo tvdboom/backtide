@@ -1,11 +1,11 @@
-mod backtest;
-mod config;
-mod constants;
-mod data;
-mod engine;
-mod errors;
-mod storage;
-mod utils;
+pub mod backtest;
+pub mod config;
+pub mod constants;
+pub mod data;
+pub mod engine;
+pub mod errors;
+pub mod storage;
+pub mod utils;
 
 use pyo3::prelude::*;
 

@@ -108,8 +108,8 @@ deployment. Click on the icons to read more about its main functionalities.
 
 ## Support
 
-ATOM recognizes the support from [JetBrains](http://www.jetbrains.com) by providing
-core project contributors with a set of developer tools free of charge.
+Backtide recognizes the support from [JetBrains](http://www.jetbrains.com) by providing core project
+contributors with a set of developer tools free of charge.
 
 <div align="center" markdown>
   [![JetBrains](img/support/jetbrains.png){ .icon width="200" height="200" }](https://www.jetbrains.com/community/opensource/#support)
@@ -121,36 +121,36 @@ core project contributors with a set of developer tools free of charge.
 
 <br>
 
-## Integrations
+## Data integrations
 
 <br>
 
 <div class="row">
   <div class="column">
     <div class="logo">
-      <a href="../user_guide/app" draggable="false">
-        <img src="../img/integrations/streamlit.png" alt="streamlit" draggable="false">
-      </a>
-    </div>
-  </div>
-  <div class="column">
-    <div class="logo">
-      <a href="../user_guide/data/#providers" draggable="false">
+      <a href="../user_guide/data/#yahoo-finance" draggable="false">
         <img src="../img/integrations/yahoo.png" alt="yahoo" draggable="false">
       </a>
     </div>
   </div>
   <div class="column">
     <div class="logo">
-      <a href="../API/data/#providers" draggable="false">
+      <a href="../user_guide/data/#binance" draggable="false">
         <img src="../img/integrations/binance.png" alt="binance" draggable="false">
       </a>
     </div>
   </div>
   <div class="column">
     <div class="logo">
-      <a href="/API/data/#providers" draggable="false">
+      <a href="../user_guide/data/#kraken" draggable="false">
         <img src="../img/integrations/kraken.png" alt="kraken" draggable="false">
+      </a>
+    </div>
+  </div>
+  <div class="column">
+    <div class="logo">
+      <a href="../user_guide/data/#coinbase" draggable="false">
+        <img src="../img/integrations/coinbase.png" alt="coinbase" draggable="false">
       </a>
     </div>
   </div>
