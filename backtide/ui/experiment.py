@@ -9,6 +9,7 @@ import ast
 from datetime import datetime
 import json
 import tomllib
+import uuid
 
 from code_editor import code_editor
 import streamlit as st
@@ -40,6 +41,10 @@ from backtide.utils.constants import (
 
 cfg = get_config()
 
+# Generate a stable experiment GUID for this session (regenerated only on explicit reset)
+if "experiment_guid" not in st.session_state:
+    st.session_state.experiment_guid = str(uuid.uuid4())
+
 st.set_page_config(page_title="Backtide - Experiment", layout="centered")
 st.title("Experiment", text_alignment="center")
 
@@ -63,7 +68,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
 with tab1:
     experiment_name = st.text_input(
         label="Experiment name",
-        placeholder="Insert name...",
+        placeholder=st.session_state.experiment_guid,
         max_chars=60,
         help=(
             "A human-readable name to identify this experiment (optional). "
@@ -356,7 +361,7 @@ with tab4:
     if "custom_strategies" not in st.session_state:
         st.session_state.custom_strategies = []
 
-    st.markdown("**Strategies**")
+    st.markdown("**Custom strategies**")
     st.caption(
         "Add one or more custom strategy functions. Each strategy is evaluated "
         "independently during the simulation.",
@@ -367,7 +372,12 @@ with tab4:
     for i, strategy_entry in enumerate(st.session_state.custom_strategies):
         with st.container(border=True):
             header_col, remove_col = st.columns([5, 1], vertical_alignment="center")
-            header_col.markdown(f"**Strategy {i + 1}**")
+            header_col.text_input(
+                label="Strategy name",
+                key=f"strategy_name_{i}",
+                placeholder=f"Strategy {i + 1}",
+                label_visibility="collapsed",
+            )
 
             if remove_col.button(
                 label="Remove",
@@ -452,9 +462,10 @@ with tab4:
 with tab5:
     st.caption(
         "Indicators are mathematical functions applied to price and volume data that "
-        "quantify trends, momentum, volatility and other market characteristics. All "
-        "selected indicators are computed up-front over the full dataset before the "
-        "simulation begins, so they add no per-tick overhead and keep your strategy fast.",
+        "quantify trends, momentum, volatility and other market characteristics. The "
+        "computed values can then be sued in your strategy to make investment decisions. "
+        "All selected indicators are computed up-front over the full dataset before the "
+        "simulation begins, so they add no per-tick overhead.",
     )
 
     selected_indicators = st.multiselect(
@@ -464,8 +475,8 @@ with tab5:
         default=[],
         placeholder="Select indicators...",
         help=(
-            "Choose zero or more premade indicators to compute on each bar. "
-            "They will be available in your strategy function via the `indicators` argument."
+            "Choose zero or more predefined indicators to compute on each bar. They will "
+            "be available in your strategy function via the `indicators` argument."
         ),
     )
 
@@ -510,7 +521,12 @@ with tab5:
     for i, indicator_entry in enumerate(st.session_state.custom_indicators):
         with st.container(border=True):
             header_col, remove_col = st.columns([5, 1], vertical_alignment="center")
-            header_col.markdown(f"**Indicator {i + 1}**")
+            header_col.text_input(
+                label="Indicator name",
+                key=f"indicator_name_{i}",
+                placeholder=f"Indicator {i + 1}",
+                label_visibility="collapsed",
+            )
 
             if remove_col.button(
                 label="Remove",
@@ -601,10 +617,11 @@ with tab6:
         col_radio, col_inputs = st.columns([2, 3], vertical_alignment="top")
 
         with col_radio:
+            variants = CommissionType.variants()
             commission_mode = st.radio(
                 label="Commission type",
-                options=CommissionType.variants(),
-                index=0,
+                options=variants,
+                index=variants.index(CommissionType.get_default()),
                 horizontal=False,
                 help=(
                     "How trading commissions are calculated. **Percentage** charges a fraction "
@@ -707,7 +724,6 @@ with tab6:
             ),
         )
 
-    # ── Margin trading ─────────────────────────────────────────────────────
     with st.container(border=True):
         st.markdown("**Margin trading**")
 
@@ -783,7 +799,6 @@ with tab6:
         else:
             max_leverage = 1.0
 
-    # ── Short selling ──────────────────────────────────────────────────────
     with st.container(border=True):
         st.markdown("**Short selling**")
 
@@ -812,7 +827,6 @@ with tab6:
                 ),
             )
 
-    # ── Position limits ────────────────────────────────────────────────────
     with st.container(border=True):
         st.markdown("**Position limits**")
 
@@ -829,15 +843,15 @@ with tab6:
             ),
         )
 
-    # ── Currency conversion ────────────────────────────────────────────────
     with st.container(border=True):
         st.markdown("**Currency conversion**")
 
+        variants = CurrencyConversionMode.variants()
         conversion_mode = st.selectbox(
             label="Foreign currency handling",
-            options=CurrencyConversionMode.variants(),
-            format_func=lambda x: x.description(),
-            index=CurrencyConversionMode.variants().index(CurrencyConversionMode.get_default()),
+            options=variants,
+            format_func=lambda x: x.name,
+            index=variants.index(CurrencyConversionMode.get_default()),
             help=(
                 "Determines how proceeds in a foreign currency are converted back to "
                 "the base currency. **Immediately** converts at the time of the trade. "
@@ -861,10 +875,11 @@ with tab6:
                 ),
             )
         elif conversion_mode == CurrencyConversionMode("EndOfPeriod"):
+            variants = ConversionPeriod.variants()
             conversion_period = st.selectbox(
                 label="Conversion period",
-                options=ConversionPeriod.variants(),
-                index=0,
+                options=variants,
+                index=variants.index(ConversionPeriod.get_default()),
                 help="How often foreign currency balances are converted to the base currency.",
             )
         elif conversion_mode == CurrencyConversionMode("CustomInterval"):
@@ -960,14 +975,15 @@ with tab7:
             ),
         )
 
-    # ── Data handling ──────────────────────────────────────────────────────
     with st.container(border=True):
         st.markdown("**Data handling**")
 
+        variants = EmptyBarPolicy.variants()
         empty_bar_policy = st.selectbox(
             label="Empty bar policy",
-            options=EmptyBarPolicy.variants(),
-            index=1,
+            options=variants,
+            format_func=lambda x: x.name,
+            index=variants.index(EmptyBarPolicy.get_default()),
             help=(
                 "How to handle bars with no trading activity (e.g. market closures during "
                 "intraday backtests, holidays or illiquid periods).\n\n"
@@ -997,7 +1013,7 @@ if st.button(
     elif not full_history and start_date > end_date:  # ty:ignore[unsupported-operator]
         st.error("Start date must be equal or prior to end date.", icon=":material/error:")
     else:
-        display_name = experiment_name or "(unnamed)"
+        display_name = experiment_name or st.session_state.experiment_guid
         base_cur = st.session_state.get("base_currency", Currency.get_default())
         date_range = f"{start_date} → {end_date}" if not full_history else "full history"
         with st.spinner(f'Running "{display_name}"...'):

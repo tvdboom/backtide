@@ -9,6 +9,11 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// (e.g. market closures during intraday backtests, holidays
 /// or illiquid periods).
 ///
+/// Attributes
+/// ----------
+/// name : str
+///     The human-readable display name of the variant.
+///
 /// See Also
 /// --------
 /// - backtide.data:Bar
@@ -59,7 +64,13 @@ impl EmptyBarPolicy {
         *self as u64
     }
 
-    pub fn __str__(&self) -> &'static str {
+    pub fn __str__(&self) -> String {
+        self.to_string()
+    }
+
+    /// The human-readable display name of the variant.
+    #[getter]
+    pub fn name(&self) -> &'static str {
         match self {
             Self::Skip => "Skip",
             Self::ForwardFill => "Forward-fill",

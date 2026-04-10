@@ -7,5 +7,3 @@
     :: table:
         - attributes
     :: see also
-
- 

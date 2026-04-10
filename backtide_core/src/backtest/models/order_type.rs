@@ -12,8 +12,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// Attributes
 /// ----------
 /// name : str
-///     The human-readable display name of the order type
-///     (e.g. ``"Stop-Loss"``).
+///     The human-readable display name of the variant.
 ///
 /// See Also
 /// --------
@@ -75,7 +74,7 @@ impl OrderType {
         self.to_string()
     }
 
-    /// The human-readable display name of the order type.
+    /// The human-readable display name of the variant.
     #[getter]
     pub fn name(&self) -> &'static str {
         match self {

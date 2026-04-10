@@ -126,7 +126,7 @@ pub fn get_assets(symbols: Bound<'_, PyAny>, asset_type: Bound<'_, PyAny>) -> Py
 /// print(get_download_info(["AAPL", "MSFT"], "stocks", "1d"))
 /// ```
 #[pyfunction]
-#[pyo3(signature = (symbols: "str | Asset | Sequence[int | Asset]", asset_type: "str | AssetType", interval: "str | Interval | Sequcen[str | Interval]") -> "DownloadInfo")]
+#[pyo3(signature = (symbols: "str | Asset | Sequence[int | Asset]", asset_type: "str | AssetType", interval: "str | Interval | Sequence[str | Interval]") -> "DownloadInfo")]
 pub fn get_download_info(
     symbols: Bound<'_, PyAny>,
     asset_type: Bound<'_, PyAny>,
@@ -182,9 +182,7 @@ pub fn list_assets(asset_type: Bound<'_, PyAny>, limit: usize) -> PyResult<Vec<A
 /// Download OHLCV data for the symbols described in a [`DownloadInfo`].
 ///
 /// Concurrently downloads all assets and legs, skipping data already stored
-/// in the database.  The download is gap-free: if the connection drops
-/// mid-way, only the contiguous prefix is persisted so a subsequent call
-/// can resume cleanly.
+/// in the database.
 ///
 /// Parameters
 /// ----------

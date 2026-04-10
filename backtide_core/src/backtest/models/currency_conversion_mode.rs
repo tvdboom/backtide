@@ -9,6 +9,11 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// balances are exchanged. The chosen mode affects cash flow timing
 /// and may influence simulation results when exchange rates fluctuate.
 ///
+/// Attributes
+/// ----------
+/// name : str
+///     The human-readable display name of the variant.
+///
 /// See Also
 /// --------
 /// - backtide.backtest:ConversionPeriod
@@ -65,8 +70,9 @@ impl CurrencyConversionMode {
         self.to_string()
     }
 
-    /// A short description of the variant.
-    pub fn description(&self) -> &'static str {
+    /// The human-readable display name of the variant.
+    #[getter]
+    pub fn name(&self) -> &'static str {
         match self {
             Self::Immediate => "Immediately convert to base currency",
             Self::HoldUntilThreshold => "Hold until threshold, then convert",
