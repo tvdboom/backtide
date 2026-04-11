@@ -17,8 +17,8 @@ use crate::config::models::log_level::LogLevel;
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
 use crate::config::utils::{fetch_config, parse_config};
 use crate::constants::DEFAULT_STORAGE_PATH;
-use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::provider::Provider;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -192,23 +192,23 @@ impl PyConfig {
 ///     The fiat currency used as an intermediate between a fiat currency and
 ///     `base_currency`. This method is chosen when no direct conversion path exists
 ///     or when this method has longer history and `triangulation_strategy="earliest"`
-///     For example, if converting `PLN → THB` and no `PLN-THB` pair is available, the
-///     engine will route through this currency as `PLN` → `triangulation_fiat` → `THB`.
+///     For example, if converting `PLN â†’ THB` and no `PLN-THB` pair is available, the
+///     engine will route through this currency as `PLN` â†’ `triangulation_fiat` â†’ `THB`.
 ///     The chosen currency is expected to have pairs with all the currencies the
 ///     project works with.
 ///
 /// triangulation_crypto : str, default="USDT"
 ///     The cryptocurrency used as an intermediate when no direct conversion
 ///     path exists between a crypto and `base_currency`. For example, to calculate
-///     the value of `BTC`, the engine will route `BTC` → `triangulation_crypto` →
-///     `triangulation_crypto_pegged` → `base_currency`. The selected crypto is
+///     the value of `BTC`, the engine will route `BTC` â†’ `triangulation_crypto` â†’
+///     `triangulation_crypto_pegged` â†’ `base_currency`. The selected crypto is
 ///     expected to be a stablecoin pegged to the `triangulation_crypto_pegged`
 ///     fiat currency.
 ///
 /// triangulation_crypto_pegged : str, default="USD"
 ///     The fiat currency to which `triangulation_crypto` is pegged, for the
 ///     purposes of bridging between the crypto and fiat conversion graphs. When
-///     a conversion path crosses the crypto/fiat boundary (e.g., `USDT → USD`),
+///     a conversion path crosses the crypto/fiat boundary (e.g., `USDT â†’ USD`),
 ///     the engine treats `triangulation_crypto`/`triangulation_crypto_pegged`
 ///     as the crossing pair at parity 1:1.
 ///
@@ -311,7 +311,7 @@ impl GeneralConfig {
 ///     File-system path to the location to store the database and cache.
 ///
 /// providers : dict[str, str] | None, default=None
-///     Which data provider to use for each asset type. If `None`, it
+///     Which data provider to use for each instrument type. If `None`, it
 ///     defaults to `{"stocks": "yahoo", "etf": "yahoo", "forex": "yahoo",
 ///     "crypto": "binance"}`.
 ///
@@ -326,14 +326,14 @@ impl GeneralConfig {
 pub struct DataConfig {
     pub storage_path: PathBuf,
     #[serde(deserialize_with = "crate::config::utils::deserialize_providers")]
-    pub providers: HashMap<AssetType, Provider>,
+    pub providers: HashMap<InstrumentType, Provider>,
 }
 
 impl Default for DataConfig {
     fn default() -> Self {
         Self {
             storage_path: PathBuf::from(DEFAULT_STORAGE_PATH),
-            providers: AssetType::iter().map(|at| (at, at.default())).collect(),
+            providers: InstrumentType::iter().map(|at| (at, at.default())).collect(),
         }
     }
 }
@@ -350,11 +350,12 @@ impl DataConfig {
             Some(map) => map
                 .into_iter()
                 .map(|(k, v)| {
-                    let asset_type = AssetType::from_str(&k)
-                        .map_err(|_| PyValueError::new_err(format!("Unknown asset type: {k}")))?;
+                    let instrument_type = InstrumentType::from_str(&k).map_err(|_| {
+                        PyValueError::new_err(format!("Unknown instrument type: {k}"))
+                    })?;
                     let provider = Provider::from_str(&v)
                         .map_err(|_| PyValueError::new_err(format!("Unknown provider: {v}")))?;
-                    Ok((asset_type, provider))
+                    Ok((instrument_type, provider))
                 })
                 .collect::<PyResult<HashMap<_, _>>>()?,
             None => DataConfig::default().providers,
@@ -368,7 +369,7 @@ impl DataConfig {
 
     fn __repr__(&self) -> String {
         let providers = {
-            let pairs: Vec<String> = AssetType::iter()
+            let pairs: Vec<String> = InstrumentType::iter()
                 .map(|k| {
                     let default = k.default();
                     format!("\"{k}\": \"{}\"", self.providers.get(&k).unwrap_or(&default))
@@ -411,7 +412,7 @@ impl DataConfig {
 ///     IANA timezone name. `None` to use the system's local timezone.
 ///
 /// logokit_api_key : str or None, default=None
-///     API key for the [logokit] website, which is used to fetch images for assets.
+///     API key for the [logokit] website, which is used to fetch images for instruments.
 ///     If `None`, no images are loaded.
 ///
 /// address : str | None, default=None

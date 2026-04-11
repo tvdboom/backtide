@@ -1,12 +1,11 @@
-pub mod asset;
-pub mod asset_meta;
-pub mod asset_type;
 pub mod bar;
 pub mod country;
 pub mod currency;
-pub mod download_info;
 pub mod download_result;
 pub mod exchange;
 pub mod forex_pair;
+pub mod instrument;
+pub mod instrument_profile;
+pub mod instrument_type;
 pub mod interval;
 pub mod provider;

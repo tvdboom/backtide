@@ -1,16 +1,16 @@
 //! Yahoo Finance data provider.
 //!
-//! Authenticates via a session cookie + CSRF crumb, then exposes asset
+//! Authenticates via a session cookie + CSRF crumb, then exposes Instrument
 //! discovery (screener) and per-symbol metadata (chart endpoint).
 
 use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
-use crate::data::models::asset::Asset;
-use crate::data::models::asset_type::AssetType;
 use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::forex_pair::ForexPair;
+use crate::data::models::instrument::Instrument;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
@@ -45,7 +45,7 @@ impl YahooFinance {
     /// Returns a one-time CSRF crumb bound to the active session.
     const CRUMB_URL: &str = "https://query2.finance.yahoo.com/v1/test/getcrumb";
 
-    /// Custom POST screener — accepts arbitrary query predicates.
+    /// Custom POST screener â€” accepts arbitrary query predicates.
     const SCREENER_URL: &str = "https://query2.finance.yahoo.com/v1/finance/screener";
 
     /// Yahoo-managed predefined screeners (e.g. `all_cryptocurrencies_us`).
@@ -65,8 +65,8 @@ impl YahooFinance {
     /// Create a new [`YahooFinance`] instance by opening an authenticated session.
     ///
     /// It performs two HTTP requests:
-    /// 1. `GET` [`Self::COOKIE_SEED_URL`] — populates the cookie jar.
-    /// 2. `GET` [`Self::CRUMB_URL`]       — retrieves the CSRF crumb.
+    /// 1. `GET` [`Self::COOKIE_SEED_URL`] â€” populates the cookie jar.
+    /// 2. `GET` [`Self::CRUMB_URL`]       â€” retrieves the CSRF crumb.
     pub async fn new() -> DataResult<Self> {
         let client = HttpClient::new()?;
         let crumb = Self::fetch_crumb(&client).await?;
@@ -102,7 +102,7 @@ impl YahooFinance {
 
         if crumb.is_empty() {
             return Err(DataError::Auth(
-                "Yahoo returned an empty crumb — session cookie may be missing".to_owned(),
+                "Yahoo returned an empty crumb â€” session cookie may be missing".to_owned(),
             ));
         }
 
@@ -116,7 +116,7 @@ impl YahooFinance {
         &self,
         scr_id: &str,
         limit: usize,
-    ) -> DataResult<Vec<Asset>> {
+    ) -> DataResult<Vec<Instrument>> {
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| async move {
             let resp = self
                 .client
@@ -137,7 +137,7 @@ impl YahooFinance {
         })
         .await?;
 
-        quotes.into_iter().map(Asset::try_from).collect()
+        quotes.into_iter().map(Instrument::try_from).collect()
     }
 
     /// Paginate the custom POST screener with an arbitrary query predicate.
@@ -149,7 +149,7 @@ impl YahooFinance {
         quote_type: &str,
         query: &Value,
         limit: usize,
-    ) -> DataResult<Vec<Asset>> {
+    ) -> DataResult<Vec<Instrument>> {
         let quotes = paginate(limit, Self::PAGE_SIZE, |batch, offset| {
             let payload = json!({
                 "size": batch,
@@ -177,7 +177,7 @@ impl YahooFinance {
         })
         .await?;
 
-        quotes.into_iter().map(Asset::try_from).collect()
+        quotes.into_iter().map(Instrument::try_from).collect()
     }
 
     /// Validate HTTP status then deserialize a screener response into quotes.
@@ -193,28 +193,30 @@ impl YahooFinance {
             .ok_or(DataError::UnexpectedResponse("empty screener result array".to_owned()))
     }
 
-    /// Map a Yahoo instrument type to [`AssetType`].
-    fn parse_asset_type(instrument_type: &str) -> DataResult<AssetType> {
+    /// Map a Yahoo instrument type to [`InstrumentType`].
+    fn parse_instrument_type(instrument_type: &str) -> DataResult<InstrumentType> {
         match instrument_type {
-            "EQUITY" => Ok(AssetType::Stocks),
-            "ETF" => Ok(AssetType::Etf),
-            "CURRENCY" => Ok(AssetType::Forex),
-            "CRYPTOCURRENCY" => Ok(AssetType::Crypto),
-            other => Err(DataError::UnexpectedResponse(format!("Unknown asset type: {other:?}"))),
+            "EQUITY" => Ok(InstrumentType::Stocks),
+            "ETF" => Ok(InstrumentType::Etf),
+            "CURRENCY" => Ok(InstrumentType::Forex),
+            "CRYPTOCURRENCY" => Ok(InstrumentType::Crypto),
+            other => {
+                Err(DataError::UnexpectedResponse(format!("Unknown Instrument type: {other:?}")))
+            },
         }
     }
 
     /// Derive `(base, quote)` currency strings from a Yahoo symbol.
     ///
-    /// - Equity `"AAPL"`    → `(None, currency)`
-    /// - Equity `"PBR-A"`   → `(None, currency)`  (dash is part of the ticker)
-    /// - Forex `"EURUSD=X"` → `(Some("EUR"), "USD")`
-    /// - Forex `"JPY=X"`    → `(Some("USD"), "JPY")` (implicit USD base)
-    /// - Crypto `"BTC-USD"` → `(Some("BTC"), "USD")`
+    /// - Equity `"AAPL"`    â†’ `(None, currency)`
+    /// - Equity `"PBR-A"`   â†’ `(None, currency)`  (dash is part of the ticker)
+    /// - Forex `"EURUSD=X"` â†’ `(Some("EUR"), "USD")`
+    /// - Forex `"JPY=X"`    â†’ `(Some("USD"), "JPY")` (implicit USD base)
+    /// - Crypto `"BTC-USD"` â†’ `(Some("BTC"), "USD")`
     fn parse_base_quote(
         symbol: &str,
         currency: &str,
-        asset_type: AssetType,
+        instrument_type: InstrumentType,
     ) -> DataResult<(Option<String>, String)> {
         if let Some(symbol) = symbol.strip_suffix("=X") {
             return match symbol.len() {
@@ -226,7 +228,7 @@ impl YahooFinance {
 
         // Only treat '-' as a base/quote delimiter for crypto pairs.
         // Stock tickers can contain dashes as part of the name (e.g., "PBR-A", "BRK-B").
-        if asset_type == AssetType::Crypto {
+        if instrument_type == InstrumentType::Crypto {
             if let Some((base, quote)) = symbol.split_once('-') {
                 return Ok((Some(base.to_owned()), quote.to_owned()));
             }
@@ -236,9 +238,9 @@ impl YahooFinance {
     }
 
     /// Convert a canonical symbol to yahoo format.
-    fn parse_canonical_symbol(symbol: &str, asset_type: AssetType) -> DataResult<String> {
-        match asset_type {
-            AssetType::Forex | AssetType::Crypto => {
+    fn parse_canonical_symbol(symbol: &str, instrument_type: InstrumentType) -> DataResult<String> {
+        match instrument_type {
+            InstrumentType::Forex | InstrumentType::Crypto => {
                 let (base, quote) = symbol
                     .split_once('-')
                     .ok_or_else(|| DataError::SymbolNotFound(symbol.to_owned()))?;
@@ -247,7 +249,7 @@ impl YahooFinance {
                     return Err(DataError::SymbolNotFound(symbol.to_owned()));
                 }
 
-                if asset_type == AssetType::Forex {
+                if instrument_type == InstrumentType::Forex {
                     if base == Currency::USD.to_string() {
                         Ok(format!("{quote}=X"))
                     } else {
@@ -352,7 +354,7 @@ impl YahooFinance {
             }
         }
 
-        debug!("Chunk [{chunk_start}–{chunk_end}] returned {} bars", bars.len());
+        debug!("Chunk [{chunk_start}â€“{chunk_end}] returned {} bars", bars.len());
         Ok(bars)
     }
 }
@@ -361,8 +363,12 @@ impl YahooFinance {
 impl DataProvider for YahooFinance {
     /// Fetch metadata for a single symbol via the chart endpoint.
     #[instrument(skip(self), fields(%symbol))]
-    async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
-        let symbol = Self::parse_canonical_symbol(symbol, asset_type)?;
+    async fn get_instrument(
+        &self,
+        symbol: &Symbol,
+        instrument_type: InstrumentType,
+    ) -> DataResult<Instrument> {
+        let symbol = Self::parse_canonical_symbol(symbol, instrument_type)?;
 
         let resp = self
             .client
@@ -380,25 +386,29 @@ impl DataProvider for YahooFinance {
             return Err(DataError::UnexpectedResponse(msg));
         }
 
-        let asset = parsed
+        let inst = parsed
             .chart
             .result
             .into_iter()
             .next()
-            .map(|r| Asset::try_from(r.meta))
+            .map(|r| Instrument::try_from(r.meta))
             .ok_or(DataError::UnexpectedResponse("empty chart result".to_owned()))??;
 
-        Ok(asset)
+        Ok(inst)
     }
 
-    /// Returns the usable download range for an asset at a given interval.
+    /// Returns the usable download range for an Instrument at a given interval.
     ///
     /// For intraday intervals the start is clamped to the provider's rolling
     /// history window (e.g. 7 days for 1m), so the value reflects what is actually
-    /// downloadable rather than the asset's listing date.
-    #[instrument(skip(self), fields(symbol = %asset.symbol, ?interval))]
-    async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
-        let symbol = Self::parse_canonical_symbol(&asset.symbol, asset.asset_type)?;
+    /// downloadable rather than the Instrument's listing date.
+    #[instrument(skip(self), fields(symbol = %instr.symbol, ?interval))]
+    async fn get_download_range(
+        &self,
+        instr: Instrument,
+        interval: Interval,
+    ) -> DataResult<(u64, u64)> {
+        let symbol = Self::parse_canonical_symbol(&instr.symbol, instr.instrument_type)?;
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
@@ -476,7 +486,7 @@ impl DataProvider for YahooFinance {
             },
         };
 
-        // End is exclusive — step back one interval so the current (potentially incomplete)
+        // End is exclusive â€” step back one interval so the current (potentially incomplete)
         // bar is excluded and the requested range stays strictly within the provider's
         // rolling window.
         let latest_ts = latest_ts.saturating_sub(interval.minutes() * 60);
@@ -484,20 +494,24 @@ impl DataProvider for YahooFinance {
         Ok((earliest_ts, latest_ts))
     }
 
-    /// List the most liquid assets for a given asset type, capped at `limit`.
+    /// List the most liquid instruments for a given Instrument type, capped at `limit`.
     ///
     /// - **Stocks / ETFs**: fans out across all known exchanges concurrently,
-    ///   then picks the top `limit` results by volume × price.
+    ///   then picks the top `limit` results by volume Ã— price.
     /// - **Forex**: returns all [`ForexPair`] variants with synthetic timestamps.
     /// - **Crypto**: merges US, EU, and GB predefined screeners concurrently.
-    #[instrument(skip(self), fields(?asset_type, limit))]
-    async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
+    #[instrument(skip(self), fields(?instrument_type, limit))]
+    async fn list_instruments(
+        &self,
+        instrument_type: InstrumentType,
+        limit: usize,
+    ) -> DataResult<Vec<Instrument>> {
         use Exchange::*;
 
-        match asset_type {
-            AssetType::Stocks | AssetType::Etf => {
-                let (quote_type, operands) = match asset_type {
-                    AssetType::Stocks => {
+        match instrument_type {
+            InstrumentType::Stocks | InstrumentType::Etf => {
+                let (quote_type, operands) = match instrument_type {
+                    InstrumentType::Stocks => {
                         (
                             "equity",
                             vec![
@@ -509,7 +523,7 @@ impl DataProvider for YahooFinance {
                             ],
                         )
                     },
-                    AssetType::Etf => {
+                    InstrumentType::Etf => {
                         ("etf", vec![json!({ "operator": "EQ", "operands": ["quoteType", "etf"] })])
                     },
                     _ => unreachable!(),
@@ -534,36 +548,36 @@ impl DataProvider for YahooFinance {
                     .collect();
 
                 // Log exchange-level failures rather than aborting the whole call.
-                let mut assets = Vec::new();
+                let mut instruments = Vec::new();
                 for result in join_all(tasks).await {
                     match result {
-                        Ok(batch) => assets.extend(batch),
-                        Err(e) => debug!("Yahoo list_assets exchange error: {e}"),
+                        Ok(batch) => instruments.extend(batch),
+                        Err(e) => debug!("Yahoo list_instruments exchange error: {e}"),
                     }
                 }
 
-                // Select only the top `limit` assets by volume x price
-                assets.sort_by(|a, b| {
+                // Select only the top `limit` instruments by volume x price
+                instruments.sort_by(|a, b| {
                     b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
                 });
-                assets.truncate(limit);
+                instruments.truncate(limit);
 
-                Ok(assets)
+                Ok(instruments)
             },
 
-            AssetType::Forex => {
-                let assets: Vec<Asset> = ForexPair::iter()
+            InstrumentType::Forex => {
+                let instruments: Vec<Instrument> = ForexPair::iter()
                     .map(|f| {
                         let symbol = f.to_string();
                         let base = Some(f.base().to_string());
                         let quote = f.quote().to_string();
 
-                        Asset {
+                        Instrument {
                             symbol: canonical_symbol(&symbol, &base, &quote),
                             name: f.to_string(),
                             base,
                             quote,
-                            asset_type: AssetType::Forex,
+                            instrument_type: InstrumentType::Forex,
                             exchange: "CCY".to_owned(), // "CCY" is Yahoo's placeholder code for the interbank FX market
                             volume: None,
                             price: None,
@@ -571,43 +585,43 @@ impl DataProvider for YahooFinance {
                     })
                     .collect();
 
-                Ok(assets)
+                Ok(instruments)
             },
 
-            AssetType::Crypto => {
+            InstrumentType::Crypto => {
                 let (us, eu, gb) = try_join!(
                     self.fetch_predefined_screener("all_cryptocurrencies_us", 100),
                     self.fetch_predefined_screener("all_cryptocurrencies_eu", 100),
                     self.fetch_predefined_screener("all_cryptocurrencies_gb", 100),
                 )?;
 
-                let mut assets: Vec<Asset> = us.into_iter().chain(eu).chain(gb).collect();
+                let mut instruments: Vec<Instrument> = us.into_iter().chain(eu).chain(gb).collect();
 
-                assets.sort_by(|a, b| {
+                instruments.sort_by(|a, b| {
                     b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
                 });
-                assets.truncate(limit);
+                instruments.truncate(limit);
 
-                Ok(assets)
+                Ok(instruments)
             },
         }
     }
 
     /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
     ///
-    /// For large date ranges the request is split into chunks (≈ 5 years each
+    /// For large date ranges the request is split into chunks (â‰ˆ 5 years each
     /// for daily bars) so that Yahoo never has to return an excessively large
     /// payload in a single response.  Results are merged and deduplicated.
     #[instrument(skip(self), fields(%symbol, ?interval, start, end))]
     async fn download_batch(
         &self,
         symbol: &str,
-        asset_type: AssetType,
+        instrument_type: InstrumentType,
         interval: Interval,
         start: u64,
         end: u64,
     ) -> DataResult<Vec<Bar>> {
-        let yahoo_symbol = Self::parse_canonical_symbol(symbol, asset_type)?;
+        let yahoo_symbol = Self::parse_canonical_symbol(symbol, instrument_type)?;
 
         // Yahoo uses 1wk instead of 1w
         let iv = if interval == Interval::OneWeek {
@@ -635,9 +649,9 @@ impl DataProvider for YahooFinance {
         // chunk sizes that keep most real-world downloads to a single request
         // while still splitting truly enormous ranges.
         let chunk_secs: u64 = if interval.minutes() >= 24 * 60 {
-            20 * 365 * 86400 // ~20 years  (≈5 000 daily bars)
+            20 * 365 * 86400 // ~20 years  (â‰ˆ5 000 daily bars)
         } else if interval.minutes() >= 60 {
-            2 * 365 * 86400 // ~2 years   (≈4 400 hourly bars)
+            2 * 365 * 86400 // ~2 years   (â‰ˆ4 400 hourly bars)
         } else {
             30 * 86400 // 30 days
         };
@@ -692,7 +706,7 @@ impl DataProvider for YahooFinance {
 
 /// Raw quote entry from the Yahoo screener endpoint.
 ///
-/// All fields are `Option` — Yahoo omits them inconsistently across asset types.
+/// All fields are `Option` â€” Yahoo omits them inconsistently across Instrument types.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct YahooQuote {
@@ -708,20 +722,20 @@ pub struct YahooQuote {
     /// ISO 4217 quote currency reported by Yahoo.
     pub currency: Option<String>,
 
-    /// Asset class string.
+    /// Instrument class string.
     pub quote_type: Option<String>,
 
     /// Short exchange code.
     pub exchange: Option<String>,
 
-    /// Most recent session volume in units of the base asset.
+    /// Most recent session volume in units of the base Instrument.
     pub regular_market_volume: Option<u64>,
 
     /// Most recent traded price in `currency`.
     pub regular_market_price: Option<f64>,
 }
 
-impl TryFrom<YahooQuote> for Asset {
+impl TryFrom<YahooQuote> for Instrument {
     type Error = DataError;
 
     fn try_from(q: YahooQuote) -> DataResult<Self> {
@@ -730,15 +744,15 @@ impl TryFrom<YahooQuote> for Asset {
             q.symbol
         )))?;
 
-        let asset_type = q
+        let instrument_type = q
             .quote_type
             .as_deref()
             .ok_or_else(|| {
                 DataError::UnexpectedResponse(format!("no quote_type for symbol: {}", q.symbol))
             })
-            .and_then(YahooFinance::parse_asset_type)?;
+            .and_then(YahooFinance::parse_instrument_type)?;
 
-        let (base, quote) = YahooFinance::parse_base_quote(&q.symbol, &currency, asset_type)?;
+        let (base, quote) = YahooFinance::parse_base_quote(&q.symbol, &currency, instrument_type)?;
 
         let exchange = {
             let s = q.exchange.ok_or_else(|| {
@@ -747,12 +761,12 @@ impl TryFrom<YahooQuote> for Asset {
             Exchange::from_yahoo_code(&s).map(|ex| ex.to_string()).unwrap_or(s)
         };
 
-        Ok(Asset {
+        Ok(Instrument {
             symbol: canonical_symbol(&q.symbol, &base, &quote),
             name: q.short_name.or(q.long_name).unwrap_or_else(|| quote.clone()),
             base,
             quote,
-            asset_type,
+            instrument_type,
             exchange,
             price: q.regular_market_price,
             volume: q.regular_market_volume,
@@ -812,7 +826,7 @@ struct ChartResult {
 
 /// Symbol metadata returned by the Yahoo chart endpoint.
 ///
-/// Used to derive [`Asset`] fields; all optional because Yahoo omits fields
+/// Used to derive [`Instrument`] fields; all optional because Yahoo omits fields
 /// inconsistently (particularly for less-traded or delisted instruments).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -829,7 +843,7 @@ struct ChartMeta {
     /// ISO 4217 quote currency.
     currency: Option<String>,
 
-    /// Asset class string.
+    /// Instrument class string.
     instrument_type: Option<String>,
 
     /// Short exchange code.
@@ -848,7 +862,7 @@ struct ChartMeta {
     regular_market_price: Option<f64>,
 }
 
-impl TryFrom<ChartMeta> for Asset {
+impl TryFrom<ChartMeta> for Instrument {
     type Error = DataError;
 
     fn try_from(m: ChartMeta) -> DataResult<Self> {
@@ -857,7 +871,7 @@ impl TryFrom<ChartMeta> for Asset {
             m.symbol
         )))?;
 
-        let asset_type = m
+        let instrument_type = m
             .instrument_type
             .as_deref()
             .ok_or_else(|| {
@@ -866,9 +880,9 @@ impl TryFrom<ChartMeta> for Asset {
                     m.symbol
                 ))
             })
-            .and_then(YahooFinance::parse_asset_type)?;
+            .and_then(YahooFinance::parse_instrument_type)?;
 
-        let (base, quote) = YahooFinance::parse_base_quote(&m.symbol, &currency, asset_type)?;
+        let (base, quote) = YahooFinance::parse_base_quote(&m.symbol, &currency, instrument_type)?;
 
         let exchange = {
             let s = m.exchange_name.ok_or_else(|| {
@@ -877,12 +891,12 @@ impl TryFrom<ChartMeta> for Asset {
             Exchange::from_yahoo_code(&s).map(|ex| ex.to_string()).unwrap_or(s)
         };
 
-        Ok(Asset {
+        Ok(Instrument {
             symbol: canonical_symbol(&m.symbol, &base, &quote),
             name: m.short_name.or(m.long_name).unwrap_or_else(|| quote.clone()),
             base,
             quote,
-            asset_type,
+            instrument_type,
             exchange,
             price: m.regular_market_price,
             volume: m.regular_market_volume,

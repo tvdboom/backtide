@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// A single OHLCV candle for one symbol at one interval.
 ///
-/// The `adj_close` field is always populated. For assets where price
+/// The `adj_close` field is always populated. For instruments where price
 /// adjustment is meaningless (crypto, forex) it's set equal to `close`.
 ///
 /// Attributes
@@ -34,15 +34,15 @@ use serde::{Deserialize, Serialize};
 ///     is not applicable.
 ///
 /// volume : float
-///     Traded volume in the asset's native units.
+///     Traded volume in the instruments's native units.
 ///
 /// n_trades: int | None
 ///     Number of trades that occurred this bar.
 ///
 /// See Also
 /// --------
-/// - backtide.data:Asset
-/// - backtide.data:DownloadInfo
+/// - backtide.data:Instrument
+/// - backtide.data:InstrumentType
 /// - backtide.data:Interval
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.data")]
 #[derive(Clone, Debug, Serialize, Deserialize)]

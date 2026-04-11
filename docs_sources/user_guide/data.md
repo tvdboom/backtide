@@ -1,29 +1,29 @@
-# Data
+﻿# Data
 ------
 
 Backtide keeps the user-facing data workflow provider-independent. You request
-bars for canonical symbols, Backtide routes each asset type to its configured
+bars for canonical symbols, Backtide routes each instrument type to its configured
 provider, determines which history is actually available for each interval, and
 automatically adds any currency-conversion pairs needed to value everything in
 the portfolio base currency.
 
 By default, the provider mapping is:
 
-| Asset type | Default provider |
+| instrument type | Default provider |
 | --- | --- |
 | Stocks | `yahoo` |
 | ETF | `yahoo` |
 | Forex | `yahoo` |
 | Crypto | `binance` |
 
-You can override those defaults in the [configuration]. Any asset type that's not
+You can override those defaults in the [configuration]. Any instrument type that's not
 overridden keeps its default provider.
 
 <br>
 
 ## Canonical symbols
 
-Backtide uses a canonical symbol format so the same asset can be referred to
+Backtide uses a canonical symbol format so the same instrument can be referred to
 consistently even when providers use different native tickers.
 
 - For **stocks** and **ETFs**: The canonical symbol is the Yahoo-style ticker, e.g., `AAPL` or `ASML.AS`.
@@ -43,7 +43,7 @@ translations are an internal implementation detail handled by Backtide.
 ## Providers
 
 Backtide currently supports four market-data providers. Yahoo can serve all
-asset classes, while Binance, Coinbase, and Kraken are primarily crypto
+instrument classes, while Binance, Coinbase, and Kraken are primarily crypto
 providers (though some, like Kraken, also list major forex pairs).
 
 ### Yahoo Finance
@@ -67,11 +67,11 @@ Important caveats:
 - Uses Binance's public spot REST API; no authentication is required.
 - Canonical symbols such as `BTC-USDT` are translated to Binance's compact
   symbols such as `BTCUSDT`.
-- Asset discovery is based on Binance spot pairs with status `TRADING`.
+- Instrument discovery is based on Binance spot pairs with status `TRADING`.
 
 Important caveats:
 
-- Binance providers can only be used for crypto asset types.
+- Binance providers can only be used for crypto instrument types.
 - Binance symbol formatting differs from Backtide's canonical format, but the
   translation is handled automatically.
 
@@ -79,7 +79,7 @@ Important caveats:
 
 - Supports crypto and forex.
 - Kraken-specific ticker aliases are normalized back to canonical names, e.g.,
-  `XBT` → `BTC` and `XDG` → `DOGE`.
+  `XBT` â†’ `BTC` and `XDG` â†’ `DOGE`.
 
 Important caveats:
 
@@ -104,7 +104,7 @@ Important caveats:
 ### Coinbase
 
 - Supports crypto only.
-- Asset discovery only includes online spot products.
+- Instrument discovery only includes online spot products.
 
 Important caveats:
 

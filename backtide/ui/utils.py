@@ -15,40 +15,40 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 from backtide.constants import MOMENT_TO_STRFTIME
-from backtide.core.data import Asset, AssetType, list_assets
-from backtide.utils.constants import MAX_PRELOADED_ASSETS
+from backtide.core.data import Instrument, InstrumentType, list_instruments
+from backtide.utils.constants import MAX_PRELOADED_INSTRUMENTS
 from backtide.utils.utils import to_list
 
 
-def _get_asset_type_description(asset_type: AssetType) -> tuple[str, str]:
-    """Get the description of a given asset type for the symbol and currency."""
-    match asset_type:
-        case AssetType.Stocks:
-            asset_description = (
+def _get_instrument_type_description(instrument_type: InstrumentType) -> tuple[str, str]:
+    """Get the description of a given instrument type for the symbol and currency."""
+    match instrument_type:
+        case InstrumentType.Stocks:
+            instrument_description = (
                 "List of stock tickers. The preloaded options are the primary listings "
                 "for companies in major indices, but any valid stock ticker can be added."
             )
             currency_description = "Filter the preloaded symbols by their denominated currency."
-        case AssetType.Etf:
-            asset_description = (
+        case InstrumentType.Etf:
+            instrument_description = (
                 "List of ETF tickers. The preloaded options are frequently traded ETFs, but "
                 "any valid ETF ticker can be added."
             )
             currency_description = "Filter the preloaded symbols by their denominated currency."
-        case AssetType.Forex:
-            asset_description = (
+        case InstrumentType.Forex:
+            instrument_description = (
                 "List of currency pairs. The preloaded options are frequently traded pairs, "
                 "but any valid forex symbol can be added."
             )
-            currency_description = "Filter the preloaded pairs by their base/quote currencies."
-        case AssetType.Crypto:
-            asset_description = (
+            currency_description = "Filter the preloaded pairs by their quote currency."
+        case InstrumentType.Crypto:
+            instrument_description = (
                 "List of cryptocurrency pairs. The preloaded options are frequently traded "
                 "pairs, but any valid crypto symbol can be added."
             )
-            currency_description = "Filter the preloaded symbols by their base/quote currencies."
+            currency_description = "Filter the preloaded symbols by their quote currency."
 
-    return asset_description, currency_description
+    return instrument_description, currency_description
 
 
 def _fmt_number(n: float) -> str:
@@ -63,14 +63,20 @@ def _fmt_number(n: float) -> str:
         return str(n)
 
 
-def _get_logokit_url(symbol: str, at: AssetType, api_key: str, *, use_quote: bool = False) -> str:
-    """Build a Logokit URL from a canonical symbol and its asset type."""
-    match at:
-        case AssetType.Forex:
+def _get_logokit_url(
+    symbol: str,
+    it: InstrumentType,
+    api_key: str,
+    *,
+    use_quote: bool = False,
+) -> str:
+    """Build a Logokit URL from a canonical symbol and its instrument type."""
+    match it:
+        case InstrumentType.Forex:
             domain = "ticker"
             base, quote = symbol.split("-")  # Canonical forex symbol has form base-quote
             symbol = f"{base}{quote}:CUR"
-        case AssetType.Crypto:
+        case InstrumentType.Crypto:
             domain = "crypto"
             base, quote = symbol.split("-")  # Canonical crypto symbol has form base-quote
             symbol = base if not use_quote else quote
@@ -89,11 +95,11 @@ def _get_provider_logo(provider: str) -> str:
 
 
 @st.cache_resource(ttl=3600, show_spinner=False)
-def _list_symbols(asset_type: AssetType) -> list[Asset]:
-    """Cache the major symbols per asset type."""
-    if asset_type is None:
-        asset_type = AssetType.get_default()
-    return list_assets(asset_type, MAX_PRELOADED_ASSETS)
+def _list_instruments(instrument_type: InstrumentType) -> list[Instrument]:
+    """Cache the major instruments per instrument type."""
+    if instrument_type is None:
+        instrument_type = InstrumentType.get_default()
+    return list_instruments(instrument_type, MAX_PRELOADED_INSTRUMENTS)
 
 
 def _moment_to_strftime(fmt: str) -> str:
@@ -131,7 +137,7 @@ def _prevent_deselection(key: str, default: Any, reset: list[str] | None = None)
     else:
         if reset and cache.get(key) != st.session_state[key]:
             for k in reset:
-                st.session_state[k] = []
+                st.session_state.pop(k, None)
 
         cache[key] = st.session_state[key]
 

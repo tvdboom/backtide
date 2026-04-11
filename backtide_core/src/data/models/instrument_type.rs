@@ -4,11 +4,11 @@ use pyo3::{pyclass, pymethods, Borrowed, Bound, FromPyObject, Py, PyAny, PyErr, 
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
-/// The broad category an [`Asset`] belongs to.
+/// The broad category an [`Instrument`] belongs to.
 ///
 /// See Also
 /// --------
-/// - backtide.data:Asset
+/// - backtide.data:Instrument
 /// - backtide.data:Bar
 /// - backtide.data:Interval
 #[pyclass(skip_from_py_object, module = "backtide.data")]
@@ -27,7 +27,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
     DeserializeFromStr,
 )]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
-pub enum AssetType {
+pub enum InstrumentType {
     #[default]
     Stocks,
     Etf,
@@ -35,7 +35,7 @@ pub enum AssetType {
     Crypto,
 }
 
-impl AssetType {
+impl InstrumentType {
     pub fn default(&self) -> Provider {
         match self {
             Self::Stocks => Provider::Yahoo,
@@ -47,13 +47,13 @@ impl AssetType {
 }
 
 #[pymethods]
-impl AssetType {
+impl InstrumentType {
     #[classattr]
     const __RUST_ENUM__: bool = true;
 
     #[new]
     pub fn new(s: &str) -> PyResult<Self> {
-        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown asset type: {s}")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown instrument type: {s}")))
     }
 
     /// Make the class pickable (required by streamlit).
@@ -91,13 +91,13 @@ impl AssetType {
         Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
     }
 
-    /// Whether the asset type has ownership stakes (true for stocks and etf).
+    /// Whether the instrument type has ownership stakes (true for stocks and etf).
     #[getter]
     fn is_equity(&self) -> bool {
-        matches!(self, AssetType::Stocks | AssetType::Etf)
+        matches!(self, InstrumentType::Stocks | InstrumentType::Etf)
     }
 
-    /// Material icon to visually represent this asset type.
+    /// Material icon to visually represent this instrument type.
     pub fn icon(&self) -> &'static str {
         match self {
             Self::Stocks => ":material/candlestick_chart:",
@@ -108,17 +108,17 @@ impl AssetType {
     }
 }
 
-impl<'a, 'py> FromPyObject<'a, 'py> for AssetType {
+impl<'a, 'py> FromPyObject<'a, 'py> for InstrumentType {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         // First try a direct downcast
-        if let Ok(bound) = obj.cast::<AssetType>() {
+        if let Ok(bound) = obj.cast::<InstrumentType>() {
             return Ok(*bound.borrow());
         }
 
         // Else parse from string
         let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown asset_type {s:?}.")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown instrument_type {s:?}.")))
     }
 }

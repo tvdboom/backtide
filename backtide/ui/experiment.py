@@ -25,28 +25,27 @@ from backtide.backtest import (
     StrategyType,
 )
 from backtide.config import get_config
-from backtide.data import AssetType, Currency, Interval
+from backtide.data import Currency, InstrumentType, Interval
 from backtide.ui.utils import (
-    _get_asset_type_description,
-    _list_symbols,
+    _get_instrument_type_description,
+    _list_instruments,
     _prevent_deselection,
     _to_upper_values,
 )
 from backtide.utils.constants import (
     INDICATOR_PLACEHOLDER,
-    MAX_ASSET_SELECTION,
+    MAX_INSTRUMENT_SELECTION,
     STRATEGY_PLACEHOLDER,
     TAG_PATTERN,
 )
 
 cfg = get_config()
 
-# Generate a stable experiment GUID for this session (regenerated only on explicit reset)
-if "experiment_guid" not in st.session_state:
-    st.session_state.experiment_guid = str(uuid.uuid4())
-
 st.set_page_config(page_title="Backtide - Experiment", layout="centered")
 st.title("Experiment", text_alignment="center")
+
+if st.session_state.get("current_tab"):
+    st.session_state.tabs = st.session_state.current_tab
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
@@ -58,6 +57,8 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         ":material/storefront: Exchange",
         ":material/build: Engine",
     ],
+    key="tabs",
+    on_change=lambda: st.session_state.update(current_tab=st.session_state.tabs),
 )
 
 
@@ -66,9 +67,13 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab1:
+    # Generate a stable experiment GUID for this session (regenerated only on explicit reset)
+    if "experiment_id" not in st.session_state:
+        st.session_state.experiment_id = str(uuid.uuid4())[:8]
+
     experiment_name = st.text_input(
         label="Experiment name",
-        placeholder=st.session_state.experiment_guid,
+        placeholder=st.session_state.experiment_id,
         max_chars=60,
         help=(
             "A human-readable name to identify this experiment (optional). "
@@ -97,7 +102,7 @@ with tab1:
                 valid_tags.append(tag)
             else:
                 st.error(
-                    f"Invalid tag: {tag}. Tags must must be one word with ≤15 chars consisting "
+                    f"Invalid tag: {tag}. Tags must must be one word with â‰¤15 chars consisting "
                     f"only of alphanumeric characters, underscores or dashes.",
                 )
 
@@ -143,59 +148,70 @@ with tab1:
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab2:
-    if st.session_state.get("asset_type") is None:
+    if st.session_state.get("instrument_type") is None:
         _cache = st.session_state.get("_cache", {})
-        st.session_state.asset_type = _cache.get("asset_type", AssetType.get_default())
+        st.session_state.instrument_type = _cache.get(
+            "instrument_type", InstrumentType.get_default()
+        )
 
-    asset_type = st.segmented_control(
-        label="Asset type",
-        key="asset_type",
-        options=AssetType.variants(),
+    instrument_type = st.segmented_control(
+        label="Instrument type",
+        key="instrument_type",
+        options=InstrumentType.variants(),
+        default=st.session_state.instrument_type,
         format_func=lambda at: f"{at.icon()} {at}",
         on_change=_prevent_deselection(
-            key="asset_type",
-            default=AssetType.get_default(),
-            reset=["symbols", "currency", "symbols_download", "currency_download"],
+            key="instrument_type",
+            default=InstrumentType.get_default(),
+            reset=["symbols", "currency"],
         ),
-        help="Select the type of financial asset you want to backtest.",
+        help="Select the type of financial instrument you want to backtest.",
     )
 
-    # Reload assets when asset type changes
-    all_assets = _list_symbols(st.session_state.asset_type)
+    all_instruments = _list_instruments(instrument_type)
 
-    # Filter assets based on the selected currency
-    if currency := st.session_state.get("currency"):
-        filtered_assets = [
-            asset
-            for asset in all_assets
-            if currency == "All" or asset.base == currency or str(asset.quote) == currency
+    # Filter instruments based on the selected currency
+    if not st.session_state.get("_currency"):
+        st.session_state._currency = "All"
+
+    if currency := st.session_state.get("_currency"):
+        filtered_instruments = [
+            inst
+            for inst in all_instruments
+            if currency == "All" or inst.base == currency or str(inst.quote) == currency
         ]
     else:
-        filtered_assets = all_assets
+        filtered_instruments = all_instruments
 
     col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
-    symbol_d, currency_d = _get_asset_type_description(st.session_state.asset_type)
+    symbol_d, currency_d = _get_instrument_type_description(instrument_type)
 
     symbols = col1.multiselect(
         label="Symbols",
         key="symbols",
-        options=sorted(filtered_assets, key=lambda a: a.symbol),
+        options=sorted(filtered_instruments, key=lambda a: a.symbol),
         format_func=lambda a: (
             f"{a.symbol} - {a.name}"
-            if st.session_state.asset_type in (AssetType.Stocks, AssetType.Etf)
+            if instrument_type in (InstrumentType.Stocks, InstrumentType.Etf)
             else a.symbol
         ),
         placeholder="Select one or more symbols...",
-        max_selections=MAX_ASSET_SELECTION,
+        max_selections=MAX_INSTRUMENT_SELECTION,
         accept_new_options=True,
         on_change=_to_upper_values("symbols"),
         help=symbol_d,
     )
 
+    # Symbols can become symbol - name when changing currency, so extract the symbol part
+    symbols = [s.split(" - ")[0] for s in symbols]
+
+    options = ["All", *sorted(dict.fromkeys(str(a.quote) for a in all_instruments))]
     col2.selectbox(
         label="Currency",
-        key="currency",  # Use key to filter tickers
-        options=["All", *sorted(dict.fromkeys(str(a.quote) for a in all_assets))],
+        index=options.index(st.session_state._currency),
+        key="currency",
+        options=options,
+        on_change=lambda: st.session_state.update(_currency=st.session_state.currency),
         placeholder="All",
         help=currency_d,
     )
@@ -272,7 +288,7 @@ with tab3:
         index=Currency.variants().index(base_currency),
         help=(
             "The currency your portfolio is denominated in during the backtest. All trades, "
-            "P&L, margin, leverage and position sizing are tracked in this currency. Asset "
+            "P&L, margin, leverage and position sizing are tracked in this currency. Instrument "
             "prices will be converted where needed."
         ),
     )
@@ -807,8 +823,8 @@ with tab6:
             value=True,
             help=(
                 "Safety guardrail for short positions. When enabled (default), the strategy "
-                "may open short positions if it chooses to — the actual decision is made in "
-                "your strategy code. When disabled, any attempt to sell assets not currently "
+                "may open short positions if it chooses to â€” the actual decision is made in "
+                "your strategy code. When disabled, any attempt to sell positions not currently "
                 "held will raise a hard error and abort the simulation."
             ),
         )
@@ -987,16 +1003,15 @@ with tab7:
             help=(
                 "How to handle bars with no trading activity (e.g. market closures during "
                 "intraday backtests, holidays or illiquid periods).\n\n"
-                "**Skip** — the bar is dropped entirely; the strategy is not called and "
+                "**Skip** â€” the bar is dropped entirely; the strategy is not called and "
                 "the simulation clock jumps to the next bar with data.\n\n"
-                "**Forward-fill** — OHLC values are copied from the last valid bar and "
+                "**Forward-fill** â€” OHLC values are copied from the last valid bar and "
                 "volume is set to zero. The strategy runs as normal, which keeps a "
                 "consistent tick cadence (recommended for most use cases).\n\n"
-                "**Fill with NaN** — the bar is kept but all fields are set to NaN. "
+                "**Fill with NaN** â€” the bar is kept but all fields are set to NaN. "
                 "Your strategy must handle missing values explicitly."
             ),
         )
-# ═════════════════════════════════════════════════════════════════════════════
 
 st.divider()
 
@@ -1013,13 +1028,13 @@ if st.button(
     elif not full_history and start_date > end_date:  # ty:ignore[unsupported-operator]
         st.error("Start date must be equal or prior to end date.", icon=":material/error:")
     else:
-        display_name = experiment_name or st.session_state.experiment_guid
+        display_name = experiment_name or st.session_state.experiment_id
         base_cur = st.session_state.get("base_currency", Currency.get_default())
-        date_range = f"{start_date} → {end_date}" if not full_history else "full history"
+        date_range = f"{start_date} -> {end_date}" if not full_history else "full history"
         with st.spinner(f'Running "{display_name}"...'):
             # TODO: implement backtest execution logic
             st.success(
-                f"Backtest **{display_name}** queued successfully — "
+                f"Backtest **{display_name}** queued successfully â€” "
                 f"{len(symbols)} symbol(s), {date_range}, "
                 f"starting cash {base_cur} {starting_amount:,.2f}.",
                 icon=":material/check_circle:",

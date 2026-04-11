@@ -6,27 +6,6 @@ related to this package. The most frequent terms are described hereunder.
 
 <br>
 
-[](){#nom-asset}
-<strong>asset</strong>
-<div markdown style="margin: -1em 0 0 1.2em">
-A tradeable financial instrument, such as a stock, ETF, currency pair, or
-cryptocurrency. Each asset is uniquely identified by a [symbol][nom-symbol] and
-belongs to exactly one [asset type].
-</div>
-
-<br>
-
-[](){#asset-type}
-<strong id="asset-type">asset type</strong>
-<div markdown style="margin: -1em 0 0 1.2em">
-The broad category an [asset][nom-asset] belongs to. These include stock (individual
-equity shares), etf (exchange-traded funds), forex (spot foreign-exchange pairs) or
-crypto (cryptocurrency spot pairs). The asset type determines which [provider][nom-provider]
-is used to fetch data for that asset. See [`AssetType`].
-</div>
-
-<br>
-
 [](){#nom-bar}
 <strong id="bar">bar</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
@@ -50,9 +29,30 @@ to throughout Backtide. Configured globally via [`Config`].
 [](){#nom-exchange}
 <strong id="exchange">exchange</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
-The marketplace on which an [asset][nom-asset] is listed and traded, such as NASDAQ,
+The marketplace on which an [instrument][nom-instrument] is listed and traded, such as NASDAQ,
 NYSE, or Binance. The exchange determines the trading calendar and session hours used
-when aligning bars across multiple assets.
+when aligning bars across multiple instruments.
+</div>
+
+<br>
+
+[](){#nom-instrument}
+<strong>instrument</strong>
+<div markdown style="margin: -1em 0 0 1.2em">
+A tradeable financial instrument, such as a stock, ETF, currency pair, or
+cryptocurrency. Each instrument is uniquely identified by a [symbol][nom-symbol] and
+belongs to exactly one [instrument type].
+</div>
+
+<br>
+
+[](){#instrument-type}
+<strong id="instrument-type">instrument type</strong>
+<div markdown style="margin: -1em 0 0 1.2em">
+The broad category an [instrument][nom-instrument] belongs to. These include stock (individual
+equity shares), etf (exchange-traded funds), forex (spot foreign-exchange pairs) or
+crypto (cryptocurrency spot pairs). The instrument type determines which [provider][nom-provider]
+is used to fetch data for that instrument. See [`InstrumentType`].
 </div>
 
 <br>
@@ -71,7 +71,7 @@ All bars within a single dataset share the same interval. Also referred to as
 <strong id="provider">provider</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
 A data source from which Backtide fetches historical market data. Each
-[asset type] is mapped to exactly one active provider at a time.
+[instrument type] is mapped to exactly one active provider at a time.
 </div>
 
 <br>
@@ -79,8 +79,8 @@ A data source from which Backtide fetches historical market data. Each
 [](){#nom-symbol}
 <strong id="symbol">symbol</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
-A short string that uniquely identifies an [asset][nom-asset]. Backtide uses a canonical
-symnbol convention since the same underlying asset may carry different symbols across
+A short string that uniquely identifies an [instrument][nom-instrument]. Backtide uses a canonical
+symbol convention since the same underlying instrument may carry different symbols across
 [providers][nom-provider]. For stocks and ETFs, symbols are of the form expected by the
 yahoo data provider (e.g., `AAPL` or `ASML.AS`). For forex and cryptos, symbols are of
 the form `base-quote` (e.g., `BTC-USDT`, or `EUR-USD`).

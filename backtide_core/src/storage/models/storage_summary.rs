@@ -13,8 +13,8 @@ use pyo3::prelude::*;
 /// interval : str
 ///     Bar interval.
 ///
-/// asset_type : str
-///     Asset type.
+/// instrument_type : str
+///     Instrument type.
 ///
 /// first_ts : int
 ///     Earliest `open_ts` in Unix seconds.
@@ -38,7 +38,7 @@ pub struct StorageSummary {
     pub symbol: String,
     pub provider: String,
     pub interval: String,
-    pub asset_type: String,
+    pub instrument_type: String,
     pub first_ts: u64,
     pub last_ts: u64,
     pub n_rows: u64,

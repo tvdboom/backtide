@@ -73,11 +73,11 @@ def launch(address: str, port: str, log_level: str):
 @main.command()
 @click.argument("symbols", nargs=-1, required=True)
 @click.option(
-    "--asset-type",
+    "--instrument-type",
     "-t",
     default="stocks",
     show_default=True,
-    help="Asset type: stocks, etf, forex, crypto.",
+    help="Instrument type: stocks, etf, forex, crypto.",
 )
 @click.option(
     "--interval",
@@ -103,27 +103,26 @@ def launch(address: str, port: str, log_level: str):
     "--log_level",
     help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
 )
-def download(symbols, asset_type, interval, start, end, log_level):
+def download(symbols, instrument_type, interval, start, end, log_level):
     """Download OHLCV data for one or more symbols.
 
     Downloads the bars for the requested symbols. Required currency legs are
     automatically downloaded as well.
 
     """
-    from backtide.data import download_assets, get_download_info
+    from backtide.data import download_instruments, resolve_profiles
 
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
 
     click.echo("📊  Resolving downloads...")
 
-    info = get_download_info(list(symbols), asset_type, list(interval))
+    profiles = resolve_profiles(list(symbols), instrument_type, list(interval))
 
-    click.echo(f"   --> {len(info.assets)} assets.")
-    click.echo(f"   --> {len(info.legs)} legs.")
+    click.echo(f"   --> {len(profiles)} profiles.")
 
     click.echo("⬇️  Downloading …")
-    result = download_assets(info, start=start, end=end)
+    result = download_instruments(profiles, start=start, end=end)
 
     for warn in result.warnings:
         click.echo(f"   ⚠️  {warn}", err=True)
@@ -131,7 +130,7 @@ def download(symbols, asset_type, interval, start, end, log_level):
     if result.n_failed and result.n_succeeded:
         click.echo(
             f"✅  Done ({result.n_succeeded}/{result.n_succeeded + result.n_failed} "
-            f"assets downloaded).",
+            f"instruments downloaded).",
         )
     elif result.n_failed:
         click.echo(f"❌  All {result.n_failed} downloads failed.", err=True)

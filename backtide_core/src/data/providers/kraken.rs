@@ -4,10 +4,10 @@
 
 use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
-use crate::data::models::asset::Asset;
-use crate::data::models::asset_type::AssetType;
 use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
+use crate::data::models::instrument::Instrument;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
@@ -76,11 +76,11 @@ impl Kraken {
             .unwrap_or_else(|| ticker.to_string())
     }
 
-    /// Checks whether the asset type is supported by the provider.
-    fn check_asset_type(asset_type: AssetType) -> DataResult<()> {
-        match asset_type {
-            AssetType::Crypto | AssetType::Forex => Ok(()),
-            _ => Err(DataError::UnsupportedAssetType(asset_type)),
+    /// Checks whether the instrument type is supported by the provider.
+    fn check_instrument_type(instrument_type: InstrumentType) -> DataResult<()> {
+        match instrument_type {
+            InstrumentType::Crypto | InstrumentType::Forex => Ok(()),
+            _ => Err(DataError::UnsupportedInstrumentType(instrument_type)),
         }
     }
 
@@ -151,8 +151,12 @@ impl Kraken {
 impl DataProvider for Kraken {
     /// Fetch metadata for a single symbol.
     #[instrument(skip(self), fields(%symbol))]
-    async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
-        Self::check_asset_type(asset_type)?;
+    async fn get_instrument(
+        &self,
+        symbol: &Symbol,
+        instrument_type: InstrumentType,
+    ) -> DataResult<Instrument> {
+        Self::check_instrument_type(instrument_type)?;
 
         let pair = self.parse_canonical_symbol(symbol);
 
@@ -168,22 +172,26 @@ impl DataProvider for Kraken {
         let info =
             map.into_values().next().ok_or_else(|| DataError::SymbolNotFound(symbol.to_owned()))?;
 
-        Ok(Asset::try_from(info)?)
+        Ok(Instrument::try_from(info)?)
     }
 
-    /// Returns the usable download range for an asset at a given interval.
-    #[instrument(skip(self), fields(symbol = %asset.symbol, ?interval))]
-    async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
-        Self::check_asset_type(asset.asset_type)?;
+    /// Returns the usable download range for an instrument at a given interval.
+    #[instrument(skip(self), fields(symbol = %instrument.symbol, ?interval))]
+    async fn get_download_range(
+        &self,
+        instrument: Instrument,
+        interval: Interval,
+    ) -> DataResult<(u64, u64)> {
+        Self::check_instrument_type(instrument.instrument_type)?;
 
-        let symbol = self.parse_canonical_symbol(&asset.symbol);
+        let symbol = self.parse_canonical_symbol(&instrument.symbol);
 
         let earliest_ts = self
             .get_bars(&symbol, interval, Some(0))
             .await?
             .into_iter()
             .next()
-            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol.clone()))?
+            .ok_or_else(|| DataError::SymbolNotFound(instrument.symbol.clone()))?
             .time;
 
         let latest_ts = self
@@ -191,41 +199,45 @@ impl DataProvider for Kraken {
             .await?
             .into_iter()
             .last()
-            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol))?
+            .ok_or_else(|| DataError::SymbolNotFound(instrument.symbol))?
             .time;
 
         Ok((earliest_ts, latest_ts))
     }
 
-    /// List assets traded on Kraken, filtered by `asset_type` and capped at `limit`.
+    /// List instruments traded on Kraken, filtered by `instrument_type` and capped at `limit`.
     ///
-    /// The asset type (Forex vs Crypto) is determined during [`PairInfo`]
+    /// The instrument type (Forex vs Crypto) is determined during [`PairInfo`]
     /// conversion — pairs where both sides are fiat [`Currency`] variants are
     /// classified as Forex, everything else as Crypto.
-    #[instrument(skip(self), fields(?asset_type, limit))]
-    async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
-        Self::check_asset_type(asset_type)?;
+    #[instrument(skip(self), fields(?instrument_type, limit))]
+    async fn list_instruments(
+        &self,
+        instrument_type: InstrumentType,
+        limit: usize,
+    ) -> DataResult<Vec<Instrument>> {
+        Self::check_instrument_type(instrument_type)?;
 
         let resp = self.client.get(Self::ASSET_PAIRS_URL, None).await?;
         let parsed = HttpClient::json::<KrakenResponse<HashMap<String, PairInfo>>>(resp).await?;
         let map = Self::unwrap_response(parsed, "AssetPairs")?;
 
-        let assets: Vec<Asset> = map
+        let instruments: Vec<Instrument> = map
             .into_values()
             .filter(|p| p.status == "online")
             .filter_map(|info| {
-                Asset::try_from(info)
+                Instrument::try_from(info)
                     .map_err(|e| {
-                        debug!("Kraken list_assets error: {e}");
+                        debug!("Kraken list_instruments error: {e}");
                         e
                     })
                     .ok()
             })
-            .filter(|a| a.asset_type == asset_type)
+            .filter(|a| a.instrument_type == instrument_type)
             .take(limit)
             .collect();
 
-        Ok(assets)
+        Ok(instruments)
     }
 
     /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
@@ -233,7 +245,7 @@ impl DataProvider for Kraken {
     async fn download_batch(
         &self,
         symbol: &str,
-        _asset_type: AssetType,
+        _instrument_type: InstrumentType,
         interval: Interval,
         start: u64,
         end: u64,
@@ -317,7 +329,7 @@ struct PairInfo {
     status: String,
 }
 
-impl TryFrom<PairInfo> for Asset {
+impl TryFrom<PairInfo> for Instrument {
     type Error = DataError;
 
     fn try_from(info: PairInfo) -> DataResult<Self> {
@@ -338,18 +350,19 @@ impl TryFrom<PairInfo> for Asset {
         let symbol = canonical_symbol(&info.altname, &Some(base.clone()), &quote);
 
         // Classify as Forex when both sides are fiat currencies, Crypto otherwise.
-        let asset_type = if base.parse::<Currency>().is_ok() && quote.parse::<Currency>().is_ok() {
-            AssetType::Forex
-        } else {
-            AssetType::Crypto
-        };
+        let instrument_type =
+            if base.parse::<Currency>().is_ok() && quote.parse::<Currency>().is_ok() {
+                InstrumentType::Forex
+            } else {
+                InstrumentType::Crypto
+            };
 
-        Ok(Asset {
+        Ok(Instrument {
             symbol: symbol.clone(),
             name: symbol,
             base: Some(base),
             quote,
-            asset_type,
+            instrument_type,
             exchange: "KRAKEN".to_owned(),
             volume: None,
             price: None,

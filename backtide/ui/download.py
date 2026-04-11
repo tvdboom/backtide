@@ -13,25 +13,25 @@ import streamlit as st
 
 from backtide.core.config import get_config
 from backtide.core.data import (
-    AssetMeta,
-    AssetType,
     Currency,
     Exchange,
+    InstrumentProfile,
+    InstrumentType,
     Interval,
-    download_assets,
-    get_download_info,
+    download_instruments,
+    resolve_profiles,
 )
 from backtide.ui.utils import (
     _fmt_number,
-    _get_asset_type_description,
+    _get_instrument_type_description,
     _get_logokit_url,
     _get_provider_logo,
-    _list_symbols,
+    _list_instruments,
     _moment_to_strftime,
     _prevent_deselection,
     _to_upper_values,
 )
-from backtide.utils.constants import MAX_ASSET_SELECTION
+from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
@@ -202,19 +202,19 @@ CARD_CSS = """
     """
 
 
-def draw_cards(assets: list[AssetMeta]) -> int:
-    """Generate HTML code to draw the asset cards."""
+def draw_cards(profiles: list[InstrumentProfile]) -> int:
+    """Generate HTML code to draw the instrument cards."""
     html = "<div class='section'></div>"
 
     get_flag = lambda code: f"https://flagcdn.com/80x60/{code.lower()}.png"
     parse_date = lambda date: date.strftime(_moment_to_strftime(cfg.display.date_format))
 
     total_rows = 0
-    for asset in assets:
+    for profile in profiles:
         interval_rows = ""
         for interval in Interval.variants():
-            start_iv = asset.earliest_ts.get(interval)
-            end_iv = asset.latest_ts.get(interval)
+            start_iv = profile.earliest_ts.get(interval)
+            end_iv = profile.latest_ts.get(interval)
             if not (start_iv and end_iv):
                 continue
 
@@ -228,13 +228,13 @@ def draw_cards(assets: list[AssetMeta]) -> int:
             delta_minutes = max((iv_end - iv_start).total_seconds() / 60, 1)
             delta_days = (iv_end - iv_start).days
 
-            if asset.asset_type.is_equity:
+            if profile.instrument_type.is_equity:
                 # Stocks / ETF markets open 8/5
                 if interval.is_intraday():
                     rows = max(int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1)
                 else:
                     rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
-            elif asset_type == AssetType.Forex:
+            elif instrument_type == InstrumentType.Forex:
                 # Forex markets open 24/5
                 if interval.is_intraday():
                     rows = max(int(delta_minutes * (5 / 7) // interval.minutes()), 1)
@@ -273,19 +273,19 @@ def draw_cards(assets: list[AssetMeta]) -> int:
                 </div>"""
 
         if logokit_key := cfg.display.logokit_api_key:
-            url = _get_logokit_url(asset.symbol, asset.asset_type, logokit_key)
+            url = _get_logokit_url(profile.symbol, profile.instrument_type, logokit_key)
             logo = f"<img src='{url}' class='logo'>"
         else:
             logo = ""
 
-        name = asset.name if asset.asset_type.is_equity else ""
+        name = profile.name if profile.instrument_type.is_equity else ""
 
         legs = ""
-        if asset.legs:
-            badges = "".join(f'<span class="badge leg">{leg}</span>' for leg in asset.legs)
+        if profile.legs:
+            badges = "".join(f'<span class="badge leg">{leg}</span>' for leg in profile.legs)
             legs = f'<div class="legs-row"><span style="font-size:16px">via</span>{badges}</div>'
 
-        provider = str(cfg.data.providers[asset.asset_type])
+        provider = str(cfg.data.providers[profile.instrument_type])
         provider_html = f"""
             <div class="provider">
                 <img src="{_get_provider_logo(provider)}" alt="{provider}">
@@ -293,26 +293,28 @@ def draw_cards(assets: list[AssetMeta]) -> int:
 
         flag = ""
         meta_inline = ""
-        if asset.asset_type.is_equity:
-            if isinstance(asset.exchange, Exchange):
-                flag = f"<img src='{get_flag(asset.exchange.country.alpha2)}' class='flag'>"
-                exchange = f"{asset.exchange.name} ({asset.exchange})"
+        if profile.instrument_type.is_equity:
+            if isinstance(profile.exchange, Exchange):
+                flag = f"<img src='{get_flag(profile.exchange.country.alpha2)}' class='flag'>"
+                exchange = f"{profile.exchange.name} ({profile.exchange})"
             else:
-                exchange = asset.exchange
+                exchange = profile.exchange
 
             meta_inline = f"""
                 <div class="meta-inline">
                     <span class="meta-label">Exchange</span>
                     <span class="meta-value">{exchange}</span>
                     <span class="meta-label" style="margin-top:8px;">Currency</span>
-                    <span class="meta-value">{asset.quote}</span>
+                    <span class="meta-value">{profile.quote}</span>
                 </div>"""
 
-        elif asset.asset_type == AssetType.Crypto:
-            if isinstance(asset.quote, Currency):
-                img = get_flag(asset.quote.country.alpha2)
+        elif profile.instrument_type == InstrumentType.Crypto:
+            if isinstance(profile.quote, Currency):
+                img = get_flag(profile.quote.country.alpha2)
             elif logokit_key:
-                img = _get_logokit_url(asset.symbol, asset.asset_type, logokit_key, use_quote=True)
+                img = _get_logokit_url(
+                    profile.symbol, profile.instrument_type, logokit_key, use_quote=True
+                )
             else:
                 img = ""
 
@@ -328,7 +330,7 @@ def draw_cards(assets: list[AssetMeta]) -> int:
               <div class="card-header">
                 {logo}
                 <div>
-                    <div class="symbol">{asset.symbol}{flag}</div>
+                    <div class="symbol">{profile.symbol}{flag}</div>
                     <div class="name">{name}</div>
                 </div>
                 <div class="meta-right">
@@ -359,71 +361,81 @@ st.title("Download", text_alignment="center")
 
 st.divider()
 
-if st.session_state.get("asset_type") is None:
+if st.session_state.get("instrument_type") is None:
     _cache = st.session_state.get("_cache", {})
-    st.session_state.asset_type = _cache.get("asset_type", AssetType.get_default())
+    st.session_state.instrument_type = _cache.get("instrument_type", InstrumentType.get_default())
 
-asset_type = st.segmented_control(
-    label="Asset type",
-    key="asset_type",
-    options=AssetType.variants(),
-    default=AssetType.get_default(),
+instrument_type = st.segmented_control(
+    label="Instrument type",
+    key="instrument_type",
+    options=InstrumentType.variants(),
+    default=st.session_state.instrument_type,
     format_func=lambda at: f"{at.icon()} {at}",
     on_change=_prevent_deselection(
-        key="asset_type",
-        default=AssetType.get_default(),
-        reset=["symbols_download", "currency_download", "symbols", "currency"],
+        key="instrument_type",
+        default=InstrumentType.get_default(),
+        reset=["symbols", "currency"],
     ),
-    help="Select the type of financial asset you want to download.",
+    help="Select the type of financial instrument you want to download.",
 )
 
-all_assets = _list_symbols(asset_type)
+all_instruments = _list_instruments(instrument_type)
 
-# Filter assets based on the selected currency
-if currency := st.session_state.get("currency"):
-    filtered_assets = [
-        asset
-        for asset in all_assets
-        if currency == "All" or asset.base == currency or str(asset.quote) == currency
+# Filter instruments based on the selected currency
+if not st.session_state.get("_currency"):
+    st.session_state._currency = "All"
+
+if currency := st.session_state.get("_currency"):
+    filtered_instruments = [
+        inst
+        for inst in all_instruments
+        if currency == "All" or inst.base == currency or str(inst.quote) == currency
     ]
 else:
-    filtered_assets = all_assets
+    filtered_instruments = all_instruments
 
 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
-asset_d, currency_d = _get_asset_type_description(asset_type)
+instrument_d, currency_d = _get_instrument_type_description(instrument_type)
 
 symbols = col1.multiselect(
     label="Symbols",
-    key="symbols_download",
-    options=sorted(filtered_assets, key=lambda a: a.symbol),
+    key="symbols",
+    options=sorted(filtered_instruments, key=lambda a: a.symbol),
     format_func=lambda a: (
-        f"{a.symbol} - {a.name}" if a.asset_type in (AssetType.Stocks, AssetType.Etf) else a.symbol
+        f"{a.symbol} - {a.name}"
+        if a.instrument_type in (InstrumentType.Stocks, InstrumentType.Etf)
+        else a.symbol
     ),
     placeholder="Select one or more symbols...",
-    max_selections=MAX_ASSET_SELECTION,
+    max_selections=MAX_INSTRUMENT_SELECTION,
     accept_new_options=True,
-    on_change=_to_upper_values("symbols_download"),
-    help=asset_d,
+    on_change=_to_upper_values("symbols"),
+    help=instrument_d,
 )
 
-intervals = st.session_state.get("intervals", [])
+# Symbols can become symbol - name when changing currency, so extract the symbol part
+symbols = [s.split(" - ")[0] for s in symbols]
+
+intervals = st.session_state.get("intervals", Interval.get_default())
 
 try:
-    # Convert custom symbols to assets and add triangulation currencies
+    # Convert custom symbols to instruments and add conversion currencies
     if symbols and intervals:
-        download_info = get_download_info(symbols, asset_type, intervals)
-        assets = download_info.assets
+        profiles = resolve_profiles(symbols, instrument_type, intervals)
+        direct = profiles[: len(symbols)]  # Direct profiles (no legs)
     else:
-        download_info = None
-        assets = []
+        profiles = None
+        direct = None
 except RuntimeError as ex:
-    assets = []
     st.error(ex, icon=":material/error:")
 
+options = ["All", *sorted(dict.fromkeys(str(inst.quote) for inst in all_instruments))]
 col2.selectbox(
     label="Currency",
-    key="currency",  # Use key to filter tickers
-    options=["All", *sorted(dict.fromkeys(str(a.quote) for a in all_assets))],
+    index=options.index(st.session_state._currency),
+    key="currency",
+    options=options,
+    on_change=lambda: st.session_state.update(_currency=st.session_state.currency),
     placeholder="All",
     help=currency_d,
 )
@@ -438,9 +450,9 @@ full_history = st.toggle(
 )
 
 today = dt.now(tz=tz).date()
-if assets and intervals:
-    earliest_ts = dt.fromtimestamp(min(min(a.earliest_ts.values()) for a in assets), tz=tz).date()
-    latest_ts = dt.fromtimestamp(max(max(a.latest_ts.values()) for a in assets), tz=tz).date()
+if profiles and intervals:
+    earliest_ts = dt.fromtimestamp(min(min(p.earliest_ts.values()) for p in direct), tz=tz).date()
+    latest_ts = dt.fromtimestamp(max(max(p.latest_ts.values()) for p in direct), tz=tz).date()
 else:
     earliest_ts = dt(2000, 1, 1, tzinfo=tz).date()
     latest_ts = today
@@ -478,7 +490,7 @@ else:
 intervals = st.pills(
     label="Interval",
     key="intervals",
-    options=cfg.data.providers[asset_type].intervals(),
+    options=cfg.data.providers[instrument_type].intervals(),
     selection_mode="multi",
     default=Interval.get_default(),
     help=(
@@ -487,7 +499,7 @@ intervals = st.pills(
     ),
 )
 
-is_enabled = assets and start_ts and latest_ts and intervals
+is_enabled = profiles and start_ts and latest_ts and intervals
 
 if is_enabled:
     BYTES_PER_ROW = 120  # Estimated memory required per OHLC bar
@@ -496,7 +508,7 @@ if is_enabled:
     st.divider()
 
     with st.expander("Download details", icon=":material/archive:", expanded=False):
-        html, n_bars = draw_cards(assets + download_info.legs)
+        html, n_bars = draw_cards(profiles)
         st.html(CARD_CSS + html)
 
     estimated_memory = (n_bars * BYTES_PER_ROW) / (1024**2)
@@ -536,7 +548,7 @@ st.divider()
 downloading = st.session_state.get("downloading", False)
 
 if st.button(
-    label="Downloading…" if downloading else "Download",
+    label="Downloading..." if downloading else "Download",
     icon=":material/get_app:",
     type="primary",
     disabled=not is_enabled or downloading,
@@ -559,7 +571,7 @@ if st.button(
                 dl_end = int(dt.combine(end_ts, dt.min.time(), tzinfo=tz).timestamp())
 
             with st.spinner("Downloading data..."):
-                result = download_assets(download_info, start=dl_start, end=dl_end)
+                result = download_instruments(profiles, start=dl_start, end=dl_end)
         except RuntimeError as ex:
             st.error(f"Download error: {ex}", icon=":material/error:")
         else:
@@ -570,16 +582,16 @@ if st.button(
 
             if result.n_failed and result.n_succeeded:
                 st.success(
-                    f"Successfully downloaded {result.n_succeeded} of {n_total} assets.",
+                    f"Successfully downloaded {result.n_succeeded} of {n_total} instruments.",
                     icon=":material/check_circle:",
                 )
             elif result.n_failed:
                 st.error(
-                    f"All {n_total} assets had warnings during download.",
+                    f"All {n_total} instruments had warnings during download.",
                     icon=":material/error:",
                 )
             else:
                 st.success(
-                    f"Successfully downloaded {result.n_succeeded} assets.",
+                    f"Successfully downloaded {result.n_succeeded} instruments.",
                     icon=":material/check_circle:",
                 )

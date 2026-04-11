@@ -22,8 +22,8 @@ use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
-use backtide_core::data::models::asset_type::AssetType;
 use backtide_core::data::models::bar::Bar;
+use backtide_core::data::models::instrument_type::InstrumentType;
 use backtide_core::data::models::interval::Interval;
 use backtide_core::data::models::provider::Provider;
 use backtide_core::storage::duckdb::DuckDb;
@@ -74,7 +74,7 @@ fn fresh_db() -> (DuckDb, tempfile::TempDir) {
 fn make_series(symbol: &str, bars: Vec<Bar>) -> BarSeries {
     BarSeries {
         symbol: symbol.to_owned(),
-        asset_type: AssetType::Stocks,
+        instrument_type: InstrumentType::Stocks,
         interval: Interval::OneDay,
         provider: Provider::Yahoo,
         bars,
@@ -122,8 +122,7 @@ fn bench_batch_bar_insert(c: &mut Criterion) {
 fn bench_historical_read_1sym(c: &mut Criterion) {
     let (db, _dir) = fresh_db();
     let bars = generate_bars(1_000);
-    db.write_bars_bulk(&[make_series("AAPL", bars)])
-        .expect("seed write failed");
+    db.write_bars_bulk(&[make_series("AAPL", bars)]).expect("seed write failed");
 
     c.bench_function("historical_read/1sym", |b| {
         b.iter(|| {
@@ -140,14 +139,10 @@ fn bench_historical_read_1sym(c: &mut Criterion) {
 fn bench_historical_read_10sym(c: &mut Criterion) {
     let (db, _dir) = fresh_db();
 
-    let symbols = [
-        "AAPL", "MSFT", "GOOG", "AMZN", "TSLA", "META", "NVDA", "JPM", "V", "JNJ",
-    ];
+    let symbols = ["AAPL", "MSFT", "GOOG", "AMZN", "TSLA", "META", "NVDA", "JPM", "V", "JNJ"];
 
-    let series: Vec<BarSeries> = symbols
-        .iter()
-        .map(|&sym| make_series(sym, generate_bars(1_000)))
-        .collect();
+    let series: Vec<BarSeries> =
+        symbols.iter().map(|&sym| make_series(sym, generate_bars(1_000))).collect();
 
     db.write_bars_bulk(&series).expect("seed write failed");
 

@@ -1,7 +1,7 @@
-# download_assets
+# get_instruments
 -----------------
 
-:: backtide.data:download_assets
+:: backtide.data:get_instruments
     :: signature
     :: head
     :: table:

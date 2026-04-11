@@ -1,5 +1,5 @@
-use crate::data::models::asset_type::AssetType;
 use crate::data::models::bar::Bar;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 
@@ -10,8 +10,8 @@ pub struct BarSeries {
     /// Canonical ticker symbol (e.g. `"AAPL"`, `"BTC-USD"`).
     pub symbol: String,
 
-    /// The asset class this series belongs to (stocks, crypto, forex, …).
-    pub asset_type: AssetType,
+    /// The instrument class this series belongs to (stocks, crypto, forex, …).
+    pub instrument_type: InstrumentType,
 
     /// Bar frequency / time-frame (e.g. `1m`, `1h`, `1d`).
     pub interval: Interval,

@@ -20,7 +20,7 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     Backtide ships with four built-in providers: **Yahoo Finance**, **Binance**,
     **Coinbase** and **Kraken**. Yahoo covers stocks, ETFs, forex and crypto.
     Binance and Coinbase are crypto-only. Kraken supports crypto and major
-    forex pairs. You can configure which provider is used for each asset type
+    forex pairs. You can configure which provider is used for each instrument type
     in the [configuration].
 
 ??? faq "Can I use Backtide without an API key?"
@@ -46,9 +46,9 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     You can delete specific series through the Python API using [`delete_rows`],
     or simply delete the `.backtide/` directory to start fresh.
 
-??? faq "Can I use multiple providers for the same asset type?"
-    Not within a single configuration. Each asset type maps to exactly one
-    provider. If you need data from a different provider for the same asset
+??? faq "Can I use multiple providers for the same instrument type?"
+    Not within a single configuration. Each instrument type maps to exactly one
+    provider. If you need data from a different provider for the same instrument
     type, you can run separate sessions with different configuration files.
 
 ??? faq "Does Backtide support live / paper trading?"
@@ -63,7 +63,7 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     and `--port` flags.
 
 ??? faq "What is currency conversion and how does it work?"
-    When an asset is quoted in a different currency than your portfolio's
+    When an instrument is quoted in a different currency than your portfolio's
     `base_currency`, Backtide automatically downloads the required forex
     conversion pairs (legs) and converts prices to the base currency. The
     conversion path is controlled by `triangulation_strategy` in the

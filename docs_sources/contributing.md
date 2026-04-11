@@ -119,7 +119,7 @@ backtide/                       # Repository root
 │   ├── scripts/                # Build-time hooks (autodocs, autorun)
 │   └── stylesheets/            # Custom CSS / JS
 │
-└── images/                     # Branding assets & provider logos
+└── images/                     # Branding instruments & provider logos
 ```
 
 ### Key technologies

@@ -1,7 +1,7 @@
-# DownloadInfo
---------------
+# InstrumentProfile
+-------------------
 
-:: backtide.data:DownloadInfo
+:: backtide.data:InstrumentProfile
     :: signature
     :: head
     :: table:

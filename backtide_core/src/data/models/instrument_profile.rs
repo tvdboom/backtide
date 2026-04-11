@@ -1,20 +1,20 @@
 use crate::constants::Symbol;
-use crate::data::models::asset::Asset;
-use crate::data::models::asset_type::AssetType;
+use crate::data::models::instrument::Instrument;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use pyo3::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-/// A wrapper around an asset with additional metadata.
+/// A wrapper around an instrument with additional metadata.
 ///
-/// Provides the information required to download an asset, including the
+/// Provides the information required to download an instrument, including the
 /// download period and required currency conversions to reach the `base_currency`.
 ///
 /// Attributes
 /// ----------
-/// asset : [Asset]
-///     Asset for which to provide the metadata.
+/// instrument : [Instrument]
+///     Instrument for which to provide the metadata.
 ///
 /// earliest_ts : dict[[Interval], int]
 ///     Per interval, the earliest timestamp for which there is data (in UNIX
@@ -25,37 +25,37 @@ use std::collections::HashMap;
 ///     seconds).
 ///
 /// legs : list[str]
-///     Symbols of the currency pairs required to convert from this asset
+///     Symbols of the currency pairs required to convert from this instrument
 ///     to the base_currency.
 ///
 /// See Also
 /// --------
-/// - backtide.data:Asset
+/// - backtide.data:Instrument
 /// - backtide.data:Bar
-/// - backtide.data:DownloadInfo
+/// - backtide.data:Interval
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.data")]
 #[derive(Debug, Clone, Deserialize)]
-pub struct AssetMeta {
-    pub asset: Asset,
+pub struct InstrumentProfile {
+    pub instrument: Instrument,
     pub earliest_ts: HashMap<Interval, u64>,
     pub latest_ts: HashMap<Interval, u64>,
     pub legs: Vec<Symbol>,
 }
 
 #[pymethods]
-impl AssetMeta {
+impl InstrumentProfile {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
     fn new(
-        asset: Asset,
+        instrument: Instrument,
         earliest_ts: HashMap<Interval, u64>,
         latest_ts: HashMap<Interval, u64>,
         legs: Vec<Symbol>,
     ) -> Self {
         Self {
-            asset,
+            instrument,
             earliest_ts,
             latest_ts,
             legs,
@@ -68,13 +68,13 @@ impl AssetMeta {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        (Asset, HashMap<Interval, u64>, HashMap<Interval, u64>, Vec<Symbol>),
+        (Instrument, HashMap<Interval, u64>, HashMap<Interval, u64>, Vec<Symbol>),
     )> {
         let cls = py.get_type::<Self>().into_any();
         Ok((
             cls,
             (
-                self.asset.clone(),
+                self.instrument.clone(),
                 self.earliest_ts.clone(),
                 self.latest_ts.clone(),
                 self.legs.to_vec(),
@@ -87,8 +87,8 @@ impl AssetMeta {
             self.earliest_ts.iter().map(|(k, v)| format!("{k}: {v}")).collect();
         let latest: Vec<String> = self.latest_ts.iter().map(|(k, v)| format!("{k}: {v}")).collect();
         format!(
-            "AssetMeta(asset={}, earliest_ts={{{}}}, latest_ts={{{}}}, legs={:?})",
-            self.asset.__repr__(),
+            "InstrumentProfile(instrument={}, earliest_ts={{{}}}, latest_ts={{{}}}, legs={:?})",
+            self.instrument.__repr__(),
             earliest.join(", "),
             latest.join(", "),
             self.legs,
@@ -97,26 +97,26 @@ impl AssetMeta {
 
     #[getter]
     fn symbol(&self) -> &str {
-        &self.asset.symbol
+        &self.instrument.symbol
     }
     #[getter]
     fn name(&self) -> &str {
-        &self.asset.name
+        &self.instrument.name
     }
     #[getter]
     fn base(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
-        self.asset.base(py)
+        self.instrument.base(py)
     }
     #[getter]
     fn quote(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        self.asset.quote(py)
+        self.instrument.quote(py)
     }
     #[getter]
-    fn asset_type(&self) -> AssetType {
-        self.asset.asset_type
+    fn instrument_type(&self) -> InstrumentType {
+        self.instrument.instrument_type
     }
     #[getter]
     fn exchange(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        self.asset.exchange(py)
+        self.instrument.exchange(py)
     }
 }

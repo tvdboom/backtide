@@ -3,13 +3,12 @@
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
 use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
-use crate::data::models::asset::Asset;
-use crate::data::models::asset_meta::AssetMeta;
-use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
-use crate::data::models::download_info::DownloadInfo;
 use crate::data::models::download_result::DownloadResult;
 use crate::data::models::forex_pair::ForexPair;
+use crate::data::models::instrument::Instrument;
+use crate::data::models::instrument_profile::InstrumentProfile;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
@@ -26,28 +25,32 @@ impl Engine {
     // Public interface
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Fetch assets concurrently, using the cache where possible.
-    #[instrument(skip(self), fields(?asset_type))]
-    pub fn get_assets(
+    /// Fetch instruments concurrently, using the cache where possible.
+    #[instrument(skip(self), fields(?instrument_type))]
+    pub fn get_instruments(
         &self,
         symbols: Vec<Symbol>,
-        asset_type: AssetType,
-    ) -> DataResult<Vec<Asset>> {
+        instrument_type: InstrumentType,
+    ) -> DataResult<Vec<Instrument>> {
         self.rt.block_on(async {
-            let tasks: Vec<_> = symbols.iter().map(|s| self.load_asset(s, asset_type)).collect();
+            let tasks: Vec<_> =
+                symbols.iter().map(|s| self.load_instrument(s, instrument_type)).collect();
             join_all(tasks).await.into_iter().collect::<Result<Vec<_>, _>>()
         })
     }
 
-    /// Resolves all assets required to price the given symbols in the
+    /// Resolves all instruments required to price the given symbols in the
     /// portfolio base currency, including any triangulation intermediaries.
-    #[instrument(skip(self), fields(?asset_type, ?intervals))]
-    pub fn get_download_info(
+    ///
+    /// Returns a flat, deduplicated list of [`InstrumentProfile`]s — direct
+    /// instruments first, followed by currency-conversion legs.
+    #[instrument(skip(self), fields(?instrument_type, ?intervals))]
+    pub fn resolve_profiles(
         &self,
         symbols: Vec<Symbol>,
-        asset_type: AssetType,
+        instrument_type: InstrumentType,
         intervals: Vec<Interval>,
-    ) -> DataResult<DownloadInfo> {
+    ) -> DataResult<Vec<InstrumentProfile>> {
         let base_currency = &self.config.general.base_currency.to_string();
 
         let tri_strategy = self.config.general.triangulation_strategy;
@@ -56,28 +59,29 @@ impl Engine {
         let tri_crypto_pegged = &self.config.general.triangulation_crypto_pegged.to_string();
 
         self.rt.block_on(async {
-            // Resolve the primary assets.
-            let tasks: Vec<_> = symbols.iter().map(|s| self.load_asset(s, asset_type)).collect();
-            let assets = join_all(tasks).await.into_iter().collect::<Result<Vec<_>, _>>()?;
+            // Resolve the primary instruments.
+            let tasks: Vec<_> =
+                symbols.iter().map(|s| self.load_instrument(s, instrument_type)).collect();
+            let instruments = join_all(tasks).await.into_iter().collect::<Result<Vec<_>, _>>()?;
 
-            let mut leg_map: IndexMap<String, Asset> = IndexMap::new();
-            let mut asset_leg_symbols: Vec<Vec<Symbol>> = Vec::new();
+            let mut leg_map: IndexMap<String, Instrument> = IndexMap::new();
+            let mut instrument_leg_symbols: Vec<Vec<Symbol>> = Vec::new();
 
-            for asset in &assets {
-                let base = &asset.base;
-                let quote = &asset.quote;
+            for instr in &instruments {
+                let base = &instr.base;
+                let quote = &instr.quote;
 
                 // Skip if already denominated in base — no extra legs needed.
                 if base.as_ref().is_some_and(|b| b == base_currency) || quote == base_currency {
-                    asset_leg_symbols.push(vec![]);
+                    instrument_leg_symbols.push(vec![]);
                     continue;
                 }
 
                 let is_fiat = quote.parse::<Currency>().is_ok();
-                let at = if is_fiat {
-                    AssetType::Forex
+                let it = if is_fiat {
+                    InstrumentType::Forex
                 } else {
-                    AssetType::Crypto
+                    InstrumentType::Crypto
                 };
 
                 let (mid, mid_pegged) = if is_fiat {
@@ -86,43 +90,44 @@ impl Engine {
                     (tri_crypto, tri_crypto_pegged)
                 };
 
-                // Fetch the legs for this asset
+                // Fetch the legs for this instrument
                 let resolved = self
                     .resolve_legs(
                         quote,
                         base_currency,
                         (mid, mid_pegged),
-                        at,
+                        it,
                         &intervals,
                         tri_strategy,
                     )
                     .await?;
 
-                // Add the leg symbols to the asset's meta
-                asset_leg_symbols.push(resolved.iter().map(|l| l.symbol.clone()).collect());
+                // Add the leg symbols to the instrument's profile
+                instrument_leg_symbols.push(resolved.iter().map(|l| l.symbol.clone()).collect());
 
                 for leg in resolved {
                     leg_map.entry(leg.symbol.clone()).or_insert(leg);
                 }
             }
 
-            let asset_metas = try_join_all(
-                assets.into_iter().zip(asset_leg_symbols.into_iter()).map(|(asset, legs)| async {
-                    let (earliest_ts, latest_ts) = self.load_range(&asset, &intervals).await?;
-                    Ok::<_, DataError>(AssetMeta {
-                        asset,
-                        earliest_ts,
-                        latest_ts,
-                        legs,
-                    })
-                }),
-            )
-            .await?;
+            let instrument_profiles =
+                try_join_all(instruments.into_iter().zip(instrument_leg_symbols.into_iter()).map(
+                    |(instr, legs)| async {
+                        let (earliest_ts, latest_ts) = self.load_range(&instr, &intervals).await?;
+                        Ok::<_, DataError>(InstrumentProfile {
+                            instrument: instr,
+                            earliest_ts,
+                            latest_ts,
+                            legs,
+                        })
+                    },
+                ))
+                .await?;
 
-            let leg_metas = try_join_all(leg_map.into_values().map(|asset| async {
-                let (earliest_ts, latest_ts) = self.load_range(&asset, &intervals).await?;
-                Ok::<_, DataError>(AssetMeta {
-                    asset,
+            let leg_profiles = try_join_all(leg_map.into_values().map(|instr| async {
+                let (earliest_ts, latest_ts) = self.load_range(&instr, &intervals).await?;
+                Ok::<_, DataError>(InstrumentProfile {
+                    instrument: instr,
                     earliest_ts,
                     latest_ts,
                     legs: vec![],
@@ -130,55 +135,67 @@ impl Engine {
             }))
             .await?;
 
-            Ok(DownloadInfo {
-                assets: asset_metas,
-                legs: leg_metas,
-            })
+            // Merge into a single flat vec, deduplicating by symbol.
+            let mut seen = std::collections::HashSet::new();
+            let mut profiles = Vec::new();
+            for p in instrument_profiles.into_iter().chain(leg_profiles) {
+                if seen.insert(p.instrument.symbol.clone()) {
+                    profiles.push(p);
+                }
+            }
+
+            Ok(profiles)
         })
     }
 
-    /// List the most important assets for a given asset type, capped at `limit`.
+    /// List the most important instruments for a given instrument type, capped at `limit`.
     ///
-    /// Delegates directly to the provider — callers should cache the result
-    /// as this may trigger multiple network requests.
-    #[instrument(skip(self), fields(?asset_type))]
-    pub fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
-        self.rt.block_on(self.providers.get(&asset_type).unwrap().list_assets(asset_type, limit))
+    /// When `exchanges` is `None`, delegates directly to the provider.
+    /// When `exchanges` is `Some`, distributes `limit` evenly across the
+    /// specified exchanges (returning the top instruments by volume×price
+    /// per exchange).
+    #[instrument(skip(self), fields(?instrument_type))]
+    pub fn list_instruments(
+        &self,
+        instrument_type: InstrumentType,
+        exchanges: Option<Vec<String>>,
+        limit: usize,
+    ) -> DataResult<Vec<Instrument>> {
+        self.rt.block_on(
+            self.providers.get(&instrument_type).unwrap().list_instruments(instrument_type, limit),
+        )
     }
 
-    /// Download assets from a [`DownloadInfo`] and stores the results in the database.
+    /// Download instruments from a list of [`InstrumentProfile`]s and store the
+    /// results in the database.
     ///
     /// * Checks what is already in storage — skips completed ranges and only downloads
     ///   the missing head/tail (or both) for partial ones.
     /// * Downloads concurrently across symbols and intervals.
     /// * Writes **all** downloaded data in a single bulk transaction.
     /// * Only writes contiguous (gap-free) bars starting from the beginning of the range.
-    /// * Idempotent, i.e., re-calling with the same `DownloadInfo` is a no-op.
+    /// * Idempotent, i.e., re-calling with the same profiles is a no-op.
     ///
-    /// When `start` or `end` is provided, the per-asset range is clamped so that
+    /// When `start` or `end` is provided, the per-instrument range is clamped so that
     /// no data before `start` or after `end` is requested from the provider.
     #[instrument(skip(self))]
-    pub fn download_symbols(
+    pub fn download_instruments(
         &self,
-        download_info: &DownloadInfo,
+        profiles: &[InstrumentProfile],
         start: Option<u64>,
         end: Option<u64>,
     ) -> EngineResult<DownloadResult> {
-        // Collect all assets and legs pairs to treat them uniformly.
-        let all_metas: Vec<&AssetMeta> =
-            download_info.assets.iter().chain(download_info.legs.iter()).collect();
-
         self.rt.block_on(async {
-            // Build a list of (symbol, asset_type, interval, start, end) tasks
-            let mut tasks: Vec<(String, AssetType, Interval, u64, u64)> = Vec::new();
+            // Build a list of (symbol, instrument_type, interval, start, end) tasks
+            let mut tasks: Vec<(String, InstrumentType, Interval, u64, u64)> = Vec::new();
 
-            for meta in &all_metas {
-                let symbol = &meta.asset.symbol;
-                let asset_type = meta.asset.asset_type;
-                let provider = self.provider(asset_type);
+            for profile in profiles {
+                let symbol = &profile.instrument.symbol;
+                let instrument_type = profile.instrument.instrument_type;
+                let provider = self.provider(instrument_type);
 
-                for (interval, meta_start) in &meta.earliest_ts {
-                    let meta_end = meta.latest_ts.get(interval).unwrap();
+                for (interval, meta_start) in &profile.earliest_ts {
+                    let meta_end = profile.latest_ts.get(interval).unwrap();
 
                     // Clamp to the user-requested range when provided.
                     let start = start.map_or(*meta_start, |s| s.max(*meta_start));
@@ -201,19 +218,16 @@ impl Engine {
                         // Missing head: requested start is before what the database has.
                         if start < db_min {
                             debug!(%symbol, ?interval, head_end = db_min, "Downloading missing head.");
-                            tasks.push((symbol.clone(), asset_type, *interval, start, db_min));
+                            tasks.push((symbol.clone(), instrument_type, *interval, start, db_min));
                         }
 
                         // Missing tail: requested end is beyond what the database has.
-                        // Always start from db_max (not from `start`) so the new data connects
-                        // to what is already stored, no gap is left even when the requested
-                        // range begins after the stored range.
                         if end > db_max {
                             debug!(%symbol, ?interval, tail_start = db_max, "Downloading missing tail.");
-                            tasks.push((symbol.clone(), asset_type, *interval, db_max, end));
+                            tasks.push((symbol.clone(), instrument_type, *interval, db_max, end));
                         }
                     } else {
-                        tasks.push((symbol.clone(), asset_type, *interval, start, end));
+                        tasks.push((symbol.clone(), instrument_type, *interval, start, end));
                     };
                 }
             }
@@ -223,30 +237,28 @@ impl Engine {
 
             // ── Phase 1: download all tasks concurrently ─────────────────
             let downloaded: Vec<_> = join_all(tasks.into_iter().enumerate().map(
-                |(idx, (symbol, at, interval, start, end))| async move {
-                    let provider = self.providers.get(&at).unwrap();
+                |(idx, (symbol, it, interval, start, end))| async move {
+                    let provider = self.providers.get(&it).unwrap();
                     info!(%symbol, ?interval, start, end, "Downloading...");
-                    let result = provider.download_batch(&symbol, at, interval, start, end).await;
-                    (idx, symbol, at, interval, result)
+                    let result = provider.download_batch(&symbol, it, interval, start, end).await;
+                    (idx, symbol, it, interval, result)
                 },
             ))
             .await;
 
             // ── Phase 2: collect results and build one bulk write ────────
-            // Separate successes from failures so we can write all successes
-            // in a single transaction and still report individual errors.
             let mut series: Vec<BarSeries> = Vec::new();
             let mut outcomes: Vec<(usize, String, Interval, Result<usize, String>)> = Vec::new();
 
-            for (idx, symbol, at, interval, result) in downloaded {
-                let provider_enum = self.provider(at);
+            for (idx, symbol, it, interval, result) in downloaded {
+                let provider_enum = self.provider(it);
                 match result {
                     Ok(bars) => {
                         let n_bars = bars.len();
                         info!(%symbol, ?interval, bars = n_bars, "Downloaded.");
                         series.push(BarSeries {
                             symbol: symbol.clone(),
-                            asset_type: at,
+                            instrument_type: it,
                             interval,
                             provider: provider_enum,
                             bars,
@@ -289,42 +301,46 @@ impl Engine {
     // Private interface
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Resolve the [`Provider`] for a given asset type from config.
-    fn provider(&self, asset_type: AssetType) -> Provider {
-        *self.config.data.providers.get(&asset_type).unwrap()
+    /// Resolve the [`Provider`] for a given instrument type from config.
+    fn provider(&self, instrument_type: InstrumentType) -> Provider {
+        *self.config.data.providers.get(&instrument_type).unwrap()
     }
 
-    /// Resolve an asset using the engine's cache.
-    async fn load_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
-        if let Some(asset) = self.cache.asset_cache.get(symbol).await {
-            debug!(%symbol, "Asset cache hit.");
-            return Ok(asset.as_ref().clone());
+    /// Resolve an instrument using the engine's cache.
+    async fn load_instrument(
+        &self,
+        symbol: &Symbol,
+        instrument_type: InstrumentType,
+    ) -> DataResult<Instrument> {
+        if let Some(instr) = self.cache.instrument_cache.get(symbol).await {
+            debug!(%symbol, "Instrument cache hit.");
+            return Ok(instr.as_ref().clone());
         }
 
-        let provider = self.providers.get(&asset_type).unwrap();
-        let asset = provider.get_asset(symbol, asset_type).await?;
-        self.cache.asset_cache.insert(symbol.clone(), Arc::new(asset.clone())).await;
-        debug!(%symbol, "Asset cached");
-        Ok(asset)
+        let provider = self.providers.get(&instrument_type).unwrap();
+        let instr = provider.get_instrument(symbol, instrument_type).await?;
+        self.cache.instrument_cache.insert(symbol.clone(), Arc::new(instr.clone())).await;
+        debug!(%symbol, "Instrument cached");
+        Ok(instr)
     }
 
-    /// Resolve an asset range for one or multiple intervals using the engine's cache.
+    /// Resolve an instrument range for one or multiple intervals using the engine's cache.
     async fn load_range(
         &self,
-        asset: &Asset,
+        instrument: &Instrument,
         intervals: &[Interval],
     ) -> DataResult<(HashMap<Interval, u64>, HashMap<Interval, u64>)> {
-        let provider = self.providers.get(&asset.asset_type).unwrap();
+        let provider = self.providers.get(&instrument.instrument_type).unwrap();
 
         let ranges = try_join_all(intervals.iter().map(|&iv| async move {
-            let key = (asset.symbol.clone(), iv);
+            let key = (instrument.symbol.clone(), iv);
 
             if let Some(range) = self.cache.range_cache.get(&key).await {
-                debug!(symbol = %asset.symbol, ?iv, "Range cache hit.");
+                debug!(symbol = %instrument.symbol, ?iv, "Range cache hit.");
                 return Ok::<_, DataError>((iv, range.0, range.1));
             }
 
-            let (start, end) = provider.get_download_range(asset.clone(), iv).await?;
+            let (start, end) = provider.get_download_range(instrument.clone(), iv).await?;
             self.cache.range_cache.insert(key, (start, end)).await;
             Ok::<_, DataError>((iv, start, end))
         }))
@@ -335,29 +351,31 @@ impl Engine {
         for (iv, start, end) in ranges {
             earliest.insert(iv, start);
             latest.insert(iv, end);
-            debug!(symbol = %asset.symbol, ?iv, "Range cached.");
+            debug!(symbol = %instrument.symbol, ?iv, "Range cached.");
         }
 
         Ok((earliest, latest))
     }
 
-    /// Try to load an asset from symbol format base-quote or quote-base.
+    /// Try to load an instrument from symbol format base-quote or quote-base.
     ///
     /// When both orderings exist, prefer the one whose concatenated symbol
     /// matches a known [`ForexPair`] variant (e.g. `EURAUD` over `AUDEUR`).
     /// If neither (or both) match, fall back to the one with the longest history.
-    async fn load_asset_bidirectional(
+    async fn load_instrument_bidirectional(
         &self,
         base: &str,
         quote: &str,
-        at: AssetType,
+        it: InstrumentType,
         intervals: &[Interval],
-    ) -> DataResult<Asset> {
+    ) -> DataResult<Instrument> {
         let base_quote = format!("{base}-{quote}");
         let quote_base = format!("{quote}-{base}");
 
-        let (direct, inverse) =
-            tokio::join!(self.load_asset(&base_quote, at), self.load_asset(&quote_base, at),);
+        let (direct, inverse) = tokio::join!(
+            self.load_instrument(&base_quote, it),
+            self.load_instrument(&quote_base, it),
+        );
 
         match (direct, inverse) {
             (Ok(d), Ok(i)) => {
@@ -398,17 +416,17 @@ impl Engine {
         quote: &str,
         mid: (&str, &str),
         base: &str,
-        at: AssetType,
+        it: InstrumentType,
         intervals: &[Interval],
-    ) -> DataResult<Vec<Asset>> {
+    ) -> DataResult<Vec<Instrument>> {
         let mut legs = Vec::new();
 
         if quote != mid.0 {
-            legs.push(self.load_asset_bidirectional(quote, mid.0, at, intervals).await?);
+            legs.push(self.load_instrument_bidirectional(quote, mid.0, it, intervals).await?);
         }
 
         if mid.1 != base {
-            legs.push(self.load_asset_bidirectional(mid.1, base, at, intervals).await?);
+            legs.push(self.load_instrument_bidirectional(mid.1, base, it, intervals).await?);
         }
 
         if legs.is_empty() {
@@ -427,22 +445,21 @@ impl Engine {
         quote: &str,
         base: &str,
         mid: (&str, &str),
-        at: AssetType,
+        it: InstrumentType,
         intervals: &[Interval],
         strategy: TriangulationStrategy,
-    ) -> DataResult<Vec<Asset>> {
-        let direct = self.load_asset_bidirectional(quote, base, at, intervals).await;
+    ) -> DataResult<Vec<Instrument>> {
+        let direct = self.load_instrument_bidirectional(quote, base, it, intervals).await;
 
         match strategy {
             TriangulationStrategy::Direct => match direct {
                 Ok(leg) => Ok(vec![leg]),
-                Err(_) => self.triangulate(quote, mid, base, at, intervals).await,
+                Err(_) => self.triangulate(quote, mid, base, it, intervals).await,
             },
             TriangulationStrategy::Earliest => {
-                let tri = self.triangulate(quote, mid, base, at, intervals).await;
+                let tri = self.triangulate(quote, mid, base, it, intervals).await;
                 match (direct, tri) {
                     (Ok(d), Ok(t)) => {
-                        // Check the history of all legs
                         let d_start = self
                             .load_range(&d, intervals)
                             .await?

@@ -1,15 +1,15 @@
 use crate::constants::Symbol;
-use crate::data::models::asset_type::AssetType;
 use crate::data::models::currency::Currency;
 use crate::data::models::exchange::Exchange;
+use crate::data::models::instrument_type::InstrumentType;
 use pyo3::prelude::*;
 use pyo3::types::PyString;
 use serde::Deserialize;
 
 /// A tradeable financial instrument.
 ///
-/// Each asset is uniquely identified by a [symbol][nom-symbol] and
-/// belongs to exactly one [asset type].
+/// Each instrument is uniquely identified by a [symbol][nom-symbol] and
+/// belongs to exactly one [instrument type].
 ///
 /// Attributes
 /// ----------
@@ -17,32 +17,32 @@ use serde::Deserialize;
 ///     Ticker symbol as used on the exchange.
 ///
 /// name : str
-///     Human-readable name of the asset.
+///     Human-readable name of the instrument.
 ///
 /// base : str | [Currency] | None
-///     The currency of the tradeable asset. Only defined for forex and
+///     The currency of the tradeable instrument. Only defined for forex and
 ///     crypto pairs.
 ///
 /// quote : str | [Currency]
-///     The currency the asset trades on.
+///     The currency the instrument trades on.
 ///
-/// asset_type : [AssetType]
-///     Asset type this asset belongs to.
+/// instrument_type : [InstrumentType]
+///     Instrument type this instrument belongs to.
 ///
 /// exchange : str | [Exchange]
-///     The exchange this asset is listed in.
+///     The exchange this instrument is listed in.
 ///
 /// exchange_name : str
 ///     Human-readable exchange name.
 ///
 /// See Also
 /// --------
-/// - backtide.data:AssetMeta
+/// - backtide.data:InstrumentProfile
 /// - backtide.data:Bar
 /// - backtide.data:Interval
 #[pyclass(from_py_object, frozen, module = "backtide.data")]
 #[derive(Debug, Clone, Deserialize)]
-pub struct Asset {
+pub struct Instrument {
     #[pyo3(get)]
     pub symbol: Symbol,
     #[pyo3(get)]
@@ -52,7 +52,7 @@ pub struct Asset {
     #[pyo3(get)]
     pub quote: String,
     #[pyo3(get)]
-    pub asset_type: AssetType,
+    pub instrument_type: InstrumentType,
     #[pyo3(get)]
     pub exchange: String,
 
@@ -63,7 +63,7 @@ pub struct Asset {
     pub price: Option<f64>,
 }
 
-impl Asset {
+impl Instrument {
     pub fn volume_price(&self) -> f64 {
         match (self.volume, self.price) {
             (Some(v), Some(p)) => v as f64 * p,
@@ -73,7 +73,7 @@ impl Asset {
 }
 
 #[pymethods]
-impl Asset {
+impl Instrument {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 
@@ -83,7 +83,7 @@ impl Asset {
         name: String,
         base: Option<String>,
         quote: String,
-        asset_type: AssetType,
+        instrument_type: InstrumentType,
         exchange: String,
     ) -> Self {
         Self {
@@ -91,7 +91,7 @@ impl Asset {
             name,
             base,
             quote,
-            asset_type,
+            instrument_type,
             exchange,
             volume: None,
             price: None,
@@ -102,9 +102,11 @@ impl Asset {
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyAny>, (Symbol, String, Option<String>, String, AssetType, String))>
-    {
-        let cls = py.get_type::<Asset>().into_any();
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (Symbol, String, Option<String>, String, InstrumentType, String),
+    )> {
+        let cls = py.get_type::<Instrument>().into_any();
         Ok((
             cls,
             (
@@ -112,7 +114,7 @@ impl Asset {
                 self.name.clone(),
                 self.base.clone(),
                 self.quote.clone(),
-                self.asset_type,
+                self.instrument_type,
                 self.exchange.clone(),
             ),
         ))
@@ -120,12 +122,12 @@ impl Asset {
 
     pub fn __repr__(&self) -> String {
         format!(
-            "Asset(symbol={:?}, name={:?}, base={}, quote={:?}, asset_type={:?}, exchange={:?})",
+            "Instrument(symbol={:?}, name={:?}, base={}, quote={:?}, instrument_type={:?}, exchange={:?})",
             self.symbol,
             self.name,
             self.base.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
             self.quote,
-            self.asset_type.to_string(),
+            self.instrument_type.to_string(),
             self.exchange,
         )
     }

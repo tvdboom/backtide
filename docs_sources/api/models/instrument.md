@@ -1,7 +1,7 @@
-# AssetMeta
------------
+# Instrument
+------------
 
-:: backtide.data:AssetMeta
+:: backtide.data:Instrument
     :: signature
     :: head
     :: table:

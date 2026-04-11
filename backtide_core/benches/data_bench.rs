@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::join_all;
 
-use backtide_core::data::models::asset_type::AssetType;
+use backtide_core::data::models::instrument_type::InstrumentType;
 use backtide_core::data::models::interval::Interval;
 use backtide_core::data::providers::traits::DataProvider;
 use backtide_core::data::providers::yahoo::YahooFinance;
@@ -55,10 +55,7 @@ fn bench_ohlc_download_1sym_1m(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
     let yahoo = rt.block_on(YahooFinance::new()).expect("failed to init Yahoo provider");
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let start = now - 7 * 86_400;
 
     c.bench_function("ohlc_download/1sym_1m", |b| {
@@ -67,7 +64,13 @@ fn bench_ohlc_download_1sym_1m(c: &mut Criterion) {
                 let t = Instant::now();
                 for _ in 0..iters {
                     yahoo
-                        .download_batch("AAPL", AssetType::Stocks, Interval::OneMinute, start, now)
+                        .download_batch(
+                            "AAPL",
+                            InstrumentType::Stocks,
+                            Interval::OneMinute,
+                            start,
+                            now,
+                        )
                         .await
                         .expect("yahoo download failed");
                 }
@@ -87,15 +90,10 @@ fn bench_ohlc_download_10sym_1d(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
     let yahoo = rt.block_on(YahooFinance::new()).expect("failed to init Yahoo provider");
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let start = now - 30 * 86_400;
 
-    let symbols = [
-        "AAPL", "MSFT", "GOOG", "AMZN", "TSLA", "META", "NVDA", "JPM", "V", "JNJ",
-    ];
+    let symbols = ["AAPL", "MSFT", "GOOG", "AMZN", "TSLA", "META", "NVDA", "JPM", "V", "JNJ"];
 
     c.bench_function("ohlc_download/10sym_1d", |b| {
         b.iter_custom(|iters| {
@@ -103,7 +101,13 @@ fn bench_ohlc_download_10sym_1d(c: &mut Criterion) {
                 let t = Instant::now();
                 for _ in 0..iters {
                     let futures = symbols.iter().map(|&sym| {
-                        yahoo.download_batch(sym, AssetType::Stocks, Interval::OneDay, start, now)
+                        yahoo.download_batch(
+                            sym,
+                            InstrumentType::Stocks,
+                            Interval::OneDay,
+                            start,
+                            now,
+                        )
                     });
                     let results = join_all(futures).await;
                     for r in results {

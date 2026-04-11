@@ -38,7 +38,7 @@ impl Storage for DuckDb {
             "
             CREATE TABLE IF NOT EXISTS bars (
                 symbol            VARCHAR NOT NULL,
-                asset_type        VARCHAR NOT NULL,
+                instrument_type   VARCHAR NOT NULL,
                 interval          VARCHAR NOT NULL,
                 provider          VARCHAR NOT NULL,
                 open_ts           BIGINT NOT NULL,
@@ -91,7 +91,7 @@ impl Storage for DuckDb {
         // Phase 2: bulk-insert every row via the Appender (one flush).
         let mut appender = conn.appender("bars")?;
         for s in &non_empty {
-            let at = s.asset_type.to_string();
+            let at = s.instrument_type.to_string();
             let iv = s.interval.to_string();
             let prov = s.provider.to_string();
             for bar in &s.bars {
@@ -151,9 +151,9 @@ impl Storage for DuckDb {
 
         // Step 1: get each series with its stats
         let mut stmt = conn.prepare(
-            "SELECT symbol, interval, asset_type, provider, MIN(open_ts), MAX(open_ts), COUNT(*)
+            "SELECT symbol, interval, instrument_type, provider, MIN(open_ts), MAX(open_ts), COUNT(*)
              FROM bars
-             GROUP BY symbol, interval, asset_type, provider
+             GROUP BY symbol, interval, instrument_type, provider
              ORDER BY symbol, interval, provider",
         )?;
 
@@ -182,7 +182,7 @@ impl Storage for DuckDb {
         )?;
 
         let mut summaries = Vec::with_capacity(rows.len());
-        for (symbol, interval, at, provider, first_ts, last_ts, n_rows) in rows {
+        for (symbol, interval, it, provider, first_ts, last_ts, n_rows) in rows {
             let sparkline: Vec<f64> = sparkline_stmt
                 .query_map(params![symbol, provider, interval], |row| row.get(0))?
                 .collect::<Result<_, _>>()?;
@@ -191,7 +191,7 @@ impl Storage for DuckDb {
                 symbol,
                 provider,
                 interval,
-                asset_type: at,
+                instrument_type: it,
                 first_ts,
                 last_ts,
                 n_rows,

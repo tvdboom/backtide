@@ -1,7 +1,7 @@
-# get_download_info
--------------------
+# list_instruments
+------------------
 
-:: backtide.data:get_download_info
+:: backtide.data:list_instruments
     :: signature
     :: head
     :: table:

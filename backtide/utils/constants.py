@@ -10,11 +10,11 @@ import re
 # Regex pattern to which tags must comply
 TAG_PATTERN = re.compile(r"^[\w-]{1,15}$")
 
-# Maximum number of assets to download or backtest at the same time
-MAX_ASSET_SELECTION = 10
+# Maximum number of instruments to download or backtest at the same time
+MAX_INSTRUMENT_SELECTION = 10
 
-# Number of preloaded assets displayed in the UI
-MAX_PRELOADED_ASSETS = 1500
+# Number of preloaded instruments displayed in the UI
+MAX_PRELOADED_INSTRUMENTS = 1500
 
 STRATEGY_PLACEHOLDER = """\
 def strategy(data, state, indicators):

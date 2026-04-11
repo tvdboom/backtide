@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from backtide.core.config import get_config
-from backtide.core.data import AssetType
+from backtide.core.data import InstrumentType
 from backtide.core.storage import delete_rows, get_summary
 from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date
 
@@ -70,7 +70,7 @@ rows = [
     {
         "Symbol": s.symbol,
         "Interval": s.interval,
-        "Asset type": s.asset_type,
+        "Instrument type": s.instrument_type,
         "Provider": s.provider,
         "First date": _parse_date(s.first_ts, cfg.display.date_format, tz),
         "Last date": _parse_date(s.last_ts, cfg.display.date_format, tz),
@@ -91,7 +91,10 @@ column_config = {
 
 if logokit_key := cfg.display.logokit_api_key:
     df.index = pd.Index(
-        data=[_get_logokit_url(s.symbol, AssetType(s.asset_type), logokit_key) for s in summaries],
+        data=[
+            _get_logokit_url(s.symbol, InstrumentType(s.instrument_type), logokit_key)
+            for s in summaries
+        ],
         name="Logo",
     )
     column_config["Logo"] = st.column_config.ImageColumn(label="", width="small")

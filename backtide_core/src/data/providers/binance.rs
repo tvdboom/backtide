@@ -4,9 +4,9 @@
 
 use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
-use crate::data::models::asset::Asset;
-use crate::data::models::asset_type::AssetType;
 use crate::data::models::bar::Bar;
+use crate::data::models::instrument::Instrument;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
@@ -18,8 +18,8 @@ use tracing::{debug, info, instrument};
 /// Binance spot-market data provider.
 ///
 /// Wraps Binance's public REST API behind the [`DataProvider`] trait.
-/// Only [`AssetType::Crypto`] is supported; all other asset types return
-/// [`DataError::UnsupportedAssetType`].
+/// Only [`InstrumentType::Crypto`] is supported; all other instrument types return
+/// [`DataError::UnsupportedInstrumentType`].
 pub struct Binance {
     /// Shared async HTTP client.
     client: HttpClient,
@@ -69,12 +69,12 @@ impl Binance {
         }
     }
 
-    /// Checks whether the asset type is supported by the provider.
-    fn check_asset_type(asset_type: AssetType) -> DataResult<()> {
-        if asset_type == AssetType::Crypto {
+    /// Checks whether the instrument type is supported by the provider.
+    fn check_instrument_type(instrument_type: InstrumentType) -> DataResult<()> {
+        if instrument_type == InstrumentType::Crypto {
             Ok(())
         } else {
-            Err(DataError::UnsupportedAssetType(asset_type))
+            Err(DataError::UnsupportedInstrumentType(instrument_type))
         }
     }
 
@@ -123,8 +123,12 @@ impl Binance {
 impl DataProvider for Binance {
     /// Fetch metadata for a single symbol.
     #[instrument(skip(self), fields(%symbol))]
-    async fn get_asset(&self, symbol: &Symbol, asset_type: AssetType) -> DataResult<Asset> {
-        Self::check_asset_type(asset_type)?;
+    async fn get_instrument(
+        &self,
+        symbol: &Symbol,
+        instrument_type: InstrumentType,
+    ) -> DataResult<Instrument> {
+        Self::check_instrument_type(instrument_type)?;
 
         let binance_symbol = Self::parse_canonical_symbol(symbol);
 
@@ -143,15 +147,19 @@ impl DataProvider for Binance {
             .next()
             .ok_or_else(|| DataError::SymbolNotFound(symbol.to_owned()))?;
 
-        Ok(Asset::try_from(info)?)
+        Ok(Instrument::try_from(info)?)
     }
 
-    /// Returns the usable download range for an asset at a given interval.
-    #[instrument(skip(self), fields(symbol = %asset.symbol, ?interval))]
-    async fn get_download_range(&self, asset: Asset, interval: Interval) -> DataResult<(u64, u64)> {
-        Self::check_asset_type(asset.asset_type)?;
+    /// Returns the usable download range for an instrument at a given interval.
+    #[instrument(skip(self), fields(symbol = %instrument.symbol, ?interval))]
+    async fn get_download_range(
+        &self,
+        instrument: Instrument,
+        interval: Interval,
+    ) -> DataResult<(u64, u64)> {
+        Self::check_instrument_type(instrument.instrument_type)?;
 
-        let symbol = Self::parse_canonical_symbol(&asset.symbol);
+        let symbol = Self::parse_canonical_symbol(&instrument.symbol);
 
         let (first, last) = tokio::try_join!(
             self.get_bars(&symbol, interval, Some(0), None, 1),
@@ -161,36 +169,40 @@ impl DataProvider for Binance {
         let earliest_ts = first
             .into_iter()
             .next()
-            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol.clone()))?
+            .ok_or_else(|| DataError::SymbolNotFound(instrument.symbol.clone()))?
             .open_time;
 
         let latest_ts = last
             .into_iter()
             .next()
-            .ok_or_else(|| DataError::SymbolNotFound(asset.symbol))?
+            .ok_or_else(|| DataError::SymbolNotFound(instrument.symbol))?
             .close_time;
 
         Ok((earliest_ts, latest_ts))
     }
 
-    /// List the spot crypto assets traded on Binance, capped at `limit`.
-    #[instrument(skip(self), fields(?asset_type, limit))]
-    async fn list_assets(&self, asset_type: AssetType, limit: usize) -> DataResult<Vec<Asset>> {
-        Self::check_asset_type(asset_type)?;
+    /// List the spot crypto instruments traded on Binance, capped at `limit`.
+    #[instrument(skip(self), fields(?instrument_type, limit))]
+    async fn list_instruments(
+        &self,
+        instrument_type: InstrumentType,
+        limit: usize,
+    ) -> DataResult<Vec<Instrument>> {
+        Self::check_instrument_type(instrument_type)?;
 
         let resp =
             self.client.get(Self::EXCHANGE_INFO_URL, Some(&[("permissions", "SPOT")])).await?;
         let parsed = HttpClient::json::<BinanceResponse<ExchangeInfo>>(resp).await?;
         let info = Self::unwrap_response(parsed)?;
 
-        let assets: Vec<Asset> = info
+        let instruments: Vec<Instrument> = info
             .symbols
             .into_iter()
             .filter(|s| s.status == "TRADING")
             .filter_map(|info| {
-                Asset::try_from(info)
+                Instrument::try_from(info)
                     .map_err(|e| {
-                        debug!("Binance list_assets error: {e}");
+                        debug!("Binance list_instruments error: {e}");
                         e
                     })
                     .ok()
@@ -198,7 +210,7 @@ impl DataProvider for Binance {
             .take(limit)
             .collect();
 
-        Ok(assets)
+        Ok(instruments)
     }
 
     /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
@@ -206,7 +218,7 @@ impl DataProvider for Binance {
     async fn download_batch(
         &self,
         symbol: &str,
-        _asset_type: AssetType,
+        _instrument_type: InstrumentType,
         interval: Interval,
         start: u64,
         end: u64,
@@ -301,7 +313,7 @@ struct SymbolInfo {
     quote_asset: String,
 }
 
-impl TryFrom<SymbolInfo> for Asset {
+impl TryFrom<SymbolInfo> for Instrument {
     type Error = DataError;
 
     fn try_from(info: SymbolInfo) -> DataResult<Self> {
@@ -310,12 +322,12 @@ impl TryFrom<SymbolInfo> for Asset {
 
         let symbol = canonical_symbol(&info.symbol, &Some(base.clone()), &quote);
 
-        Ok(Asset {
+        Ok(Instrument {
             symbol: symbol.clone(),
             name: symbol,
             base: Some(base),
             quote,
-            asset_type: AssetType::Crypto,
+            instrument_type: InstrumentType::Crypto,
             exchange: "BINANCE".to_owned(), // Binance has no MIC code.
             volume: None,
             price: None,

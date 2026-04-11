@@ -1,7 +1,7 @@
-# get_assets
-------------
+# resolve_profiles
+------------------
 
-:: backtide.data:get_assets
+:: backtide.data:resolve_profiles
     :: signature
     :: head
     :: table:

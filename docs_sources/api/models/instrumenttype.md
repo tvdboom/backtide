@@ -1,7 +1,7 @@
-# Asset
--------
+# InstrumentType
+----------------
 
-:: backtide.data:Asset
+:: backtide.data:InstrumentType
     :: signature
     :: head
     :: table:

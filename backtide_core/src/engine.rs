@@ -6,8 +6,8 @@
 
 use crate::config::interface::Config;
 use crate::constants::Symbol;
-use crate::data::models::asset::Asset;
-use crate::data::models::asset_type::AssetType;
+use crate::data::models::instrument::Instrument;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::data::providers::binance::Binance;
@@ -32,25 +32,31 @@ static ENGINE: OnceLock<Engine> = OnceLock::new();
 
 /// Cache storage for the engine.
 pub struct EngineCache {
-    /// TTL asset cache.
-    pub asset_cache: Cache<Symbol, Arc<Asset>>,
+    /// TTL instrument cache.
+    pub instrument_cache: Cache<Symbol, Arc<Instrument>>,
 
-    /// TTL asset range cache.
+    /// TTL instrument range cache.
     pub range_cache: Cache<(Symbol, Interval), (u64, u64)>,
 }
 
 impl EngineCache {
     pub fn new() -> Self {
         Self {
-            asset_cache: Cache::builder().time_to_live(Duration::from_secs(2 * 3600)).build(),
+            instrument_cache: Cache::builder().time_to_live(Duration::from_secs(2 * 3600)).build(),
             range_cache: Cache::builder().time_to_live(Duration::from_secs(1800)).build(),
         }
     }
 
     /// Invalidate all cache.
     pub fn clear(&self) {
-        self.asset_cache.invalidate_all();
+        self.instrument_cache.invalidate_all();
         self.range_cache.invalidate_all();
+    }
+}
+
+impl Default for EngineCache {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -62,8 +68,8 @@ pub struct Engine {
     /// Dedicated runtime for blocking async calls from sync contexts.
     pub rt: Runtime,
 
-    /// One provider arc per asset type, potentially shared across types.
-    pub providers: HashMap<AssetType, Arc<dyn DataProvider>>,
+    /// One provider arc per instrument type, potentially shared across types.
+    pub providers: HashMap<InstrumentType, Arc<dyn DataProvider>>,
 
     /// Database which stores all data.
     pub db: Box<dyn Storage>,
@@ -103,8 +109,8 @@ impl Engine {
 
     /// Build the singleton from the active [`Config`].
     ///
-    /// Provider instances are deduplicated — if two asset types share the same
-    /// [`Provider`] variant they receive the same [`Arc`].
+    /// Provider instances are deduplicated — if two instrument types share the
+    /// same [`Provider`] variant they receive the same [`Arc`].
     fn init() -> EngineResult<Self> {
         // Load the configuration from the file or use default.
         let config = Config::get()?;
@@ -113,19 +119,19 @@ impl Engine {
         let rt = Runtime::new()?;
         let pc = &config.data.providers;
 
-        // Provider instances are deduplicated — if two asset types share the same
-        // variant, they receive the same Arc.
+        // Provider instances are deduplicated — if two instrument types share the
+        // same variant, they receive the same Arc.
         let mut cache: HashMap<Provider, Arc<dyn DataProvider>> = HashMap::new();
-        let mut providers: HashMap<AssetType, Arc<dyn DataProvider>> = HashMap::new();
+        let mut providers: HashMap<InstrumentType, Arc<dyn DataProvider>> = HashMap::new();
 
-        for asset_type in AssetType::iter() {
-            let default = asset_type.default();
-            let provider = pc.get(&asset_type).unwrap_or(&default);
+        for instrument_type in InstrumentType::iter() {
+            let default = instrument_type.default();
+            let provider = pc.get(&instrument_type).unwrap_or(&default);
             let p = if let Some(p) = cache.get(provider) {
-                debug!(?asset_type, ?provider, "Reusing existing provider instance");
+                debug!(?instrument_type, ?provider, "Reusing existing provider instance");
                 p.clone()
             } else {
-                debug!(?asset_type, ?provider, "Creating new provider instance");
+                debug!(?instrument_type, ?provider, "Creating new provider instance");
                 let p: Arc<dyn DataProvider> = match provider {
                     Provider::Yahoo => Arc::new(rt.block_on(YahooFinance::new())?),
                     Provider::Binance => Arc::new(rt.block_on(Binance::new())?),
@@ -136,7 +142,7 @@ impl Engine {
                 p
             };
 
-            providers.insert(asset_type, p);
+            providers.insert(instrument_type, p);
         }
 
         // Initialize the database and create all required tables

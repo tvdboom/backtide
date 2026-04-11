@@ -1,7 +1,7 @@
 use crate::config::errors::{ConfigError, ConfigResult};
 use crate::config::interface::Config;
 use crate::constants::CONFIG_FILE_NAME;
-use crate::data::models::asset_type::AssetType;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::provider::Provider;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -40,19 +40,19 @@ pub fn fetch_config() -> ConfigResult<Config> {
     find_config_file().map(|path| parse_config(&path)).unwrap_or(Ok(Config::default()))
 }
 
-/// Deserialize providers, filling in missing asset types with their defaults.
+/// Deserialize providers, filling in missing instrument types with their defaults.
 pub fn deserialize_providers<'de, D>(
     deserializer: D,
-) -> Result<HashMap<AssetType, Provider>, D::Error>
+) -> Result<HashMap<InstrumentType, Provider>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     use serde::Deserialize;
     use strum::IntoEnumIterator;
 
-    let explicit: HashMap<AssetType, Provider> = HashMap::deserialize(deserializer)?;
-    let mut providers: HashMap<AssetType, Provider> =
-        AssetType::iter().map(|at| (at, at.default())).collect();
+    let explicit: HashMap<InstrumentType, Provider> = HashMap::deserialize(deserializer)?;
+    let mut providers: HashMap<InstrumentType, Provider> =
+        InstrumentType::iter().map(|it| (it, it.default())).collect();
     providers.extend(explicit);
     Ok(providers)
 }

@@ -1,5 +1,5 @@
 use crate::constants::Symbol;
-use crate::data::models::asset_type::AssetType;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::utils::http::HttpError;
 use pyo3::exceptions::PyRuntimeError;
@@ -32,9 +32,9 @@ pub enum DataError {
     #[error("Unexpected response: {0}")]
     UnexpectedResponse(String),
 
-    /// The asset type is not supported by the provider.
-    #[error("Unsupported asset type: {0}")]
-    UnsupportedAssetType(AssetType),
+    /// The instrument type is not supported by the provider.
+    #[error("Unsupported instrument type: {0}")]
+    UnsupportedInstrumentType(InstrumentType),
 
     /// The interval is not supported by the provider.
     #[error("Unsupported interval: {0}")]
