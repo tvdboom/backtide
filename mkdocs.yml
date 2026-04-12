@@ -130,33 +130,45 @@ nav:
             - list_instruments: api/data/list_instruments.md
             - resolve_profiles: api/data/resolve_profiles.md
         - storage:
-            - get_summary: api/storage/get_summary.md
-            - delete_rows: api/storage/delete_rows.md
+            - get_bars: api/storage/get_bars.md
+            - get_dividends: api/storage/get_dividends.md
+            - delete_symbols: api/storage/delete_symbols.md
         - models:
-            - Bar: api/models/bar.md
-            - CommissionType: api/models/commissiontype.md
-            - Config: api/models/config.md
-            - ConversionPeriod: api/models/conversionperiod.md
-            - Country: api/models/country.md
-            - Currency: api/models/currency.md
-            - CurrencyConversionMode: api/models/currencyconversionmode.md
-            - DataConfig: api/models/dataconfig.md
-            - DisplayConfig: api/models/displayconfig.md
-            - DownloadResult: api/models/downloadresult.md
-            - EmptyBarPolicy: api/models/emptybarpolicy.md
-            - Exchange: api/models/exchange.md
-            - GeneralConfig: api/models/generalconfig.md
-            - IndicatorType: api/models/indicatortype.md
-            - Instrument: api/models/instrument.md
-            - InstrumentProfile: api/models/instrumentprofile.md
-            - InstrumentType: api/models/instrumenttype.md
-            - Interval: api/models/interval.md
-            - LogLevel: api/models/loglevel.md
-            - OrderType: api/models/ordertype.md
-            - Provider: api/models/provider.md
-            - StorageSummary: api/models/storagesummary.md
-            - StrategyType: api/models/strategytype.md
-            - TriangulationStrategy: api/models/triangulationstrategy.md
+            - backtest:
+                - CodeSnippet: api/models/codesnippet.md
+                - CommissionType: api/models/commissiontype.md
+                - ConversionPeriod: api/models/conversionperiod.md
+                - CurrencyConversionMode: api/models/currencyconversionmode.md
+                - DataSectionConfig: api/models/datasectionconfig.md
+                - EmptyBarPolicy: api/models/emptybarpolicy.md
+                - EngineConfig: api/models/engineconfig.md
+                - ExchangeConfig: api/models/exchangeconfig.md
+                - ExperimentConfig: api/models/experimentconfig.md
+                - GeneralConfig: api/models/experimentgeneralconfig.md
+                - IndicatorConfig: api/models/indicatorconfig.md
+                - IndicatorType: api/models/indicatortype.md
+                - OrderType: api/models/ordertype.md
+                - PortfolioConfig: api/models/portfolioconfig.md
+                - StrategyConfig: api/models/strategyconfig.md
+                - StrategyType: api/models/strategytype.md
+            - config:
+                - Config: api/models/config.md
+                - DataConfig: api/models/dataconfig.md
+                - DisplayConfig: api/models/displayconfig.md
+                - GeneralConfig: api/models/generalconfig.md
+                - LogLevel: api/models/loglevel.md
+                - TriangulationStrategy: api/models/triangulationstrategy.md
+            - data:
+                - Bar: api/models/bar.md
+                - Country: api/models/country.md
+                - Currency: api/models/currency.md
+                - DownloadResult: api/models/downloadresult.md
+                - Exchange: api/models/exchange.md
+                - Instrument: api/models/instrument.md
+                - InstrumentProfile: api/models/instrumentprofile.md
+                - InstrumentType: api/models/instrumenttype.md
+                - Interval: api/models/interval.md
+                - Provider: api/models/provider.md
         - utils:
             - clear_cache: api/utils/clear_cache.md
             - init_logging: api/utils/init_logging.md

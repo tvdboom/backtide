@@ -1,7 +1,7 @@
-# get_summary
--------------
+# get_dividends
+---------------
 
-:: backtide.storage:get_summary
+:: backtide.storage:get_dividends
     :: signature
     :: head
     :: table:
@@ -13,3 +13,4 @@
 ## Example
 
 :: examples
+

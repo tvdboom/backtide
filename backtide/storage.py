@@ -1,8 +1,8 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing re-exports of `backtide.core.data`.
+Description: Module containing re-exports of `backtide.core.storage`.
 
 """
 
-from backtide.core.storage import StorageSummary, delete_rows, get_summary
+from backtide.core.storage import delete_symbols, get_bars, get_dividends

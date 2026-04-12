@@ -37,8 +37,8 @@ use serde::Deserialize;
 ///
 /// See Also
 /// --------
-/// - backtide.data:InstrumentProfile
 /// - backtide.data:Bar
+/// - backtide.data:InstrumentProfile
 /// - backtide.data:Interval
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.data")]
 #[derive(Debug, Clone, Deserialize)]

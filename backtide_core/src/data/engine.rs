@@ -15,6 +15,7 @@ use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use crate::errors::EngineResult;
 use crate::storage::models::bar_series::BarSeries;
+use crate::storage::models::dividend_series::DividendSeries;
 use futures::future::{join_all, try_join_all};
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
@@ -25,6 +26,154 @@ impl Engine {
     // ────────────────────────────────────────────────────────────────────────
     // Public interface
     // ────────────────────────────────────────────────────────────────────────
+
+    /// Download instruments from a list of [`InstrumentProfile`]s and store the
+    /// results in the database.
+    ///
+    /// * Checks what is already in storage — skips completed ranges and only downloads
+    ///   the missing head/tail (or both) for partial ones.
+    /// * Downloads concurrently across symbols and intervals.
+    /// * Writes **all** downloaded data in a single bulk transaction.
+    /// * Only writes contiguous (gap-free) bars starting from the beginning of the range.
+    /// * Idempotent, i.e., re-calling with the same profiles is a no-op.
+    ///
+    /// When `start` or `end` is provided, the per-instrument range is clamped so that
+    /// no data before `start` or after `end` is requested from the provider.
+    #[instrument(skip(self))]
+    pub fn download_instruments(
+        &self,
+        profiles: &[InstrumentProfile],
+        start: Option<u64>,
+        end: Option<u64>,
+    ) -> EngineResult<DownloadResult> {
+        self.rt.block_on(async {
+            // Build a list of (symbol, instrument_type, interval, start, end) tasks
+            let mut tasks: Vec<(String, InstrumentType, Interval, u64, u64)> = Vec::new();
+
+            for profile in profiles {
+                let symbol = &profile.instrument.symbol;
+                let instrument_type = profile.instrument.instrument_type;
+                let provider = self.provider(instrument_type);
+
+                for (interval, meta_start) in &profile.earliest_ts {
+                    let meta_end = profile.latest_ts.get(interval).unwrap();
+
+                    // Clamp to the user-requested range when provided.
+                    let start = start.map_or(*meta_start, |s| s.max(*meta_start));
+                    let end = end.map_or(*meta_end, |e| e.min(*meta_end));
+
+                    if start >= end {
+                        debug!(%symbol, ?interval, "User range does not overlap provider range, skipping.");
+                        continue;
+                    }
+
+                    // Check what's in storage and only download the missing portions.
+                    if let Some((db_min, db_max)) =
+                        self.get_stored_range(symbol, *interval, provider)?
+                    {
+                        if db_min <= start && db_max >= end {
+                            debug!(%symbol, ?interval, "Already in database, skipping download.");
+                            continue;
+                        }
+
+                        // Missing head: requested start is before what the database has.
+                        if start < db_min {
+                            debug!(%symbol, ?interval, head_end = db_min, "Downloading missing head.");
+                            tasks.push((symbol.clone(), instrument_type, *interval, start, db_min));
+                        }
+
+                        // Missing tail: requested end is beyond what the database has.
+                        if end > db_max {
+                            debug!(%symbol, ?interval, tail_start = db_max, "Downloading missing tail.");
+                            tasks.push((symbol.clone(), instrument_type, *interval, db_max, end));
+                        }
+                    } else {
+                        tasks.push((symbol.clone(), instrument_type, *interval, start, end));
+                    };
+                }
+            }
+
+            let total_tasks = tasks.len();
+            info!("Download plan: {total_tasks} symbol x interval tasks");
+
+            // ── Phase 1: download all tasks concurrently ─────────────────
+            let downloaded: Vec<_> = join_all(tasks.into_iter().enumerate().map(
+                |(idx, (symbol, it, interval, start, end))| async move {
+                    let provider = self.providers.get(&it).unwrap();
+                    info!(%symbol, ?interval, start, end, "Downloading...");
+                    let result = provider.download_bars(&symbol, it, interval, start, end).await;
+                    (idx, symbol, it, interval, result)
+                },
+            ))
+            .await;
+
+            // ── Phase 2: collect results and build one bulk write ────────
+            let mut bar_series: Vec<BarSeries> = Vec::new();
+            let mut div_series: Vec<DividendSeries> = Vec::new();
+            let mut outcomes: Vec<(usize, String, Interval, Result<usize, String>)> = Vec::new();
+
+            for (idx, symbol, it, interval, result) in downloaded {
+                let provider_enum = self.provider(it);
+                match result {
+                    Ok(download) => {
+                        let n_bars = download.bars.len();
+                        let n_divs = download.dividends.len();
+                        info!(%symbol, ?interval, bars = n_bars, dividends = n_divs, "Downloaded.");
+
+                        bar_series.push(BarSeries {
+                            symbol: symbol.clone(),
+                            instrument_type: it,
+                            interval,
+                            provider: provider_enum,
+                            bars: download.bars,
+                        });
+
+                        if !download.dividends.is_empty() {
+                            div_series.push(DividendSeries {
+                                symbol: symbol.clone(),
+                                provider: provider_enum,
+                                dividends: download.dividends,
+                            });
+                        }
+                        outcomes.push((idx, symbol, interval, Ok(n_bars)));
+                    },
+                    Err(e) => {
+                        warn!(%symbol, ?interval, "Download failed: {e}");
+                        outcomes.push((idx, symbol, interval, Err(e.to_string())));
+                    },
+                }
+            }
+
+            if !bar_series.is_empty() {
+                info!(n_series = bar_series.len(), "Writing bar data to the database...");
+                self.write_bars_bulk(&bar_series)?;
+                info!("Bar bulk write complete.");
+            }
+
+            if !div_series.is_empty() {
+                info!(n_series = div_series.len(), "Writing dividend data to the database...");
+                self.write_dividends_bulk(&div_series)?;
+                info!("Dividend bulk write complete.");
+            }
+
+            // ── Phase 3: build result summary ────────────────────────────
+
+            let mut n_succeeded = 0usize;
+            let mut warnings = Vec::new();
+            for (_idx, symbol, interval, outcome) in outcomes {
+                match outcome {
+                    Ok(_) => n_succeeded += 1,
+                    Err(msg) => warnings.push(format!("{symbol} ({interval}): {msg}")),
+                }
+            }
+
+            Ok(DownloadResult {
+                n_succeeded,
+                n_failed: warnings.len(),
+                warnings,
+            })
+        })
+    }
 
     /// Fetch instruments concurrently, using the cache where possible.
     #[instrument(skip(self), fields(?instrument_type))]
@@ -38,6 +187,26 @@ impl Engine {
                 symbols.iter().map(|s| self.load_instrument(s, instrument_type)).collect();
             join_all(tasks).await.into_iter().collect::<Result<Vec<_>, _>>()
         })
+    }
+
+    /// List the most important instruments for a given instrument type, capped at `limit`.
+    ///
+    /// When `exchanges` is `None`, delegates directly to the provider.
+    /// When `exchanges` is `Some`, distributes `limit` evenly across the
+    /// specified exchanges (returning the top instruments by volume×price
+    /// per exchange).
+    #[instrument(skip(self), fields(?instrument_type))]
+    pub fn list_instruments(
+        &self,
+        instrument_type: InstrumentType,
+        exchanges: Option<Vec<Exchange>>,
+        limit: usize,
+    ) -> DataResult<Vec<Instrument>> {
+        self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
+            instrument_type,
+            exchanges,
+            limit,
+        ))
     }
 
     /// Resolves all instruments required to price the given symbols in the
@@ -145,157 +314,6 @@ impl Engine {
                 .collect();
 
             Ok(profiles)
-        })
-    }
-
-    /// List the most important instruments for a given instrument type, capped at `limit`.
-    ///
-    /// When `exchanges` is `None`, delegates directly to the provider.
-    /// When `exchanges` is `Some`, distributes `limit` evenly across the
-    /// specified exchanges (returning the top instruments by volume×price
-    /// per exchange).
-    #[instrument(skip(self), fields(?instrument_type))]
-    pub fn list_instruments(
-        &self,
-        instrument_type: InstrumentType,
-        exchanges: Option<Vec<Exchange>>,
-        limit: usize,
-    ) -> DataResult<Vec<Instrument>> {
-        self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
-            instrument_type,
-            exchanges,
-            limit,
-        ))
-    }
-
-    /// Download instruments from a list of [`InstrumentProfile`]s and store the
-    /// results in the database.
-    ///
-    /// * Checks what is already in storage — skips completed ranges and only downloads
-    ///   the missing head/tail (or both) for partial ones.
-    /// * Downloads concurrently across symbols and intervals.
-    /// * Writes **all** downloaded data in a single bulk transaction.
-    /// * Only writes contiguous (gap-free) bars starting from the beginning of the range.
-    /// * Idempotent, i.e., re-calling with the same profiles is a no-op.
-    ///
-    /// When `start` or `end` is provided, the per-instrument range is clamped so that
-    /// no data before `start` or after `end` is requested from the provider.
-    #[instrument(skip(self))]
-    pub fn download_instruments(
-        &self,
-        profiles: &[InstrumentProfile],
-        start: Option<u64>,
-        end: Option<u64>,
-    ) -> EngineResult<DownloadResult> {
-        self.rt.block_on(async {
-            // Build a list of (symbol, instrument_type, interval, start, end) tasks
-            let mut tasks: Vec<(String, InstrumentType, Interval, u64, u64)> = Vec::new();
-
-            for profile in profiles {
-                let symbol = &profile.instrument.symbol;
-                let instrument_type = profile.instrument.instrument_type;
-                let provider = self.provider(instrument_type);
-
-                for (interval, meta_start) in &profile.earliest_ts {
-                    let meta_end = profile.latest_ts.get(interval).unwrap();
-
-                    // Clamp to the user-requested range when provided.
-                    let start = start.map_or(*meta_start, |s| s.max(*meta_start));
-                    let end = end.map_or(*meta_end, |e| e.min(*meta_end));
-
-                    if start >= end {
-                        debug!(%symbol, ?interval, "User range does not overlap provider range, skipping.");
-                        continue;
-                    }
-
-                    // Check what's in storage and only download the missing portions.
-                    if let Some((db_min, db_max)) =
-                        self.get_stored_range(symbol, *interval, provider)?
-                    {
-                        if db_min <= start && db_max >= end {
-                            debug!(%symbol, ?interval, "Already in database, skipping download.");
-                            continue;
-                        }
-
-                        // Missing head: requested start is before what the database has.
-                        if start < db_min {
-                            debug!(%symbol, ?interval, head_end = db_min, "Downloading missing head.");
-                            tasks.push((symbol.clone(), instrument_type, *interval, start, db_min));
-                        }
-
-                        // Missing tail: requested end is beyond what the database has.
-                        if end > db_max {
-                            debug!(%symbol, ?interval, tail_start = db_max, "Downloading missing tail.");
-                            tasks.push((symbol.clone(), instrument_type, *interval, db_max, end));
-                        }
-                    } else {
-                        tasks.push((symbol.clone(), instrument_type, *interval, start, end));
-                    };
-                }
-            }
-
-            let total_tasks = tasks.len();
-            info!("Download plan: {total_tasks} symbol x interval tasks");
-
-            // ── Phase 1: download all tasks concurrently ─────────────────
-            let downloaded: Vec<_> = join_all(tasks.into_iter().enumerate().map(
-                |(idx, (symbol, it, interval, start, end))| async move {
-                    let provider = self.providers.get(&it).unwrap();
-                    info!(%symbol, ?interval, start, end, "Downloading...");
-                    let result = provider.download_batch(&symbol, it, interval, start, end).await;
-                    (idx, symbol, it, interval, result)
-                },
-            ))
-            .await;
-
-            // ── Phase 2: collect results and build one bulk write ────────
-            let mut series: Vec<BarSeries> = Vec::new();
-            let mut outcomes: Vec<(usize, String, Interval, Result<usize, String>)> = Vec::new();
-
-            for (idx, symbol, it, interval, result) in downloaded {
-                let provider_enum = self.provider(it);
-                match result {
-                    Ok(bars) => {
-                        let n_bars = bars.len();
-                        info!(%symbol, ?interval, bars = n_bars, "Downloaded.");
-                        series.push(BarSeries {
-                            symbol: symbol.clone(),
-                            instrument_type: it,
-                            interval,
-                            provider: provider_enum,
-                            bars,
-                        });
-                        outcomes.push((idx, symbol, interval, Ok(n_bars)));
-                    },
-                    Err(e) => {
-                        warn!(%symbol, ?interval, "Download failed: {e}");
-                        outcomes.push((idx, symbol, interval, Err(e.to_string())));
-                    },
-                }
-            }
-
-            if !series.is_empty() {
-                info!(n_series = series.len(), "Writing all data to the database...");
-                self.write_bars_bulk(&series)?;
-                info!("Bulk write complete.");
-            }
-
-            // ── Phase 3: build result summary ────────────────────────────
-
-            let mut n_succeeded = 0usize;
-            let mut warnings = Vec::new();
-            for (_idx, symbol, interval, outcome) in outcomes {
-                match outcome {
-                    Ok(_) => n_succeeded += 1,
-                    Err(msg) => warnings.push(format!("{symbol} ({interval}): {msg}")),
-                }
-            }
-
-            Ok(DownloadResult {
-                n_succeeded,
-                n_failed: warnings.len(),
-                warnings,
-            })
         })
     }
 

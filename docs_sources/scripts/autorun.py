@@ -11,10 +11,25 @@ from io import StringIO
 import os
 import shutil
 import sys
+import tempfile
 
 from markdown import Markdown
 from pandas.io.formats.style import Styler
 from pymdownx.superfences import SuperFencesException
+
+from backtide.config import Config, DataConfig, set_config
+
+# Set a deterministic config for all doc examples.
+# Uses a temporary directory for storage so docs never touch the real DB.
+# Uses yahoo as crypto provider since binance doesn't allow requests from CI.
+set_config(
+    Config(
+        data=DataConfig(
+            storage_path=tempfile.mkdtemp(prefix="backtide_docs_"),
+            providers={"crypto": "yahoo"},
+        ),
+    )
+)
 
 # Directory in which to store all plots from the examples
 shutil.rmtree(DIR_EXAMPLES := "docs_sources/img/examples/", ignore_errors=True)

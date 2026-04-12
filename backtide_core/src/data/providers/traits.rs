@@ -2,7 +2,7 @@
 
 use crate::constants::Symbol;
 use crate::data::errors::DataResult;
-use crate::data::models::bar::Bar;
+use crate::data::models::bar_download::BarDownload;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_type::InstrumentType;
@@ -35,14 +35,15 @@ pub trait DataProvider: Send + Sync {
     ) -> DataResult<Vec<Instrument>>;
 
     /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
-    /// Returns an empty `Vec` when the symbol had no trading activity that period
-    /// (e.g., before listing date), which is distinct from a [`DataResult`].
-    async fn download_batch(
+    ///
+    /// The returned [`BarDownload`] also includes dividend events when the
+    /// provider supports them.
+    async fn download_bars(
         &self,
         symbol: &str,
         instrument_type: InstrumentType,
         interval: Interval,
         start: u64,
         end: u64,
-    ) -> DataResult<Vec<Bar>>;
+    ) -> DataResult<BarDownload>;
 }

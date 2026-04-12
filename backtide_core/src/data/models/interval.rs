@@ -10,9 +10,9 @@ use strum::{EnumIter, IntoEnumIterator};
 ///
 /// See Also
 /// --------
+/// - backtide.data:Bar
 /// - backtide.data:Instrument
 /// - backtide.data:InstrumentType
-/// - backtide.data:Bar
 #[pyclass(skip_from_py_object, module = "backtide.data")]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, EnumIter, Serialize, Deserialize)]
 pub enum Interval {

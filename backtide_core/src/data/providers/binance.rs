@@ -5,6 +5,7 @@
 use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::bar::Bar;
+use crate::data::models::bar_download::BarDownload;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_type::InstrumentType;
@@ -217,14 +218,14 @@ impl DataProvider for Binance {
 
     /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
     #[instrument(skip(self), fields(%symbol, ?interval, start, end))]
-    async fn download_batch(
+    async fn download_bars(
         &self,
         symbol: &str,
         _instrument_type: InstrumentType,
         interval: Interval,
         start: u64,
         end: u64,
-    ) -> DataResult<Vec<Bar>> {
+    ) -> DataResult<BarDownload> {
         let binance_symbol = Self::parse_canonical_symbol(symbol);
         let interval_secs = interval.minutes() * 60;
         let mut all_bars: Vec<Bar> = Vec::new();
@@ -270,7 +271,10 @@ impl DataProvider for Binance {
         all_bars.sort_by_key(|b| b.open_ts);
         all_bars.dedup_by_key(|b| b.open_ts);
 
-        Ok(all_bars)
+        Ok(BarDownload {
+            bars: all_bars,
+            dividends: vec![],
+        })
     }
 }
 

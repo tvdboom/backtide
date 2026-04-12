@@ -6,7 +6,9 @@
 use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::bar::Bar;
+use crate::data::models::bar_download::BarDownload;
 use crate::data::models::currency::Currency;
+use crate::data::models::dividend::Dividend;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::forex_pair::ForexPair;
 use crate::data::models::instrument::Instrument;
@@ -288,29 +290,36 @@ impl YahooFinance {
 
     /// Download one chunk of bars from the Yahoo chart endpoint.
     ///
-    /// `chunk_start`/`chunk_end` define the HTTP request window, while
-    /// `filter_start`/`filter_end` are the overall requested range used to
-    /// filter out bars that fall outside the caller's interest.
+    /// `chunk_range` define the HTTP request window, while `filter_range` are
+    /// the overall requested range used to filter out bars that fall outside
+    /// the caller's interest.
+    ///
+    /// When the instrument is an equity (stocks/ETF), dividend events are
+    /// requested via `events=div` and returned alongside the bars.
     async fn download_chart_chunk(
         &self,
         yahoo_symbol: &str,
+        instrument_type: InstrumentType,
         iv: &str,
-        chunk_start: u64,
-        chunk_end: u64,
-        filter_start: u64,
-        filter_end: u64,
-    ) -> DataResult<Vec<Bar>> {
+        chunk_range: (u64, u64),
+        filter_range: (u64, u64),
+    ) -> DataResult<(Vec<Bar>, Vec<Dividend>)> {
+        let mut params = vec![
+            ("period1", chunk_range.0.to_string()),
+            ("period2", chunk_range.1.to_string()),
+            ("interval", iv.to_string()),
+            ("crumb", self.crumb.clone()),
+        ];
+
+        if instrument_type.is_equity() {
+            params.push(("events", "div".to_string()));
+        }
+
+        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
         let resp = self
             .client
-            .get(
-                &format!("{}/{}", Self::CHART_URL, yahoo_symbol),
-                Some(&[
-                    ("period1", chunk_start.to_string().as_str()),
-                    ("period2", chunk_end.to_string().as_str()),
-                    ("interval", iv),
-                    ("crumb", &self.crumb),
-                ]),
-            )
+            .get(&format!("{}/{}", Self::CHART_URL, yahoo_symbol), Some(&param_refs))
             .await?;
 
         let parsed = HttpClient::json::<ChartResponse>(resp).await?;
@@ -360,7 +369,7 @@ impl YahooFinance {
 
             if let (Some(o), Some(h), Some(l), Some(c), Some(v)) = (open, high, low, close, volume)
             {
-                if open_ts >= filter_start && open_ts < filter_end {
+                if open_ts >= filter_range.0 && open_ts < filter_range.1 {
                     bars.push(Bar {
                         open_ts,
                         close_ts: open_ts,
@@ -377,8 +386,32 @@ impl YahooFinance {
             }
         }
 
-        debug!("Chunk [{chunk_start}â€“{chunk_end}] returned {} bars", bars.len());
-        Ok(bars)
+        // Parse dividend events (only present when events=div was requested).
+        let mut dividends = vec![];
+        if instrument_type.is_equity() {
+            if let Some(events) = result.events {
+                if let Some(div_map) = events.dividends {
+                    for (_, div) in div_map {
+                        let ts = div.date as u64;
+                        if ts >= filter_range.0 && ts < filter_range.1 {
+                            dividends.push(Dividend {
+                                ex_date: ts,
+                                amount: div.amount,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        debug!(
+            "Chunk [{}-{}] returned {} bars, {} dividends",
+            chunk_range.0,
+            chunk_range.1,
+            bars.len(),
+            dividends.len()
+        );
+        Ok((bars, dividends))
     }
 }
 
@@ -620,18 +653,18 @@ impl DataProvider for YahooFinance {
 
     /// Download OHLCV bars for `symbol` at `interval` from `start` to `end`.
     ///
-    /// For large date ranges the request is split into chunks (â‰ˆ 5 years each
+    /// For large date ranges the request is split into chunks (≈ 5 years each
     /// for daily bars) so that Yahoo never has to return an excessively large
     /// payload in a single response.  Results are merged and deduplicated.
     #[instrument(skip(self), fields(%symbol, ?interval, start, end))]
-    async fn download_batch(
+    async fn download_bars(
         &self,
         symbol: &str,
         instrument_type: InstrumentType,
         interval: Interval,
         start: u64,
         end: u64,
-    ) -> DataResult<Vec<Bar>> {
+    ) -> DataResult<BarDownload> {
         let yahoo_symbol = Self::parse_canonical_symbol(symbol, instrument_type)?;
 
         // Yahoo uses 1wk instead of 1w
@@ -660,9 +693,9 @@ impl DataProvider for YahooFinance {
         // chunk sizes that keep most real-world downloads to a single request
         // while still splitting truly enormous ranges.
         let chunk_secs: u64 = if interval.minutes() >= 24 * 60 {
-            20 * 365 * 86400 // ~20 years  (â‰ˆ5 000 daily bars)
+            20 * 365 * 86400 // ~20 years  (≈5 000 daily bars)
         } else if interval.minutes() >= 60 {
-            2 * 365 * 86400 // ~2 years   (â‰ˆ4 400 hourly bars)
+            2 * 365 * 86400 // ~2 years   (≈4 400 hourly bars)
         } else {
             30 * 86400 // 30 days
         };
@@ -676,17 +709,20 @@ impl DataProvider for YahooFinance {
             cursor = chunk_end;
         }
 
-        let results =
-            join_all(chunks.iter().map(|&(cs, ce)| {
-                self.download_chart_chunk(&yahoo_symbol, &iv, cs, ce, start, end)
-            }))
-            .await;
+        let results = join_all(chunks.iter().map(|&(cs, ce)| {
+            self.download_chart_chunk(&yahoo_symbol, instrument_type, &iv, (cs, ce), (start, end))
+        }))
+        .await;
 
         let mut all_bars: Vec<Bar> = Vec::new();
+        let mut all_dividends: Vec<Dividend> = Vec::new();
         let mut first_err: Option<DataError> = None;
         for result in results {
             match result {
-                Ok(mut b) => all_bars.append(&mut b),
+                Ok((mut bars, mut divs)) => {
+                    all_bars.append(&mut bars);
+                    all_dividends.append(&mut divs);
+                },
                 Err(e) => {
                     debug!("Yahoo chunk download error: {e}");
                     if first_err.is_none() {
@@ -706,8 +742,14 @@ impl DataProvider for YahooFinance {
         all_bars.sort_by_key(|b| b.open_ts);
         all_bars.dedup_by_key(|b| b.open_ts);
 
-        info!("Downloaded {} bars.", all_bars.len());
-        Ok(all_bars)
+        all_dividends.sort_by_key(|d| d.ex_date);
+        all_dividends.dedup_by_key(|d| d.ex_date);
+
+        info!("Downloaded {} bars, {} dividends.", all_bars.len(), all_dividends.len());
+        Ok(BarDownload {
+            bars: all_bars,
+            dividends: all_dividends,
+        })
     }
 }
 
@@ -825,6 +867,9 @@ struct ChartResult {
 
     /// OHLCV indicator arrays.
     indicators: Option<ChartIndicators>,
+
+    /// Corporate-action events (dividends, splits) keyed by timestamp.
+    events: Option<ChartEvents>,
 }
 
 /// Symbol metadata returned by the Yahoo chart endpoint.
@@ -920,4 +965,19 @@ struct ChartQuote {
 #[serde(default)]
 struct ChartAdjClose {
     adjclose: Vec<Option<f64>>,
+}
+
+// ── Chart event structs (dividends, splits) ──────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct ChartEvents {
+    dividends: Option<std::collections::HashMap<String, ChartDividend>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChartDividend {
+    /// Ex-dividend date as a Unix timestamp (seconds).
+    date: i64,
+    /// Dividend amount per share.
+    amount: f64,
 }

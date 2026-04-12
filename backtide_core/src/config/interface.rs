@@ -21,13 +21,12 @@ use crate::data::models::currency::Currency;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::provider::Provider;
 use pyo3::basic::CompareOp;
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::OnceLock;
 use strum::IntoEnumIterator;
 
@@ -310,7 +309,7 @@ impl GeneralConfig {
 /// storage_path : str, default=".backtide"
 ///     File-system path to the location to store the database and cache.
 ///
-/// providers : dict[str, str] | None, default=None
+/// providers : dict[str | [InstrumentType], str | [Provider]] | None, default=None
 ///     Which data provider to use for each instrument type. If `None`, it
 ///     defaults to `{"stocks": "yahoo", "etf": "yahoo", "forex": "yahoo",
 ///     "crypto": "binance"}`.
@@ -333,7 +332,7 @@ impl Default for DataConfig {
     fn default() -> Self {
         Self {
             storage_path: PathBuf::from(DEFAULT_STORAGE_PATH),
-            providers: InstrumentType::iter().map(|at| (at, at.default())).collect(),
+            providers: InstrumentType::iter().map(|at| (at, at.default_provider())).collect(),
         }
     }
 }
@@ -344,26 +343,21 @@ impl DataConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (storage_path=".backtide", providers=None))]
-    fn new(storage_path: &str, providers: Option<HashMap<String, String>>) -> PyResult<Self> {
-        let providers = match providers {
-            Some(map) => map
-                .into_iter()
-                .map(|(k, v)| {
-                    let instrument_type = InstrumentType::from_str(&k).map_err(|_| {
-                        PyValueError::new_err(format!("Unknown instrument type: {k}"))
-                    })?;
-                    let provider = Provider::from_str(&v)
-                        .map_err(|_| PyValueError::new_err(format!("Unknown provider: {v}")))?;
-                    Ok((instrument_type, provider))
-                })
-                .collect::<PyResult<HashMap<_, _>>>()?,
-            None => DataConfig::default().providers,
-        };
+    #[pyo3(signature = (storage_path=".backtide", providers: "dict[str | InstrumentType, str | Provider] | None"=None))]
+    fn new(storage_path: &str, providers: Option<Bound<'_, PyAny>>) -> PyResult<Self> {
+        let mut resolved = DataConfig::default().providers;
+        if let Some(obj) = providers {
+            let dict = obj.cast::<pyo3::types::PyDict>()?;
+            for (k, v) in dict.iter() {
+                let instrument_type = k.extract::<InstrumentType>()?;
+                let provider = v.extract::<Provider>()?;
+                resolved.insert(instrument_type, provider);
+            }
+        }
 
         Ok(Self {
             storage_path: PathBuf::from(storage_path),
-            providers,
+            providers: resolved,
         })
     }
 
@@ -371,7 +365,7 @@ impl DataConfig {
         let providers = {
             let pairs: Vec<String> = InstrumentType::iter()
                 .map(|k| {
-                    let default = k.default();
+                    let default = k.default_provider();
                     format!("\"{k}\": \"{}\"", self.providers.get(&k).unwrap_or(&default))
                 })
                 .collect();

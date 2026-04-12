@@ -114,11 +114,11 @@ fn bench_batch_bar_insert(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark [`Storage::get_summary`] read latency for a single symbol.
+/// Benchmark [`Storage::get_all_bars`] read latency for a single symbol.
 ///
 /// Pre-populates a DuckDB instance with 1 000 daily bars for one symbol,
-/// then repeatedly calls `get_summary`. Measures the grouped aggregation
-/// plus sparkline retrieval for a single-series database.
+/// then repeatedly calls `get_all_bars`. Measures the full table scan
+/// for a single-series database.
 fn bench_historical_read_1sym(c: &mut Criterion) {
     let (db, _dir) = fresh_db();
     let bars = generate_bars(1_000);
@@ -126,16 +126,15 @@ fn bench_historical_read_1sym(c: &mut Criterion) {
 
     c.bench_function("historical_read/1sym", |b| {
         b.iter(|| {
-            db.get_summary().expect("summary query failed");
+            db.get_all_bars().expect("read query failed");
         });
     });
 }
 
-/// Benchmark [`Storage::get_summary`] read latency across 10 symbols.
+/// Benchmark [`Storage::get_all_bars`] read latency across 10 symbols.
 ///
 /// Seeds the database with 10 symbols × 1 000 bars each (10 000 bars
-/// total), then measures how long the grouped summary query takes,
-/// including sparkline retrieval for every series.
+/// total), then measures how long the full table scan takes.
 fn bench_historical_read_10sym(c: &mut Criterion) {
     let (db, _dir) = fresh_db();
 
@@ -148,7 +147,7 @@ fn bench_historical_read_10sym(c: &mut Criterion) {
 
     c.bench_function("historical_read/10sym", |b| {
         b.iter(|| {
-            db.get_summary().expect("summary query failed");
+            db.get_all_bars().expect("read query failed");
         });
     });
 }

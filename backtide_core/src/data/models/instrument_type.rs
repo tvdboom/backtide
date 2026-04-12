@@ -8,8 +8,8 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 ///
 /// See Also
 /// --------
-/// - backtide.data:Instrument
 /// - backtide.data:Bar
+/// - backtide.data:Instrument
 /// - backtide.data:Interval
 #[pyclass(skip_from_py_object, module = "backtide.data")]
 #[derive(
@@ -36,7 +36,7 @@ pub enum InstrumentType {
 }
 
 impl InstrumentType {
-    pub fn default(&self) -> Provider {
+    pub fn default_provider(&self) -> Provider {
         match self {
             Self::Stocks => Provider::Yahoo,
             Self::Etf => Provider::Yahoo,
@@ -93,7 +93,7 @@ impl InstrumentType {
 
     /// Whether the instrument type has ownership stakes (true for stocks and etf).
     #[getter]
-    fn is_equity(&self) -> bool {
+    pub fn is_equity(&self) -> bool {
         matches!(self, InstrumentType::Stocks | InstrumentType::Etf)
     }
 

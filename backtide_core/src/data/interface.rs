@@ -19,9 +19,7 @@ where
     for<'a> <T as FromPyObject<'a, 'py>>::Error: Into<pyo3::PyErr>,
 {
     if let Ok(seq) = param.extract::<Vec<Bound<'py, PyAny>>>() {
-        seq.iter()
-            .map(|item| item.extract::<T>().map_err(Into::into))
-            .collect::<PyResult<_>>()
+        seq.iter().map(|item| item.extract::<T>().map_err(Into::into)).collect::<PyResult<_>>()
     } else {
         Ok(vec![param.extract::<T>().map_err(Into::into)?])
     }
@@ -76,7 +74,9 @@ fn parse_instrument(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
 ///
 /// See Also
 /// --------
+/// - backtide.data:download_instruments
 /// - backtide.data:list_instruments
+/// - backtide.data:resolve_profiles
 ///
 /// Examples
 /// --------
@@ -123,6 +123,7 @@ pub fn get_instruments(
 ///
 /// See Also
 /// --------
+/// - backtide.data:download_instruments
 /// - backtide.data:get_instruments
 /// - backtide.data:list_instruments
 ///
@@ -174,7 +175,9 @@ pub fn resolve_profiles(
 ///
 /// See Also
 /// --------
+/// - backtide.data:download_instruments
 /// - backtide.data:get_instruments
+/// - backtide.data:resolve_profiles
 ///
 /// Examples
 /// --------
@@ -191,7 +194,7 @@ pub fn list_instruments(
     limit: usize,
 ) -> PyResult<Vec<Instrument>> {
     let instrument_type = instrument_type.extract::<InstrumentType>()?;
-    let exchanges: Option<Vec<Exchange>> = exchange.map(|ex| parse_input::<Exchange>(ex)).transpose()?;
+    let exchanges: Option<Vec<Exchange>> = exchange.map(parse_input::<Exchange>).transpose()?;
 
     let engine = Engine::get()?;
     Ok(engine.list_instruments(instrument_type, exchanges, limit)?)
@@ -221,6 +224,12 @@ pub fn list_instruments(
 /// -------
 /// [DownloadResult]
 ///     Summary of the download: succeeded/failed counts and per-task warnings.
+///
+/// See Also
+/// --------
+/// - backtide.data:get_instruments
+/// - backtide.data:resolve_profiles
+/// - backtide.storage:get_bars
 ///
 /// Examples
 /// --------

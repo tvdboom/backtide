@@ -5,6 +5,12 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumString, IntoEnumIterator};
 
 /// A supported market data provider.
+///
+/// See Also
+/// --------
+/// - backtide.data:Instrument
+/// - backtide.data:InstrumentType
+/// - backtide.data:Interval
 #[pyclass(skip_from_py_object)]
 #[derive(
     Clone,

@@ -374,7 +374,7 @@ instrument_type = st.segmented_control(
     on_change=_prevent_deselection(
         key="instrument_type",
         default=InstrumentType.get_default(),
-        reset=["symbols", "currency"],
+        reset=["symbols", "_currency"],
     ),
     help="Select the type of financial instrument you want to download.",
 )

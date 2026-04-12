@@ -1,6 +1,8 @@
 pub mod bar;
+pub mod bar_download;
 pub mod country;
 pub mod currency;
+pub mod dividend;
 pub mod download_result;
 pub mod exchange;
 pub mod forex_pair;

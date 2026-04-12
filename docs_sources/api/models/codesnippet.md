@@ -1,9 +1,10 @@
-# StorageSummary
-----------------
+# CodeSnippet
+--------------
 
-:: backtide.storage:StorageSummary
+:: backtide.backtest:CodeSnippet
     :: signature
     :: head
     :: table:
         - attributes
     :: see also
+

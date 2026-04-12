@@ -1,0 +1,1107 @@
+//! Experiment configuration data model.
+//!
+//! A complete specification for a single backtest experiment, split into
+//! logical sections that mirror the tabs on the Streamlit experiment page.
+
+use crate::backtest::models::commission_type::CommissionType;
+use crate::backtest::models::conversion_period::ConversionPeriod;
+use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
+use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
+use crate::backtest::models::indicator_type::IndicatorType;
+use crate::backtest::models::order_type::OrderType;
+use crate::backtest::models::strategy_type::StrategyType;
+use crate::data::models::currency::Currency;
+use crate::data::models::instrument_type::InstrumentType;
+use crate::data::models::interval::Interval;
+use pyo3::basic::CompareOp;
+use pyo3::prelude::*;
+use pyo3::types::PyDict;
+use pythonize::pythonize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+// ────────────────────────────────────────────────────────────────────────────
+// CodeSnippet
+// ────────────────────────────────────────────────────────────────────────────
+
+/// A named snippet of custom Python code (strategy or indicator).
+///
+/// Attributes
+/// ----------
+/// name : str
+///     Human-readable label for the snippet.
+///
+/// code : str
+///     Python source code.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:ExperimentConfig
+/// - backtide.backtest:IndicatorConfig
+/// - backtide.backtest:StrategyConfig
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CodeSnippet {
+    pub name: String,
+    pub code: String,
+}
+
+#[pymethods]
+impl CodeSnippet {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (name="", code=""))]
+    fn new(name: &str, code: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            code: code.to_owned(),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("CodeSnippet(name={:?}, code={:?})", self.name, self.code)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// GeneralConfig
+// ────────────────────────────────────────────────────────────────────────────
+
+/// General metadata for an experiment.
+///
+/// Attributes
+/// ----------
+/// name : str
+///     A human-readable name to identify this experiment.
+///
+/// tags : list[str]
+///     Descriptive tags for organising and filtering experiments.
+///
+/// description : str
+///     Free-text description of the experiment.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:DataSectionConfig
+/// - backtide.backtest:EngineConfig
+/// - backtide.backtest:ExchangeConfig
+/// - backtide.backtest:ExperimentConfig
+/// - backtide.backtest:IndicatorConfig
+/// - backtide.backtest:PortfolioConfig
+/// - backtide.backtest:StrategyConfig
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GeneralConfig {
+    pub name: String,
+    pub tags: Vec<String>,
+    pub description: String,
+}
+
+#[pymethods]
+impl GeneralConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (name="", tags=vec![], description=""))]
+    fn new(name: &str, tags: Vec<String>, description: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            tags,
+            description: description.to_owned(),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "GeneralConfig(name={:?}, tags={:?}, description={:?})",
+            self.name, self.tags, self.description,
+        )
+    }
+
+    /// Convert to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, self)?.unbind())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// DataSectionConfig
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Data settings for an experiment.
+///
+/// Attributes
+/// ----------
+/// instrument_type : str | [`InstrumentType`]
+///     The category of financial instrument (e.g. ``"stocks"``).
+///
+/// symbols : list[str]
+///     Ticker symbols included in the backtest.
+///
+/// full_history : bool
+///     If ``True``, use the maximum available history for every symbol.
+///
+/// start_date : str | None
+///     ISO-8601 start date (``"YYYY-MM-DD"``). Ignored when ``full_history`` is ``True``.
+///
+/// end_date : str | None
+///     ISO-8601 end date.
+///
+/// interval : str | [`Interval`]
+///     Bar interval (e.g. ``"1d"``).
+///
+/// See Also
+/// --------
+/// - backtide.backtest:EngineConfig
+/// - backtide.backtest:ExchangeConfig
+/// - backtide.backtest:ExperimentConfig
+/// - backtide.backtest:GeneralConfig
+/// - backtide.backtest:IndicatorConfig
+/// - backtide.backtest:PortfolioConfig
+/// - backtide.backtest:StrategyConfig
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DataSectionConfig {
+    pub instrument_type: InstrumentType,
+    pub symbols: Vec<String>,
+    pub full_history: bool,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub interval: Interval,
+}
+
+impl Default for DataSectionConfig {
+    fn default() -> Self {
+        Self {
+            instrument_type: InstrumentType::default(),
+            symbols: Vec::new(),
+            full_history: true,
+            start_date: None,
+            end_date: None,
+            interval: Interval::default(),
+        }
+    }
+}
+
+#[pymethods]
+impl DataSectionConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (
+        instrument_type = InstrumentType::Stocks,
+        symbols = vec![],
+        full_history = true,
+        start_date = None,
+        end_date = None,
+        interval = Interval::default(),
+    ))]
+    fn new(
+        instrument_type: InstrumentType,
+        symbols: Vec<String>,
+        full_history: bool,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+        interval: Interval,
+    ) -> Self {
+        Self {
+            instrument_type,
+            symbols,
+            full_history,
+            start_date: start_date.map(|s| s.to_owned()),
+            end_date: end_date.map(|s| s.to_owned()),
+            interval,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DataSectionConfig(instrument_type={}, symbols={:?}, interval={})",
+            self.instrument_type, self.symbols, self.interval,
+        )
+    }
+
+    /// Convert to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, self)?.unbind())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// PortfolioConfig
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Portfolio settings for an experiment.
+///
+/// Attributes
+/// ----------
+/// initial_cash : float
+///     Cash balance at the start of the simulation.
+///
+/// base_currency : str | [`Currency`]
+///     ISO 4217 code the portfolio is denominated in.
+///
+/// starting_positions : dict[str, int]
+///     Pre-loaded positions ``{symbol: quantity}``.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:DataSectionConfig
+/// - backtide.backtest:EngineConfig
+/// - backtide.backtest:ExchangeConfig
+/// - backtide.backtest:ExperimentConfig
+/// - backtide.backtest:GeneralConfig
+/// - backtide.backtest:IndicatorConfig
+/// - backtide.backtest:StrategyConfig
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PortfolioConfig {
+    pub initial_cash: f64,
+    pub base_currency: Currency,
+    pub starting_positions: HashMap<String, i64>,
+}
+
+impl Default for PortfolioConfig {
+    fn default() -> Self {
+        Self {
+            initial_cash: 10_000.0,
+            base_currency: Currency::default(),
+            starting_positions: HashMap::new(),
+        }
+    }
+}
+
+#[pymethods]
+impl PortfolioConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (
+        initial_cash = 10_000.0,
+        base_currency = Currency::default(),
+        starting_positions = HashMap::new(),
+    ))]
+    fn new(
+        initial_cash: f64,
+        base_currency: Currency,
+        starting_positions: HashMap<String, i64>,
+    ) -> Self {
+        Self {
+            initial_cash,
+            base_currency,
+            starting_positions,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PortfolioConfig(initial_cash={}, base_currency={})",
+            self.initial_cash, self.base_currency,
+        )
+    }
+
+    /// Convert to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, self)?.unbind())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// StrategyConfig
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Strategy settings for an experiment.
+///
+/// Attributes
+/// ----------
+/// predefined_strategies : list[str | [StrategyType]]
+///     Built-in strategies to run.
+///
+/// custom_strategies : list[CodeSnippet]
+///     User-defined strategy code snippets.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:CodeSnippet
+/// - backtide.backtest:DataSectionConfig
+/// - backtide.backtest:EngineConfig
+/// - backtide.backtest:ExchangeConfig
+/// - backtide.backtest:ExperimentConfig
+/// - backtide.backtest:GeneralConfig
+/// - backtide.backtest:IndicatorConfig
+/// - backtide.backtest:PortfolioConfig
+#[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
+#[derive(Debug, Default)]
+pub struct StrategyConfig {
+    pub predefined_strategies: Vec<StrategyType>,
+    pub custom_strategies: Vec<Py<CodeSnippet>>,
+}
+
+/// Pure-Rust representation for serde.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StrategyConfigInner {
+    pub predefined_strategies: Vec<StrategyType>,
+    pub custom_strategies: Vec<CodeSnippet>,
+}
+
+impl StrategyConfig {
+    pub fn from_inner(py: Python<'_>, inner: StrategyConfigInner) -> PyResult<Self> {
+        Ok(Self {
+            predefined_strategies: inner.predefined_strategies,
+            custom_strategies: inner
+                .custom_strategies
+                .into_iter()
+                .map(|s| Py::new(py, s))
+                .collect::<PyResult<Vec<_>>>()?,
+        })
+    }
+
+    pub fn to_inner(&self, py: Python<'_>) -> StrategyConfigInner {
+        StrategyConfigInner {
+            predefined_strategies: self.predefined_strategies.clone(),
+            custom_strategies: self
+                .custom_strategies
+                .iter()
+                .map(|s| s.borrow(py).clone())
+                .collect(),
+        }
+    }
+}
+
+impl Clone for StrategyConfig {
+    fn clone(&self) -> Self {
+        Python::attach(|py| Self {
+            predefined_strategies: self.predefined_strategies.clone(),
+            custom_strategies: self.custom_strategies.iter().map(|s| s.clone_ref(py)).collect(),
+        })
+    }
+}
+
+#[pymethods]
+impl StrategyConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (predefined_strategies=vec![], custom_strategies=vec![]))]
+    fn new(
+        predefined_strategies: Vec<StrategyType>,
+        custom_strategies: Vec<Py<CodeSnippet>>,
+    ) -> Self {
+        Self {
+            predefined_strategies,
+            custom_strategies,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("StrategyConfig(predefined={:?})", self.predefined_strategies,)
+    }
+
+    fn __richcmp__(&self, py: Python<'_>, other: PyRef<Self>, op: CompareOp) -> bool {
+        match op {
+            CompareOp::Eq => self.to_inner(py) == other.to_inner(py),
+            CompareOp::Ne => self.to_inner(py) != other.to_inner(py),
+            _ => false,
+        }
+    }
+
+    /// Convert to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, &self.to_inner(py))?.unbind())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// IndicatorConfig
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Indicator settings for an experiment.
+///
+/// Attributes
+/// ----------
+/// builtin_indicators : list[str | [`IndicatorType`]]
+///     Built-in indicators to compute.
+///
+/// custom_indicators : list[`CodeSnippet`]
+///     User-defined indicator code snippets.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:CodeSnippet
+/// - backtide.backtest:DataSectionConfig
+/// - backtide.backtest:EngineConfig
+/// - backtide.backtest:ExchangeConfig
+/// - backtide.backtest:ExperimentConfig
+/// - backtide.backtest:GeneralConfig
+/// - backtide.backtest:PortfolioConfig
+/// - backtide.backtest:StrategyConfig
+#[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
+#[derive(Debug, Default)]
+pub struct IndicatorConfig {
+    pub builtin_indicators: Vec<IndicatorType>,
+    pub custom_indicators: Vec<Py<CodeSnippet>>,
+}
+
+/// Pure-Rust representation for serde.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct IndicatorConfigInner {
+    pub builtin_indicators: Vec<IndicatorType>,
+    pub custom_indicators: Vec<CodeSnippet>,
+}
+
+impl IndicatorConfig {
+    pub fn from_inner(py: Python<'_>, inner: IndicatorConfigInner) -> PyResult<Self> {
+        Ok(Self {
+            builtin_indicators: inner.builtin_indicators,
+            custom_indicators: inner
+                .custom_indicators
+                .into_iter()
+                .map(|s| Py::new(py, s))
+                .collect::<PyResult<Vec<_>>>()?,
+        })
+    }
+
+    pub fn to_inner(&self, py: Python<'_>) -> IndicatorConfigInner {
+        IndicatorConfigInner {
+            builtin_indicators: self.builtin_indicators.clone(),
+            custom_indicators: self
+                .custom_indicators
+                .iter()
+                .map(|s| s.borrow(py).clone())
+                .collect(),
+        }
+    }
+}
+
+impl Clone for IndicatorConfig {
+    fn clone(&self) -> Self {
+        Python::attach(|py| Self {
+            builtin_indicators: self.builtin_indicators.clone(),
+            custom_indicators: self.custom_indicators.iter().map(|s| s.clone_ref(py)).collect(),
+        })
+    }
+}
+
+#[pymethods]
+impl IndicatorConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (builtin_indicators=vec![], custom_indicators=vec![]))]
+    fn new(
+        builtin_indicators: Vec<IndicatorType>,
+        custom_indicators: Vec<Py<CodeSnippet>>,
+    ) -> Self {
+        Self {
+            builtin_indicators,
+            custom_indicators,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("IndicatorConfig(builtin={:?})", self.builtin_indicators,)
+    }
+
+    fn __richcmp__(&self, py: Python<'_>, other: PyRef<Self>, op: CompareOp) -> bool {
+        match op {
+            CompareOp::Eq => self.to_inner(py) == other.to_inner(py),
+            CompareOp::Ne => self.to_inner(py) != other.to_inner(py),
+            _ => false,
+        }
+    }
+
+    /// Convert to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, &self.to_inner(py))?.unbind())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// ExchangeConfig
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Exchange and execution settings for an experiment.
+///
+/// Attributes
+/// ----------
+/// commission_type : str | [`CommissionType`]
+///     Fee structure applied to every executed order.
+///
+/// commission_pct : float
+///     Percentage commission per trade.
+///
+/// commission_fixed : float
+///     Fixed commission per trade.
+///
+/// slippage : float
+///     Simulated market-impact percentage.
+///
+/// allowed_order_types : list[str | [`OrderType`]]
+///     Which order types the engine accepts.
+///
+/// partial_fills : bool
+///     Whether to simulate partial order fills.
+///
+/// allow_margin : bool
+///     Whether margin trading is enabled.
+///
+/// max_leverage : float
+///     Maximum leverage ratio.
+///
+/// initial_margin : float
+///     Initial margin percentage.
+///
+/// maintenance_margin : float
+///     Maintenance margin percentage.
+///
+/// margin_interest : float
+///     Annual interest rate on borrowed funds.
+///
+/// allow_short_selling : bool
+///     Whether short selling is permitted.
+///
+/// borrow_rate : float
+///     Annual borrow cost for short positions.
+///
+/// max_position_size : int
+///     Max allocation to one position (% of portfolio).
+///
+/// conversion_mode : str | [`CurrencyConversionMode`]
+///     How foreign-currency proceeds are converted.
+///
+/// conversion_threshold : float | None
+///     Threshold for ``HoldUntilThreshold`` mode.
+///
+/// conversion_period : str | [`ConversionPeriod`] | None
+///     Period for ``EndOfPeriod`` mode.
+///
+/// conversion_interval : int | None
+///     Bar count for ``CustomInterval`` mode.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:DataSectionConfig
+/// - backtide.backtest:EngineConfig
+/// - backtide.backtest:ExperimentConfig
+/// - backtide.backtest:GeneralConfig
+/// - backtide.backtest:IndicatorConfig
+/// - backtide.backtest:PortfolioConfig
+/// - backtide.backtest:StrategyConfig
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExchangeConfig {
+    pub commission_type: CommissionType,
+    pub commission_pct: f64,
+    pub commission_fixed: f64,
+    pub slippage: f64,
+    pub allowed_order_types: Vec<OrderType>,
+    pub partial_fills: bool,
+    pub allow_margin: bool,
+    pub max_leverage: f64,
+    pub initial_margin: f64,
+    pub maintenance_margin: f64,
+    pub margin_interest: f64,
+    pub allow_short_selling: bool,
+    pub borrow_rate: f64,
+    pub max_position_size: u32,
+    pub conversion_mode: CurrencyConversionMode,
+    pub conversion_threshold: Option<f64>,
+    pub conversion_period: Option<ConversionPeriod>,
+    pub conversion_interval: Option<u32>,
+}
+
+impl Default for ExchangeConfig {
+    fn default() -> Self {
+        Self {
+            commission_type: CommissionType::default(),
+            commission_pct: 0.1,
+            commission_fixed: 0.0,
+            slippage: 0.05,
+            allowed_order_types: vec![OrderType::Market],
+            partial_fills: false,
+            allow_margin: true,
+            max_leverage: 1.0,
+            initial_margin: 50.0,
+            maintenance_margin: 25.0,
+            margin_interest: 0.0,
+            allow_short_selling: true,
+            borrow_rate: 0.0,
+            max_position_size: 100,
+            conversion_mode: CurrencyConversionMode::default(),
+            conversion_threshold: None,
+            conversion_period: None,
+            conversion_interval: None,
+        }
+    }
+}
+
+#[pymethods]
+impl ExchangeConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (
+        commission_type = CommissionType::default(),
+        commission_pct = 0.1,
+        commission_fixed = 0.0,
+        slippage = 0.05,
+        allowed_order_types = vec![OrderType::Market],
+        partial_fills = false,
+        allow_margin = true,
+        max_leverage = 1.0,
+        initial_margin = 50.0,
+        maintenance_margin = 25.0,
+        margin_interest = 0.0,
+        allow_short_selling = true,
+        borrow_rate = 0.0,
+        max_position_size = 100,
+        conversion_mode = CurrencyConversionMode::default(),
+        conversion_threshold = None,
+        conversion_period = None,
+        conversion_interval = None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        commission_type: CommissionType,
+        commission_pct: f64,
+        commission_fixed: f64,
+        slippage: f64,
+        allowed_order_types: Vec<OrderType>,
+        partial_fills: bool,
+        allow_margin: bool,
+        max_leverage: f64,
+        initial_margin: f64,
+        maintenance_margin: f64,
+        margin_interest: f64,
+        allow_short_selling: bool,
+        borrow_rate: f64,
+        max_position_size: u32,
+        conversion_mode: CurrencyConversionMode,
+        conversion_threshold: Option<f64>,
+        conversion_period: Option<ConversionPeriod>,
+        conversion_interval: Option<u32>,
+    ) -> Self {
+        Self {
+            commission_type,
+            commission_pct,
+            commission_fixed,
+            slippage,
+            allowed_order_types,
+            partial_fills,
+            allow_margin,
+            max_leverage,
+            initial_margin,
+            maintenance_margin,
+            margin_interest,
+            allow_short_selling,
+            borrow_rate,
+            max_position_size,
+            conversion_mode,
+            conversion_threshold,
+            conversion_period,
+            conversion_interval,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ExchangeConfig(commission_type={}, slippage={})",
+            self.commission_type, self.slippage,
+        )
+    }
+
+    /// Convert to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, self)?.unbind())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// EngineConfig
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Engine / simulation settings for an experiment.
+///
+/// Attributes
+/// ----------
+/// warmup_period : int
+///     Bars to skip before the strategy starts.
+///
+/// trade_on_close : bool
+///     Fill orders at the close price of the current bar.
+///
+/// risk_free_rate : float
+///     Annualised risk-free rate for metrics.
+///
+/// benchmark : str
+///     Optional benchmark ticker symbol.
+///
+/// exclusive_orders : bool
+///     Cancel pending orders when a new order is submitted.
+///
+/// random_seed : int | None
+///     Fixed RNG seed for reproducibility.
+///
+/// empty_bar_policy : str | [`EmptyBarPolicy`]
+///     How to handle bars with no data.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:DataSectionConfig
+/// - backtide.backtest:ExchangeConfig
+/// - backtide.backtest:ExperimentConfig
+/// - backtide.backtest:GeneralConfig
+/// - backtide.backtest:IndicatorConfig
+/// - backtide.backtest:PortfolioConfig
+/// - backtide.backtest:StrategyConfig
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EngineConfig {
+    pub warmup_period: u32,
+    pub trade_on_close: bool,
+    pub risk_free_rate: f64,
+    pub benchmark: String,
+    pub exclusive_orders: bool,
+    pub random_seed: Option<u64>,
+    pub empty_bar_policy: EmptyBarPolicy,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            warmup_period: 0,
+            trade_on_close: false,
+            risk_free_rate: 0.0,
+            benchmark: String::new(),
+            exclusive_orders: false,
+            random_seed: None,
+            empty_bar_policy: EmptyBarPolicy::default(),
+        }
+    }
+}
+
+#[pymethods]
+impl EngineConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (
+        warmup_period = 0,
+        trade_on_close = false,
+        risk_free_rate = 0.0,
+        benchmark = "",
+        exclusive_orders = false,
+        random_seed = None,
+        empty_bar_policy = EmptyBarPolicy::default(),
+    ))]
+    fn new(
+        warmup_period: u32,
+        trade_on_close: bool,
+        risk_free_rate: f64,
+        benchmark: &str,
+        exclusive_orders: bool,
+        random_seed: Option<u64>,
+        empty_bar_policy: EmptyBarPolicy,
+    ) -> Self {
+        Self {
+            warmup_period,
+            trade_on_close,
+            risk_free_rate,
+            benchmark: benchmark.to_owned(),
+            exclusive_orders,
+            random_seed,
+            empty_bar_policy,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "EngineConfig(warmup_period={}, trade_on_close={})",
+            self.warmup_period, self.trade_on_close,
+        )
+    }
+
+    /// Convert to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, self)?.unbind())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// ExperimentConfigInner (serde-friendly, no Py<> wrappers)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Internal (pure-Rust) representation used for serialisation.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExperimentConfigInner {
+    pub general: GeneralConfig,
+    pub data: DataSectionConfig,
+    pub portfolio: PortfolioConfig,
+    pub strategy: StrategyConfigInner,
+    pub indicators: IndicatorConfigInner,
+    pub exchange: ExchangeConfig,
+    pub engine: EngineConfig,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// ExperimentConfig (Python-facing)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Complete configuration for a single backtest experiment.
+///
+/// Enum-valued settings accept both their enum variant and
+/// plain strings.
+///
+/// Attributes
+/// ----------
+/// general : [GeneralConfig]
+///     Experiment name, tags and description.
+///
+/// data : [DataSectionConfig]
+///     Instrument type, symbols, date range and interval.
+///
+/// portfolio : [PortfolioConfig]
+///     Initial cash, base currency and starting positions.
+///
+/// strategy : [StrategyConfig]
+///     Predefined and custom strategies.
+///
+/// indicators : [IndicatorConfig]
+///     Built-in and custom indicators.
+///
+/// exchange : [ExchangeConfig]
+///     Commission, slippage, order execution, margin and short-selling.
+///
+/// engine : [EngineConfig]
+///     Warmup, timing, benchmark and data-handling policies.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:DataSectionConfig
+/// - backtide.backtest:EngineConfig
+/// - backtide.backtest:ExchangeConfig
+/// - backtide.backtest:GeneralConfig
+/// - backtide.backtest:IndicatorConfig
+/// - backtide.backtest:PortfolioConfig
+/// - backtide.backtest:StrategyConfig
+#[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
+#[derive(Debug)]
+pub struct ExperimentConfig {
+    pub general: GeneralConfig,
+    pub data: DataSectionConfig,
+    pub portfolio: PortfolioConfig,
+    pub strategy: Py<StrategyConfig>,
+    pub indicators: Py<IndicatorConfig>,
+    pub exchange: ExchangeConfig,
+    pub engine: EngineConfig,
+}
+
+impl Clone for ExperimentConfig {
+    fn clone(&self) -> Self {
+        Python::attach(|py| Self {
+            general: self.general.clone(),
+            data: self.data.clone(),
+            portfolio: self.portfolio.clone(),
+            strategy: self.strategy.clone_ref(py),
+            indicators: self.indicators.clone_ref(py),
+            exchange: self.exchange.clone(),
+            engine: self.engine.clone(),
+        })
+    }
+}
+
+impl ExperimentConfig {
+    /// Convert from the inner (serde-friendly) representation.
+    pub fn from_inner(py: Python<'_>, inner: ExperimentConfigInner) -> PyResult<Self> {
+        let strategy = StrategyConfig::from_inner(py, inner.strategy)?;
+        let indicators = IndicatorConfig::from_inner(py, inner.indicators)?;
+        Ok(Self {
+            general: inner.general,
+            data: inner.data,
+            portfolio: inner.portfolio,
+            strategy: Py::new(py, strategy)?,
+            indicators: Py::new(py, indicators)?,
+            exchange: inner.exchange,
+            engine: inner.engine,
+        })
+    }
+
+    /// Convert to the inner (serde-friendly) representation.
+    pub fn to_inner(&self, py: Python<'_>) -> ExperimentConfigInner {
+        ExperimentConfigInner {
+            general: self.general.clone(),
+            data: self.data.clone(),
+            portfolio: self.portfolio.clone(),
+            strategy: self.strategy.borrow(py).to_inner(py),
+            indicators: self.indicators.borrow(py).to_inner(py),
+            exchange: self.exchange.clone(),
+            engine: self.engine.clone(),
+        }
+    }
+}
+
+#[pymethods]
+impl ExperimentConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (
+        general = GeneralConfig::default(),
+        data = DataSectionConfig::default(),
+        portfolio = PortfolioConfig::default(),
+        strategy = None,
+        indicators = None,
+        exchange = ExchangeConfig::default(),
+        engine = EngineConfig::default(),
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        py: Python<'_>,
+        general: GeneralConfig,
+        data: DataSectionConfig,
+        portfolio: PortfolioConfig,
+        strategy: Option<Py<StrategyConfig>>,
+        indicators: Option<Py<IndicatorConfig>>,
+        exchange: ExchangeConfig,
+        engine: EngineConfig,
+    ) -> PyResult<Self> {
+        let strategy = strategy.map_or_else(|| Py::new(py, StrategyConfig::default()), Ok)?;
+        let indicators = indicators.map_or_else(|| Py::new(py, IndicatorConfig::default()), Ok)?;
+        Ok(Self {
+            general,
+            data,
+            portfolio,
+            strategy,
+            indicators,
+            exchange,
+            engine,
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ExperimentConfig(general={:?}, data={:?}, ...)",
+            self.general.name, self.data.symbols,
+        )
+    }
+
+    fn __richcmp__(&self, py: Python<'_>, other: PyRef<Self>, op: CompareOp) -> bool {
+        match op {
+            CompareOp::Eq => self.to_inner(py) == other.to_inner(py),
+            CompareOp::Ne => self.to_inner(py) != other.to_inner(py),
+            _ => false,
+        }
+    }
+
+    /// Convert the experiment configuration to a nested dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict with ``general``, ``data``, ``portfolio``,
+    ///     ``strategy``, ``indicators``, ``exchange`` and ``engine``
+    ///     sections.
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, &self.to_inner(py))?.unbind())
+    }
+
+    /// Build an `ExperimentConfig` from a (possibly nested) dictionary.
+    ///
+    /// The dict may use the same nested structure produced by `to_toml`
+    /// (with ``general``, ``data``, ``portfolio``, etc. sections) **or**
+    /// a flat key-value mapping. Missing keys silently fall back to defaults.
+    ///
+    /// Parameters
+    /// ----------
+    /// data : dict
+    ///     Source dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// self
+    ///     The created instance.
+    #[staticmethod]
+    fn from_dict(py: Python<'_>, data: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let inner: ExperimentConfigInner = pythonize::depythonize(data)?;
+        Self::from_inner(py, inner)
+    }
+
+    /// Serialise the configuration to a TOML string.
+    ///
+    /// The output is grouped into ``[general]``, ``[data]``,
+    /// ``[portfolio]``, ``[strategy]``, ``[indicators]``,
+    /// ``[exchange]`` and ``[engine]`` sections.
+    ///
+    /// Returns
+    /// -------
+    /// str
+    ///     TOML representation of the config.
+    pub fn to_toml(&self, py: Python<'_>) -> PyResult<String> {
+        toml::to_string_pretty(&self.to_inner(py))
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    /// Build an `ExperimentConfig` from a TOML string.
+    ///
+    /// Parameters
+    /// ----------
+    /// text : str
+    ///     TOML document.
+    ///
+    /// Returns
+    /// -------
+    /// self
+    ///     The created instance.
+    #[staticmethod]
+    fn from_toml(py: Python<'_>, text: &str) -> PyResult<Self> {
+        let inner: ExperimentConfigInner = toml::from_str(text)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Self::from_inner(py, inner)
+    }
+}

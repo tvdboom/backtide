@@ -125,7 +125,7 @@ impl Engine {
         let mut providers: HashMap<InstrumentType, Arc<dyn DataProvider>> = HashMap::new();
 
         for instrument_type in InstrumentType::iter() {
-            let default = instrument_type.default();
+            let default = instrument_type.default_provider();
             let provider = pc.get(&instrument_type).unwrap_or(&default);
             let p = if let Some(p) = cache.get(provider) {
                 debug!(?instrument_type, ?provider, "Reusing existing provider instance");

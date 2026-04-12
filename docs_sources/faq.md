@@ -43,7 +43,7 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     for more details.
 
 ??? faq "How do I clear or reset the local database?"
-    You can delete specific series through the Python API using [`delete_rows`],
+    You can delete specific series through the Python API using [`delete_symbols`],
     or simply delete the `.backtide/` directory to start fresh.
 
 ??? faq "Can I use multiple providers for the same instrument type?"

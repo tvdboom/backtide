@@ -17,6 +17,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// See Also
 /// --------
 /// - backtide.backtest:ConversionPeriod
+/// - backtide.backtest:ExchangeConfig
 /// - backtide.data:Currency
 #[pyclass(skip_from_py_object, module = "backtide.backtest")]
 #[derive(

@@ -16,12 +16,21 @@ import streamlit as st
 import yaml
 
 from backtide.backtest import (
+    CodeSnippet,
     CommissionType,
     ConversionPeriod,
     CurrencyConversionMode,
+    DataSectionConfig,
     EmptyBarPolicy,
+    EngineConfig,
+    ExchangeConfig,
+    ExperimentConfig,
+    GeneralConfig,
+    IndicatorConfig,
     IndicatorType,
     OrderType,
+    PortfolioConfig,
+    StrategyConfig,
     StrategyType,
 )
 from backtide.config import get_config
@@ -83,8 +92,100 @@ with tab1:
         ),
     )
 
-    col2.button(
+    def _build_experiment_config() -> ExperimentConfig:
+        """Snapshot the current widget state into an ExperimentConfig."""
+        ss = st.session_state
+        return ExperimentConfig(
+            general=GeneralConfig(
+                name=ss.get("experiment_name", ""),
+                tags=ss.get("tags", []),
+                description=ss.get("description", ""),
+            ),
+            data=DataSectionConfig(
+                instrument_type=str(ss.get("instrument_type", "stocks")),
+                symbols=[
+                    s.symbol if hasattr(s, "symbol") else str(s) for s in ss.get("symbols", [])
+                ],
+                full_history=ss.get("full_history", True),
+                start_date=str(ss.get("start_date")) if ss.get("start_date") else None,
+                end_date=str(ss.get("end_date")) if ss.get("end_date") else None,
+                interval=str(ss.get("interval", "1d")),
+            ),
+            portfolio=PortfolioConfig(
+                initial_cash=float(ss.get("initial_cash", 10_000)),
+                base_currency=str(ss.get("base_currency", "USD")),
+            ),
+            strategy=StrategyConfig(
+                predefined_strategies=[str(s) for s in ss.get("predefined_strategies", [])],
+                custom_strategies=[
+                    CodeSnippet(
+                        name=ss.get(f"strategy_name_{i}", f"Strategy {i + 1}"),
+                        code=e.get("code", ""),
+                    )
+                    for i, e in enumerate(ss.get("custom_strategies", []))
+                ],
+            ),
+            indicators=IndicatorConfig(
+                builtin_indicators=[str(i) for i in ss.get("builtin_indicators", [])],
+                custom_indicators=[
+                    CodeSnippet(
+                        name=ss.get(f"indicator_name_{i}", f"Indicator {i + 1}"),
+                        code=e.get("code", ""),
+                    )
+                    for i, e in enumerate(ss.get("custom_indicators", []))
+                ],
+            ),
+            exchange=ExchangeConfig(
+                commission_type=str(ss.get("commission_type", "Percentage")),
+                commission_pct=float(ss.get("commission_pct", 0.1)),
+                commission_fixed=float(ss.get("commission_fixed", 0.0)),
+                slippage=float(ss.get("slippage", 0.05)),
+                allowed_order_types=[str(o) for o in ss.get("allowed_order_types", ["Market"])],
+                partial_fills=ss.get("partial_fills", False),
+                allow_margin=ss.get("allow_margin", True),
+                max_leverage=float(ss.get("max_leverage", 1.0)),
+                initial_margin=float(ss.get("initial_margin", 50.0)),
+                maintenance_margin=float(ss.get("maintenance_margin", 25.0)),
+                margin_interest=float(ss.get("margin_interest", 0.0)),
+                allow_short_selling=ss.get("allow_short_selling", True),
+                borrow_rate=float(ss.get("borrow_rate", 0.0)),
+                max_position_size=int(ss.get("max_position_size", 100)),
+                conversion_mode=str(ss.get("conversion_mode", "Immediate")),
+                conversion_threshold=(
+                    float(ss["conversion_threshold"])
+                    if ss.get("conversion_threshold") is not None
+                    else None
+                ),
+                conversion_period=(
+                    str(ss["conversion_period"])
+                    if ss.get("conversion_period") is not None
+                    else None
+                ),
+                conversion_interval=(
+                    int(ss["conversion_interval"])
+                    if ss.get("conversion_interval") is not None
+                    else None
+                ),
+            ),
+            engine=EngineConfig(
+                warmup_period=int(ss.get("warmup_period", 0)),
+                trade_on_close=ss.get("trade_on_close", False),
+                risk_free_rate=float(ss.get("risk_free_rate", 0.0)),
+                benchmark=ss.get("benchmark", ""),
+                exclusive_orders=ss.get("exclusive_orders", False),
+                random_seed=int(ss["random_seed"]) if ss.get("random_seed") is not None else None,
+                empty_bar_policy=str(ss.get("empty_bar_policy", "ForwardFill")),
+            ),
+        )
+
+    exp_cfg = _build_experiment_config()
+    file_name = (exp_cfg.general.name or st.session_state.experiment_id) + ".toml"
+
+    col2.download_button(
         label="Download configuration",
+        data=exp_cfg.to_toml(),
+        file_name=file_name,
+        mime="application/toml",
         icon=":material/download:",
         type="secondary",
         use_container_width=True,
@@ -172,7 +273,7 @@ with tab2:
         on_change=_prevent_deselection(
             key="instrument_type",
             default=InstrumentType.get_default(),
-            reset=["symbols", "currency"],
+            reset=["symbols", "_currency"],
         ),
         help="Select the type of financial instrument you want to backtest.",
     )
@@ -488,7 +589,7 @@ with tab5:
     st.caption(
         "Indicators are mathematical functions applied to price and volume data that "
         "quantify trends, momentum, volatility and other market characteristics. The "
-        "computed values can then be sued in your strategy to make investment decisions. "
+        "computed values can then be used in your strategy to make investment decisions. "
         "All selected indicators are computed up-front over the full dataset before the "
         "simulation begins, so they add no per-tick overhead.",
     )
@@ -537,8 +638,8 @@ with tab5:
 
     st.markdown("**Custom indicators**")
     st.caption(
-        "Add one or more indicator functions. Each function's return values "
-        "are merged with the built-in indicators and passed to your strategy.",
+        "Add custom indicator functions. The function's return values "
+        "are passed to your strategy together with the built-in indicators.",
     )
 
     custom_indicator_codes: list[str] = []

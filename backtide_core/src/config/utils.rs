@@ -52,7 +52,7 @@ where
 
     let explicit: HashMap<InstrumentType, Provider> = HashMap::deserialize(deserializer)?;
     let mut providers: HashMap<InstrumentType, Provider> =
-        InstrumentType::iter().map(|it| (it, it.default())).collect();
+        InstrumentType::iter().map(|it| (it, it.default_provider())).collect();
     providers.extend(explicit);
     Ok(providers)
 }

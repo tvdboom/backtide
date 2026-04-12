@@ -13,7 +13,7 @@ import streamlit as st
 
 from backtide.core.config import get_config
 from backtide.core.data import InstrumentType
-from backtide.core.storage import delete_rows, get_summary
+from backtide.core.storage import delete_symbols, get_bars
 from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ def _confirm_delete(series: list[dict[str, str]]):
 
     if col2.button("Delete", width="stretch", type="primary", icon=":material/delete:"):
         for g in series:
-            delete_rows(g["Symbol"], interval=g["Interval"], provider=g["Provider"])
+            delete_symbols(g["Symbol"], interval=g["Interval"], provider=g["Provider"])
         st.rerun()
 
 
@@ -57,27 +57,45 @@ st.title("Storage", text_alignment="center")
 
 st.divider()
 
-summaries = get_summary()
+bars_df = get_bars()
 
-if not summaries:
+if bars_df.empty:
     st.info(
         "There database is empty. Head over to the **Download** page to fetch some market data.",
         icon=":material/info:",
     )
     st.stop()
 
+# Build a summary per (symbol, interval, instrument_type, provider) group.
+grouped = bars_df.groupby(["symbol", "interval", "instrument_type", "provider"], sort=False)
+summary = grouped.agg(
+    first_ts=("open_ts", "min"),
+    last_ts=("open_ts", "max"),
+    n_rows=("open_ts", "count"),
+).reset_index()
+
+
+# Compute sparklines: last 365 adj_close values per group.
+def _sparkline(group):
+    vals = group.sort_values("open_ts").tail(365)["adj_close"].tolist()
+    return vals if vals else None
+
+
+sparklines = grouped.apply(_sparkline).reset_index(name="sparkline")
+summary = summary.merge(sparklines, on=["symbol", "interval", "instrument_type", "provider"])
+
 rows = [
     {
-        "Symbol": s.symbol,
-        "Interval": s.interval,
-        "Instrument type": s.instrument_type,
-        "Provider": s.provider,
-        "First date": _parse_date(s.first_ts, cfg.display.date_format, tz),
-        "Last date": _parse_date(s.last_ts, cfg.display.date_format, tz),
-        "Bars": s.n_rows,
-        "Price": s.sparkline if s.sparkline else None,
+        "Symbol": r["symbol"],
+        "Interval": r["interval"],
+        "Instrument type": r["instrument_type"],
+        "Provider": r["provider"],
+        "First date": _parse_date(int(r["first_ts"]), cfg.display.date_format, tz),
+        "Last date": _parse_date(int(r["last_ts"]), cfg.display.date_format, tz),
+        "Bars": int(r["n_rows"]),
+        "Price": r["sparkline"],
     }
-    for s in summaries
+    for _, r in summary.iterrows()
 ]
 
 df = pd.DataFrame(rows)
@@ -92,8 +110,8 @@ column_config = {
 if logokit_key := cfg.display.logokit_api_key:
     df.index = pd.Index(
         data=[
-            _get_logokit_url(s.symbol, InstrumentType(s.instrument_type), logokit_key)
-            for s in summaries
+            _get_logokit_url(row["Symbol"], InstrumentType(row["Instrument type"]), logokit_key)
+            for _, row in df.iterrows()
         ],
         name="Logo",
     )

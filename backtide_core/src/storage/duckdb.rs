@@ -1,10 +1,14 @@
 //! DuckDB storage solution.
 
+use crate::data::models::bar::Bar;
+use crate::data::models::dividend::Dividend;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::storage::errors::StorageResult;
 use crate::storage::models::bar_series::BarSeries;
-use crate::storage::models::storage_summary::StorageSummary;
+use crate::storage::models::dividend_series::DividendSeries;
+use crate::storage::models::stored_bar::StoredBar;
+use crate::storage::models::stored_dividend::StoredDividend;
 use crate::storage::traits::Storage;
 use duckdb::params;
 use duckdb::params_from_iter;
@@ -53,6 +57,14 @@ impl Storage for DuckDb {
                 n_trades          INTEGER,
                 UNIQUE (symbol, provider, interval, open_ts)
             );
+
+            CREATE TABLE IF NOT EXISTS dividends (
+                symbol            VARCHAR NOT NULL,
+                provider          VARCHAR NOT NULL,
+                ex_date           BIGINT NOT NULL,
+                amount            DOUBLE NOT NULL,
+                UNIQUE (symbol, provider, ex_date)
+            );
         ",
         )?;
 
@@ -66,6 +78,7 @@ impl Storage for DuckDb {
     fn write_bars_bulk(&self, series: &[BarSeries]) -> StorageResult<()> {
         // Filter out empty series early.
         let non_empty: Vec<&BarSeries> = series.iter().filter(|s| !s.bars.is_empty()).collect();
+
         if non_empty.is_empty() {
             return Ok(());
         }
@@ -118,6 +131,48 @@ impl Storage for DuckDb {
         Ok(())
     }
 
+    /// Store multiple series of dividend events in one bulk operation.
+    ///
+    /// 1. Removes overlapping rows for every series in a single transaction.
+    /// 2. Bulk-inserts all rows from every series via DuckDB's `Appender`.
+    fn write_dividends_bulk(&self, series: &[DividendSeries]) -> StorageResult<()> {
+        let non_empty: Vec<&DividendSeries> =
+            series.iter().filter(|s| !s.dividends.is_empty()).collect();
+
+        if non_empty.is_empty() {
+            return Ok(());
+        }
+
+        let conn = self.conn.lock().unwrap();
+
+        // Phase 1: delete overlapping ranges.
+        conn.execute_batch("BEGIN TRANSACTION")?;
+        for s in &non_empty {
+            let prov = s.provider.to_string();
+            let min_ts = s.dividends.iter().map(|d| d.ex_date).min().unwrap();
+            let max_ts = s.dividends.iter().map(|d| d.ex_date).max().unwrap();
+            conn.execute(
+                "DELETE FROM dividends
+                 WHERE symbol = ? AND provider = ?
+                    AND ex_date >= ? AND ex_date <= ?",
+                params![&s.symbol, prov, min_ts as i64, max_ts as i64],
+            )?;
+        }
+        conn.execute_batch("COMMIT")?;
+
+        // Phase 2: bulk-insert every row via the Appender.
+        let mut appender = conn.appender("dividends")?;
+        for s in &non_empty {
+            let prov = s.provider.to_string();
+            for div in &s.dividends {
+                appender.append_row(params![&s.symbol, &prov, div.ex_date as i64, div.amount,])?;
+            }
+        }
+        appender.flush()?;
+
+        Ok(())
+    }
+
     /// Get the (min_ts, max_ts) of stored bars for a given symbol/provider/interval.
     /// Returns `None` if no data exists.
     fn get_stored_range(
@@ -145,65 +200,73 @@ impl Storage for DuckDb {
         }
     }
 
-    /// Return a summary for every (symbol, provider, interval) series in the database.
-    fn get_summary(&self) -> StorageResult<Vec<StorageSummary>> {
+    /// Return all stored bars.
+    fn get_all_bars(&self) -> StorageResult<Vec<StoredBar>> {
         let conn = self.conn.lock().unwrap();
 
-        // Step 1: get each series with its stats
         let mut stmt = conn.prepare(
-            "SELECT symbol, interval, instrument_type, provider, MIN(open_ts), MAX(open_ts), COUNT(*)
+            "SELECT symbol, instrument_type, interval, provider,
+                    open_ts, close_ts, open_ts_exchange,
+                    open, high, low, close, adj_close, volume, n_trades
              FROM bars
-             GROUP BY symbol, interval, instrument_type, provider
-             ORDER BY symbol, interval, provider",
+             ORDER BY symbol, interval, open_ts",
         )?;
 
-        let rows: Vec<(String, String, String, String, u64, u64, u64)> = stmt
+        let rows = stmt
             .query_map([], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                ))
+                Ok(StoredBar {
+                    symbol: row.get(0)?,
+                    instrument_type: row.get(1)?,
+                    interval: row.get(2)?,
+                    provider: row.get(3)?,
+                    bar: Bar {
+                        open_ts: row.get(4)?,
+                        close_ts: row.get(5)?,
+                        open_ts_exchange: row.get(6)?,
+                        open: row.get(7)?,
+                        high: row.get(8)?,
+                        low: row.get(9)?,
+                        close: row.get(10)?,
+                        adj_close: row.get(11)?,
+                        volume: row.get(12)?,
+                        n_trades: row.get(13)?,
+                    },
+                })
             })?
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
 
-        // Step 2: for each series, fetch last 365 adj_close values
-        let mut sparkline_stmt = conn.prepare(
-            "SELECT adj_close FROM (
-                SELECT adj_close, open_ts FROM bars
-                WHERE symbol = ? AND provider = ? AND interval = ?
-                ORDER BY open_ts DESC
-                LIMIT 365
-            ) sub ORDER BY open_ts ASC",
-        )?;
-
-        let mut summaries = Vec::with_capacity(rows.len());
-        for (symbol, interval, it, provider, first_ts, last_ts, n_rows) in rows {
-            let sparkline: Vec<f64> = sparkline_stmt
-                .query_map(params![symbol, provider, interval], |row| row.get(0))?
-                .collect::<Result<_, _>>()?;
-
-            summaries.push(StorageSummary {
-                symbol,
-                provider,
-                interval,
-                instrument_type: it,
-                first_ts,
-                last_ts,
-                n_rows,
-                sparkline,
-            });
-        }
-
-        Ok(summaries)
+        Ok(rows)
     }
 
-    /// Delete all bars for a given (symbol, provider, interval) series.
-    fn delete_rows(
+    /// Return all stored dividends.
+    fn get_all_dividends(&self) -> StorageResult<Vec<StoredDividend>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT symbol, provider, ex_date, amount
+             FROM dividends
+             ORDER BY symbol, ex_date",
+        )?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(StoredDividend {
+                    symbol: row.get(0)?,
+                    provider: row.get(1)?,
+                    dividend: Dividend {
+                        ex_date: row.get(2)?,
+                        amount: row.get(3)?,
+                    },
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rows)
+    }
+
+    /// Delete all bars for a given symbol, filtered by interval and provider.
+    /// Orphaned dividends are removed when no bars remain for its symbol.
+    fn delete_symbols(
         &self,
         symbol: &str,
         interval: Option<Interval>,
@@ -223,6 +286,32 @@ impl Storage for DuckDb {
         }
 
         let deleted = conn.execute(&sql, params_from_iter(values.iter()))?;
+
+        // Clean up orphaned dividends (no bars remain for this symbol, scoped to
+        // provider when one was specified).
+        let (check_sql, check_params): (&str, Vec<String>) = if let Some(ref prov) = provider {
+            (
+                "SELECT COUNT(*) FROM bars WHERE symbol = ? AND provider = ?",
+                vec![symbol.to_string(), prov.to_string()],
+            )
+        } else {
+            ("SELECT COUNT(*) FROM bars WHERE symbol = ?", vec![symbol.to_string()])
+        };
+
+        let remaining: u64 =
+            conn.query_row(check_sql, params_from_iter(check_params.iter()), |row| row.get(0))?;
+
+        if remaining == 0 {
+            if let Some(ref prov) = provider {
+                conn.execute(
+                    "DELETE FROM dividends WHERE symbol = ? AND provider = ?",
+                    params![symbol, prov.to_string()],
+                )?;
+            } else {
+                conn.execute("DELETE FROM dividends WHERE symbol = ?", params![symbol])?;
+            }
+        }
+
         Ok(deleted as u64)
     }
 }

@@ -30,8 +30,8 @@ use std::collections::HashMap;
 ///
 /// See Also
 /// --------
-/// - backtide.data:Instrument
 /// - backtide.data:Bar
+/// - backtide.data:Instrument
 /// - backtide.data:Interval
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.data")]
 #[derive(Debug, Clone, Deserialize)]

@@ -1,11 +1,10 @@
-# delete_rows
--------------
+# get_bars
+----------
 
-:: backtide.storage:delete_rows
+:: backtide.storage:get_bars
     :: signature
     :: head
     :: table:
-        - parameters
         - returns
     :: see also
 
@@ -14,3 +13,4 @@
 ## Example
 
 :: examples
+

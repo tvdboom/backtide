@@ -47,7 +47,7 @@ fn network_criterion() -> Criterion {
 
 /// Benchmark downloading ~7 days of 1-minute bars for a single symbol.
 ///
-/// Calls [`YahooFinance::download_batch`] for `"AAPL"` with
+/// Calls [`YahooFinance::download_bars`] for `"AAPL"` with
 /// [`Interval::OneMinute`] over the last 7 days. Uses `iter_custom`
 /// so that each of the 10 samples performs exactly `iters` sequential
 /// API calls, keeping the total request count predictable.
@@ -64,7 +64,7 @@ fn bench_ohlc_download_1sym_1m(c: &mut Criterion) {
                 let t = Instant::now();
                 for _ in 0..iters {
                     yahoo
-                        .download_batch(
+                        .download_bars(
                             "AAPL",
                             InstrumentType::Stocks,
                             Interval::OneMinute,
@@ -82,7 +82,7 @@ fn bench_ohlc_download_1sym_1m(c: &mut Criterion) {
 
 /// Benchmark downloading ~30 days of daily bars for 10 symbols concurrently.
 ///
-/// Calls [`YahooFinance::download_batch`] for 10 common US stock tickers
+/// Calls [`YahooFinance::download_bars`] for 10 common US stock tickers
 /// with [`Interval::OneDay`] over the last 30 days. All 10 downloads run
 /// concurrently via [`futures::future::join_all`] within each measured
 /// iteration, mirroring real-world multi-symbol ingestion.
@@ -101,7 +101,7 @@ fn bench_ohlc_download_10sym_1d(c: &mut Criterion) {
                 let t = Instant::now();
                 for _ in 0..iters {
                     let futures = symbols.iter().map(|&sym| {
-                        yahoo.download_batch(
+                        yahoo.download_bars(
                             sym,
                             InstrumentType::Stocks,
                             Interval::OneDay,
