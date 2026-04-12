@@ -6,6 +6,7 @@ use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
+use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
@@ -214,6 +215,7 @@ impl DataProvider for Kraken {
     async fn list_instruments(
         &self,
         instrument_type: InstrumentType,
+        _: Option<Vec<Exchange>>,
         limit: usize,
     ) -> DataResult<Vec<Instrument>> {
         Self::check_instrument_type(instrument_type)?;
@@ -364,8 +366,6 @@ impl TryFrom<PairInfo> for Instrument {
             quote,
             instrument_type,
             exchange: "KRAKEN".to_owned(),
-            volume: None,
-            price: None,
         })
     }
 }

@@ -99,7 +99,7 @@ def _list_instruments(instrument_type: InstrumentType) -> list[Instrument]:
     """Cache the major instruments per instrument type."""
     if instrument_type is None:
         instrument_type = InstrumentType.get_default()
-    return list_instruments(instrument_type, MAX_PRELOADED_INSTRUMENTS)
+    return list_instruments(instrument_type, limit=MAX_PRELOADED_INSTRUMENTS)
 
 
 def _moment_to_strftime(fmt: str) -> str:

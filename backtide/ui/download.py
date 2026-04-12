@@ -414,7 +414,7 @@ symbols = col1.multiselect(
 )
 
 # Symbols can become symbol - name when changing currency, so extract the symbol part
-symbols = [s.split(" - ")[0] for s in symbols]
+symbols = [s.split(" - ")[0] if isinstance(s, str) else s for s in symbols]
 
 intervals = st.session_state.get("intervals", Interval.get_default())
 

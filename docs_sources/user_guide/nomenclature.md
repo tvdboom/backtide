@@ -39,9 +39,21 @@ when aligning bars across multiple instruments.
 [](){#nom-instrument}
 <strong>instrument</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
-A tradeable financial instrument, such as a stock, ETF, currency pair, or
-cryptocurrency. Each instrument is uniquely identified by a [symbol][nom-symbol] and
-belongs to exactly one [instrument type].
+A tradeable financial instrument, such as a stock, ETF, currency pair, or cryptocurrency.
+Each instrument is uniquely identified by a [symbol][nom-symbol] and belongs to exactly
+one [instrument type].
+</div>
+
+<br>
+
+[](){#instrument-profile}
+<strong id="instrument-profile">instrument profile</strong>
+<div markdown style="margin: -1em 0 0 1.2em">
+A wrapper around an [instrument][nom-instrument] enriched with download metadata.
+It carries the per-[interval][nom-interval] earliest and latest available timestamps
+as well as the currency-conversion legs needed to reach the [base currency]. Instrument
+profiles are resolved automatically when preparing a download and are the primary input
+to the download pipeline. See [`InstrumentProfile`].
 </div>
 
 <br>
@@ -49,10 +61,10 @@ belongs to exactly one [instrument type].
 [](){#instrument-type}
 <strong id="instrument-type">instrument type</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
-The broad category an [instrument][nom-instrument] belongs to. These include stock (individual
-equity shares), etf (exchange-traded funds), forex (spot foreign-exchange pairs) or
-crypto (cryptocurrency spot pairs). The instrument type determines which [provider][nom-provider]
-is used to fetch data for that instrument. See [`InstrumentType`].
+The broad category an [instrument][nom-instrument] belongs to. These include stock
+(individual equity shares), etf (exchange-traded funds), forex (spot foreign-exchange
+pairs) or crypto (cryptocurrency spot pairs). The instrument type determines which
+[provider][nom-provider] is used to fetch data for that instrument. See [`InstrumentType`].
 </div>
 
 <br>

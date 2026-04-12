@@ -40,36 +40,15 @@ use serde::Deserialize;
 /// - backtide.data:InstrumentProfile
 /// - backtide.data:Bar
 /// - backtide.data:Interval
-#[pyclass(from_py_object, frozen, module = "backtide.data")]
+#[pyclass(from_py_object, get_all, frozen, module = "backtide.data")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Instrument {
-    #[pyo3(get)]
     pub symbol: Symbol,
-    #[pyo3(get)]
     pub name: String,
-    #[pyo3(get)]
     pub base: Option<String>,
-    #[pyo3(get)]
     pub quote: String,
-    #[pyo3(get)]
     pub instrument_type: InstrumentType,
-    #[pyo3(get)]
     pub exchange: String,
-
-    /// Traded volume during the most recent regular market session.
-    pub volume: Option<u64>,
-
-    /// The most recent traded price during the regular market session.
-    pub price: Option<f64>,
-}
-
-impl Instrument {
-    pub fn volume_price(&self) -> f64 {
-        match (self.volume, self.price) {
-            (Some(v), Some(p)) => v as f64 * p,
-            _ => 0.,
-        }
-    }
 }
 
 #[pymethods]
@@ -93,8 +72,6 @@ impl Instrument {
             quote,
             instrument_type,
             exchange,
-            volume: None,
-            price: None,
         }
     }
 

@@ -71,14 +71,23 @@ with tab1:
     if "experiment_id" not in st.session_state:
         st.session_state.experiment_id = str(uuid.uuid4())[:8]
 
-    experiment_name = st.text_input(
+    col1, col2 = st.columns([2, 1], vertical_alignment="bottom")
+
+    experiment_name = col1.text_input(
         label="Experiment name",
         placeholder=st.session_state.experiment_id,
-        max_chars=60,
+        max_chars=40,
         help=(
             "A human-readable name to identify this experiment (optional). "
             "If no name is filled in, an automatic GUID is assigned instead."
         ),
+    )
+
+    col2.button(
+        label="Download configuration",
+        icon=":material/download:",
+        type="secondary",
+        use_container_width=True,
     )
 
     tags = st.multiselect(
@@ -120,25 +129,25 @@ with tab1:
         ),
     )
 
-    uploaded = st.file_uploader(
+    upload = st.file_uploader(
         label="Import configuration",
         type=["toml", "yaml", "yml", "json"],
         help="Upload a TOML, YAML or JSON file to pre-fill the experiment configuration.",
     )
 
-    if uploaded is not None:
+    if upload is not None:
         try:
-            if uploaded.name.endswith(".json"):
-                config = json.load(uploaded)
-            elif uploaded.name.endswith(".toml"):
-                config = tomllib.loads(uploaded.read().decode("utf-8"))
+            if upload.name.endswith(".json"):
+                config = json.load(upload)
+            elif upload.name.endswith(".toml"):
+                config = tomllib.loads(upload.read().decode("utf-8"))
             else:
-                config = yaml.safe_load(uploaded)
+                config = yaml.safe_load(upload)
 
             st.session_state["experiment_name"] = config.get("name", "")
             st.session_state["tags"] = config.get("tags", [])
             st.session_state["description"] = config.get("description", "")
-            st.success(f"Loaded configuration from `{uploaded.name}`.")
+            st.success(f"Loaded configuration from `{upload.name}`.")
         except (yaml.YAMLError, json.JSONDecodeError, tomllib.TOMLDecodeError, TypeError) as ex:
             st.error(f"Failed to parse file: {ex}")
 
@@ -203,7 +212,7 @@ with tab2:
     )
 
     # Symbols can become symbol - name when changing currency, so extract the symbol part
-    symbols = [s.split(" - ")[0] for s in symbols]
+    symbols = [s.split(" - ")[0] if isinstance(s, str) else s for s in symbols]
 
     options = ["All", *sorted(dict.fromkeys(str(a.quote) for a in all_instruments))]
     col2.selectbox(

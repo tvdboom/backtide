@@ -19,7 +19,6 @@ use async_trait::async_trait;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::cmp::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 use strum::IntoEnumIterator;
 use tokio::try_join;
@@ -137,7 +136,19 @@ impl YahooFinance {
         })
         .await?;
 
-        quotes.into_iter().map(Instrument::try_from).collect()
+        Ok(quotes
+            .into_iter()
+            .filter_map(|q| {
+                let symbol = q.symbol.clone();
+                match Instrument::try_from(q) {
+                    Ok(inst) => Some(inst),
+                    Err(e) => {
+                        debug!("Skipping symbol {symbol}: {e}");
+                        None
+                    },
+                }
+            })
+            .collect())
     }
 
     /// Paginate the custom POST screener with an arbitrary query predicate.
@@ -177,7 +188,19 @@ impl YahooFinance {
         })
         .await?;
 
-        quotes.into_iter().map(Instrument::try_from).collect()
+        Ok(quotes
+            .into_iter()
+            .filter_map(|q| {
+                let symbol = q.symbol.clone();
+                match Instrument::try_from(q) {
+                    Ok(inst) => Some(inst),
+                    Err(e) => {
+                        debug!("Skipping symbol {symbol}: {e}");
+                        None
+                    },
+                }
+            })
+            .collect())
     }
 
     /// Validate HTTP status then deserialize a screener response into quotes.
@@ -386,7 +409,7 @@ impl DataProvider for YahooFinance {
             return Err(DataError::UnexpectedResponse(msg));
         }
 
-        let inst = parsed
+        let instrument = parsed
             .chart
             .result
             .into_iter()
@@ -394,7 +417,7 @@ impl DataProvider for YahooFinance {
             .map(|r| Instrument::try_from(r.meta))
             .ok_or(DataError::UnexpectedResponse("empty chart result".to_owned()))??;
 
-        Ok(inst)
+        Ok(instrument)
     }
 
     /// Returns the usable download range for an Instrument at a given interval.
@@ -504,6 +527,7 @@ impl DataProvider for YahooFinance {
     async fn list_instruments(
         &self,
         instrument_type: InstrumentType,
+        exchanges: Option<Vec<Exchange>>,
         limit: usize,
     ) -> DataResult<Vec<Instrument>> {
         use Exchange::*;
@@ -529,12 +553,13 @@ impl DataProvider for YahooFinance {
                     _ => unreachable!(),
                 };
 
-                // Fan out across major exchanges concurrently.
-                let exchanges = [
+                // If unspecified, select default major exchanges.
+                let exchanges = exchanges.unwrap_or(vec![
                     XAMS, XASX, XETR, XHKG, XJPX, XKRX, XLON, XMAD, XNAS, XNSE, XNYS, XPAR, XSES,
                     XSHG, XSHE, XSWX,
-                ];
+                ]);
 
+                let limit_per_ex = limit / exchanges.len();
                 let tasks: Vec<_> = exchanges
                     .iter()
                     .map(|ex| {
@@ -543,7 +568,7 @@ impl DataProvider for YahooFinance {
                             json!({ "operator": "EQ", "operands": ["exchange", ex.yahoo_code()] }),
                         );
                         let query = json!({ "operator": "AND", "operands": operands });
-                        async move { self.paginate_screener(quote_type, &query, 100).await }
+                        async move { self.paginate_screener(quote_type, &query, limit_per_ex).await }
                     })
                     .collect();
 
@@ -555,12 +580,6 @@ impl DataProvider for YahooFinance {
                         Err(e) => debug!("Yahoo list_instruments exchange error: {e}"),
                     }
                 }
-
-                // Select only the top `limit` instruments by volume x price
-                instruments.sort_by(|a, b| {
-                    b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
-                });
-                instruments.truncate(limit);
 
                 Ok(instruments)
             },
@@ -579,8 +598,6 @@ impl DataProvider for YahooFinance {
                             quote,
                             instrument_type: InstrumentType::Forex,
                             exchange: "CCY".to_owned(), // "CCY" is Yahoo's placeholder code for the interbank FX market
-                            volume: None,
-                            price: None,
                         }
                     })
                     .collect();
@@ -589,20 +606,14 @@ impl DataProvider for YahooFinance {
             },
 
             InstrumentType::Crypto => {
+                let limit_per_screener = limit / 3;
                 let (us, eu, gb) = try_join!(
-                    self.fetch_predefined_screener("all_cryptocurrencies_us", 100),
-                    self.fetch_predefined_screener("all_cryptocurrencies_eu", 100),
-                    self.fetch_predefined_screener("all_cryptocurrencies_gb", 100),
+                    self.fetch_predefined_screener("all_cryptocurrencies_us", limit_per_screener),
+                    self.fetch_predefined_screener("all_cryptocurrencies_eu", limit_per_screener),
+                    self.fetch_predefined_screener("all_cryptocurrencies_gb", limit_per_screener),
                 )?;
 
-                let mut instruments: Vec<Instrument> = us.into_iter().chain(eu).chain(gb).collect();
-
-                instruments.sort_by(|a, b| {
-                    b.volume_price().partial_cmp(&a.volume_price()).unwrap_or(Ordering::Equal)
-                });
-                instruments.truncate(limit);
-
-                Ok(instruments)
+                Ok(us.into_iter().chain(eu).chain(gb).collect())
             },
         }
     }
@@ -727,12 +738,6 @@ pub struct YahooQuote {
 
     /// Short exchange code.
     pub exchange: Option<String>,
-
-    /// Most recent session volume in units of the base Instrument.
-    pub regular_market_volume: Option<u64>,
-
-    /// Most recent traded price in `currency`.
-    pub regular_market_price: Option<f64>,
 }
 
 impl TryFrom<YahooQuote> for Instrument {
@@ -768,8 +773,6 @@ impl TryFrom<YahooQuote> for Instrument {
             quote,
             instrument_type,
             exchange,
-            price: q.regular_market_price,
-            volume: q.regular_market_volume,
         })
     }
 }
@@ -854,12 +857,6 @@ struct ChartMeta {
 
     /// Unix timestamp of the most recent market event.
     regular_market_time: Option<i64>,
-
-    /// Most recent session volume.
-    regular_market_volume: Option<u64>,
-
-    /// Most recent traded price.
-    regular_market_price: Option<f64>,
 }
 
 impl TryFrom<ChartMeta> for Instrument {
@@ -898,8 +895,6 @@ impl TryFrom<ChartMeta> for Instrument {
             quote,
             instrument_type,
             exchange,
-            price: m.regular_market_price,
-            volume: m.regular_market_volume,
         })
     }
 }

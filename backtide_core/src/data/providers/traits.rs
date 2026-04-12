@@ -3,6 +3,7 @@
 use crate::constants::Symbol;
 use crate::data::errors::DataResult;
 use crate::data::models::bar::Bar;
+use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
@@ -29,6 +30,7 @@ pub trait DataProvider: Send + Sync {
     async fn list_instruments(
         &self,
         instrument_type: InstrumentType,
+        exchanges: Option<Vec<Exchange>>,
         limit: usize,
     ) -> DataResult<Vec<Instrument>>;
 

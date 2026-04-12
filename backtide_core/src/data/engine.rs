@@ -5,6 +5,7 @@ use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::currency::Currency;
 use crate::data::models::download_result::DownloadResult;
+use crate::data::models::exchange::Exchange;
 use crate::data::models::forex_pair::ForexPair;
 use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_profile::InstrumentProfile;
@@ -16,7 +17,7 @@ use crate::errors::EngineResult;
 use crate::storage::models::bar_series::BarSeries;
 use futures::future::{join_all, try_join_all};
 use indexmap::IndexMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
 
@@ -136,13 +137,12 @@ impl Engine {
             .await?;
 
             // Merge into a single flat vec, deduplicating by symbol.
-            let mut seen = std::collections::HashSet::new();
-            let mut profiles = Vec::new();
-            for p in instrument_profiles.into_iter().chain(leg_profiles) {
-                if seen.insert(p.instrument.symbol.clone()) {
-                    profiles.push(p);
-                }
-            }
+            let mut seen = HashSet::new();
+            let profiles: Vec<_> = instrument_profiles
+                .into_iter()
+                .chain(leg_profiles)
+                .filter(|p| seen.insert(p.instrument.symbol.clone()))
+                .collect();
 
             Ok(profiles)
         })
@@ -158,12 +158,14 @@ impl Engine {
     pub fn list_instruments(
         &self,
         instrument_type: InstrumentType,
-        exchanges: Option<Vec<String>>,
+        exchanges: Option<Vec<Exchange>>,
         limit: usize,
     ) -> DataResult<Vec<Instrument>> {
-        self.rt.block_on(
-            self.providers.get(&instrument_type).unwrap().list_instruments(instrument_type, limit),
-        )
+        self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
+            instrument_type,
+            exchanges,
+            limit,
+        ))
     }
 
     /// Download instruments from a list of [`InstrumentProfile`]s and store the

@@ -2,6 +2,7 @@
 
 use crate::constants::Symbol;
 use crate::data::models::download_result::DownloadResult;
+use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_profile::InstrumentProfile;
 use crate::data::models::instrument_type::InstrumentType;
@@ -9,7 +10,22 @@ use crate::data::models::interval::Interval;
 use crate::engine::Engine;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
-use pyo3::{pyfunction, Bound, PyAny, PyResult};
+use pyo3::{pyfunction, Bound, FromPyObject, PyAny, PyResult};
+
+/// Parse input from Python into a vec of T.
+fn parse_input<'py, T>(param: Bound<'py, PyAny>) -> PyResult<Vec<T>>
+where
+    for<'a> T: FromPyObject<'a, 'py>,
+    for<'a> <T as FromPyObject<'a, 'py>>::Error: Into<pyo3::PyErr>,
+{
+    if let Ok(seq) = param.extract::<Vec<Bound<'py, PyAny>>>() {
+        seq.iter()
+            .map(|item| item.extract::<T>().map_err(Into::into))
+            .collect::<PyResult<_>>()
+    } else {
+        Ok(vec![param.extract::<T>().map_err(Into::into)?])
+    }
+}
 
 /// Parse input from Python into a list of symbols.
 fn parse_instrument(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
@@ -39,15 +55,6 @@ fn parse_instrument(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
                 "Parameter symbols must be a str, Instrument or a sequence of those.",
             ))
         }
-    }
-}
-
-/// Parse input from Python into a vec of intervals.
-fn parse_interval(interval: Bound<'_, PyAny>) -> PyResult<Vec<Interval>> {
-    if let Ok(seq) = interval.extract::<Vec<Bound<'_, PyAny>>>() {
-        seq.into_iter().map(|item| item.extract::<Interval>()).collect::<PyResult<_>>()
-    } else {
-        Ok(vec![interval.extract::<Interval>()?])
     }
 }
 
@@ -135,7 +142,7 @@ pub fn resolve_profiles(
 ) -> PyResult<Vec<InstrumentProfile>> {
     let symbols = parse_instrument(symbols)?;
     let instrument_type = instrument_type.extract::<InstrumentType>()?;
-    let interval = parse_interval(interval)?;
+    let interval = parse_input::<Interval>(interval)?;
 
     let engine = Engine::get()?;
     Ok(engine.resolve_profiles(symbols, instrument_type, interval)?)
@@ -151,10 +158,10 @@ pub fn resolve_profiles(
 /// instrument_type : str | [InstrumentType]
 ///     For which [instrument type] to list the instruments.
 ///
-/// exchange : str | list[str] | None, default=None
-///     Optional exchange filter. If `None`, the default exchange list is used.
-///     If specified, only query those exchanges and distribute `limit` evenly
-///     across them.
+/// exchange : str | [Exchange] | list[str | [Exchange]] | None, default=None
+///     Optional exchange filter. If `None`, a default list of major exchanges is
+///     used. If specified, only query those exchanges and distribute `limit` evenly
+///     across them. This parameter is ignored for single-exchange providers.
 ///
 /// limit : int, default=100
 ///     Maximum number of instruments to return. The actual number may be smaller,
@@ -177,26 +184,14 @@ pub fn resolve_profiles(
 /// print(list_instruments("crypto", limit=5))
 /// ```
 #[pyfunction]
-#[pyo3(signature = (instrument_type: "str | InstrumentType", exchange: "str | list[str] | None"=None, limit: "int"=100))]
+#[pyo3(signature = (instrument_type: "str | InstrumentType", exchange: "str | Exchange | list[str | Exchange] | None"=None, *, limit: "int"=100))]
 pub fn list_instruments(
     instrument_type: Bound<'_, PyAny>,
     exchange: Option<Bound<'_, PyAny>>,
     limit: usize,
 ) -> PyResult<Vec<Instrument>> {
     let instrument_type = instrument_type.extract::<InstrumentType>()?;
-
-    let exchanges: Option<Vec<String>> = match exchange {
-        None => None,
-        Some(obj) => {
-            if let Ok(s) = obj.extract::<String>() {
-                Some(vec![s])
-            } else if let Ok(seq) = obj.extract::<Vec<String>>() {
-                Some(seq)
-            } else {
-                return Err(PyValueError::new_err("exchange must be a str, list[str] or None."));
-            }
-        },
-    };
+    let exchanges: Option<Vec<Exchange>> = exchange.map(|ex| parse_input::<Exchange>(ex)).transpose()?;
 
     let engine = Engine::get()?;
     Ok(engine.list_instruments(instrument_type, exchanges, limit)?)

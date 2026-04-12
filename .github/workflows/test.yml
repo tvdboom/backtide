@@ -39,7 +39,7 @@ jobs:
       - name: Run tests
         run: |
           uv sync --group dev
-          uv run tox -e unit
+          uv run tox -m unit
       - uses: codecov/codecov-action@v4
         if: ${{ matrix.os == 'ubuntu-latest' }}
         with:

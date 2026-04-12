@@ -4,7 +4,7 @@ use pyo3::{pyclass, pymethods, Borrowed, Bound, FromPyObject, Py, PyAny, PyErr, 
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
-/// The broad category an [`Instrument`] belongs to.
+/// The category an [`Instrument`] belongs to.
 ///
 /// See Also
 /// --------
