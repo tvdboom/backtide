@@ -55,7 +55,7 @@ impl Kraken {
     // Private API
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Convert a canonical pair (e.g. `"BTC-USD"`) to Kraken format (e.g. `"XBTUSD"`).
+    /// Convert a canonical pair to Kraken format.
     fn parse_canonical_symbol(&self, symbol: &str) -> String {
         symbol
             .split('-')
@@ -319,16 +319,16 @@ struct KrakenResponse<T> {
 /// One trading pair entry from `/0/public/AssetPairs`.
 #[derive(Debug, Deserialize)]
 struct PairInfo {
-    /// WebSocket pair name (e.g. `"XBT/USD"`).
+    /// WebSocket pair name.
     wsname: Option<String>,
 
-    /// Alternative pair name (e.g. `"XBTUSDT"`).
+    /// Alternative pair name.
     altname: String,
 
-    /// Base asset identifier (e.g. `"XXBT"`).
+    /// Base asset identifier.
     base: String,
 
-    /// Quote asset identifier (e.g. `"ZUSD"`).
+    /// Quote asset identifier.
     quote: String,
 
     /// Pair lifecycle status — only `"online"` pairs are usable.
@@ -339,7 +339,7 @@ impl TryFrom<PairInfo> for Instrument {
     type Error = DataError;
 
     fn try_from(info: PairInfo) -> DataResult<Self> {
-        // Prefer the human-readable wsname (e.g. "XBT/USD") for base/quote.
+        // Prefer the human-readable wsname (e.g., "XBT/USD") for base/quote.
         let (base, quote) = if let Some(ref ws) = info.wsname {
             let mut parts = ws.splitn(2, '/');
             let b = parts.next().unwrap_or(&info.base).to_owned();

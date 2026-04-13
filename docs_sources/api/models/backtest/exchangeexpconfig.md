@@ -1,7 +1,7 @@
-# ExchangeConfig
-----------------
+# ExchangeExpConfig
+-------------------
 
-:: backtide.backtest:ExchangeConfig
+:: backtide.backtest:ExchangeExpConfig
     :: signature
     :: head
     :: table:
@@ -16,4 +16,5 @@
     toc_only: False
     include:
         - to_dict
+
 

@@ -10,9 +10,9 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 ///
 /// See Also
 /// --------
-/// - backtide.backtest:ExchangeConfig
-/// - backtide.backtest:OrderType
 /// - backtide.data:Currency
+/// - backtide.backtest:ExchangeExpConfig
+/// - backtide.backtest:OrderType
 #[pyclass(skip_from_py_object, module = "backtide.backtest")]
 #[derive(
     Clone,

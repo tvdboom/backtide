@@ -58,7 +58,7 @@ pub fn clear_cache() -> PyResult<()> {
 ///
 /// Parameters
 /// ----------
-/// log_level : str | [`LogLevel`]
+/// log_level : str | [LogLevel]
 ///     Minimum tracing log level. Choose from: "error", "warn", "info",
 ///    "debug".
 ///

@@ -1,7 +1,7 @@
-# EngineConfig
---------------
+# EngineExpConfig
+-----------------
 
-:: backtide.backtest:EngineConfig
+:: backtide.backtest:EngineExpConfig
     :: signature
     :: head
     :: table:

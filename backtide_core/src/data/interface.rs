@@ -227,9 +227,9 @@ pub fn list_instruments(
 ///
 /// See Also
 /// --------
+/// - backtide.storage:get_bars
 /// - backtide.data:get_instruments
 /// - backtide.data:resolve_profiles
-/// - backtide.storage:get_bars
 ///
 /// Examples
 /// --------

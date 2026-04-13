@@ -298,13 +298,13 @@ struct ProductsListResponse {
 /// One product entry from `/api/v3/brokerage/market/products`.
 #[derive(Debug, Deserialize)]
 struct ProductInfo {
-    /// Coinbase product id (e.g. `"BTC-USD"`).
+    /// Coinbase product id.
     product_id: String,
 
-    /// Base currency id (e.g. `"BTC"`).
+    /// Base currency id.
     base_currency_id: String,
 
-    /// Quote currency id (e.g. `"USD"`).
+    /// Quote currency id.
     quote_currency_id: String,
 
     /// Product lifecycle status — only `"online"` products are usable.

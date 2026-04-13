@@ -20,8 +20,8 @@ use pyo3::types::{PyDict, PyList};
 ///
 /// See Also
 /// --------
-/// - backtide.data:download_instruments
 /// - backtide.storage:delete_symbols
+/// - backtide.data:download_instruments
 /// - backtide.storage:get_dividends
 ///
 /// Examples
@@ -103,8 +103,8 @@ pub fn get_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
 ///
 /// See Also
 /// --------
-/// - backtide.data:download_instruments
 /// - backtide.storage:delete_symbols
+/// - backtide.data:download_instruments
 /// - backtide.storage:get_bars
 ///
 /// Examples

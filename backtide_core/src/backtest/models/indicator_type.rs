@@ -16,9 +16,9 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 ///
 /// See Also
 /// --------
-/// - backtide.backtest:IndicatorConfig
-/// - backtide.backtest:StrategyType
 /// - backtide.data:Bar
+/// - backtide.backtest:IndicatorExpConfig
+/// - backtide.backtest:StrategyType
 #[pyclass(skip_from_py_object, module = "backtide.backtest")]
 #[derive(
     Clone,

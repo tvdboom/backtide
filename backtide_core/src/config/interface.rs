@@ -76,13 +76,13 @@ impl Config {
 ///
 /// Attributes
 /// ----------
-/// general : [`GeneralConfig`]
+/// general : [GeneralConfig]
 ///     Portfolio-wide settings.
 ///
-/// data : [`DataConfig`]
+/// data : [DataConfig]
 ///     Settings that control how market data is fetched and stored.
 ///
-/// display : [`DisplayConfig`]
+/// display : [DisplayConfig]
 ///     Settings that control how values are presented in the application's frontend.
 ///
 /// See Also
@@ -207,7 +207,7 @@ impl PyConfig {
 /// triangulation_crypto_pegged : str, default="USD"
 ///     The fiat currency to which `triangulation_crypto` is pegged, for the
 ///     purposes of bridging between the crypto and fiat conversion graphs. When
-///     a conversion path crosses the crypto/fiat boundary (e.g., `USDT â†’ USD`),
+///     a conversion path crosses the crypto/fiat boundary,
 ///     the engine treats `triangulation_crypto`/`triangulation_crypto_pegged`
 ///     as the crossing pair at parity 1:1.
 ///
@@ -521,7 +521,7 @@ impl DisplayConfig {
 ///
 /// Returns
 /// -------
-/// [`Config`]
+/// [Config]
 ///     The current configuration.
 ///
 /// See Also
@@ -558,7 +558,7 @@ pub fn get_config(py: Python<'_>) -> PyResult<PyConfig> {
 ///
 /// Returns
 /// -------
-/// [`Config`]
+/// [Config]
 ///     The loaded configuration.
 ///
 /// See Also
@@ -589,7 +589,7 @@ pub fn load_config(py: Python<'_>, path: &str) -> PyResult<PyConfig> {
 ///
 /// Parameters
 /// ----------
-/// config: [`Config`]
+/// config: [Config]
 ///     Configuration to set.
 ///
 /// See Also

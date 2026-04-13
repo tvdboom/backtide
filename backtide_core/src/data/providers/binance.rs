@@ -306,16 +306,16 @@ struct ExchangeInfo {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SymbolInfo {
-    /// Binance composite symbol (e.g. `"BTCUSDT"`).
+    /// Binance composite symbol.
     symbol: String,
 
     /// Lifecycle state — only `"TRADING"` pairs are usable.
     status: String,
 
-    /// Base asset ticker (e.g. `"BTC"`).
+    /// Base asset ticker.
     base_asset: String,
 
-    /// Quote asset ticker (e.g. `"USDT"`).
+    /// Quote asset ticker.
     quote_asset: String,
 }
 

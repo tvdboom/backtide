@@ -1,7 +1,7 @@
-# PortfolioConfig
------------------
+# IndicatorExpConfig
+--------------------
 
-:: backtide.backtest:PortfolioConfig
+:: backtide.backtest:IndicatorExpConfig
     :: signature
     :: head
     :: table:
@@ -16,4 +16,5 @@
     toc_only: False
     include:
         - to_dict
+
 

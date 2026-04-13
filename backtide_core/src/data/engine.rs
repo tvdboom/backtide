@@ -380,7 +380,7 @@ impl Engine {
     /// Try to load an instrument from symbol format base-quote or quote-base.
     ///
     /// When both orderings exist, prefer the one whose concatenated symbol
-    /// matches a known [`ForexPair`] variant (e.g. `EURAUD` over `AUDEUR`).
+    /// matches a known [`ForexPair`] variant.
     /// If neither (or both) match, fall back to the one with the longest history.
     async fn load_instrument_bidirectional(
         &self,

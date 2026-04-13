@@ -17,7 +17,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// See Also
 /// --------
 /// - backtide.backtest:CommissionType
-/// - backtide.backtest:ExchangeConfig
+/// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:StrategyType
 #[pyclass(skip_from_py_object, module = "backtide.backtest")]
 #[derive(

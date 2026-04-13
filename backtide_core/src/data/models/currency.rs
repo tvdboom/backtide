@@ -14,9 +14,9 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 ///     The human-readable name of the currency.
 ///
 /// symbol : str
-///     The currency symbol as a UTF-8 string (e.g., `$`, `€`, `₺`).
+///     The currency symbol as a UTF-8 string.
 ///
-/// country : [`Country`]
+/// country : [Country]
 ///     The country that issues this currency.
 ///
 /// decimals : int

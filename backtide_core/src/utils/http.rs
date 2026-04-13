@@ -28,20 +28,18 @@ pub enum HttpError {
     /// The server returned a non-2xx status code.
     ///
     /// `body` contains a human-readable error message extracted from the
-    /// response body when possible (e.g. Yahoo's `chart.error.description`),
-    /// falling back to the raw status + body text.
+    /// response body when possible, falling back to the raw status + body text.
     #[error("{body}")]
     Status {
         status: StatusCode,
         body: String,
     },
 
-    /// The response body could not be decoded (e.g. invalid JSON or charset).
+    /// The response body could not be decoded.
     #[error("Failed to decode response body: {0}")]
     Decode(#[source] reqwest::Error),
 
-    /// The HTTP layer succeeded but the response structure was unexpected
-    /// (e.g. a missing or empty result array in the parsed body).
+    /// The HTTP layer succeeded but the response structure was unexpected.
     #[error("Unexpected response payload: {0}")]
     UnexpectedPayload(String),
 }

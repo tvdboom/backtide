@@ -1,7 +1,7 @@
-# StrategyConfig
-----------------
+# PortfolioExpConfig
+--------------------
 
-:: backtide.backtest:StrategyConfig
+:: backtide.backtest:PortfolioExpConfig
     :: signature
     :: head
     :: table:
@@ -16,4 +16,5 @@
     toc_only: False
     include:
         - to_dict
+
 

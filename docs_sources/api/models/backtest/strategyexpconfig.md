@@ -1,7 +1,7 @@
-# IndicatorConfig
------------------
+# StrategyExpConfig
+-------------------
 
-:: backtide.backtest:IndicatorConfig
+:: backtide.backtest:StrategyExpConfig
     :: signature
     :: head
     :: table:
@@ -16,4 +16,5 @@
     toc_only: False
     include:
         - to_dict
+
 

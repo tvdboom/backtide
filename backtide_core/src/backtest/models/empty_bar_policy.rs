@@ -5,9 +5,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
 /// How to handle bars with no trading activity.
 ///
-/// Controls what the engine does when a bar has no market data
-/// (e.g. market closures during intraday backtests, holidays
-/// or illiquid periods).
+/// Controls what the engine does when a bar has no market data.
 ///
 /// Attributes
 /// ----------

@@ -20,17 +20,17 @@ from backtide.backtest import (
     CommissionType,
     ConversionPeriod,
     CurrencyConversionMode,
-    DataSectionConfig,
+    DataExpConfig,
     EmptyBarPolicy,
-    EngineConfig,
-    ExchangeConfig,
+    EngineExpConfig,
+    ExchangeExpConfig,
     ExperimentConfig,
-    GeneralConfig,
-    IndicatorConfig,
+    GeneralExpConfig,
+    IndicatorExpConfig,
     IndicatorType,
     OrderType,
-    PortfolioConfig,
-    StrategyConfig,
+    PortfolioExpConfig,
+    StrategyExpConfig,
     StrategyType,
 )
 from backtide.config import get_config
@@ -96,12 +96,12 @@ with tab1:
         """Snapshot the current widget state into an ExperimentConfig."""
         ss = st.session_state
         return ExperimentConfig(
-            general=GeneralConfig(
+            general=GeneralExpConfig(
                 name=ss.get("experiment_name", ""),
                 tags=ss.get("tags", []),
                 description=ss.get("description", ""),
             ),
-            data=DataSectionConfig(
+            data=DataExpConfig(
                 instrument_type=str(ss.get("instrument_type", "stocks")),
                 symbols=[
                     s.symbol if hasattr(s, "symbol") else str(s) for s in ss.get("symbols", [])
@@ -111,11 +111,11 @@ with tab1:
                 end_date=str(ss.get("end_date")) if ss.get("end_date") else None,
                 interval=str(ss.get("interval", "1d")),
             ),
-            portfolio=PortfolioConfig(
+            portfolio=PortfolioExpConfig(
                 initial_cash=float(ss.get("initial_cash", 10_000)),
                 base_currency=str(ss.get("base_currency", "USD")),
             ),
-            strategy=StrategyConfig(
+            strategy=StrategyExpConfig(
                 predefined_strategies=[str(s) for s in ss.get("predefined_strategies", [])],
                 custom_strategies=[
                     CodeSnippet(
@@ -125,7 +125,7 @@ with tab1:
                     for i, e in enumerate(ss.get("custom_strategies", []))
                 ],
             ),
-            indicators=IndicatorConfig(
+            indicators=IndicatorExpConfig(
                 builtin_indicators=[str(i) for i in ss.get("builtin_indicators", [])],
                 custom_indicators=[
                     CodeSnippet(
@@ -135,7 +135,7 @@ with tab1:
                     for i, e in enumerate(ss.get("custom_indicators", []))
                 ],
             ),
-            exchange=ExchangeConfig(
+            exchange=ExchangeExpConfig(
                 commission_type=str(ss.get("commission_type", "Percentage")),
                 commission_pct=float(ss.get("commission_pct", 0.1)),
                 commission_fixed=float(ss.get("commission_fixed", 0.0)),
@@ -167,7 +167,7 @@ with tab1:
                     else None
                 ),
             ),
-            engine=EngineConfig(
+            engine=EngineExpConfig(
                 warmup_period=int(ss.get("warmup_period", 0)),
                 trade_on_close=ss.get("trade_on_close", False),
                 risk_free_rate=float(ss.get("risk_free_rate", 0.0)),

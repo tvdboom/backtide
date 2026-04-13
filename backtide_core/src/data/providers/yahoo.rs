@@ -49,7 +49,7 @@ impl YahooFinance {
     /// Custom POST screener â€” accepts arbitrary query predicates.
     const SCREENER_URL: &str = "https://query2.finance.yahoo.com/v1/finance/screener";
 
-    /// Yahoo-managed predefined screeners (e.g. `all_cryptocurrencies_us`).
+    /// Yahoo-managed predefined screeners.
     const PREDEFINED_SCREENER_URL: &str =
         "https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved";
 
@@ -456,7 +456,7 @@ impl DataProvider for YahooFinance {
     /// Returns the usable download range for an Instrument at a given interval.
     ///
     /// For intraday intervals the start is clamped to the provider's rolling
-    /// history window (e.g. 7 days for 1m), so the value reflects what is actually
+    /// history window, so the value reflects what is actually
     /// downloadable rather than the Instrument's listing date.
     #[instrument(skip(self), fields(symbol = %instr.symbol, ?interval))]
     async fn get_download_range(

@@ -3,8 +3,8 @@ use crate::backtest::models::conversion_period::ConversionPeriod;
 use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
 use crate::backtest::models::experiment_config::{
-    CodeSnippet, DataSectionConfig, EngineConfig, ExchangeConfig, ExperimentConfig, GeneralConfig,
-    IndicatorConfig, PortfolioConfig, StrategyConfig,
+    CodeSnippet, DataExpConfig, EngineExpConfig, ExchangeExpConfig, ExperimentConfig,
+    GeneralExpConfig, IndicatorExpConfig, PortfolioExpConfig, StrategyExpConfig,
 };
 use crate::backtest::models::indicator_type::IndicatorType;
 use crate::backtest::models::order_type::OrderType;
@@ -27,14 +27,14 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<StrategyType>()?;
 
     m.add_class::<CodeSnippet>()?;
-    m.add_class::<DataSectionConfig>()?;
-    m.add_class::<EngineConfig>()?;
-    m.add_class::<ExchangeConfig>()?;
+    m.add_class::<DataExpConfig>()?;
+    m.add_class::<EngineExpConfig>()?;
+    m.add_class::<ExchangeExpConfig>()?;
     m.add_class::<ExperimentConfig>()?;
-    m.add_class::<GeneralConfig>()?;
-    m.add_class::<IndicatorConfig>()?;
-    m.add_class::<PortfolioConfig>()?;
-    m.add_class::<StrategyConfig>()?;
+    m.add_class::<GeneralExpConfig>()?;
+    m.add_class::<IndicatorExpConfig>()?;
+    m.add_class::<PortfolioExpConfig>()?;
+    m.add_class::<StrategyExpConfig>()?;
 
     parent.add_submodule(&m)?;
 

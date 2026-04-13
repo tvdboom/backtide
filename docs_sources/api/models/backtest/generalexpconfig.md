@@ -1,7 +1,7 @@
-# DataSectionConfig
--------------------
+# GeneralExpConfig
+------------------
 
-:: backtide.backtest:DataSectionConfig
+:: backtide.backtest:GeneralExpConfig
     :: signature
     :: head
     :: table:
@@ -16,4 +16,5 @@
     toc_only: False
     include:
         - to_dict
+
 

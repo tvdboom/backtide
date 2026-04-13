@@ -9,7 +9,7 @@ use thiserror::Error;
 /// Errors that the data module raises.
 #[derive(Debug, Error)]
 pub enum DataError {
-    /// Failed to authenticate (e.g. provider crumb fetch failed).
+    /// Failed to authenticate.
     #[error("Authentication failed: {0}")]
     Auth(String),
 
@@ -28,7 +28,7 @@ pub enum DataError {
     #[error("Symbol not found: {0}")]
     SymbolNotFound(Symbol),
 
-    /// The response had an unexpected structure (e.g., missing fields).
+    /// The response had an unexpected structure.
     #[error("Unexpected response: {0}")]
     UnexpectedResponse(String),
 

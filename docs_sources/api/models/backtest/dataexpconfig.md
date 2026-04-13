@@ -1,7 +1,7 @@
-# ExperimentGeneralConfig
--------------------------
+# DataExpConfig
+---------------
 
-:: backtide.backtest:GeneralConfig
+:: backtide.backtest:DataExpConfig
     :: signature
     :: head
     :: table:
@@ -16,4 +16,5 @@
     toc_only: False
     include:
         - to_dict
+
 
