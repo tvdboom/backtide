@@ -13,6 +13,7 @@ use crate::storage::traits::Storage;
 use duckdb::params;
 use duckdb::params_from_iter;
 use duckdb::Connection;
+use std::collections::HashMap;
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -69,6 +70,93 @@ impl Storage for DuckDb {
         )?;
 
         Ok(())
+    }
+
+    /// Get all stored ranges in a single query, keyed by (symbol, interval, provider).
+    fn get_bar_ranges(&self) -> StorageResult<HashMap<(String, String, String), (u64, u64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT symbol, interval, provider, MIN(open_ts), MAX(open_ts)
+             FROM bars
+             GROUP BY symbol, interval, provider",
+        )?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let symbol: String = row.get(0)?;
+                let interval: String = row.get(1)?;
+                let provider: String = row.get(2)?;
+                let min_ts: u64 = row.get(3)?;
+                let max_ts: u64 = row.get(4)?;
+                Ok(((symbol, interval, provider), (min_ts, max_ts)))
+            })?
+            .collect::<Result<HashMap<_, _>, _>>()?;
+
+        Ok(rows)
+    }
+
+    /// Return all stored bars.
+    fn get_all_bars(&self) -> StorageResult<Vec<StoredBar>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT symbol, instrument_type, interval, provider,
+                    open_ts, close_ts, open_ts_exchange,
+                    open, high, low, close, adj_close, volume, n_trades
+             FROM bars
+             ORDER BY symbol, interval, open_ts",
+        )?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(StoredBar {
+                    symbol: row.get(0)?,
+                    instrument_type: row.get(1)?,
+                    interval: row.get(2)?,
+                    provider: row.get(3)?,
+                    bar: Bar {
+                        open_ts: row.get(4)?,
+                        close_ts: row.get(5)?,
+                        open_ts_exchange: row.get(6)?,
+                        open: row.get(7)?,
+                        high: row.get(8)?,
+                        low: row.get(9)?,
+                        close: row.get(10)?,
+                        adj_close: row.get(11)?,
+                        volume: row.get(12)?,
+                        n_trades: row.get(13)?,
+                    },
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rows)
+    }
+
+    /// Return all stored dividends.
+    fn get_all_dividends(&self) -> StorageResult<Vec<StoredDividend>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT symbol, provider, ex_date, amount
+             FROM dividends
+             ORDER BY symbol, ex_date",
+        )?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(StoredDividend {
+                    symbol: row.get(0)?,
+                    provider: row.get(1)?,
+                    dividend: Dividend {
+                        ex_date: row.get(2)?,
+                        amount: row.get(3)?,
+                    },
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rows)
     }
 
     /// Store multiple series of OHLC data in one bulk operation.
@@ -171,97 +259,6 @@ impl Storage for DuckDb {
         appender.flush()?;
 
         Ok(())
-    }
-
-    /// Get the (min_ts, max_ts) of stored bars for a given symbol/provider/interval.
-    /// Returns `None` if no data exists.
-    fn get_stored_range(
-        &self,
-        symbol: &str,
-        interval: Interval,
-        provider: Provider,
-    ) -> StorageResult<Option<(u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT MIN(open_ts), MAX(open_ts) FROM bars
-             WHERE symbol = ? AND interval = ? AND provider = ?",
-        )?;
-
-        let result =
-            stmt.query_row(params![symbol, interval.to_string(), provider.to_string()], |row| {
-                let min_ts: Option<u64> = row.get(0)?;
-                let max_ts: Option<u64> = row.get(1)?;
-                Ok((min_ts, max_ts))
-            })?;
-
-        match result {
-            (Some(min), Some(max)) => Ok(Some((min, max))),
-            _ => Ok(None),
-        }
-    }
-
-    /// Return all stored bars.
-    fn get_all_bars(&self) -> StorageResult<Vec<StoredBar>> {
-        let conn = self.conn.lock().unwrap();
-
-        let mut stmt = conn.prepare(
-            "SELECT symbol, instrument_type, interval, provider,
-                    open_ts, close_ts, open_ts_exchange,
-                    open, high, low, close, adj_close, volume, n_trades
-             FROM bars
-             ORDER BY symbol, interval, open_ts",
-        )?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(StoredBar {
-                    symbol: row.get(0)?,
-                    instrument_type: row.get(1)?,
-                    interval: row.get(2)?,
-                    provider: row.get(3)?,
-                    bar: Bar {
-                        open_ts: row.get(4)?,
-                        close_ts: row.get(5)?,
-                        open_ts_exchange: row.get(6)?,
-                        open: row.get(7)?,
-                        high: row.get(8)?,
-                        low: row.get(9)?,
-                        close: row.get(10)?,
-                        adj_close: row.get(11)?,
-                        volume: row.get(12)?,
-                        n_trades: row.get(13)?,
-                    },
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(rows)
-    }
-
-    /// Return all stored dividends.
-    fn get_all_dividends(&self) -> StorageResult<Vec<StoredDividend>> {
-        let conn = self.conn.lock().unwrap();
-
-        let mut stmt = conn.prepare(
-            "SELECT symbol, provider, ex_date, amount
-             FROM dividends
-             ORDER BY symbol, ex_date",
-        )?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(StoredDividend {
-                    symbol: row.get(0)?,
-                    provider: row.get(1)?,
-                    dividend: Dividend {
-                        ex_date: row.get(2)?,
-                        amount: row.get(3)?,
-                    },
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(rows)
     }
 
     /// Delete all bars for a given symbol, filtered by interval and provider.

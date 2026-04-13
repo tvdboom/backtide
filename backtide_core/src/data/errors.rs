@@ -13,6 +13,10 @@ pub enum DataError {
     #[error("Authentication failed: {0}")]
     Auth(String),
 
+    /// Too many consecutive failures — provider assumed unreachable.
+    #[error("Circuit breaker tripped after {0} consecutive failures")]
+    CircuitBreaker(usize),
+
     /// An HTTP client related error.
     #[error("HTTP error: {0}")]
     Http(#[from] HttpError),
@@ -27,6 +31,13 @@ pub enum DataError {
     /// The requested value does not exist or is not served.
     #[error("Symbol not found: {0}")]
     SymbolNotFound(Symbol),
+
+    /// A download task exceeded its deadline.
+    #[error("Download timed out for {symbol} ({interval})")]
+    Timeout {
+        symbol: Symbol,
+        interval: Interval,
+    },
 
     /// The response had an unexpected structure.
     #[error("Unexpected response: {0}")]

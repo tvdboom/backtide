@@ -16,12 +16,12 @@ use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
-use crate::utils::http::{paginate, HttpClient};
+use crate::utils::http::{paginate, HttpClient, HttpClientConfig};
 use async_trait::async_trait;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use strum::IntoEnumIterator;
 use tokio::try_join;
 use tracing::{debug, info, instrument};
@@ -69,7 +69,12 @@ impl YahooFinance {
     /// 1. `GET` [`Self::COOKIE_SEED_URL`] â€” populates the cookie jar.
     /// 2. `GET` [`Self::CRUMB_URL`]       â€” retrieves the CSRF crumb.
     pub async fn new() -> DataResult<Self> {
-        let client = HttpClient::new()?;
+        let client = HttpClient::with_config(HttpClientConfig {
+            max_concurrent_requests: 50,
+            min_request_gap: Duration::ZERO,
+            connect_timeout: Duration::from_secs(10),
+            request_timeout: Duration::from_secs(30),
+        })?;
         let crumb = Self::fetch_crumb(&client).await?;
 
         info!("Yahoo Finance session established");

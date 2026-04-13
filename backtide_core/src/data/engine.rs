@@ -1,7 +1,7 @@
 //! Implementation of data related methods for [`Engine`].
 
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
-use crate::constants::{Symbol, MAX_CONCURRENT_REQUESTS};
+use crate::constants::{Symbol, CIRCUIT_BREAKER_THRESHOLD, MAX_CONCURRENT_REQUESTS, TASK_TIMEOUT};
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::currency::Currency;
 use crate::data::models::download_result::DownloadResult;
@@ -21,9 +21,9 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::{self, StreamExt};
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
-
 
 impl Engine {
     // ────────────────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ impl Engine {
     /// * Checks what is already in storage — skips completed ranges and only downloads
     ///   the missing head/tail (or both) for partial ones.
     /// * Downloads concurrently across symbols and intervals.
-    /// * Writes **all** downloaded data in a single bulk transaction.
+    /// * Writes all downloaded data in a single bulk transaction.
     /// * Only writes contiguous (gap-free) bars starting from the beginning of the range.
     /// * Idempotent, i.e., re-calling with the same profiles is a no-op.
     ///
@@ -53,6 +53,8 @@ impl Engine {
         self.rt.block_on(async {
             // Build a list of (symbol, instrument_type, interval, start, end) tasks
             let mut tasks: Vec<(String, InstrumentType, Interval, u64, u64)> = Vec::new();
+
+            let stored_ranges = self.get_bar_ranges()?;
 
             for profile in profiles {
                 let symbol = &profile.instrument.symbol;
@@ -71,10 +73,9 @@ impl Engine {
                         continue;
                     }
 
-                    // Check what's in storage and only download the missing portions.
-                    if let Some((db_min, db_max)) =
-                        self.get_stored_range(symbol, *interval, provider)?
-                    {
+                    // Look up the stored range from the pre-fetched map.
+                    let key = (symbol.clone(), interval.to_string(), provider.to_string());
+                    if let Some(&(db_min, db_max)) = stored_ranges.get(&key) {
                         let interval_secs = interval.minutes() * 60;
 
                         if db_min <= start + interval_secs && db_max + interval_secs >= end {
@@ -101,20 +102,74 @@ impl Engine {
             info!("Download plan: {total_tasks} symbol x interval tasks");
 
             // ── Phase 1: download all tasks concurrently ─────────────────
-            let pb = verbose.then(|| {
+
+            let pb = (verbose && total_tasks > 0).then(|| {
                 progress_bar(
                     total_tasks as u64,
                     format!("Downloading bars for {} profiles...", profiles.len()),
                 )
             });
 
+            // Circuit breaker: after CIRCUIT_BREAKER_THRESHOLD consecutive
+            // failures, skip remaining tasks — the provider is likely
+            // unreachable or blocking us.
+            let consecutive_failures = Arc::new(AtomicUsize::new(0));
+
             let downloaded: Vec<_> = stream::iter(tasks.into_iter().enumerate().map(
                 |(idx, (symbol, it, interval, start, end))| {
                     let pb = pb.clone();
+                    let consecutive_failures = Arc::clone(&consecutive_failures);
                     async move {
+                        // Check circuit breaker before attempting the request.
+                        let failures = consecutive_failures.load(Ordering::Relaxed);
+                        if failures >= CIRCUIT_BREAKER_THRESHOLD {
+                            if let Some(ref pb) = pb {
+                                pb.inc(1);
+                            }
+                            return (
+                                idx,
+                                symbol,
+                                it,
+                                interval,
+                                Err(DataError::CircuitBreaker(failures)),
+                            );
+                        }
+
                         let provider = self.providers.get(&it).unwrap();
                         info!(%symbol, ?interval, start, end, "Downloading...");
-                        let result = provider.download_bars(&symbol, it, interval, start, end).await;
+
+                        let result = tokio::time::timeout(
+                            TASK_TIMEOUT,
+                            provider.download_bars(&symbol, it, interval, start, end),
+                        )
+                        .await;
+
+                        // Flatten the timeout result into a DataError.
+                        let result = match result {
+                            Ok(inner) => inner,
+                            Err(_) => {
+                                warn!(%symbol, ?interval, "Download timed out after {TASK_TIMEOUT:?}.");
+                                Err(DataError::Timeout { symbol: symbol.clone(), interval })
+                            },
+                        };
+
+                        // Update circuit breaker state.
+                        match &result {
+                            Ok(_) => {
+                                consecutive_failures.store(0, Ordering::Relaxed);
+                            },
+                            Err(_) => {
+                                let prev =
+                                    consecutive_failures.fetch_add(1, Ordering::Relaxed);
+                                if prev + 1 == CIRCUIT_BREAKER_THRESHOLD {
+                                    warn!(
+                                        "Circuit breaker tripped after {} consecutive failures, \
+                                         skipping remaining tasks.",
+                                        prev + 1
+                                    );
+                                }
+                            },
+                        }
 
                         if let Some(ref pb) = pb {
                             pb.inc(1);
@@ -133,6 +188,7 @@ impl Engine {
             }
 
             // ── Phase 2: collect results and build one bulk write ────────
+
             let mut bar_series: Vec<BarSeries> = Vec::new();
             let mut div_series: Vec<DividendSeries> = Vec::new();
             let mut outcomes: Vec<(usize, String, Interval, Result<usize, String>)> = Vec::new();
@@ -228,15 +284,15 @@ impl Engine {
         limit: usize,
         verbose: bool,
     ) -> DataResult<Vec<Instrument>> {
-        let pb = verbose.then(|| {
-            progress_spinner(format!("Listing {instrument_type} instruments..."))
-        });
+        let pb =
+            verbose.then(|| progress_spinner(format!("Listing {instrument_type} instruments...")));
 
-        let instruments = self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
-            instrument_type,
-            exchanges,
-            limit,
-        ))?;
+        let instruments =
+            self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
+                instrument_type,
+                exchanges,
+                limit,
+            ))?;
 
         if let Some(ref pb) = pb {
             pb.finish_and_clear();
@@ -330,10 +386,7 @@ impl Engine {
 
             let total = instruments.len();
             let pb = verbose.then(|| {
-                progress_bar(
-                    total as u64,
-                    format!("Resolving profiles for {total} symbols..."),
-                )
+                progress_bar(total as u64, format!("Resolving profiles for {total} symbols..."))
             });
 
             let instrument_profiles: Vec<InstrumentProfile> =
@@ -342,7 +395,8 @@ impl Engine {
                         let pb = pb.clone();
                         let intervals = intervals.clone();
                         async move {
-                            let (earliest_ts, latest_ts) = self.load_range(&instr, &intervals).await?;
+                            let (earliest_ts, latest_ts) =
+                                self.load_range(&instr, &intervals).await?;
 
                             if let Some(ref pb) = pb {
                                 pb.inc(1);

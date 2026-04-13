@@ -1,5 +1,6 @@
 //! Implementation of storage related methods for [`Engine`].
 
+use crate::constants::BarKey;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
@@ -8,6 +9,7 @@ use crate::storage::models::bar_series::BarSeries;
 use crate::storage::models::dividend_series::DividendSeries;
 use crate::storage::models::stored_bar::StoredBar;
 use crate::storage::models::stored_dividend::StoredDividend;
+use std::collections::HashMap;
 
 impl Engine {
     /// Writes many bar series to storage in a single transaction.
@@ -20,14 +22,9 @@ impl Engine {
         self.db.write_dividends_bulk(series)
     }
 
-    /// Returns the earliest and latest stored timestamps for the given series.
-    pub fn get_stored_range(
-        &self,
-        symbol: &str,
-        interval: Interval,
-        provider: Provider,
-    ) -> StorageResult<Option<(u64, u64)>> {
-        self.db.get_stored_range(symbol, interval, provider)
+    /// Returns all stored (symbol, interval, provider) → (min_ts, max_ts) in one query.
+    pub fn get_bar_ranges(&self) -> StorageResult<HashMap<BarKey, (u64, u64)>> {
+        self.db.get_bar_ranges()
     }
 
     /// Returns all stored bars.

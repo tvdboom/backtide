@@ -13,10 +13,11 @@ use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
-use crate::utils::http::{HttpClient, HttpError};
+use crate::utils::http::{HttpClient, HttpClientConfig, HttpError};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::time::Duration;
 use tracing::{debug, info, instrument};
 
 /// Kraken spot-market data provider.
@@ -43,7 +44,13 @@ impl Kraken {
 
     /// Create a new [`Kraken`] provider.
     pub async fn new() -> DataResult<Self> {
-        let client = HttpClient::new()?;
+        // Kraken public API: 1 req/s for unauthenticated users (counter
+        // decrements by 1/s, max burst of 15). Keep it conservative.
+        let client = HttpClient::with_config(HttpClientConfig {
+            max_concurrent_requests: 8,
+            min_request_gap: Duration::from_millis(1000),
+            ..HttpClientConfig::default()
+        })?;
 
         info!("Kraken provider initialised");
         Ok(Self {

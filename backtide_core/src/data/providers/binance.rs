@@ -12,9 +12,10 @@ use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
-use crate::utils::http::{HttpClient, HttpError};
+use crate::utils::http::{HttpClient, HttpClientConfig, HttpError};
 use async_trait::async_trait;
 use serde::Deserialize;
+use std::time::Duration;
 use tracing::{debug, info, instrument};
 
 /// Binance spot-market data provider.
@@ -42,7 +43,13 @@ impl Binance {
 
     /// Create a new [`Binance`] provider.
     pub async fn new() -> DataResult<Self> {
-        let client = HttpClient::new()?;
+        // Binance public API: 1 200 weight/min IP limit (~20 req/s for
+        // weight-1 endpoints like klines and exchangeInfo).
+        let client = HttpClient::with_config(HttpClientConfig {
+            max_concurrent_requests: 10,
+            min_request_gap: Duration::from_millis(50),
+            ..HttpClientConfig::default()
+        })?;
 
         info!("Binance provider initialised");
         Ok(Self {

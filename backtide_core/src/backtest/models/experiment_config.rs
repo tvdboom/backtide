@@ -1012,7 +1012,8 @@ impl ExperimentConfig {
         engine: EngineExpConfig,
     ) -> PyResult<Self> {
         let strategy = strategy.map_or_else(|| Py::new(py, StrategyExpConfig::default()), Ok)?;
-        let indicators = indicators.map_or_else(|| Py::new(py, IndicatorExpConfig::default()), Ok)?;
+        let indicators =
+            indicators.map_or_else(|| Py::new(py, IndicatorExpConfig::default()), Ok)?;
         Ok(Self {
             general,
             data,

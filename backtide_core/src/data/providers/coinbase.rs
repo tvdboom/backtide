@@ -12,10 +12,11 @@ use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
-use crate::utils::http::{HttpClient, HttpError};
+use crate::utils::http::{HttpClient, HttpClientConfig, HttpError};
 use async_trait::async_trait;
 use chrono::DateTime;
 use serde::Deserialize;
+use std::time::Duration;
 use tracing::{debug, info, instrument};
 
 /// Coinbase spot-market data provider.
@@ -41,7 +42,12 @@ impl Coinbase {
 
     /// Create a new [`Coinbase`] provider.
     pub async fn new() -> DataResult<Self> {
-        let client = HttpClient::new()?;
+        // Coinbase Advanced Trade public API: 10 req/s per IP.
+        let client = HttpClient::with_config(HttpClientConfig {
+            max_concurrent_requests: 8,
+            min_request_gap: Duration::from_millis(100),
+            ..HttpClientConfig::default()
+        })?;
 
         info!("Coinbase provider initialised");
         Ok(Self {

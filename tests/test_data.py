@@ -63,7 +63,7 @@ class TestGetInstruments:
 
     def test_invalid_instrument_type_raises(self):
         """An invalid instrument_type string raises ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown instrument_type"):
             get_instruments("AAPL", "invalid_type")
 
 
@@ -151,5 +151,5 @@ class TestListInstruments:
 
     def test_invalid_instrument_type_raises(self):
         """An invalid instrument type string raises ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown instrument_type"):
             list_instruments("invalid_type")

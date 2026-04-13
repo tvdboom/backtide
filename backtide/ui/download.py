@@ -571,9 +571,7 @@ if st.button(
                 dl_end = int(dt.combine(end_ts, dt.min.time(), tzinfo=tz).timestamp())
 
             with st.spinner("Downloading data..."):
-                result = download_instruments(
-                    profiles, start=dl_start, end=dl_end, verbose=False
-                )
+                result = download_instruments(profiles, start=dl_start, end=dl_end, verbose=False)
         except RuntimeError as ex:
             st.error(f"Download error: {ex}", icon=":material/error:")
         else:

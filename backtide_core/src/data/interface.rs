@@ -56,7 +56,6 @@ fn parse_instrument(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
     }
 }
 
-
 /// Get instruments given their symbols.
 ///
 /// Parameters

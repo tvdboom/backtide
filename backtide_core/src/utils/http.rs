@@ -55,11 +55,40 @@ pub struct HttpClient {
 
     /// Tracks the scheduled time of the next allowed request for rate limiting.
     next_request_at: Mutex<Instant>,
+
+    /// Minimum gap between consecutive HTTP requests.
+    min_request_gap: Duration,
+}
+
+/// Per-provider tunables for [`HttpClient`].
+pub struct HttpClientConfig {
+    /// Maximum number of concurrent in-flight HTTP requests.
+    pub max_concurrent_requests: usize,
+
+    /// Minimum gap between consecutive HTTP requests (rate limiter).
+    pub min_request_gap: Duration,
+
+    /// Maximum time to wait for a TCP connection to be established.
+    pub connect_timeout: Duration,
+
+    /// Maximum time to wait for an entire HTTP response (including body).
+    pub request_timeout: Duration,
+}
+
+impl Default for HttpClientConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_requests: 10,
+            min_request_gap: Duration::from_millis(100),
+            connect_timeout: Duration::from_secs(10),
+            request_timeout: Duration::from_secs(30),
+        }
+    }
 }
 
 impl HttpClient {
     /// Number of times to retry a failed HTTP request.
-    const MAX_RETRIES: u32 = 8;
+    const MAX_RETRIES: u32 = 4;
 
     /// Base delay for exponential back-off (doubles each attempt).
     const BACKOFF_BASE: Duration = Duration::from_millis(500);
@@ -67,31 +96,45 @@ impl HttpClient {
     /// Base delay for 429 rate-limit back-off (doubles each attempt).
     const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(2);
 
-    /// Maximum number of concurrent in-flight HTTP requests.
-    const MAX_CONCURRENT_REQUESTS: usize = 10;
-
-    /// Minimum gap between consecutive HTTP requests (rate limiter).
-    const MIN_REQUEST_GAP: Duration = Duration::from_millis(50);
+    /// Maximum value we honor from a `Retry-After` header.
+    const MAX_RETRY_AFTER: Duration = Duration::from_secs(20);
 
     /// User-agent sent with every request.
     const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-     (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+     (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
     // ────────────────────────────────────────────────────────────────────────
     // Public API
     // ────────────────────────────────────────────────────────────────────────
 
+    /// Create a new [`HttpClient`] with default settings.
     pub fn new() -> Result<Self, HttpError> {
+        Self::with_config(HttpClientConfig::default())
+    }
+
+    /// Create a new [`HttpClient`] with provider-specific settings.
+    pub fn with_config(config: HttpClientConfig) -> Result<Self, HttpError> {
         let inner = Client::builder()
             .cookie_provider(Arc::new(Jar::default()))
             .user_agent(Self::USER_AGENT)
+            .connect_timeout(config.connect_timeout)
+            .timeout(config.request_timeout)
+            // Force HTTP/1.1 — with HTTP/2 every request to the same host
+            // shares a single TCP connection.  If that connection stalls
+            // (flow-control, slow ACK, server-side back-pressure) ALL
+            // in-flight requests freeze together.  With HTTP/1.1 each
+            // request gets its own connection, so one stuck request cannot
+            // block others.
+            .http1_only()
+            .pool_max_idle_per_host(config.max_concurrent_requests)
             .build()
             .map_err(HttpError::ClientBuild)?;
 
         Ok(Self {
             inner,
-            semaphore: Arc::new(Semaphore::new(Self::MAX_CONCURRENT_REQUESTS)),
+            semaphore: Arc::new(Semaphore::new(config.max_concurrent_requests)),
             next_request_at: Mutex::new(Instant::now()),
+            min_request_gap: config.min_request_gap,
         })
     }
 
@@ -139,7 +182,22 @@ impl HttpClient {
 
     /// Wait until the next request slot is available, enforcing a minimum gap
     /// between any two HTTP requests to avoid provider rate limits.
+    ///
+    /// A small random jitter is added to desynchronize concurrent callers and
+    /// avoid thundering-herd bursts after a shared back-off period.
     async fn pace(&self) {
+        if self.min_request_gap.is_zero() {
+            return;
+        }
+
+        // Random jitter: 0–50% of min_request_gap.
+        let jitter_ms = (self.min_request_gap.as_millis() as u64) / 2;
+        let jitter = if jitter_ms > 0 {
+            Duration::from_millis(rand::random::<u64>() % jitter_ms)
+        } else {
+            Duration::ZERO
+        };
+
         let wait_until = {
             let mut next = self.next_request_at.lock().await;
             let now = Instant::now();
@@ -147,7 +205,7 @@ impl HttpClient {
                 *next = now;
             }
             let target = *next;
-            *next = target + Self::MIN_REQUEST_GAP;
+            *next = target + self.min_request_gap + jitter;
             target
         };
         sleep(wait_until.saturating_duration_since(Instant::now())).await;
@@ -177,9 +235,11 @@ impl HttpClient {
                             .and_then(|s| s.parse::<u64>().ok())
                             .map(Duration::from_secs);
 
-                        let delay = retry_after.unwrap_or_else(|| {
-                            Self::RATE_LIMIT_BACKOFF * 2u32.saturating_pow(attempt)
-                        });
+                        let delay = retry_after
+                            .unwrap_or_else(|| {
+                                Self::RATE_LIMIT_BACKOFF * 2u32.saturating_pow(attempt)
+                            })
+                            .min(Self::MAX_RETRY_AFTER);
 
                         last_err = Some(HttpError::Status {
                             status,
@@ -188,8 +248,17 @@ impl HttpClient {
 
                         sleep(delay).await;
                         continue;
+                    } else if status == StatusCode::UNAUTHORIZED
+                        || status == StatusCode::FORBIDDEN
+                    {
+                        // 401/403: Yahoo often uses these as rate-limit signals
+                        // (expired crumb, temporary IP block). Retry with backoff.
+                        last_err = Some(HttpError::Status {
+                            status,
+                            body: format!("Access denied ({status}), retrying..."),
+                        });
                     } else if status.is_client_error() {
-                        // 4xx: no point retrying, the request itself is wrong.
+                        // Other 4xx: no point retrying, the request itself is wrong.
                         let body = resp.text().await.unwrap_or_default();
                         let body = Self::extract_api_message(&body)
                             .unwrap_or(format!("Server returned {status}: {body}"));
@@ -234,7 +303,8 @@ impl HttpClient {
             json.pointer("/message"),
         ];
 
-        let result = candidates.into_iter().flatten().find_map(|v| v.as_str().map(|s| s.to_owned()));
+        let result =
+            candidates.into_iter().flatten().find_map(|v| v.as_str().map(|s| s.to_owned()));
         result
     }
 }

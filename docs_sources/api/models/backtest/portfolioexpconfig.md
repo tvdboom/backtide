@@ -16,5 +16,3 @@
     toc_only: False
     include:
         - to_dict
-
-

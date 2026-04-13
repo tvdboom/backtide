@@ -29,20 +29,20 @@ class TestGetBars:
         """The DataFrame has the expected column names even when empty."""
         result = get_bars()
         expected = {
-            'symbol',
-            'instrument_type',
-            'interval',
-            'provider',
-            'open_ts',
-            'close_ts',
-            'open_ts_exchange',
-            'open',
-            'high',
-            'low',
-            'close',
-            'adj_close',
-            'volume',
-            'n_trades',
+            "symbol",
+            "instrument_type",
+            "interval",
+            "provider",
+            "open_ts",
+            "close_ts",
+            "open_ts_exchange",
+            "open",
+            "high",
+            "low",
+            "close",
+            "adj_close",
+            "volume",
+            "n_trades",
         }
         assert set(result.columns) == expected
 
@@ -63,7 +63,7 @@ class TestGetDividends:
     def test_expected_columns(self):
         """The DataFrame has the expected column names even when empty."""
         result = get_dividends()
-        expected = {'symbol', 'provider', 'ex_date', 'amount'}
+        expected = {"symbol", "provider", "ex_date", "amount"}
         assert set(result.columns) == expected
 
 
@@ -72,50 +72,50 @@ class TestDeleteSymbols:
 
     def test_returns_int(self):
         """delete_symbols returns an integer count."""
-        result = delete_symbols('AAPL')
+        result = delete_symbols("AAPL")
         assert isinstance(result, int)
 
     def test_empty_database_returns_zero(self):
         """Deleting from an empty database returns 0."""
-        assert delete_symbols('AAPL') == 0
+        assert delete_symbols("AAPL") == 0
 
     def test_list_of_symbols(self):
         """Accepts a list of symbols."""
-        result = delete_symbols(['AAPL', 'MSFT'])
+        result = delete_symbols(["AAPL", "MSFT"])
         assert isinstance(result, int)
         assert result == 0
 
     def test_with_interval_str(self):
         """The interval parameter accepts a string."""
-        result = delete_symbols('AAPL', interval='1d')
+        result = delete_symbols("AAPL", interval="1d")
         assert isinstance(result, int)
 
     def test_with_interval_enum(self):
         """The interval parameter accepts an Interval enum."""
-        result = delete_symbols('AAPL', interval=Interval('1d'))
+        result = delete_symbols("AAPL", interval=Interval("1d"))
         assert isinstance(result, int)
 
     def test_with_provider_str(self):
         """The provider parameter accepts a string."""
-        result = delete_symbols('AAPL', provider='yahoo')
+        result = delete_symbols("AAPL", provider="yahoo")
         assert isinstance(result, int)
 
     def test_with_provider_enum(self):
         """The provider parameter accepts a provider string."""
-        result = delete_symbols('AAPL', provider='yahoo')
+        result = delete_symbols("AAPL", provider="yahoo")
         assert isinstance(result, int)
 
     def test_all_filters(self):
         """All optional filters can be combined."""
-        result = delete_symbols('AAPL', interval='1d', provider='yahoo')
+        result = delete_symbols("AAPL", interval="1d", provider="yahoo")
         assert isinstance(result, int)
 
     def test_invalid_interval_raises(self):
         """An invalid interval string raises ValueError."""
-        with pytest.raises(ValueError):
-            delete_symbols('AAPL', interval='invalid')
+        with pytest.raises(ValueError, match="Unknown interval"):
+            delete_symbols("AAPL", interval="invalid")
 
     def test_invalid_provider_raises(self):
         """An invalid provider string raises ValueError."""
-        with pytest.raises(ValueError):
-            delete_symbols('AAPL', provider='invalid')
+        with pytest.raises(ValueError, match="Unknown provider"):
+            delete_symbols("AAPL", provider="invalid")
