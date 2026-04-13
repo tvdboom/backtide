@@ -421,7 +421,7 @@ intervals = st.session_state.get("intervals", Interval.get_default())
 try:
     # Convert custom symbols to instruments and add conversion currencies
     if symbols and intervals:
-        profiles = resolve_profiles(symbols, instrument_type, intervals)
+        profiles = resolve_profiles(symbols, instrument_type, intervals, verbose=False)
         direct = profiles[: len(symbols)]  # Direct profiles (no legs)
     else:
         profiles = None
@@ -571,7 +571,9 @@ if st.button(
                 dl_end = int(dt.combine(end_ts, dt.min.time(), tzinfo=tz).timestamp())
 
             with st.spinner("Downloading data..."):
-                result = download_instruments(profiles, start=dl_start, end=dl_end)
+                result = download_instruments(
+                    profiles, start=dl_start, end=dl_end, verbose=False
+                )
         except RuntimeError as ex:
             st.error(f"Download error: {ex}", icon=":material/error:")
         else:

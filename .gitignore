@@ -30,6 +30,8 @@ docs/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*.pyd
+*.pdb
 
 # Distribution / packaging
 .Python

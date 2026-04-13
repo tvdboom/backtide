@@ -56,6 +56,7 @@ fn parse_instrument(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
     }
 }
 
+
 /// Get instruments given their symbols.
 ///
 /// Parameters
@@ -116,6 +117,9 @@ pub fn get_instruments(
 /// interval : str | [Interval] | list[str | [Interval]]
 ///     Interval(s) for which to resolve the download information.
 ///
+/// verbose : bool, default=True
+///     Whether to display a progress bar while resolving.
+///
 /// Returns
 /// -------
 /// list[[InstrumentProfile]]
@@ -135,18 +139,19 @@ pub fn get_instruments(
 /// print(resolve_profiles(["AAPL", "MSFT"], "stocks", "1d"))
 /// ```
 #[pyfunction]
-#[pyo3(signature = (symbols: "str | Instrument | Sequence[str | Instrument]", instrument_type: "str | InstrumentType", interval: "str | Interval | Sequence[str | Interval]") -> "list[InstrumentProfile]")]
+#[pyo3(signature = (symbols, instrument_type, interval, *, verbose=true))]
 pub fn resolve_profiles(
     symbols: Bound<'_, PyAny>,
     instrument_type: Bound<'_, PyAny>,
     interval: Bound<'_, PyAny>,
+    verbose: bool,
 ) -> PyResult<Vec<InstrumentProfile>> {
     let symbols = parse_instrument(symbols)?;
     let instrument_type = instrument_type.extract::<InstrumentType>()?;
     let interval = parse_input::<Interval>(interval)?;
 
     let engine = Engine::get()?;
-    Ok(engine.resolve_profiles(symbols, instrument_type, interval)?)
+    Ok(engine.resolve_profiles(symbols, instrument_type, interval, verbose)?)
 }
 
 /// List available instruments for a given instrument type.
@@ -168,6 +173,9 @@ pub fn resolve_profiles(
 ///     Maximum number of instruments to return. The actual number may be smaller,
 ///     but not larger.
 ///
+/// verbose : bool, default=True
+///     Whether to display a progress spinner in the terminal.
+///
 /// Returns
 /// -------
 /// list[[Instrument]]
@@ -187,17 +195,18 @@ pub fn resolve_profiles(
 /// print(list_instruments("crypto", limit=5))
 /// ```
 #[pyfunction]
-#[pyo3(signature = (instrument_type: "str | InstrumentType", exchange: "str | Exchange | list[str | Exchange] | None"=None, *, limit: "int"=100))]
+#[pyo3(signature = (instrument_type: "str | InstrumentType", exchange: "str | Exchange | list[str | Exchange] | None"=None, *, limit: "int"=100, verbose: "bool"=true))]
 pub fn list_instruments(
     instrument_type: Bound<'_, PyAny>,
     exchange: Option<Bound<'_, PyAny>>,
     limit: usize,
+    verbose: bool,
 ) -> PyResult<Vec<Instrument>> {
     let instrument_type = instrument_type.extract::<InstrumentType>()?;
     let exchanges: Option<Vec<Exchange>> = exchange.map(parse_input::<Exchange>).transpose()?;
 
     let engine = Engine::get()?;
-    Ok(engine.list_instruments(instrument_type, exchanges, limit)?)
+    Ok(engine.list_instruments(instrument_type, exchanges, limit, verbose)?)
 }
 
 /// Download OHLCV data for the instruments described in a list of profiles.
@@ -220,6 +229,9 @@ pub fn list_instruments(
 ///     given, per-instrument ranges are clamped so that no data after this timestamp
 ///     is requested. If `None`, it uses the provider's latest available date.
 ///
+/// verbose : bool, default=True
+///     Whether to display a progress bar while downloading.
+///
 /// Returns
 /// -------
 /// [DownloadResult]
@@ -238,14 +250,16 @@ pub fn list_instruments(
 ///
 /// profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", "1d")
 /// result = download_instruments(profiles)  # no run
+/// print(result)
 /// ```
 #[pyfunction]
-#[pyo3(signature = (profiles, start=None, end=None))]
+#[pyo3(signature = (profiles, start=None, end=None, *, verbose=true))]
 pub fn download_instruments(
     profiles: Vec<InstrumentProfile>,
     start: Option<u64>,
     end: Option<u64>,
+    verbose: bool,
 ) -> PyResult<DownloadResult> {
     let engine = Engine::get()?;
-    Ok(engine.download_instruments(&profiles, start, end)?)
+    Ok(engine.download_instruments(&profiles, start, end, verbose)?)
 }

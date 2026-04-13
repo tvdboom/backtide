@@ -4,6 +4,7 @@ use pyo3::{wrap_pyfunction, Bound, PyResult};
 
 pub mod http;
 pub mod interface;
+pub mod progress;
 
 /// Register the Python interface for `backtide.core.utils`.
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {

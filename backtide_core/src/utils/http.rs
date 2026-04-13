@@ -8,7 +8,8 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::time::sleep;
+use tokio::sync::{Mutex, Semaphore};
+use tokio::time::{sleep, Instant};
 
 /// Errors that can occur during an HTTP request or paginated fetch.
 #[derive(Debug, Error)]
@@ -44,21 +45,33 @@ pub enum HttpError {
     UnexpectedPayload(String),
 }
 
-/// HTTP client wrapper with retry logic.
+/// HTTP client wrapper with retry logic, concurrency limiting, and rate limiting.
 pub struct HttpClient {
     /// `reqwest` client.
     pub(crate) inner: Client,
+
+    /// Limits the number of concurrent in-flight HTTP requests.
+    semaphore: Arc<Semaphore>,
+
+    /// Tracks the scheduled time of the next allowed request for rate limiting.
+    next_request_at: Mutex<Instant>,
 }
 
 impl HttpClient {
     /// Number of times to retry a failed HTTP request.
-    const MAX_RETRIES: u32 = 5;
+    const MAX_RETRIES: u32 = 8;
 
-    /// How long to wait between retry attempts.
-    const RETRY_SLEEP: Duration = Duration::from_millis(100);
+    /// Base delay for exponential back-off (doubles each attempt).
+    const BACKOFF_BASE: Duration = Duration::from_millis(500);
 
     /// Base delay for 429 rate-limit back-off (doubles each attempt).
-    const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(1);
+    const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(2);
+
+    /// Maximum number of concurrent in-flight HTTP requests.
+    const MAX_CONCURRENT_REQUESTS: usize = 10;
+
+    /// Minimum gap between consecutive HTTP requests (rate limiter).
+    const MIN_REQUEST_GAP: Duration = Duration::from_millis(50);
 
     /// User-agent sent with every request.
     const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
@@ -77,6 +90,8 @@ impl HttpClient {
 
         Ok(Self {
             inner,
+            semaphore: Arc::new(Semaphore::new(Self::MAX_CONCURRENT_REQUESTS)),
+            next_request_at: Mutex::new(Instant::now()),
         })
     }
 
@@ -86,24 +101,31 @@ impl HttpClient {
         url: &str,
         params: Option<&[(&str, &str)]>,
     ) -> Result<Response, HttpError> {
-        self.retry(|| {
+        self.retry(|| async {
+            let _permit = self.semaphore.acquire().await.expect("semaphore closed");
+            self.pace().await;
             let mut req = self.inner.get(url);
             if let Some(p) = params {
                 req = req.query(p);
             }
-            req.send()
+            req.send().await
         })
         .await
     }
 
     /// Send a `POST` request with a JSON body and optional query parameters.
-    pub async fn post<B: Serialize>(
+    pub async fn post<B: Serialize + Sync>(
         &self,
         url: &str,
         params: &[(&str, &str)],
         body: &B,
     ) -> Result<Response, HttpError> {
-        self.retry(|| self.inner.post(url).query(params).json(body).send()).await
+        self.retry(|| async {
+            let _permit = self.semaphore.acquire().await.expect("semaphore closed");
+            self.pace().await;
+            self.inner.post(url).query(params).json(body).send().await
+        })
+        .await
     }
 
     /// Deserialize a response body as JSON, mapping failures to [`HttpError::Decode`].
@@ -114,6 +136,22 @@ impl HttpClient {
     // ────────────────────────────────────────────────────────────────────────
     // Private API
     // ────────────────────────────────────────────────────────────────────────
+
+    /// Wait until the next request slot is available, enforcing a minimum gap
+    /// between any two HTTP requests to avoid provider rate limits.
+    async fn pace(&self) {
+        let wait_until = {
+            let mut next = self.next_request_at.lock().await;
+            let now = Instant::now();
+            if *next < now {
+                *next = now;
+            }
+            let target = *next;
+            *next = target + Self::MIN_REQUEST_GAP;
+            target
+        };
+        sleep(wait_until.saturating_duration_since(Instant::now())).await;
+    }
 
     /// Execute an async request factory up to [`Self::MAX_RETRIES`] times.
     async fn retry<F, Fut>(&self, mut f: F) -> Result<Response, HttpError>
@@ -152,8 +190,6 @@ impl HttpClient {
                         continue;
                     } else if status.is_client_error() {
                         // 4xx: no point retrying, the request itself is wrong.
-                        // Read the body first — APIs like Yahoo embed the real
-                        // error description in the JSON response.
                         let body = resp.text().await.unwrap_or_default();
                         let body = Self::extract_api_message(&body)
                             .unwrap_or(format!("Server returned {status}: {body}"));
@@ -179,7 +215,7 @@ impl HttpClient {
             }
 
             if attempt < Self::MAX_RETRIES - 1 {
-                sleep(Self::RETRY_SLEEP).await;
+                sleep(Self::BACKOFF_BASE * 2u32.saturating_pow(attempt)).await;
             }
         }
 
@@ -190,22 +226,15 @@ impl HttpClient {
     fn extract_api_message(body: &str) -> Option<String> {
         let json: serde_json::Value = serde_json::from_str(body).ok()?;
 
-        // Traverse known patterns to find the descriptive message.
         let candidates = [
-            // Yahoo: {"chart":{"error":{"description":"..."}}}
             json.pointer("/chart/error/description"),
-            // Generic: {"error":{"description":"..."}}
             json.pointer("/error/description"),
-            // Generic: {"error":{"message":"..."}}
             json.pointer("/error/message"),
-            // Generic: {"error":"..."}
             json.pointer("/error"),
-            // Generic: {"message":"..."}
             json.pointer("/message"),
         ];
 
-        let result =
-            candidates.into_iter().flatten().find_map(|v| v.as_str().map(|s| s.to_owned()));
+        let result = candidates.into_iter().flatten().find_map(|v| v.as_str().map(|s| s.to_owned()));
         result
     }
 }
@@ -230,7 +259,7 @@ where
         results.extend(page);
         offset += n;
         if n < batch {
-            break; // source exhausted
+            break;
         }
     }
 

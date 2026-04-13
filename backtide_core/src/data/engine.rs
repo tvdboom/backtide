@@ -1,7 +1,7 @@
 //! Implementation of data related methods for [`Engine`].
 
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
-use crate::constants::Symbol;
+use crate::constants::{Symbol, MAX_CONCURRENT_REQUESTS};
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::currency::Currency;
 use crate::data::models::download_result::DownloadResult;
@@ -16,11 +16,14 @@ use crate::engine::Engine;
 use crate::errors::EngineResult;
 use crate::storage::models::bar_series::BarSeries;
 use crate::storage::models::dividend_series::DividendSeries;
+use crate::utils::progress::{progress_bar, progress_spinner};
 use futures::future::{join_all, try_join_all};
+use futures::stream::{self, StreamExt};
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
+
 
 impl Engine {
     // ────────────────────────────────────────────────────────────────────────
@@ -45,6 +48,7 @@ impl Engine {
         profiles: &[InstrumentProfile],
         start: Option<u64>,
         end: Option<u64>,
+        verbose: bool,
     ) -> EngineResult<DownloadResult> {
         self.rt.block_on(async {
             // Build a list of (symbol, instrument_type, interval, start, end) tasks
@@ -71,19 +75,19 @@ impl Engine {
                     if let Some((db_min, db_max)) =
                         self.get_stored_range(symbol, *interval, provider)?
                     {
-                        if db_min <= start && db_max >= end {
+                        let interval_secs = interval.minutes() * 60;
+
+                        if db_min <= start + interval_secs && db_max + interval_secs >= end {
                             debug!(%symbol, ?interval, "Already in database, skipping download.");
                             continue;
                         }
 
-                        // Missing head: requested start is before what the database has.
-                        if start < db_min {
+                        if start + interval_secs < db_min {
                             debug!(%symbol, ?interval, head_end = db_min, "Downloading missing head.");
                             tasks.push((symbol.clone(), instrument_type, *interval, start, db_min));
                         }
 
-                        // Missing tail: requested end is beyond what the database has.
-                        if end > db_max {
+                        if end > db_max + interval_secs {
                             debug!(%symbol, ?interval, tail_start = db_max, "Downloading missing tail.");
                             tasks.push((symbol.clone(), instrument_type, *interval, db_max, end));
                         }
@@ -97,15 +101,36 @@ impl Engine {
             info!("Download plan: {total_tasks} symbol x interval tasks");
 
             // ── Phase 1: download all tasks concurrently ─────────────────
-            let downloaded: Vec<_> = join_all(tasks.into_iter().enumerate().map(
-                |(idx, (symbol, it, interval, start, end))| async move {
-                    let provider = self.providers.get(&it).unwrap();
-                    info!(%symbol, ?interval, start, end, "Downloading...");
-                    let result = provider.download_bars(&symbol, it, interval, start, end).await;
-                    (idx, symbol, it, interval, result)
+            let pb = verbose.then(|| {
+                progress_bar(
+                    total_tasks as u64,
+                    format!("Downloading bars for {} profiles...", profiles.len()),
+                )
+            });
+
+            let downloaded: Vec<_> = stream::iter(tasks.into_iter().enumerate().map(
+                |(idx, (symbol, it, interval, start, end))| {
+                    let pb = pb.clone();
+                    async move {
+                        let provider = self.providers.get(&it).unwrap();
+                        info!(%symbol, ?interval, start, end, "Downloading...");
+                        let result = provider.download_bars(&symbol, it, interval, start, end).await;
+
+                        if let Some(ref pb) = pb {
+                            pb.inc(1);
+                        }
+
+                        (idx, symbol, it, interval, result)
+                    }
                 },
             ))
+            .buffer_unordered(MAX_CONCURRENT_REQUESTS)
+            .collect()
             .await;
+
+            if let Some(ref pb) = pb {
+                pb.finish_and_clear();
+            }
 
             // ── Phase 2: collect results and build one bulk write ────────
             let mut bar_series: Vec<BarSeries> = Vec::new();
@@ -201,12 +226,34 @@ impl Engine {
         instrument_type: InstrumentType,
         exchanges: Option<Vec<Exchange>>,
         limit: usize,
+        verbose: bool,
     ) -> DataResult<Vec<Instrument>> {
-        self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
+        let pb = verbose.then(|| {
+            progress_spinner(format!("Listing {instrument_type} instruments..."))
+        });
+
+        let instruments = self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
             instrument_type,
             exchanges,
             limit,
-        ))
+        ))?;
+
+        if let Some(ref pb) = pb {
+            pb.finish_and_clear();
+        }
+
+        // Warm the instrument cache so subsequent resolve_profiles calls don't
+        // need to re-fetch each symbol individually.
+        self.rt.block_on(async {
+            for instr in &instruments {
+                self.cache
+                    .instrument_cache
+                    .insert(instr.symbol.clone(), Arc::new(instr.clone()))
+                    .await;
+            }
+        });
+
+        Ok(instruments)
     }
 
     /// Resolves all instruments required to price the given symbols in the
@@ -220,6 +267,7 @@ impl Engine {
         symbols: Vec<Symbol>,
         instrument_type: InstrumentType,
         intervals: Vec<Interval>,
+        verbose: bool,
     ) -> DataResult<Vec<InstrumentProfile>> {
         let base_currency = &self.config.general.base_currency.to_string();
 
@@ -280,28 +328,56 @@ impl Engine {
                 }
             }
 
-            let instrument_profiles =
-                try_join_all(instruments.into_iter().zip(instrument_leg_symbols.into_iter()).map(
-                    |(instr, legs)| async {
-                        let (earliest_ts, latest_ts) = self.load_range(&instr, &intervals).await?;
-                        Ok::<_, DataError>(InstrumentProfile {
-                            instrument: instr,
-                            earliest_ts,
-                            latest_ts,
-                            legs,
-                        })
+            let total = instruments.len();
+            let pb = verbose.then(|| {
+                progress_bar(
+                    total as u64,
+                    format!("Resolving profiles for {total} symbols..."),
+                )
+            });
+
+            let instrument_profiles: Vec<InstrumentProfile> =
+                stream::iter(instruments.into_iter().zip(instrument_leg_symbols.into_iter()).map(
+                    |(instr, legs)| {
+                        let pb = pb.clone();
+                        let intervals = intervals.clone();
+                        async move {
+                            let (earliest_ts, latest_ts) = self.load_range(&instr, &intervals).await?;
+
+                            if let Some(ref pb) = pb {
+                                pb.inc(1);
+                            }
+
+                            Ok::<_, DataError>(InstrumentProfile {
+                                instrument: instr,
+                                earliest_ts,
+                                latest_ts,
+                                legs,
+                            })
+                        }
                     },
                 ))
-                .await?;
+                .buffer_unordered(MAX_CONCURRENT_REQUESTS)
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?;
 
-            let leg_profiles = try_join_all(leg_map.into_values().map(|instr| async {
-                let (earliest_ts, latest_ts) = self.load_range(&instr, &intervals).await?;
-                Ok::<_, DataError>(InstrumentProfile {
-                    instrument: instr,
-                    earliest_ts,
-                    latest_ts,
-                    legs: vec![],
-                })
+            if let Some(ref pb) = pb {
+                pb.finish_and_clear();
+            }
+
+            let leg_profiles = try_join_all(leg_map.into_values().map(|instr| {
+                let intervals = intervals.clone();
+                async move {
+                    let (earliest_ts, latest_ts) = self.load_range(&instr, &intervals).await?;
+                    Ok::<_, DataError>(InstrumentProfile {
+                        instrument: instr,
+                        earliest_ts,
+                        latest_ts,
+                        legs: vec![],
+                    })
+                }
             }))
             .await?;
 

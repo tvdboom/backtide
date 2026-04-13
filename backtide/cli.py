@@ -103,7 +103,14 @@ def launch(address: str, port: str, log_level: str):
     "--log_level",
     help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
 )
-def download(symbols, instrument_type, interval, start, end, log_level):
+@click.option(
+    "--verbose/--no-verbose",
+    "-v",
+    default=True,
+    show_default=True,
+    help="Show progress bars during resolve and download.",
+)
+def download(symbols, instrument_type, interval, start, end, log_level, verbose):
     """Download OHLCV data for one or more symbols.
 
     Downloads the bars for the requested symbols. Required currency legs are
@@ -115,14 +122,8 @@ def download(symbols, instrument_type, interval, start, end, log_level):
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
 
-    click.echo("📊  Resolving downloads...")
-
-    profiles = resolve_profiles(list(symbols), instrument_type, list(interval))
-
-    click.echo(f"   --> {len(profiles)} profiles.")
-
-    click.echo("⬇️  Downloading …")
-    result = download_instruments(profiles, start=start, end=end)
+    profiles = resolve_profiles(list(symbols), instrument_type, list(interval), verbose=verbose)
+    result = download_instruments(profiles, start=start, end=end, verbose=verbose)
 
     for warn in result.warnings:
         click.echo(f"   ⚠️  {warn}", err=True)
