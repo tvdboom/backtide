@@ -13,7 +13,7 @@ import streamlit as st
 
 from backtide.core.config import get_config
 from backtide.core.data import InstrumentType
-from backtide.core.storage import delete_symbols, get_bars
+from backtide.core.storage import delete_symbols, get_bars_summary
 from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,8 +36,7 @@ def _confirm_delete(series: list[dict[str, str]]):
         st.rerun()
 
     if col2.button("Delete", width="stretch", type="primary", icon=":material/delete:"):
-        for g in series:
-            delete_symbols(g["Symbol"], interval=g["Interval"], provider=g["Provider"])
+        delete_symbols(series=[(g["Symbol"], g["Interval"], g["Provider"]) for g in series])
         st.rerun()
 
 
@@ -57,7 +56,7 @@ st.title("Storage", text_alignment="center")
 
 st.divider()
 
-bars_df = get_bars()
+bars_df = get_bars_summary()
 
 if bars_df.empty:
     st.info(
@@ -65,24 +64,6 @@ if bars_df.empty:
         icon=":material/info:",
     )
     st.stop()
-
-# Build a summary per (symbol, interval, instrument_type, provider) group.
-grouped = bars_df.groupby(["symbol", "interval", "instrument_type", "provider"], sort=False)
-summary = grouped.agg(
-    first_ts=("open_ts", "min"),
-    last_ts=("open_ts", "max"),
-    n_rows=("open_ts", "count"),
-).reset_index()
-
-
-# Compute sparklines: last 365 adj_close values per group.
-def _sparkline(group):
-    vals = group.sort_values("open_ts").tail(365)["adj_close"].tolist()
-    return vals if vals else None
-
-
-sparklines = grouped.apply(_sparkline).reset_index(name="sparkline")
-summary = summary.merge(sparklines, on=["symbol", "interval", "instrument_type", "provider"])
 
 rows = [
     {
@@ -93,9 +74,9 @@ rows = [
         "First date": _parse_date(int(r["first_ts"]), cfg.display.date_format, tz),
         "Last date": _parse_date(int(r["last_ts"]), cfg.display.date_format, tz),
         "Bars": int(r["n_rows"]),
-        "Price": r["sparkline"],
+        "Price": r["sparkline"] if r["sparkline"] else None,
     }
-    for _, r in summary.iterrows()
+    for _, r in bars_df.iterrows()
 ]
 
 df = pd.DataFrame(rows)

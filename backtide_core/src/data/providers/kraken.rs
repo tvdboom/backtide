@@ -111,7 +111,7 @@ impl Kraken {
     /// Fetch OHLC bars for a pair.
     ///
     /// `since` is an optional Unix-seconds timestamp. When `Some(0)` the
-    /// exchange returns the earliest 720 candles.  When `None` it returns
+    /// exchange returns the earliest 720 candles. When `None` it returns
     /// the most recent 720 candles.
     #[instrument(skip(self), fields(%symbol, %interval))]
     async fn get_bars(

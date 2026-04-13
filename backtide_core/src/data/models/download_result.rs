@@ -1,6 +1,6 @@
 //! Result of a bulk download operation.
 
-use pyo3::pyclass;
+use pyo3::{pyclass, pymethods};
 
 /// Summary returned by [`download_instruments`] after all tasks finish.
 ///
@@ -29,4 +29,19 @@ pub struct DownloadResult {
     pub n_succeeded: usize,
     pub n_failed: usize,
     pub warnings: Vec<String>,
+}
+
+#[pymethods]
+impl DownloadResult {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DownloadResult(n_succeeded={}, n_failed={}, warnings=[{}])",
+            self.n_succeeded,
+            self.n_failed,
+            self.warnings.iter().map(|w| format!("{w:?}")).collect::<Vec<_>>().join(", ")
+        )
+    }
 }

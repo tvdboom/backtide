@@ -933,7 +933,7 @@ with tab6:
             value=True,
             help=(
                 "Safety guardrail for short positions. When enabled (default), the strategy "
-                "may open short positions if it chooses to â€” the actual decision is made in "
+                "may open short positions if it chooses to - the actual decision is made in "
                 "your strategy code. When disabled, any attempt to sell positions not currently "
                 "held will raise a hard error and abort the simulation."
             ),
@@ -1113,12 +1113,12 @@ with tab7:
             help=(
                 "How to handle bars with no trading activity (e.g. market closures during "
                 "intraday backtests, holidays or illiquid periods).\n\n"
-                "**Skip** â€” the bar is dropped entirely; the strategy is not called and "
+                "**Skip** - the bar is dropped entirely; the strategy is not called and "
                 "the simulation clock jumps to the next bar with data.\n\n"
-                "**Forward-fill** â€” OHLC values are copied from the last valid bar and "
+                "**Forward-fill** - OHLC values are copied from the last valid bar and "
                 "volume is set to zero. The strategy runs as normal, which keeps a "
                 "consistent tick cadence (recommended for most use cases).\n\n"
-                "**Fill with NaN** â€” the bar is kept but all fields are set to NaN. "
+                "**Fill with NaN** - the bar is kept but all fields are set to NaN. "
                 "Your strategy must handle missing values explicitly."
             ),
         )
@@ -1144,7 +1144,7 @@ if st.button(
         with st.spinner(f'Running "{display_name}"...'):
             # TODO: implement backtest execution logic
             st.success(
-                f"Backtest **{display_name}** queued successfully â€” "
+                f"Backtest **{display_name}** queued successfully - "
                 f"{len(symbols)} symbol(s), {date_range}, "
                 f"starting cash {base_cur} {starting_amount:,.2f}.",
                 icon=":material/check_circle:",

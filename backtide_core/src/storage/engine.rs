@@ -6,6 +6,7 @@ use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use crate::storage::errors::StorageResult;
 use crate::storage::models::bar_series::BarSeries;
+use crate::storage::models::bar_summary::BarSummary;
 use crate::storage::models::dividend_series::DividendSeries;
 use crate::storage::models::stored_bar::StoredBar;
 use crate::storage::models::stored_dividend::StoredDividend;
@@ -27,6 +28,11 @@ impl Engine {
         self.db.get_bar_ranges()
     }
 
+    /// Returns a pre-aggregated summary of stored bars.
+    pub fn get_bars_summary(&self) -> StorageResult<Vec<BarSummary>> {
+        self.db.get_bars_summary()
+    }
+
     /// Returns all stored bars.
     pub fn get_all_bars(&self) -> StorageResult<Vec<StoredBar>> {
         self.db.get_all_bars()
@@ -37,14 +43,11 @@ impl Engine {
         self.db.get_all_dividends()
     }
 
-    /// Deletes all stored bars matching the given symbol, provider, and interval.
-    /// Orphaned dividends are cleaned up automatically.
+    /// Deletes bars (and orphaned dividends) for one or more series.
     pub fn delete_symbols(
         &self,
-        symbol: &str,
-        interval: Option<Interval>,
-        provider: Option<Provider>,
+        series: &[(String, Option<Interval>, Option<Provider>)],
     ) -> StorageResult<u64> {
-        self.db.delete_symbols(symbol, interval, provider)
+        self.db.delete_symbols(series)
     }
 }

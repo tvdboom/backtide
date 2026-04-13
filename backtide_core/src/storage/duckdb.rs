@@ -6,6 +6,7 @@ use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::storage::errors::StorageResult;
 use crate::storage::models::bar_series::BarSeries;
+use crate::storage::models::bar_summary::BarSummary;
 use crate::storage::models::dividend_series::DividendSeries;
 use crate::storage::models::stored_bar::StoredBar;
 use crate::storage::models::stored_dividend::StoredDividend;
@@ -93,6 +94,72 @@ impl Storage for DuckDb {
             .collect::<Result<HashMap<_, _>, _>>()?;
 
         Ok(rows)
+    }
+
+    /// Return a pre-aggregated summary of stored bars.
+    fn get_bars_summary(&self) -> StorageResult<Vec<BarSummary>> {
+        let conn = self.conn.lock().unwrap();
+
+        // Phase 1: grouped summary (one row per series).
+        let mut stmt = conn.prepare(
+            "SELECT symbol, instrument_type, interval, provider,
+                    MIN(open_ts) AS first_ts,
+                    MAX(open_ts) AS last_ts,
+                    COUNT(*)     AS n_rows
+             FROM bars
+             GROUP BY symbol, instrument_type, interval, provider
+             ORDER BY symbol, interval",
+        )?;
+
+        let mut summaries: Vec<BarSummary> = stmt
+            .query_map([], |row| {
+                Ok(BarSummary {
+                    symbol: row.get(0)?,
+                    instrument_type: row.get(1)?,
+                    interval: row.get(2)?,
+                    provider: row.get(3)?,
+                    first_ts: row.get(4)?,
+                    last_ts: row.get(5)?,
+                    n_rows: row.get(6)?,
+                    sparkline: Vec::new(),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Phase 2: fetch the last 365 adj_close values per group for sparklines.
+        // Uses a window function to rank rows within each group, then filters.
+        let mut spark_stmt = conn.prepare(
+            "SELECT symbol, interval, provider, adj_close
+             FROM (
+                 SELECT symbol, interval, provider, adj_close,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY symbol, interval, provider
+                            ORDER BY open_ts DESC
+                        ) AS rn
+                 FROM bars
+             )
+             WHERE rn <= 365
+             ORDER BY symbol, interval, provider, rn DESC",
+        )?;
+
+        // Build a map of (symbol, interval, provider) → Vec<adj_close>.
+        let mut sparkline_map: HashMap<(String, String, String), Vec<f64>> = HashMap::new();
+        let mut spark_rows = spark_stmt.query([])?;
+        while let Some(row) = spark_rows.next()? {
+            let key: (String, String, String) = (row.get(0)?, row.get(1)?, row.get(2)?);
+            let val: f64 = row.get(3)?;
+            sparkline_map.entry(key).or_default().push(val);
+        }
+
+        // Attach sparklines to summaries.
+        for s in &mut summaries {
+            let key = (s.symbol.clone(), s.interval.clone(), s.provider.clone());
+            if let Some(spark) = sparkline_map.remove(&key) {
+                s.sparkline = spark;
+            }
+        }
+
+        Ok(summaries)
     }
 
     /// Return all stored bars.
@@ -261,54 +328,72 @@ impl Storage for DuckDb {
         Ok(())
     }
 
-    /// Delete all bars for a given symbol, filtered by interval and provider.
-    /// Orphaned dividends are removed when no bars remain for its symbol.
+    /// Delete bars (and orphaned dividends) for one or more series in a single transaction.
     fn delete_symbols(
         &self,
-        symbol: &str,
-        interval: Option<Interval>,
-        provider: Option<Provider>,
+        series: &[(String, Option<Interval>, Option<Provider>)],
     ) -> StorageResult<u64> {
+        if series.is_empty() {
+            return Ok(0);
+        }
+
         let conn = self.conn.lock().unwrap();
-        let mut sql = String::from("DELETE FROM bars WHERE symbol = ?");
-        let mut values: Vec<String> = vec![symbol.to_string()];
+        conn.execute_batch("BEGIN TRANSACTION")?;
 
-        if let Some(interval) = interval {
-            sql.push_str(" AND interval = ?");
-            values.push(interval.to_string());
+        let mut total_deleted = 0u64;
+
+        // Phase 1: delete bars for each series.
+        for (symbol, interval, provider) in series {
+            let mut sql = String::from("DELETE FROM bars WHERE symbol = ?");
+            let mut values: Vec<String> = vec![symbol.clone()];
+
+            if let Some(iv) = interval {
+                sql.push_str(" AND interval = ?");
+                values.push(iv.to_string());
+            }
+            if let Some(prov) = provider {
+                sql.push_str(" AND provider = ?");
+                values.push(prov.to_string());
+            }
+
+            let deleted = conn.execute(&sql, params_from_iter(values.iter()))?;
+            total_deleted += deleted as u64;
         }
-        if let Some(provider) = provider {
-            sql.push_str(" AND provider = ?");
-            values.push(provider.to_string());
-        }
 
-        let deleted = conn.execute(&sql, params_from_iter(values.iter()))?;
+        // Phase 2: clean up orphaned dividends — any symbol that has no
+        // remaining bars (scoped to provider when given) gets its dividends removed.
+        let mut checked = std::collections::HashSet::new();
+        for (symbol, _, provider) in series {
+            let key = (symbol.clone(), provider.map(|p| p.to_string()));
+            if !checked.insert(key) {
+                continue;
+            }
 
-        // Clean up orphaned dividends (no bars remain for this symbol, scoped to
-        // provider when one was specified).
-        let (check_sql, check_params): (&str, Vec<String>) = if let Some(ref prov) = provider {
-            (
-                "SELECT COUNT(*) FROM bars WHERE symbol = ? AND provider = ?",
-                vec![symbol.to_string(), prov.to_string()],
-            )
-        } else {
-            ("SELECT COUNT(*) FROM bars WHERE symbol = ?", vec![symbol.to_string()])
-        };
-
-        let remaining: u64 =
-            conn.query_row(check_sql, params_from_iter(check_params.iter()), |row| row.get(0))?;
-
-        if remaining == 0 {
-            if let Some(ref prov) = provider {
-                conn.execute(
-                    "DELETE FROM dividends WHERE symbol = ? AND provider = ?",
-                    params![symbol, prov.to_string()],
-                )?;
+            let (check_sql, check_params): (&str, Vec<String>) = if let Some(prov) = provider {
+                (
+                    "SELECT COUNT(*) FROM bars WHERE symbol = ? AND provider = ?",
+                    vec![symbol.clone(), prov.to_string()],
+                )
             } else {
-                conn.execute("DELETE FROM dividends WHERE symbol = ?", params![symbol])?;
+                ("SELECT COUNT(*) FROM bars WHERE symbol = ?", vec![symbol.clone()])
+            };
+
+            let remaining: u64 =
+                conn.query_row(check_sql, params_from_iter(check_params.iter()), |row| row.get(0))?;
+
+            if remaining == 0 {
+                if let Some(prov) = provider {
+                    conn.execute(
+                        "DELETE FROM dividends WHERE symbol = ? AND provider = ?",
+                        params![symbol, prov.to_string()],
+                    )?;
+                } else {
+                    conn.execute("DELETE FROM dividends WHERE symbol = ?", params![symbol])?;
+                }
             }
         }
 
-        Ok(deleted as u64)
+        conn.execute_batch("COMMIT")?;
+        Ok(total_deleted)
     }
 }

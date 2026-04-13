@@ -398,7 +398,7 @@ class AutoDocs:
                         obj = obj.func
 
                     # Get the return type. Sometimes it returns a string 'Pandas'
-                    # and sometimes a class pandas.DataFrame. Unclear why
+                    # and sometimes a class pd.DataFrame. Unclear why
                     output = str(signature(obj).return_annotation)
 
                     header = f"{obj.__name__}: {types_conversion(output)}"
@@ -614,15 +614,7 @@ def types_conversion(dtype: str) -> str:
         "<class '": "",
         "'>": "",
         "typing.": "",  # For typing.Any
-        "pandas.core.indexes.base.Index": "pd.Index",
-        "pandas.core.series.Series": "pd.Series",
-        "pandas.core.frame.DataFrame": "pd.DataFrame",
         "Styler": "[Styler][]",
-        "collections.abc.Hashable": "str",
-        "Scalar": "int | float",
-        "Pandas": "pd.Series | pd.DataFrame",
-        "int | numpy.integer": "int",
-        "float | numpy.floating": "float",
     }
 
     for k, v in types.items():
@@ -725,9 +717,12 @@ def custom_autorefs(markdown: str, autodocs: AutoDocs | None = None) -> str:
     """
     result, start = "", 0
 
+    # Mask everything between triple quotes to avoid replacing links in code blocks
+    masker = lambda text: FENCE_RE.sub(lambda m: " " * (m.end() - m.start()), text)
+
     # Skip regex check for very long docs
     if len(markdown) < 1e5:
-        for match in re.finditer(LINK_RE, FENCE_RE.sub("", markdown)):
+        for match in re.finditer(LINK_RE, masker(markdown)):
             anchor = match.group(1)
             link = match.group(2)
 

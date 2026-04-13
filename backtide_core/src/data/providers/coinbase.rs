@@ -22,7 +22,7 @@ use tracing::{debug, info, instrument};
 /// Coinbase spot-market data provider.
 ///
 /// Wraps Coinbase's public Advanced Trade REST API behind the [`DataProvider`]
-/// trait.  Only [`InstrumentType::Crypto`] is supported; all other instrument types
+/// trait. Only [`InstrumentType::Crypto`] is supported; all other instrument types
 /// return [`DataError::UnsupportedInstrumentType`].
 pub struct Coinbase {
     /// Shared async HTTP client.

@@ -55,9 +55,11 @@ providers (though some, like Kraken, also list major forex pairs).
 Important caveats:
 
 - Yahoo intraday availability is clamped to the following rolling windows:
-  - `1m`: Last 7 days.
-  - `5m`, `15m`, `30m`: Last 60 days.
-  - `1h`, `4h`: Last 730 days.
+
+    - `1m`: Last 7 days.
+    - `5m`, `15m`, `30m`: Last 60 days.
+    - `1h`, `4h`: Last 730 days.
+
 - Daily and weekly history usually go back to the instrument's first trade
   date.
 
@@ -79,7 +81,7 @@ Important caveats:
 
 - Supports crypto and forex.
 - Kraken-specific ticker aliases are normalized back to canonical names, e.g.,
-  `XBT` â†’ `BTC` and `XDG` â†’ `DOGE`.
+  `XBT` becomes `BTC` and `XDG` becomes `DOGE`.
 
 Important caveats:
 
@@ -112,17 +114,17 @@ Important caveats:
 
 <br>
 
-## Downloading data
+## Downloading bulk data
 
-The Streamlit UI handles downloading for you, but you can also drive the
-entire workflow from Python. The key concept is the two-step pipeline:
-**resolve**, then **download**.
+The Streamlit UI handles data downloading for a small number of symbols, but you
+can drive the entire workflow from Python for larger workloads. The key concept is
+the two-step pipeline: **resolve**, then **download**.
 
 ### Instruments vs. profiles
 
 An [`Instrument`] is a lightweight descriptor — it knows a symbol's name, quote
 currency, exchange, and instrument type, but nothing about the data that is actually
-available.  An [`InstrumentProfile`] wraps an instrument with the metadata needed
+available. An [`InstrumentProfile`] wraps an instrument with the metadata needed
 to download it: the per-interval date range the provider can serve and the
 currency-conversion legs required to reach the portfolio base currency.
 
@@ -146,12 +148,12 @@ profiles = resolve_profiles(
 )
 
 for p in profiles:
-    print(p.symbol, p.earliest_ts, p.latest_ts, p.legs)
+    print(p.symbol, p.earliest_ts, p.latest_ts)
 ```
 
 ### Downloading bars
 
-Pass the resolved profiles to [`download_instruments`].  It checks what is
+Pass the resolved profiles to [`download_instruments`]. It checks what is
 already in the database, downloads only the missing portions, and writes
 everything (including any dividend data for stocks and ETFs) in a single
 bulk transaction.

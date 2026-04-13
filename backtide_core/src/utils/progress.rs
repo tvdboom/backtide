@@ -1,7 +1,7 @@
 //! Shared progress bar / spinner helpers built on [`indicatif`].
 
-use std::time::Duration;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::time::Duration;
 
 /// Create a determinate progress bar with a header message.
 pub fn progress_bar(total: u64, msg: impl Into<String>) -> ProgressBar {
@@ -15,7 +15,7 @@ pub fn progress_bar(total: u64, msg: impl Into<String>) -> ProgressBar {
                 .progress_chars("━╸─"),
         )
         .with_message(msg.into());
-    
+
     pb.enable_steady_tick(Duration::from_millis(100));
     pb
 }
@@ -29,7 +29,7 @@ pub fn progress_spinner(msg: impl Into<String>) -> ProgressBar {
                 .unwrap(),
         )
         .with_message(msg.into());
-    
+
     pb.enable_steady_tick(Duration::from_millis(100));
     pb
 }

@@ -46,7 +46,7 @@ impl YahooFinance {
     /// Returns a one-time CSRF crumb bound to the active session.
     const CRUMB_URL: &str = "https://query2.finance.yahoo.com/v1/test/getcrumb";
 
-    /// Custom POST screener â€” accepts arbitrary query predicates.
+    /// Custom POST screener - accepts arbitrary query predicates.
     const SCREENER_URL: &str = "https://query2.finance.yahoo.com/v1/finance/screener";
 
     /// Yahoo-managed predefined screeners.
@@ -66,12 +66,12 @@ impl YahooFinance {
     /// Create a new [`YahooFinance`] instance by opening an authenticated session.
     ///
     /// It performs two HTTP requests:
-    /// 1. `GET` [`Self::COOKIE_SEED_URL`] â€” populates the cookie jar.
-    /// 2. `GET` [`Self::CRUMB_URL`]       â€” retrieves the CSRF crumb.
+    /// 1. `GET` [`Self::COOKIE_SEED_URL`] - populates the cookie jar.
+    /// 2. `GET` [`Self::CRUMB_URL`]       - retrieves the CSRF crumb.
     pub async fn new() -> DataResult<Self> {
         let client = HttpClient::with_config(HttpClientConfig {
-            max_concurrent_requests: 50,
-            min_request_gap: Duration::ZERO,
+            max_concurrent_requests: 25,
+            min_request_gap: Duration::from_millis(20),
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
         })?;
@@ -108,7 +108,7 @@ impl YahooFinance {
 
         if crumb.is_empty() {
             return Err(DataError::Auth(
-                "Yahoo returned an empty crumb â€” session cookie may be missing".to_owned(),
+                "Yahoo returned an empty crumb - session cookie may be missing".to_owned(),
             ));
         }
 
@@ -547,7 +547,7 @@ impl DataProvider for YahooFinance {
             },
         };
 
-        // End is exclusive â€” step back one interval so the current (potentially incomplete)
+        // End is exclusive - step back one interval so the current (potentially incomplete)
         // bar is excluded and the requested range stays strictly within the provider's
         // rolling window.
         let latest_ts = latest_ts.saturating_sub(interval.minutes() * 60);
@@ -660,7 +660,7 @@ impl DataProvider for YahooFinance {
     ///
     /// For large date ranges the request is split into chunks (≈ 5 years each
     /// for daily bars) so that Yahoo never has to return an excessively large
-    /// payload in a single response.  Results are merged and deduplicated.
+    /// payload in a single response. Results are merged and deduplicated.
     #[instrument(skip(self), fields(%symbol, ?interval, start, end))]
     async fn download_bars(
         &self,
@@ -694,7 +694,7 @@ impl DataProvider for YahooFinance {
             _ => start,
         };
 
-        // Yahoo's chart API can return ~10 000 bars per request.  Choose
+        // Yahoo's chart API can return ~10 000 bars per request. Choose
         // chunk sizes that keep most real-world downloads to a single request
         // while still splitting truly enormous ranges.
         let chunk_secs: u64 = if interval.minutes() >= 24 * 60 {
@@ -764,7 +764,7 @@ impl DataProvider for YahooFinance {
 
 /// Raw quote entry from the Yahoo screener endpoint.
 ///
-/// All fields are `Option` â€” Yahoo omits them inconsistently across Instrument types.
+/// All fields are `Option` - Yahoo omits them inconsistently across Instrument types.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct YahooQuote {

@@ -10,7 +10,7 @@
 //! | Group                   | What it measures                                                 |
 //! |-------------------------|------------------------------------------------------------------|
 //! | `batch_bar_insert`      | Insert throughput at 100 / 10 000 rows.                          |
-//! | `historical_read`       | Read latency via `get_summary` for 1 and 10 symbols.            |
+//! | `historical_read`       | Read latency via `get_summary` for 1 and 10 symbols.             |
 //!
 //! Run with:
 //!

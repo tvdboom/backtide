@@ -15,7 +15,7 @@ use pyo3::types::{PyDict, PyList};
 ///
 /// Returns
 /// -------
-/// pandas.DataFrame
+/// pd.DataFrame
 ///     All bars currently held in the database.
 ///
 /// See Also
@@ -91,6 +91,65 @@ pub fn get_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
     Ok(df.unbind())
 }
 
+/// Return a pre-aggregated summary of stored bars as a pandas DataFrame.
+///
+/// Each row represents one (symbol, interval, provider) series. The `sparkline`
+/// column contains the last 365 `adj_close` values.
+///
+/// Returns
+/// -------
+/// pd.DataFrame
+///     One summary row per stored series.
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.storage import get_bars_summary
+///
+/// df = get_bars_summary()
+/// print(df.head())
+/// ```
+#[pyfunction]
+pub fn get_bars_summary(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    let engine = Engine::get()?;
+    let rows = engine.get_bars_summary()?;
+
+    let n = rows.len();
+    let mut symbols = Vec::with_capacity(n);
+    let mut instrument_types = Vec::with_capacity(n);
+    let mut intervals = Vec::with_capacity(n);
+    let mut providers = Vec::with_capacity(n);
+    let mut first_ts = Vec::with_capacity(n);
+    let mut last_ts = Vec::with_capacity(n);
+    let mut n_rows = Vec::with_capacity(n);
+    let mut sparklines: Vec<Py<PyAny>> = Vec::with_capacity(n);
+
+    for r in rows {
+        symbols.push(r.symbol);
+        instrument_types.push(r.instrument_type);
+        intervals.push(r.interval);
+        providers.push(r.provider);
+        first_ts.push(r.first_ts);
+        last_ts.push(r.last_ts);
+        n_rows.push(r.n_rows);
+        sparklines.push(PyList::new(py, &r.sparkline)?.unbind().into());
+    }
+
+    let data = PyDict::new(py);
+    data.set_item("symbol", PyList::new(py, &symbols)?)?;
+    data.set_item("instrument_type", PyList::new(py, &instrument_types)?)?;
+    data.set_item("interval", PyList::new(py, &intervals)?)?;
+    data.set_item("provider", PyList::new(py, &providers)?)?;
+    data.set_item("first_ts", PyList::new(py, &first_ts)?)?;
+    data.set_item("last_ts", PyList::new(py, &last_ts)?)?;
+    data.set_item("n_rows", PyList::new(py, &n_rows)?)?;
+    data.set_item("sparkline", PyList::new(py, &sparklines)?)?;
+
+    let pd = py.import("pandas")?;
+    let df = pd.call_method1("DataFrame", (data,))?;
+    Ok(df.unbind())
+}
+
 /// Return all stored dividend events as a pandas DataFrame.
 ///
 /// Each row represents a single dividend payment. The DataFrame columns
@@ -98,7 +157,7 @@ pub fn get_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
 ///
 /// Returns
 /// -------
-/// pandas.DataFrame
+/// pd.DataFrame
 ///     All dividend events currently held in the database.
 ///
 /// See Also
@@ -146,22 +205,26 @@ pub fn get_dividends(py: Python<'_>) -> PyResult<Py<PyAny>> {
 
 /// Delete bars (and orphaned dividends) from the database.
 ///
-/// Removes bars matching the given symbol(s) and optional filters. When no
-/// bars remain for a symbol (scoped to the provider if one is given), any
-/// associated dividend records are removed as well.
+/// Accepts either individual arguments for a single symbol (or list of
+/// symbols), or a `series` list of `(symbol, interval, provider)` triples
+/// for bulk deletion. All deletions run in a single database transaction.
 ///
 /// Parameters
 /// ----------
-/// symbol : str | Sequence[str]
-///     The symbols to delete.
+/// symbol : str | list[str] | None = None
+///     One or more symbols to delete. Mutually exclusive with `series`.
 ///
 /// interval : str | [Interval] | None = None
-///     The bar interval for which to remove the data. If `None`, all
-///     intervals will be deleted.
+///     The bar interval to remove. Applies to every symbol when `symbol`
+///     is given. Ignored when `series` is given.
 ///
 /// provider : str | [Provider] | None = None
-///     The data provider for which to remove the data. If `None`, all
-///     providers will be deleted.
+///     The data provider to remove. Applies to every symbol when `symbol`
+///     is given. Ignored when `series` is given.
+///
+/// series : list[tuple[str, str, str]] | None = None
+///     Explicit list of `(symbol, interval, provider)` triples to delete.
+///     Mutually exclusive with `symbol`.
 ///
 /// Returns
 /// -------
@@ -182,30 +245,50 @@ pub fn get_dividends(py: Python<'_>) -> PyResult<Py<PyAny>> {
 /// # Delete all stored data for a single symbol
 /// delete_symbols("AAPL")  # norun
 ///
-/// # Delete all daily bars for multiple symbols
+/// # Delete daily bars for multiple symbols
 /// delete_symbols(["BTC-USDT", "ETH-USDT"], interval="1d")  # norun
+///
+/// # Bulk-delete specific series
+/// delete_symbols(series=[("AAPL", "1d", "yahoo"), ("MSFT", "1h", "yahoo")])  # norun
 /// ```
 #[pyfunction]
-#[pyo3(signature = (symbol: "str | Sequence[str]", interval: "str | Interval | None"=None, provider: "str | Provider | None"=None))]
+#[pyo3(signature = (symbol=None, interval=None, provider=None, *, series=None))]
 pub fn delete_symbols(
-    symbol: Bound<'_, PyAny>,
+    symbol: Option<Bound<'_, PyAny>>,
     interval: Option<Bound<'_, PyAny>>,
     provider: Option<Bound<'_, PyAny>>,
+    series: Option<Vec<(String, String, String)>>,
 ) -> PyResult<u64> {
-    let symbols: Vec<String> = if let Ok(s) = symbol.extract::<String>() {
-        vec![s]
+    let tuples: Vec<(String, Option<Interval>, Option<Provider>)> = if let Some(series) = series {
+        // Bulk mode: each triple has explicit (symbol, interval, provider).
+        series
+            .into_iter()
+            .map(|(sym, iv, prov)| {
+                let interval: Interval = iv.parse().map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(format!("invalid interval: {e}"))
+                })?;
+                let provider: Provider = prov.parse().map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(format!("invalid provider: {e}"))
+                })?;
+                Ok((sym, Some(interval), Some(provider)))
+            })
+            .collect::<PyResult<Vec<_>>>()?
+    } else if let Some(symbol) = symbol {
+        // Legacy mode: (symbol(s), optional interval, optional provider).
+        let symbols: Vec<String> = if let Ok(s) = symbol.extract::<String>() {
+            vec![s]
+        } else {
+            symbol.extract::<Vec<String>>()?
+        };
+        let provider = provider.map(|p| p.extract::<Provider>()).transpose()?;
+        let interval = interval.map(|i| i.extract::<Interval>()).transpose()?;
+        symbols.into_iter().map(|s| (s, interval, provider)).collect()
     } else {
-        symbol.extract::<Vec<String>>()?
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "Either `symbol` or `series` must be provided.",
+        ));
     };
 
-    let provider = provider.map(|p| p.extract::<Provider>()).transpose()?;
-    let interval = interval.map(|i| i.extract::<Interval>()).transpose()?;
-
     let engine = Engine::get()?;
-
-    let mut total = 0u64;
-    for sym in &symbols {
-        total += engine.delete_symbols(sym, interval, provider)?;
-    }
-    Ok(total)
+    Ok(engine.delete_symbols(&tuples)?)
 }

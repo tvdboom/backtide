@@ -582,16 +582,16 @@ if st.button(
 
             if result.n_failed and result.n_succeeded:
                 st.success(
-                    f"Successfully downloaded {result.n_succeeded} of {n_total} instruments.",
+                    f"Successfully downloaded {result.n_succeeded} of {n_total} series.",
                     icon=":material/check_circle:",
                 )
             elif result.n_failed:
                 st.error(
-                    f"All {n_total} instruments had warnings during download.",
+                    f"All {n_total} series had warnings during download.",
                     icon=":material/error:",
                 )
             else:
                 st.success(
-                    f"Successfully downloaded {result.n_succeeded} instruments.",
+                    f"Successfully downloaded {result.n_succeeded} series.",
                     icon=":material/check_circle:",
                 )
