@@ -23,7 +23,7 @@ impl Engine {
         self.db.write_dividends_bulk(series)
     }
 
-    /// Returns all stored (symbol, interval, provider) → (min_ts, max_ts) in one query.
+    /// Returns all stored (symbol, interval, provider) -> (min_ts, max_ts) in one query.
     pub fn get_bar_ranges(&self) -> StorageResult<HashMap<BarKey, (u64, u64)>> {
         self.db.get_bar_ranges()
     }

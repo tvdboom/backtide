@@ -5,10 +5,10 @@ repos:
     - id: ruff
       types_or: [ python, pyi ]
       args: [--fix]
-      files: ^(?!docs/).*\.(py|ipy)$
+      files: ^(?!docs/).*\.(pyi?|ipy)$
     - id: ruff-format
       types_or: [ python, pyi ]
-      files: ^(?!docs/).*\.(py|ipy)$
+      files: ^(?!docs/).*\.(pyi?|ipy)$
 
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.11.6
@@ -45,3 +45,17 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+
+#      - id: ty
+#        name: ty check
+#        entry: ty check
+#        language: system
+#        pass_filenames: false
+#        types: [python]
+
+      - id: check-stubs
+        name: check pyi stubs
+        entry: python scripts/generate_stubs.py --check
+        language: system
+        pass_filenames: false
+        types_or: [rust, pyi]

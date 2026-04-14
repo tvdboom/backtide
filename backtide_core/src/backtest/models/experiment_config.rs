@@ -14,12 +14,12 @@ use crate::data::models::currency::Currency;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use pyo3::basic::CompareOp;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
 // ────────────────────────────────────────────────────────────────────────────
 // CodeSnippet
 // ────────────────────────────────────────────────────────────────────────────
@@ -1085,8 +1085,7 @@ impl ExperimentConfig {
     /// str
     ///     TOML representation of the config.
     pub fn to_toml(&self, py: Python<'_>) -> PyResult<String> {
-        toml::to_string_pretty(&self.to_inner(py))
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+        toml::to_string_pretty(&self.to_inner(py)).map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     /// Build an `ExperimentConfig` from a TOML string.
@@ -1102,8 +1101,8 @@ impl ExperimentConfig {
     ///     The created instance.
     #[staticmethod]
     fn from_toml(py: Python<'_>, text: &str) -> PyResult<Self> {
-        let inner: ExperimentConfigInner = toml::from_str(text)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        let inner: ExperimentConfigInner =
+            toml::from_str(text).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Self::from_inner(py, inner)
     }
 }

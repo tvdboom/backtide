@@ -39,7 +39,7 @@ lint = [
 ]
 dev = [
     "tox>=4.50.3",
-    "tox-uv>=1.33.4"
+    "tox-uv>=1.33.4",
 ]
 pre-commit = [
     "pre-commit>=4.5.1",
@@ -136,12 +136,19 @@ section-order = [
 force-sort-within-sections = true
 
 [tool.ruff.lint.per-file-ignores]
+"backtide/core/*.pyi" = [
+    "PYI021",  # Docstrings in stubs
+]
 "__init__.py" = ["F401"]  # Unused imports
 "app.py" = ["E501"]  # Line too long
 "backtest.py" = ["F401"]  # Unused imports
 "config.py" = ["F401"]  # Unused imports
 "data.py" = ["F401"]  # Unused imports
 "storage.py" = ["F401"]  # Unused imports
+"scripts/*.py" = [
+    "INP001",  # Part of an implicit namespace package
+    "T201",  # CLI scripts use print for output
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"

@@ -142,7 +142,7 @@ impl Storage for DuckDb {
              ORDER BY symbol, interval, provider, rn DESC",
         )?;
 
-        // Build a map of (symbol, interval, provider) → Vec<adj_close>.
+        // Build a map of (symbol, interval, provider) -> Vec<adj_close>.
         let mut sparkline_map: HashMap<(String, String, String), Vec<f64>> = HashMap::new();
         let mut spark_rows = spark_stmt.query([])?;
         while let Some(row) = spark_rows.next()? {

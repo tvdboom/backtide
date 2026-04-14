@@ -68,7 +68,6 @@ required for any of its functionalities. These libraries are only necessary to
 * **[mkdocs-material](https://squidfunk.github.io/mkdocs-material/)** (>=9.7.6)
 * **[mkdocs-material-extensions](https://pypi.org/project/mkdocs-material-extensions/)** (>=1.3.1)
 * **[mkdocs-simple-hooks](https://github.com/aklajnert/mkdocs-simple-hooks)** (>=0.1.5)
-* **[pymdown-extensions](https://github.com/facelessuser/pymdown-extensions)** (>=10.21)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
 * **[regex](https://github.com/mrabarnett/mrab-regex)** (>=2026.2.28)
 

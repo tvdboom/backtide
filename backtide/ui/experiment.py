@@ -165,13 +165,13 @@ def _on_config_upload():
 
         imported = ExperimentConfig.from_dict(raw)
 
-        # ── General ───────────────────────────────────────────
+        # ── General ──────────────────────────────────────────────────────────
 
         st.session_state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", imported.general.name)
         st.session_state["tags"] = list(imported.general.tags)
         st.session_state["description"] = imported.general.description
 
-        # ── Data ──────────────────────────────────────────────
+        # ── Data ─────────────────────────────────────────────────────────────
 
         st.session_state["instrument_type"] = imported.data.instrument_type
         st.session_state["symbols"] = list(imported.data.symbols)
@@ -187,13 +187,13 @@ def _on_config_upload():
                 ).date()
         st.session_state["interval"] = imported.data.interval
 
-        # ── Portfolio ─────────────────────────────────────────
+        # ── Portfolio ────────────────────────────────────────────────────────
 
         st.session_state["initial_cash"] = int(imported.portfolio.initial_cash)
         st.session_state["base_currency"] = imported.portfolio.base_currency
         st.session_state["starting_positions"] = dict(imported.portfolio.starting_positions)
 
-        # ── Strategy ──────────────────────────────────────────
+        # ── Strategy ─────────────────────────────────────────────────────────
 
         st.session_state["predefined_strategies"] = list(imported.strategy.predefined_strategies)
         st.session_state["custom_strategies"] = [
@@ -203,7 +203,7 @@ def _on_config_upload():
         for i, s in enumerate(imported.strategy.custom_strategies):
             st.session_state[f"strategy_name_{i}"] = s.name
 
-        # ── Indicators ────────────────────────────────────────
+        # ── Indicators ───────────────────────────────────────────────────────
 
         st.session_state["builtin_indicators"] = list(imported.indicators.builtin_indicators)
         st.session_state["custom_indicators"] = [
@@ -213,7 +213,7 @@ def _on_config_upload():
         for i, s in enumerate(imported.indicators.custom_indicators):
             st.session_state[f"indicator_name_{i}"] = s.name
 
-        # ── Exchange ──────────────────────────────────────────
+        # ── Exchange ─────────────────────────────────────────────────────────
 
         ex = imported.exchange
         st.session_state["commission_type"] = ex.commission_type
@@ -238,7 +238,7 @@ def _on_config_upload():
         if ex.conversion_interval is not None:
             st.session_state["conversion_interval"] = int(ex.conversion_interval)
 
-        # ── Engine ────────────────────────────────────────────
+        # ── Engine ───────────────────────────────────────────────────────────
 
         eng = imported.engine
         st.session_state["warmup_period"] = int(eng.warmup_period)
@@ -327,7 +327,8 @@ with tab1:
         mime="application/toml",
         icon=":material/download:",
         type="secondary",
-        use_container_width=True,
+        on_click="ignore",
+        width="stretch",
         help="Persist the current experiment configuration to disk.",
     )
 

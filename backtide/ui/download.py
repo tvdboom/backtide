@@ -575,6 +575,9 @@ if st.button(
         except RuntimeError as ex:
             st.error(f"Download error: {ex}", icon=":material/error:")
         else:
+            # Invalidate the storage cache so new bars become visible.
+            st.cache_data.clear()
+
             for warn in result.warnings:
                 st.warning(warn, icon=":material/warning:")
 

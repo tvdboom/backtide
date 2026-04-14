@@ -21,8 +21,41 @@ from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date, _to_pa
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@st.cache_data(show_spinner="Loading bars from database...")
+def _load_storage_df(date_fmt: str, tz: ZoneInfo, logokit_key: str | None) -> pd.DataFrame:
+    """Load and cache the stored data from the database."""
+    raw = _to_pandas(get_bars_summary())
+    df = pd.DataFrame(
+        {
+            "Symbol": raw["symbol"],
+            "Interval": raw["interval"],
+            "Instrument type": raw["instrument_type"],
+            "Provider": raw["provider"],
+            "First date": raw["first_ts"].astype(int).map(lambda x: _parse_date(x, date_fmt, tz)),
+            "Last date": raw["last_ts"].astype(int).map(lambda x: _parse_date(x, date_fmt, tz)),
+            "Bars": raw["n_rows"].astype(int),
+            "Price": raw["sparkline"].tolist(),  # pyarrow to list so streamlit can serialize
+        },
+    )
+
+    df = df.sort_values(["Symbol", "Interval"], ascending=True).reset_index(drop=True)
+
+    if logokit_key:
+        df.index = pd.Index(
+            data=df.apply(
+                lambda row: _get_logokit_url(
+                    row["Symbol"], InstrumentType(row["Instrument type"]), logokit_key
+                ),
+                axis=1,
+            ),
+            name="Logo",
+        )
+
+    return df
+
+
 @st.dialog("Confirm deletion", width="medium")
-def _confirm_delete(series: list[dict[str, str]]):
+def _confirm_delete(series: pd.Series):
     """Show a modal asking the user to confirm deletion of selected series."""
     text = "\n".join([f"* {g['Symbol']}  -  {g['Interval']}" for g in series])
     st.warning(
@@ -37,6 +70,7 @@ def _confirm_delete(series: list[dict[str, str]]):
 
     if col2.button("Delete", width="stretch", type="primary", icon=":material/delete:"):
         delete_symbols(series=[(g["Symbol"], g["Interval"], g["Provider"]) for g in series])
+        _load_storage_df.clear()
         st.rerun()
 
 
@@ -45,6 +79,8 @@ def _confirm_delete(series: list[dict[str, str]]):
 # ─────────────────────────────────────────────────────────────────────────────
 
 cfg = get_config()
+logokit_key = cfg.display.logokit_api_key
+
 if cfg.display.timezone:
     tz = ZoneInfo(cfg.display.timezone)
 else:
@@ -56,7 +92,8 @@ st.title("Storage", text_alignment="center")
 
 st.divider()
 
-bars_df = _to_pandas(get_bars_summary())
+
+bars_df = _load_storage_df(cfg.display.date_format, tz, logokit_key)
 
 if bars_df.empty:
     st.info(
@@ -64,22 +101,6 @@ if bars_df.empty:
         icon=":material/info:",
     )
     st.stop()
-
-rows = [
-    {
-        "Symbol": r["symbol"],
-        "Interval": r["interval"],
-        "Instrument type": r["instrument_type"],
-        "Provider": r["provider"],
-        "First date": _parse_date(int(r["first_ts"]), cfg.display.date_format, tz),
-        "Last date": _parse_date(int(r["last_ts"]), cfg.display.date_format, tz),
-        "Bars": int(r["n_rows"]),
-        "Price": r["sparkline"],
-    }
-    for _, r in bars_df.iterrows()
-]
-
-df = pd.DataFrame(rows)
 
 metrics_container = st.container()
 
@@ -89,27 +110,20 @@ column_config = {
     "Price": st.column_config.LineChartColumn(help="Closing price for the last 365 intervals."),
 }
 
-if logokit_key := cfg.display.logokit_api_key:
-    df.index = pd.Index(
-        data=[
-            _get_logokit_url(row["Symbol"], InstrumentType(row["Instrument type"]), logokit_key)
-            for _, row in df.iterrows()
-        ],
-        name="Logo",
-    )
+if logokit_key:
     column_config["Logo"] = st.column_config.ImageColumn(label="", width="small")
 
 event = st.dataframe(
-    df.sort_values(["Symbol", "Interval"], ascending=True),
+    bars_df,
     height="stretch",
     column_config=column_config,
-    hide_index=df.index.name is None,
+    hide_index=bars_df.index.name is None,
     selection_mode="multi-row",
     on_select="rerun",
 )
 
 indices = event.selection.rows if event and event.selection else None
-selected = df.iloc[indices] if indices else df
+selected = bars_df.iloc[indices] if indices else bars_df
 
 with metrics_container:
     col1, col2, col3 = st.columns(3)
@@ -127,4 +141,4 @@ with metrics_container:
 
 if indices:
     if st.button(f"Delete {len(indices)} series", type="primary", icon=":material/delete:"):
-        _confirm_delete([rows[i] for i in indices])
+        _confirm_delete([bars_df.iloc[i] for i in indices])

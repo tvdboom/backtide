@@ -192,16 +192,16 @@ impl PyConfig {
 ///     The fiat currency used as an intermediate between a fiat currency and
 ///     `base_currency`. This method is chosen when no direct conversion path exists
 ///     or when this method has longer history and `triangulation_strategy="earliest"`
-///     For example, if converting `PLN â†’ THB` and no `PLN-THB` pair is available, the
-///     engine will route through this currency as `PLN` â†’ `triangulation_fiat` â†’ `THB`.
+///     For example, if converting `PLN -> THB` and no `PLN-THB` pair is available, the
+///     engine will route through this currency as `PLN` -> `triangulation_fiat` -> `THB`.
 ///     The chosen currency is expected to have pairs with all the currencies the
 ///     project works with.
 ///
 /// triangulation_crypto : str, default="USDT"
 ///     The cryptocurrency used as an intermediate when no direct conversion
 ///     path exists between a crypto and `base_currency`. For example, to calculate
-///     the value of `BTC`, the engine will route `BTC` â†’ `triangulation_crypto` â†’
-///     `triangulation_crypto_pegged` â†’ `base_currency`. The selected crypto is
+///     the value of `BTC`, the engine will route `BTC` -> `triangulation_crypto` ->
+///     `triangulation_crypto_pegged` -> `base_currency`. The selected crypto is
 ///     expected to be a stablecoin pegged to the `triangulation_crypto_pegged`
 ///     fiat currency.
 ///
@@ -212,7 +212,7 @@ impl PyConfig {
 ///     the engine treats `triangulation_crypto`/`triangulation_crypto_pegged`
 ///     as the crossing pair at parity 1:1.
 ///
-/// log_level : str, defeault="warn"
+/// log_level : str, default="warn"
 ///     Minimum tracing log level. Choose from: "error", "warn", "info", "debug".
 ///
 /// See Also

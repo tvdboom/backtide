@@ -352,7 +352,7 @@ impl TryFrom<PairInfo> for Instrument {
             (info.base.clone(), info.quote.clone())
         };
 
-        // Normalize Kraken-specific tickers (e.g., XBT → BTC).
+        // Normalize Kraken-specific tickers (e.g., XBT -> BTC).
         let base = Kraken::normalize_ticker(&base);
         let quote = Kraken::normalize_ticker(&quote);
 

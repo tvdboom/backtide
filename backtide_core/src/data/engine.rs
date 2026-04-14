@@ -586,7 +586,7 @@ impl Engine {
         }
     }
 
-    /// Resolve a two-leg triangulation path: `quote → mid` and `mid_pegged → base`.
+    /// Resolve a two-leg triangulation path: `quote -> mid` and `mid_pegged -> base`.
     ///
     /// Legs that are identical to their target currency are omitted.
     async fn triangulate(
