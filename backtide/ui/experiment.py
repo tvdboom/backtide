@@ -43,10 +43,229 @@ from backtide.ui.utils import (
 )
 from backtide.utils.constants import (
     INDICATOR_PLACEHOLDER,
+    INVALID_FILENAME_CHARS,
     MAX_INSTRUMENT_SELECTION,
     STRATEGY_PLACEHOLDER,
     TAG_PATTERN,
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _build_experiment_config() -> ExperimentConfig:
+    """Snapshot the current widget state into an ExperimentConfig."""
+    ss = st.session_state
+    return ExperimentConfig(
+        general=GeneralExpConfig(
+            name=experiment_name or ss.experiment_id,
+            tags=ss.get("tags", []),
+            description=ss.get("description", ""),
+        ),
+        data=DataExpConfig(
+            instrument_type=ss.get("instrument_type", "stocks"),
+            symbols=[s.symbol if hasattr(s, "symbol") else str(s) for s in ss.get("symbols", [])],
+            full_history=ss.get("full_history", True),
+            start_date=str(ss.get("start_date")) if ss.get("start_date") else None,
+            end_date=str(ss.get("end_date")) if ss.get("end_date") else None,
+            interval=ss.get("interval", "1d"),
+        ),
+        portfolio=PortfolioExpConfig(
+            initial_cash=float(ss.get("initial_cash", 10_000)),
+            base_currency=ss.get("base_currency", "USD"),
+            starting_positions=ss.get("starting_positions", {}),
+        ),
+        strategy=StrategyExpConfig(
+            predefined_strategies=list(ss.get("predefined_strategies", [])),
+            custom_strategies=[
+                CodeSnippet(
+                    name=ss.get(f"strategy_name_{i}", f"Strategy {i + 1}"),
+                    code=e.get("code", ""),
+                )
+                for i, e in enumerate(ss.get("custom_strategies", []))
+            ],
+        ),
+        indicators=IndicatorExpConfig(
+            builtin_indicators=list(ss.get("builtin_indicators", [])),
+            custom_indicators=[
+                CodeSnippet(
+                    name=ss.get(f"indicator_name_{i}", f"Indicator {i + 1}"),
+                    code=e.get("code", ""),
+                )
+                for i, e in enumerate(ss.get("custom_indicators", []))
+            ],
+        ),
+        exchange=ExchangeExpConfig(
+            commission_type=ss.get("commission_type", "Percentage"),
+            commission_pct=float(ss.get("commission_pct", 0.1)),
+            commission_fixed=float(ss.get("commission_fixed", 0.0)),
+            slippage=float(ss.get("slippage", 0.05)),
+            allowed_order_types=list(ss.get("allowed_order_types", ["Market"])),
+            partial_fills=ss.get("partial_fills", False),
+            allow_margin=ss.get("allow_margin", True),
+            max_leverage=float(ss.get("max_leverage", 1.0)),
+            initial_margin=float(ss.get("initial_margin", 50.0)),
+            maintenance_margin=float(ss.get("maintenance_margin", 25.0)),
+            margin_interest=float(ss.get("margin_interest", 0.0)),
+            allow_short_selling=ss.get("allow_short_selling", True),
+            borrow_rate=float(ss.get("borrow_rate", 0.0)),
+            max_position_size=int(ss.get("max_position_size", 100)),
+            conversion_mode=ss.get("conversion_mode", "Immediate"),
+            conversion_threshold=(
+                float(ss["conversion_threshold"])
+                if ss.get("conversion_threshold") is not None
+                else None
+            ),
+            conversion_period=(
+                ss["conversion_period"] if ss.get("conversion_period") is not None else None
+            ),
+            conversion_interval=(
+                int(ss["conversion_interval"])
+                if ss.get("conversion_interval") is not None
+                else None
+            ),
+        ),
+        engine=EngineExpConfig(
+            warmup_period=int(ss.get("warmup_period", 0)),
+            trade_on_close=ss.get("trade_on_close", False),
+            risk_free_rate=float(ss.get("risk_free_rate", 0.0)),
+            benchmark=ss.get("benchmark", ""),
+            exclusive_orders=ss.get("exclusive_orders", False),
+            random_seed=int(ss["random_seed"]) if ss.get("random_seed") is not None else None,
+            empty_bar_policy=ss.get("empty_bar_policy", "ForwardFill"),
+        ),
+    )
+
+
+def _on_config_upload():
+    """Set the experiment config based on the session_state.
+
+    Because callbacks execute before any widget is instantiated, we can
+    freely set session-state keys that are bound to widgets.
+
+    """
+    upload = st.session_state.get("_config_upload")
+    if upload is None:
+        # File was cleared by the user.
+        st.session_state.pop("_import_hash", None)
+        return
+
+    _upload_hash = hash(upload.getvalue())
+    if st.session_state.get("_import_hash") == _upload_hash:
+        return  # Same file already processed.
+
+    try:
+        if upload.name.endswith(".json"):
+            raw = json.load(upload)
+        elif upload.name.endswith(".toml"):
+            raw = tomllib.loads(upload.read().decode("utf-8"))
+        else:
+            raw = yaml.safe_load(upload)
+
+        imported = ExperimentConfig.from_dict(raw)
+
+        # ── General ───────────────────────────────────────────
+
+        st.session_state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", imported.general.name)
+        st.session_state["tags"] = list(imported.general.tags)
+        st.session_state["description"] = imported.general.description
+
+        # ── Data ──────────────────────────────────────────────
+
+        st.session_state["instrument_type"] = imported.data.instrument_type
+        st.session_state["symbols"] = list(imported.data.symbols)
+        st.session_state["full_history"] = imported.data.full_history
+        if not imported.data.full_history:
+            if imported.data.start_date:
+                st.session_state["start_date"] = datetime.fromisoformat(
+                    str(imported.data.start_date)
+                ).date()
+            if imported.data.end_date:
+                st.session_state["end_date"] = datetime.fromisoformat(
+                    str(imported.data.end_date)
+                ).date()
+        st.session_state["interval"] = imported.data.interval
+
+        # ── Portfolio ─────────────────────────────────────────
+
+        st.session_state["initial_cash"] = int(imported.portfolio.initial_cash)
+        st.session_state["base_currency"] = imported.portfolio.base_currency
+        st.session_state["starting_positions"] = dict(imported.portfolio.starting_positions)
+
+        # ── Strategy ──────────────────────────────────────────
+
+        st.session_state["predefined_strategies"] = list(imported.strategy.predefined_strategies)
+        st.session_state["custom_strategies"] = [
+            {"source": ":material/code: Code editor", "code": s.code}
+            for s in imported.strategy.custom_strategies
+        ]
+        for i, s in enumerate(imported.strategy.custom_strategies):
+            st.session_state[f"strategy_name_{i}"] = s.name
+
+        # ── Indicators ────────────────────────────────────────
+
+        st.session_state["builtin_indicators"] = list(imported.indicators.builtin_indicators)
+        st.session_state["custom_indicators"] = [
+            {"source": ":material/code: Code editor", "code": s.code}
+            for s in imported.indicators.custom_indicators
+        ]
+        for i, s in enumerate(imported.indicators.custom_indicators):
+            st.session_state[f"indicator_name_{i}"] = s.name
+
+        # ── Exchange ──────────────────────────────────────────
+
+        ex = imported.exchange
+        st.session_state["commission_type"] = ex.commission_type
+        st.session_state["commission_pct"] = ex.commission_pct
+        st.session_state["commission_fixed"] = ex.commission_fixed
+        st.session_state["slippage"] = ex.slippage
+        st.session_state["allowed_order_types"] = list(ex.allowed_order_types)
+        st.session_state["partial_fills"] = ex.partial_fills
+        st.session_state["allow_margin"] = ex.allow_margin
+        st.session_state["max_leverage"] = ex.max_leverage
+        st.session_state["initial_margin"] = ex.initial_margin
+        st.session_state["maintenance_margin"] = ex.maintenance_margin
+        st.session_state["margin_interest"] = ex.margin_interest
+        st.session_state["allow_short_selling"] = ex.allow_short_selling
+        st.session_state["borrow_rate"] = ex.borrow_rate
+        st.session_state["max_position_size"] = int(ex.max_position_size)
+        st.session_state["conversion_mode"] = ex.conversion_mode
+        if ex.conversion_threshold is not None:
+            st.session_state["conversion_threshold"] = ex.conversion_threshold
+        if ex.conversion_period is not None:
+            st.session_state["conversion_period"] = ex.conversion_period
+        if ex.conversion_interval is not None:
+            st.session_state["conversion_interval"] = int(ex.conversion_interval)
+
+        # ── Engine ────────────────────────────────────────────
+
+        eng = imported.engine
+        st.session_state["warmup_period"] = int(eng.warmup_period)
+        st.session_state["trade_on_close"] = eng.trade_on_close
+        st.session_state["risk_free_rate"] = eng.risk_free_rate
+        st.session_state["benchmark"] = eng.benchmark
+        st.session_state["exclusive_orders"] = eng.exclusive_orders
+        st.session_state["random_seed"] = (
+            int(eng.random_seed) if eng.random_seed is not None else None
+        )
+        st.session_state["empty_bar_policy"] = eng.empty_bar_policy
+
+        st.session_state["_import_hash"] = _upload_hash
+        st.session_state["_import_success"] = f"Loaded configuration from `{upload.name}`."
+    except (
+        yaml.YAMLError,
+        json.JSONDecodeError,
+        tomllib.TOMLDecodeError,
+        TypeError,
+        ValueError,
+    ) as ex:
+        st.session_state["_import_error"] = f"Failed to parse file: {ex}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Experiment interface
+# ─────────────────────────────────────────────────────────────────────────────
 
 cfg = get_config()
 
@@ -71,9 +290,9 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
 )
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 # 1. General
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 
 with tab1:
     # Generate a stable experiment GUID for this session (regenerated only on explicit reset)
@@ -84,115 +303,37 @@ with tab1:
 
     experiment_name = col1.text_input(
         label="Experiment name",
+        key="experiment_name",
         placeholder=st.session_state.experiment_id,
         max_chars=40,
+        on_change=lambda: st.session_state.update(
+            experiment_name=INVALID_FILENAME_CHARS.sub(
+                "", st.session_state.get("experiment_name", "")
+            )
+        ),
         help=(
             "A human-readable name to identify this experiment (optional). "
-            "If no name is filled in, an automatic GUID is assigned instead."
+            "If no name is filled in, an automatic GUID is assigned instead. "
+            "Characters not allowed in file names are stripped automatically."
         ),
     )
 
-    def _build_experiment_config() -> ExperimentConfig:
-        """Snapshot the current widget state into an ExperimentConfig."""
-        ss = st.session_state
-        return ExperimentConfig(
-            general=GeneralExpConfig(
-                name=ss.get("experiment_name", ""),
-                tags=ss.get("tags", []),
-                description=ss.get("description", ""),
-            ),
-            data=DataExpConfig(
-                instrument_type=str(ss.get("instrument_type", "stocks")),
-                symbols=[
-                    s.symbol if hasattr(s, "symbol") else str(s) for s in ss.get("symbols", [])
-                ],
-                full_history=ss.get("full_history", True),
-                start_date=str(ss.get("start_date")) if ss.get("start_date") else None,
-                end_date=str(ss.get("end_date")) if ss.get("end_date") else None,
-                interval=str(ss.get("interval", "1d")),
-            ),
-            portfolio=PortfolioExpConfig(
-                initial_cash=float(ss.get("initial_cash", 10_000)),
-                base_currency=str(ss.get("base_currency", "USD")),
-            ),
-            strategy=StrategyExpConfig(
-                predefined_strategies=[str(s) for s in ss.get("predefined_strategies", [])],
-                custom_strategies=[
-                    CodeSnippet(
-                        name=ss.get(f"strategy_name_{i}", f"Strategy {i + 1}"),
-                        code=e.get("code", ""),
-                    )
-                    for i, e in enumerate(ss.get("custom_strategies", []))
-                ],
-            ),
-            indicators=IndicatorExpConfig(
-                builtin_indicators=[str(i) for i in ss.get("builtin_indicators", [])],
-                custom_indicators=[
-                    CodeSnippet(
-                        name=ss.get(f"indicator_name_{i}", f"Indicator {i + 1}"),
-                        code=e.get("code", ""),
-                    )
-                    for i, e in enumerate(ss.get("custom_indicators", []))
-                ],
-            ),
-            exchange=ExchangeExpConfig(
-                commission_type=str(ss.get("commission_type", "Percentage")),
-                commission_pct=float(ss.get("commission_pct", 0.1)),
-                commission_fixed=float(ss.get("commission_fixed", 0.0)),
-                slippage=float(ss.get("slippage", 0.05)),
-                allowed_order_types=[str(o) for o in ss.get("allowed_order_types", ["Market"])],
-                partial_fills=ss.get("partial_fills", False),
-                allow_margin=ss.get("allow_margin", True),
-                max_leverage=float(ss.get("max_leverage", 1.0)),
-                initial_margin=float(ss.get("initial_margin", 50.0)),
-                maintenance_margin=float(ss.get("maintenance_margin", 25.0)),
-                margin_interest=float(ss.get("margin_interest", 0.0)),
-                allow_short_selling=ss.get("allow_short_selling", True),
-                borrow_rate=float(ss.get("borrow_rate", 0.0)),
-                max_position_size=int(ss.get("max_position_size", 100)),
-                conversion_mode=str(ss.get("conversion_mode", "Immediate")),
-                conversion_threshold=(
-                    float(ss["conversion_threshold"])
-                    if ss.get("conversion_threshold") is not None
-                    else None
-                ),
-                conversion_period=(
-                    str(ss["conversion_period"])
-                    if ss.get("conversion_period") is not None
-                    else None
-                ),
-                conversion_interval=(
-                    int(ss["conversion_interval"])
-                    if ss.get("conversion_interval") is not None
-                    else None
-                ),
-            ),
-            engine=EngineExpConfig(
-                warmup_period=int(ss.get("warmup_period", 0)),
-                trade_on_close=ss.get("trade_on_close", False),
-                risk_free_rate=float(ss.get("risk_free_rate", 0.0)),
-                benchmark=ss.get("benchmark", ""),
-                exclusive_orders=ss.get("exclusive_orders", False),
-                random_seed=int(ss["random_seed"]) if ss.get("random_seed") is not None else None,
-                empty_bar_policy=str(ss.get("empty_bar_policy", "ForwardFill")),
-            ),
-        )
-
     exp_cfg = _build_experiment_config()
-    file_name = (exp_cfg.general.name or st.session_state.experiment_id) + ".toml"
 
     col2.download_button(
         label="Download configuration",
         data=exp_cfg.to_toml(),
-        file_name=file_name,
+        file_name=f"{exp_cfg.general.name}.toml",
         mime="application/toml",
         icon=":material/download:",
         type="secondary",
         use_container_width=True,
+        help="Persist the current experiment configuration to disk.",
     )
 
     tags = st.multiselect(
         label="Tags",
+        key="tags",
         options=[],
         default=[],
         accept_new_options=True,
@@ -220,6 +361,7 @@ with tab1:
 
     description = st.text_area(
         label="Description",
+        key="description",
         height=200,
         max_chars=1500,
         placeholder="Add a description...",
@@ -230,32 +372,24 @@ with tab1:
         ),
     )
 
-    upload = st.file_uploader(
+    # Show feedback from a previous import (survives rerun).
+    if _import_msg := st.session_state.pop("_import_success", None):
+        st.success(_import_msg)
+    if _import_err := st.session_state.pop("_import_error", None):
+        st.error(_import_err)
+
+    st.file_uploader(
         label="Import configuration",
+        key="_config_upload",
         type=["toml", "yaml", "yml", "json"],
+        on_change=_on_config_upload,
         help="Upload a TOML, YAML or JSON file to pre-fill the experiment configuration.",
     )
 
-    if upload is not None:
-        try:
-            if upload.name.endswith(".json"):
-                config = json.load(upload)
-            elif upload.name.endswith(".toml"):
-                config = tomllib.loads(upload.read().decode("utf-8"))
-            else:
-                config = yaml.safe_load(upload)
 
-            st.session_state["experiment_name"] = config.get("name", "")
-            st.session_state["tags"] = config.get("tags", [])
-            st.session_state["description"] = config.get("description", "")
-            st.success(f"Loaded configuration from `{upload.name}`.")
-        except (yaml.YAMLError, json.JSONDecodeError, tomllib.TOMLDecodeError, TypeError) as ex:
-            st.error(f"Failed to parse file: {ex}")
-
-
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 # 2. Data
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 
 with tab2:
     if st.session_state.get("instrument_type") is None:
@@ -328,6 +462,7 @@ with tab2:
 
     full_history = st.toggle(
         label="Use full available history",
+        key="full_history",
         value=True,
         help=(
             "Whether to use the maximum available history for all selected symbols. "
@@ -340,6 +475,7 @@ with tab2:
 
         start_date = col1.date_input(
             label="Start date",
+            key="start_date",
             value=None,
             min_value="2000-01-01",
             max_value=datetime.now().date(),
@@ -351,6 +487,7 @@ with tab2:
 
         end_date = col2.date_input(
             label="End date",
+            key="end_date",
             value="today",
             min_value=start_date,
             max_value="today",
@@ -362,6 +499,7 @@ with tab2:
 
     interval = st.pills(
         label="Interval",
+        key="interval",
         options=Interval.variants(),
         selection_mode="single",
         default=Interval.get_default(),
@@ -373,9 +511,9 @@ with tab2:
     )
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 # 3. Portfolio
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 
 with tab3:
     base_currency = st.session_state.get("base_currency", cfg.general.base_currency)
@@ -384,6 +522,7 @@ with tab3:
 
     starting_amount = col1.number_input(
         label="Initial cash",
+        key="initial_cash",
         min_value=100,
         value=10_000,
         step=1_000,
@@ -410,9 +549,15 @@ with tab3:
         )
 
         if symbols:
+            _saved_positions = st.session_state.get("starting_positions", {})
             positions_data = st.data_editor(
                 data=[
-                    {"Symbol": a.symbol if hasattr(a, "symbol") else str(a), "Quantity": 0}
+                    {
+                        "Symbol": a.symbol if hasattr(a, "symbol") else str(a),
+                        "Quantity": _saved_positions.get(
+                            a.symbol if hasattr(a, "symbol") else str(a), 0
+                        ),
+                    }
                     for a in symbols
                 ],
                 num_rows="fixed",
@@ -425,13 +570,18 @@ with tab3:
                     ),
                 },
             )
+
+            # Persist non-zero positions back to session state.
+            st.session_state["starting_positions"] = {
+                row["Symbol"]: row["Quantity"] for row in positions_data if row["Quantity"]
+            }
         else:
             st.caption("No symbols selected.")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 # 4. Strategy
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 
 with tab4:
 
@@ -468,6 +618,7 @@ with tab4:
 
     selected_predefined = st.multiselect(
         label="Built-in strategies",
+        key="predefined_strategies",
         options=StrategyType.variants(),
         format_func=lambda s: s.name,
         default=[],
@@ -581,9 +732,9 @@ with tab4:
         st.rerun()
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 # 5. Indicators
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 
 with tab5:
     st.caption(
@@ -596,6 +747,7 @@ with tab5:
 
     selected_indicators = st.multiselect(
         label="Built-in indicators",
+        key="builtin_indicators",
         options=IndicatorType.variants(),
         format_func=lambda i: f"{i} - {i.name}",
         default=[],
@@ -730,9 +882,9 @@ with tab5:
         st.rerun()
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 # 6. Exchange
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 
 with tab6:
     base_cur = st.session_state.get("base_currency", Currency.get_default())
@@ -746,6 +898,7 @@ with tab6:
             variants = CommissionType.variants()
             commission_mode = st.radio(
                 label="Commission type",
+                key="commission_type",
                 options=variants,
                 index=variants.index(CommissionType.get_default()),
                 horizontal=False,
@@ -764,6 +917,7 @@ with tab6:
             if is_pct:
                 commission_pct = st.number_input(
                     label="Commission (% per trade)",
+                    key="commission_pct",
                     min_value=0.0,
                     max_value=100.0,
                     value=0.1,
@@ -778,6 +932,7 @@ with tab6:
             elif is_fixed:
                 commission_fixed = st.number_input(
                     label=f"Commission ({base_cur} per trade)",
+                    key="commission_fixed",
                     min_value=0.0,
                     value=1.0,
                     step=0.5,
@@ -788,6 +943,7 @@ with tab6:
             else:
                 commission_pct = st.number_input(
                     label="Commission (% per trade)",
+                    key="commission_pct",
                     min_value=0.0,
                     max_value=100.0,
                     value=0.1,
@@ -797,6 +953,7 @@ with tab6:
                 )
                 commission_fixed = st.number_input(
                     label=f"Commission ({base_cur} per trade)",
+                    key="commission_fixed",
                     min_value=0.0,
                     value=1.0,
                     step=0.5,
@@ -812,6 +969,7 @@ with tab6:
 
         slippage = st.number_input(
             label="Slippage (% of price per trade)",
+            key="slippage",
             min_value=0.0,
             max_value=100.0,
             value=0.05,
@@ -828,6 +986,7 @@ with tab6:
 
         allowed_order_types = st.multiselect(
             label="Allowed order types",
+            key="allowed_order_types",
             options=OrderType.variants(),
             default=[OrderType.get_default()],
             help=(
@@ -843,6 +1002,7 @@ with tab6:
 
         partial_fills = st.toggle(
             label="Partial fills",
+            key="partial_fills",
             value=False,
             help=(
                 "Simulate partial order fills based on available bar volume. When disabled, "
@@ -857,6 +1017,7 @@ with tab6:
 
         enable_margin = col_toggle.toggle(
             label="Allow margin trading",
+            key="allow_margin",
             value=True,
             help=(
                 "Safety guardrail for margin usage. When enabled (default), the strategy "
@@ -869,6 +1030,7 @@ with tab6:
         if enable_margin:
             max_leverage = col_input.number_input(
                 label="Max leverage",
+                key="max_leverage",
                 min_value=1.0,
                 max_value=10.0,
                 value=1.0,
@@ -885,6 +1047,7 @@ with tab6:
 
             initial_margin = col_im.number_input(
                 label="Initial margin (%)",
+                key="initial_margin",
                 min_value=0.0,
                 max_value=100.0,
                 value=50.0,
@@ -899,6 +1062,7 @@ with tab6:
 
             maintenance_margin = col_mm.number_input(
                 label="Maintenance margin (%)",
+                key="maintenance_margin",
                 min_value=0.0,
                 max_value=100.0,
                 value=25.0,
@@ -912,6 +1076,7 @@ with tab6:
 
             margin_interest = st.number_input(
                 label="Margin interest rate (% annual)",
+                key="margin_interest",
                 min_value=0.0,
                 max_value=100.0,
                 value=0.0,
@@ -930,6 +1095,7 @@ with tab6:
 
         allow_short_selling = st.toggle(
             label="Allow short selling",
+            key="allow_short_selling",
             value=True,
             help=(
                 "Safety guardrail for short positions. When enabled (default), the strategy "
@@ -942,6 +1108,7 @@ with tab6:
         if allow_short_selling:
             borrow_rate = st.number_input(
                 label="Borrow rate (% annual)",
+                key="borrow_rate",
                 min_value=0.0,
                 max_value=100.0,
                 value=0.0,
@@ -958,6 +1125,7 @@ with tab6:
 
         max_position_size = st.number_input(
             label="Max position size (% of portfolio)",
+            key="max_position_size",
             min_value=1,
             max_value=100,
             value=100,
@@ -975,6 +1143,7 @@ with tab6:
         variants = CurrencyConversionMode.variants()
         conversion_mode = st.selectbox(
             label="Foreign currency handling",
+            key="conversion_mode",
             options=variants,
             format_func=lambda x: x.name,
             index=variants.index(CurrencyConversionMode.get_default()),
@@ -991,6 +1160,7 @@ with tab6:
         if conversion_mode == CurrencyConversionMode("HoldUntilThreshold"):
             conversion_threshold = st.number_input(
                 label=f"Conversion threshold ({base_cur})",
+                key="conversion_threshold",
                 min_value=0.0,
                 value=1_000.0,
                 step=100.0,
@@ -1004,6 +1174,7 @@ with tab6:
             variants = ConversionPeriod.variants()
             conversion_period = st.selectbox(
                 label="Conversion period",
+                key="conversion_period",
                 options=variants,
                 index=variants.index(ConversionPeriod.get_default()),
                 help="How often foreign currency balances are converted to the base currency.",
@@ -1011,6 +1182,7 @@ with tab6:
         elif conversion_mode == CurrencyConversionMode("CustomInterval"):
             conversion_interval = st.number_input(
                 label="Conversion interval (bars)",
+                key="conversion_interval",
                 min_value=1,
                 value=5,
                 step=1,
@@ -1021,9 +1193,9 @@ with tab6:
             )
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 # 7. Engine
-# ═════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 
 with tab7:
     with st.container(border=True):
@@ -1031,6 +1203,7 @@ with tab7:
 
         warmup_period = st.number_input(
             label="Warmup period (bars)",
+            key="warmup_period",
             min_value=0,
             value=0,
             step=1,
@@ -1043,6 +1216,7 @@ with tab7:
 
         trade_on_close = st.toggle(
             label="Trade on close",
+            key="trade_on_close",
             value=False,
             help=(
                 "When enabled, orders are filled at the current bar's close price. "
@@ -1056,6 +1230,7 @@ with tab7:
 
         risk_free_rate = st.number_input(
             label="Risk-free rate (%)",
+            key="risk_free_rate",
             min_value=0.0,
             max_value=100.0,
             value=0.0,
@@ -1069,6 +1244,7 @@ with tab7:
 
         benchmark = st.text_input(
             label="Benchmark symbol",
+            key="benchmark",
             placeholder="e.g. SPY",
             max_chars=20,
             help=(
@@ -1082,6 +1258,7 @@ with tab7:
 
         exclusive_orders = st.toggle(
             label="Exclusive orders",
+            key="exclusive_orders",
             value=False,
             help=(
                 "When enabled, submitting a new order automatically cancels all pending "
@@ -1091,6 +1268,7 @@ with tab7:
 
         random_seed = st.number_input(
             label="Random seed",
+            key="random_seed",
             min_value=0,
             value=None,
             step=1,
@@ -1107,6 +1285,7 @@ with tab7:
         variants = EmptyBarPolicy.variants()
         empty_bar_policy = st.selectbox(
             label="Empty bar policy",
+            key="empty_bar_policy",
             options=variants,
             format_func=lambda x: x.name,
             index=variants.index(EmptyBarPolicy.get_default()),

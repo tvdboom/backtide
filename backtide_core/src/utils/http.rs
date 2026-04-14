@@ -5,7 +5,6 @@ use reqwest::{Client, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::future::Future;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -55,31 +54,13 @@ pub struct HttpClient {
     /// Limits the number of concurrent in-flight HTTP requests.
     semaphore: Arc<Semaphore>,
 
-    /// Tracks the scheduled time of the next allowed request for rate
-    /// limiting.
-    next_request_at: Mutex<Instant>,
+    /// Minimum interval between consecutive requests (rate limiter).
+    /// When `None`, no rate limiting is applied beyond the concurrency semaphore.
+    min_request_interval: Option<Duration>,
 
-    /// Current minimum gap between consecutive HTTP requests (milliseconds).
-    /// Starts at the configured value, increases on 429s, recovers on
-    /// sustained success.
-    min_request_gap_ms: AtomicU64,
-
-    /// The originally configured gap (milliseconds). The adaptive gap never
-    /// drops below this.
-    initial_request_gap_ms: u64,
-
-    /// Upper bound for adaptive rate limiting (milliseconds).
-    /// Prevents the gap from growing unboundedly.
-    max_request_gap_ms: u64,
-
-    /// Number of consecutive successful HTTP requests since the last 429.
-    /// Used to gradually recover the request rate after a rate-limit episode.
-    consecutive_successes: AtomicU64,
-
-    /// Generation counter for rate-limit episodes. Incremented by the first
-    /// 429 in a burst, preventing concurrent 429 responses from compounding
-    /// the adaptive gap increase.
-    rate_limit_generation: AtomicU64,
+    /// Tracks the last time a request was dispatched. Used together with
+    /// `min_request_interval` to throttle the overall request rate.
+    last_request: Arc<Mutex<Instant>>,
 }
 
 /// Per-provider tunables for [`HttpClient`].
@@ -87,42 +68,40 @@ pub struct HttpClientConfig {
     /// Maximum number of concurrent in-flight HTTP requests.
     pub max_concurrent_requests: usize,
 
-    /// Minimum gap between consecutive HTTP requests (rate limiter).
-    pub min_request_gap: Duration,
-
     /// Maximum time to wait for a TCP connection to be established.
     pub connect_timeout: Duration,
 
     /// Maximum time to wait for an entire HTTP response (including body).
     pub request_timeout: Duration,
+
+    /// Minimum interval between consecutive HTTP requests (rate limiter).
+    ///
+    /// When `None` (the default), requests are only gated by the concurrency
+    /// semaphore. Set this to e.g. `Duration::from_millis(200)` to cap the
+    /// throughput at ~5 req/s regardless of how many tasks are waiting.
+    pub min_request_interval: Option<Duration>,
 }
 
 impl Default for HttpClientConfig {
     fn default() -> Self {
         Self {
             max_concurrent_requests: 10,
-            min_request_gap: Duration::from_millis(100),
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
+            min_request_interval: None,
         }
     }
 }
 
 impl HttpClient {
     /// Number of times to retry a failed HTTP request.
-    const MAX_RETRIES: u32 = 10;
+    const MAX_RETRIES: u32 = 5;
 
     /// Base delay for exponential back-off (doubles each attempt).
     const BACKOFF_BASE: Duration = Duration::from_millis(500);
 
-    /// Base delay for 429 rate-limit back-off (doubles each attempt).
-    const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(2);
-
     /// Maximum value we honor from a `Retry-After` header.
     const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
-
-    /// Number of consecutive successful requests before the adaptive gap is reduced.
-    const RECOVERY_THRESHOLD: u64 = 5;
 
     /// User-agent sent with every request.
     const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
@@ -148,17 +127,11 @@ impl HttpClient {
             .build()
             .map_err(HttpError::ClientBuild)?;
 
-        let initial_gap_ms = config.min_request_gap.as_millis() as u64;
-
         Ok(Self {
             inner,
             semaphore: Arc::new(Semaphore::new(config.max_concurrent_requests)),
-            next_request_at: Mutex::new(Instant::now()),
-            min_request_gap_ms: AtomicU64::new(initial_gap_ms),
-            initial_request_gap_ms: initial_gap_ms,
-            max_request_gap_ms: (initial_gap_ms * 20).max(500),
-            consecutive_successes: AtomicU64::new(0),
-            rate_limit_generation: AtomicU64::new(0),
+            min_request_interval: config.min_request_interval,
+            last_request: Arc::new(Mutex::new(Instant::now())),
         })
     }
 
@@ -169,8 +142,8 @@ impl HttpClient {
         params: Option<&[(&str, &str)]>,
     ) -> Result<Response, HttpError> {
         self.retry(|| async {
+            self.throttle().await;
             let _permit = self.semaphore.acquire().await.expect("semaphore closed");
-            self.pace().await;
             let mut req = self.inner.get(url);
             if let Some(p) = params {
                 req = req.query(p);
@@ -188,8 +161,8 @@ impl HttpClient {
         body: &B,
     ) -> Result<Response, HttpError> {
         self.retry(|| async {
+            self.throttle().await;
             let _permit = self.semaphore.acquire().await.expect("semaphore closed");
-            self.pace().await;
             self.inner.post(url).query(params).json(body).send().await
         })
         .await
@@ -204,37 +177,19 @@ impl HttpClient {
     // Private API
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Reserve the next available request slot, then sleep until it arrives.
+    /// Enforce the minimum interval between consecutive requests.
     ///
-    /// Called **after** the semaphore is acquired, so only permit-holders
-    /// (bounded count) enter the pace gate.  Each caller atomically advances
-    /// the pacing clock by the current adaptive gap, staggering concurrent
-    /// dispatches evenly.  The lock is released before sleeping so other
-    /// permit-holders can reserve their own slots in parallel.
-    async fn pace(&self) {
-        let delay = {
-            let gap = Duration::from_millis(self.min_request_gap_ms.load(Ordering::Relaxed));
-            let mut next = self.next_request_at.lock().await;
-            let now = Instant::now();
-            let delay = next.saturating_duration_since(now);
-            *next = now.max(*next) + gap;
-            delay
-        };
-        if !delay.is_zero() {
-            sleep(delay).await;
-        }
-    }
-
-    /// Push the global pacing clock forward by `delay`, so every concurrent
-    /// and future request is forced to wait at least that long.
-    ///
-    /// Called when a 429 is received - this ensures the entire client slows
-    /// down, not just the single request that was rate-limited.
-    async fn global_cooldown(&self, delay: Duration) {
-        let mut next = self.next_request_at.lock().await;
-        let earliest = Instant::now() + delay;
-        if *next < earliest {
-            *next = earliest;
+    /// If `min_request_interval` is set, this method sleeps until enough time
+    /// has passed since the last dispatched request, then updates the timestamp.
+    /// This serializes the rate-limiting decision but not the actual I/O.
+    async fn throttle(&self) {
+        if let Some(interval) = self.min_request_interval {
+            let mut last = self.last_request.lock().await;
+            let elapsed = last.elapsed();
+            if elapsed < interval {
+                sleep(interval - elapsed).await;
+            }
+            *last = Instant::now();
         }
     }
 
@@ -252,21 +207,6 @@ impl HttpClient {
                     let status = resp.status();
 
                     if status.is_success() {
-                        // Track consecutive successes to gradually recover
-                        // from an elevated request gap after 429 episodes.
-                        let prev = self.consecutive_successes.fetch_add(1, Ordering::Relaxed);
-                        if prev + 1 >= Self::RECOVERY_THRESHOLD {
-                            self.consecutive_successes.store(0, Ordering::Relaxed);
-                            let current = self.min_request_gap_ms.load(Ordering::Relaxed);
-                            if current > self.initial_request_gap_ms {
-                                let recovered = (current / 4).max(self.initial_request_gap_ms);
-                                self.min_request_gap_ms.store(recovered, Ordering::Relaxed);
-                                tracing::debug!(
-                                    "Rate recovery: request gap decreased to {}ms",
-                                    recovered,
-                                );
-                            }
-                        }
                         return Ok(resp);
                     } else if status == StatusCode::TOO_MANY_REQUESTS {
                         // 429: honor Retry-After header or use exponential back-off.
@@ -276,38 +216,12 @@ impl HttpClient {
                             .and_then(|v| v.to_str().ok())
                             .and_then(|s| s.parse::<u64>().ok())
                             .map(Duration::from_secs)
-                            .unwrap_or_else(|| {
-                                    Self::RATE_LIMIT_BACKOFF * 2u32.saturating_pow(attempt)
-                                })
+                            .unwrap_or_else(|| Self::BACKOFF_BASE * 2u32.saturating_pow(attempt))
                             .min(Self::MAX_RETRY_AFTER);
 
-                        // Reset the success counter and adaptively slow down the
-                        // steady-state request rate so subsequent requests don't
-                        // immediately re-trigger the rate limit.
-                        //
-                        // Use a generation counter so only the FIRST 429 in a
-                        // concurrent burst doubles the gap. Without this, N
-                        // concurrent 429s would compound into a 2^N increase.
-                        self.consecutive_successes.store(0, Ordering::Relaxed);
-                        let gen = self.rate_limit_generation.load(Ordering::Relaxed);
-                        let gap_increased = self
-                            .rate_limit_generation
-                            .compare_exchange(gen, gen + 1, Ordering::Relaxed, Ordering::Relaxed)
-                            .is_ok();
-
-                        let new_gap = if gap_increased {
-                            let prev_gap = self.min_request_gap_ms.load(Ordering::Relaxed);
-                            let new_gap = (prev_gap * 2).min(self.max_request_gap_ms);
-                            self.min_request_gap_ms.store(new_gap, Ordering::Relaxed);
-                            new_gap
-                        } else {
-                            self.min_request_gap_ms.load(Ordering::Relaxed)
-                        };
-
                         warn!(
-                            "Rate limited (429), backing off for {:.1}s, request gap {}ms (attempt {}/{})",
+                            "Rate limited (429). Backing off for {:.1}s (attempt {}/{})",
                             delay.as_secs_f64(),
-                            new_gap,
                             attempt + 1,
                             Self::MAX_RETRIES,
                         );
@@ -316,10 +230,6 @@ impl HttpClient {
                             status,
                             body: format!("Rate limited ({status})"),
                         });
-
-                        // Push the global pacing clock forward so ALL concurrent
-                        // requests also pause, preventing a thundering herd.
-                        self.global_cooldown(delay).await;
 
                         sleep(delay).await;
                         continue;

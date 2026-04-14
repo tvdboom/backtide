@@ -16,10 +16,10 @@ from backtide.core.data import InstrumentType
 from backtide.core.storage import delete_symbols, get_bars_summary
 from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date, _to_pandas
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @st.dialog("Confirm deletion", width="medium")
 def _confirm_delete(series: list[dict[str, str]]):

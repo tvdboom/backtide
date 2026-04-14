@@ -15,7 +15,6 @@ use crate::data::utils::canonical_symbol;
 use crate::utils::http::{HttpClient, HttpClientConfig, HttpError};
 use async_trait::async_trait;
 use serde::Deserialize;
-use std::time::Duration;
 use tracing::{debug, info, instrument};
 
 /// Binance spot-market data provider.
@@ -44,8 +43,7 @@ impl Binance {
     /// Create a new [`Binance`] provider.
     pub async fn new() -> DataResult<Self> {
         let client = HttpClient::with_config(HttpClientConfig {
-            max_concurrent_requests: 25,
-            min_request_gap: Duration::from_millis(25),
+            max_concurrent_requests: 12,
             ..HttpClientConfig::default()
         })?;
 
@@ -158,7 +156,7 @@ impl DataProvider for Binance {
     }
 
     /// Returns the usable download range for an instrument at a given interval.
-    #[instrument(skip(self), fields(symbol = %instrument.symbol, ?interval))]
+    #[instrument(skip(self, instrument), fields(symbol = %instrument.symbol, ?interval))]
     async fn get_download_range(
         &self,
         instrument: Instrument,

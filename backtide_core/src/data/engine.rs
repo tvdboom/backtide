@@ -42,7 +42,7 @@ impl Engine {
     ///
     /// When `start` or `end` is provided, the per-instrument range is clamped so that
     /// no data before `start` or after `end` is requested from the provider.
-    #[instrument(skip(self))]
+    #[instrument(skip(self, profiles), fields(n_profiles = profiles.len(), start, end))]
     pub fn download_instruments(
         &self,
         profiles: &[InstrumentProfile],
@@ -257,7 +257,7 @@ impl Engine {
     }
 
     /// Fetch instruments concurrently, using the cache where possible.
-    #[instrument(skip(self), fields(?instrument_type))]
+    #[instrument(skip(self, symbols), fields(?instrument_type, n_symbols = symbols.len()))]
     pub fn get_instruments(
         &self,
         symbols: Vec<Symbol>,
@@ -276,7 +276,7 @@ impl Engine {
     /// When `exchanges` is `Some`, distributes `limit` evenly across the
     /// specified exchanges (returning the top instruments by volume×price
     /// per exchange).
-    #[instrument(skip(self), fields(?instrument_type))]
+    #[instrument(skip(self, exchanges), fields(?instrument_type, n_exchanges = exchanges.as_ref().map_or(0, |e| e.len())))]
     pub fn list_instruments(
         &self,
         instrument_type: InstrumentType,
@@ -317,7 +317,7 @@ impl Engine {
     ///
     /// Returns a flat, deduplicated list of [`InstrumentProfile`]s — direct
     /// instruments first, followed by currency-conversion legs.
-    #[instrument(skip(self), fields(?instrument_type, ?intervals))]
+    #[instrument(skip(self, symbols), fields(?instrument_type, ?intervals, n_symbols = symbols.len()))]
     pub fn resolve_profiles(
         &self,
         symbols: Vec<Symbol>,
@@ -385,7 +385,7 @@ impl Engine {
                 .filter_map(|result| match result {
                     Ok(pair) => Some(pair),
                     Err(e) => {
-                        warn!("Skipping unconvertible quote currency: {e}");
+                        warn!("Skipping unconvertible quote currency. {e}");
                         None
                     },
                 })
@@ -399,9 +399,7 @@ impl Engine {
                 {
                     instrument_leg_symbols.push(vec![]);
                 } else if let Some(legs) = resolved_legs.get(instr.quote.as_str()) {
-                    instrument_leg_symbols.push(
-                        legs.iter().map(|l| l.symbol.clone()).collect(),
-                    );
+                    instrument_leg_symbols.push(legs.iter().map(|l| l.symbol.clone()).collect());
                 } else {
                     instrument_leg_symbols.push(vec![]);
                 }

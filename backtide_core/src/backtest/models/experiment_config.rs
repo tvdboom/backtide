@@ -272,6 +272,7 @@ impl DataExpConfig {
 pub struct PortfolioExpConfig {
     pub initial_cash: f64,
     pub base_currency: Currency,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub starting_positions: HashMap<String, i64>,
 }
 

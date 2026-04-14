@@ -10,6 +10,9 @@ import re
 # Regex pattern to which tags must comply
 TAG_PATTERN = re.compile(r"^[\w-]{1,15}$")
 
+# Characters forbidden in file names (Windows superset covers all platforms)
+INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
 # Maximum number of instruments to download or backtest at the same time
 MAX_INSTRUMENT_SELECTION = 10
 

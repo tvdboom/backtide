@@ -70,10 +70,10 @@ impl YahooFinance {
     /// 2. `GET` [`Self::CRUMB_URL`]       - retrieves the CSRF crumb.
     pub async fn new() -> DataResult<Self> {
         let client = HttpClient::with_config(HttpClientConfig {
-            max_concurrent_requests: 25,
-            min_request_gap: Duration::from_millis(20),
+            max_concurrent_requests: 15,
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
+            min_request_interval: Some(Duration::from_millis(20)),
         })?;
         let crumb = Self::fetch_crumb(&client).await?;
 
@@ -463,7 +463,7 @@ impl DataProvider for YahooFinance {
     /// For intraday intervals the start is clamped to the provider's rolling
     /// history window, so the value reflects what is actually
     /// downloadable rather than the Instrument's listing date.
-    #[instrument(skip(self), fields(symbol = %instr.symbol, ?interval))]
+    #[instrument(skip(self, instr), fields(symbol = %instr.symbol, ?interval))]
     async fn get_download_range(
         &self,
         instr: Instrument,
@@ -561,7 +561,7 @@ impl DataProvider for YahooFinance {
     ///   then picks the top `limit` results by volume Ã— price.
     /// - **Forex**: returns all [`ForexPair`] variants with synthetic timestamps.
     /// - **Crypto**: merges US, EU, and GB predefined screeners concurrently.
-    #[instrument(skip(self), fields(?instrument_type, limit))]
+    #[instrument(skip(self, exchanges), fields(?instrument_type, n_exchanges = exchanges.as_ref().map_or(0, |e| e.len()), limit))]
     async fn list_instruments(
         &self,
         instrument_type: InstrumentType,

@@ -82,6 +82,7 @@ Important caveats:
 - Supports crypto and forex.
 - Kraken-specific ticker aliases are normalized back to canonical names, e.g.,
   `XBT` becomes `BTC` and `XDG` becomes `DOGE`.
+- Kraken's high API call limits make it the fastest provider.
 
 Important caveats:
 
@@ -111,6 +112,7 @@ Important caveats:
 Important caveats:
 
 - Coinbase does not support the `1w` interval.
+- Coinbase's strict rate limits make it the slowest provider.
 
 <br>
 

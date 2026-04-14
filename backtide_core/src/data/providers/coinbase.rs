@@ -16,7 +16,6 @@ use crate::utils::http::{HttpClient, HttpClientConfig, HttpError};
 use async_trait::async_trait;
 use chrono::DateTime;
 use serde::Deserialize;
-use std::time::Duration;
 use tracing::{debug, info, instrument};
 
 /// Coinbase spot-market data provider.
@@ -42,10 +41,8 @@ impl Coinbase {
 
     /// Create a new [`Coinbase`] provider.
     pub async fn new() -> DataResult<Self> {
-        // Coinbase Advanced Trade public API: 10 req/s per IP.
         let client = HttpClient::with_config(HttpClientConfig {
-            max_concurrent_requests: 8,
-            min_request_gap: Duration::from_millis(100),
+            max_concurrent_requests: 1,
             ..HttpClientConfig::default()
         })?;
 
@@ -151,7 +148,7 @@ impl DataProvider for Coinbase {
     }
 
     /// Returns the usable download range for an instrument at a given interval.
-    #[instrument(skip(self), fields(symbol = %instrument.symbol, ?interval))]
+    #[instrument(skip(self, instrument), fields(symbol = %instrument.symbol, ?interval))]
     async fn get_download_range(
         &self,
         instrument: Instrument,
