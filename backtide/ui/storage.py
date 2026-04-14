@@ -14,12 +14,12 @@ import streamlit as st
 from backtide.core.config import get_config
 from backtide.core.data import InstrumentType
 from backtide.core.storage import delete_symbols, get_bars_summary
-from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date
+from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date, _to_pandas
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
 # ─────────────────────────────────────────────────────────────────────────────
-
 
 @st.dialog("Confirm deletion", width="medium")
 def _confirm_delete(series: list[dict[str, str]]):
@@ -56,7 +56,7 @@ st.title("Storage", text_alignment="center")
 
 st.divider()
 
-bars_df = get_bars_summary()
+bars_df = _to_pandas(get_bars_summary())
 
 if bars_df.empty:
     st.info(
@@ -74,7 +74,7 @@ rows = [
         "First date": _parse_date(int(r["first_ts"]), cfg.display.date_format, tz),
         "Last date": _parse_date(int(r["last_ts"]), cfg.display.date_format, tz),
         "Bars": int(r["n_rows"]),
-        "Price": r["sparkline"] if r["sparkline"] else None,
+        "Price": r["sparkline"],
     }
     for _, r in bars_df.iterrows()
 ]
@@ -84,6 +84,7 @@ df = pd.DataFrame(rows)
 metrics_container = st.container()
 
 column_config = {
+    "Instrument type": st.column_config.TextColumn(width="small"),
     "Bars": st.column_config.NumberColumn(format="%d"),
     "Price": st.column_config.LineChartColumn(help="Closing price for the last 365 intervals."),
 }

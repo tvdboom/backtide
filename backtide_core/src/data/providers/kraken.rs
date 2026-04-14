@@ -47,8 +47,8 @@ impl Kraken {
         // Kraken public API: 1 req/s for unauthenticated users (counter
         // decrements by 1/s, max burst of 15). Keep it conservative.
         let client = HttpClient::with_config(HttpClientConfig {
-            max_concurrent_requests: 8,
-            min_request_gap: Duration::from_millis(1000),
+            max_concurrent_requests: 12,
+            min_request_gap: Duration::from_millis(25),
             ..HttpClientConfig::default()
         })?;
 

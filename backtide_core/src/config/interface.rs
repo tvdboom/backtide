@@ -13,6 +13,7 @@
 //! | `[display]` | UI / Streamlit app                                   |
 
 use crate::config::errors::{ConfigError, ConfigResult};
+use crate::config::models::dataframe_backend::DataframeBackend;
 use crate::config::models::log_level::LogLevel;
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
 use crate::config::utils::{fetch_config, parse_config};
@@ -393,6 +394,11 @@ impl DataConfig {
 ///
 /// Attributes
 /// ----------
+/// dataframe_backend : str | [DataframeBackend], default="pandas"
+///     Which dataframe library to use when providing data to the frontend (i.e.,
+///     the return of storage functions or parameters in the strategy function).
+///     Choose from: "pandas", "polars".
+///
 /// date_format : str, default="YYYY-MM-DD"
 ///     Format in which to display dates in [momentjs] style. Valid formats include
 ///     `YYYY/MM/DD`, `DD/MM/YYYY`, or `MM/DD/YYYY` and can also use a period (.) or
@@ -427,6 +433,7 @@ impl DataConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DisplayConfig {
+    pub dataframe_backend: DataframeBackend,
     pub date_format: String,
     pub time_format: String,
     pub timezone: Option<String>,
@@ -438,6 +445,7 @@ pub struct DisplayConfig {
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
+            dataframe_backend: DataframeBackend::default(),
             date_format: "YYYY-MM-DD".to_owned(),
             time_format: "HH:MM".to_owned(),
             timezone: None,
@@ -455,6 +463,7 @@ impl DisplayConfig {
 
     #[new]
     #[pyo3(signature = (
+        dataframe_backend=None,
         date_format="YYYY-MM-DD",
         time_format="HH:MM",
         timezone=None,
@@ -463,6 +472,7 @@ impl DisplayConfig {
         port=8501
     ))]
     fn new(
+        dataframe_backend: Option<DataframeBackend>,
         date_format: &str,
         time_format: &str,
         timezone: Option<&str>,
@@ -471,6 +481,7 @@ impl DisplayConfig {
         port: u16,
     ) -> Self {
         Self {
+            dataframe_backend: dataframe_backend.unwrap_or_default(),
             date_format: date_format.to_owned(),
             time_format: time_format.to_owned(),
             timezone: timezone.map(|s| s.to_owned()),
@@ -482,7 +493,8 @@ impl DisplayConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "DisplayConfig(date_format={:?}, time_format={:?}, timezone={:?}, logokit_api_key={:?}, address={:?}, port={:?})",
+            "DisplayConfig(dataframe_backend={:?}, date_format={:?}, time_format={:?}, timezone={:?}, logokit_api_key={:?}, address={:?}, port={:?})",
+            self.dataframe_backend.to_string().to_lowercase(),
             self.date_format,
             self.time_format,
             self.timezone,

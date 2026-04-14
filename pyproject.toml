@@ -28,6 +28,9 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
+[project.optional-dependencies]
+polars = ["polars>=1.0"]
+
 [dependency-groups]
 # Although already in the pre-commit, required for the IDE's language server
 lint = [

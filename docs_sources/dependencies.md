@@ -30,6 +30,10 @@ And operating systems:
 * **[streamlit-code-editor](https://github.com/bouzidanas/streamlit-code-editor)** (>=0.1.22)
 
 
+### Optional
+
+* **[polars](https://github.com/pola-rs/polars)** (>=1.0)
+
 ### Development
 
 The development dependencies are not installed with the package, and are not

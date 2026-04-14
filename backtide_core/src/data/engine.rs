@@ -341,45 +341,75 @@ impl Engine {
             let mut leg_map: IndexMap<String, Instrument> = IndexMap::new();
             let mut instrument_leg_symbols: Vec<Vec<Symbol>> = Vec::new();
 
+            // Collect the unique quote currencies that need conversion legs.
+            let unique_quotes: Vec<&str> = {
+                let mut seen = HashSet::new();
+                instruments
+                    .iter()
+                    .filter(|i| {
+                        !(i.base.as_ref().is_some_and(|b| b == base_currency)
+                            || &i.quote == base_currency)
+                    })
+                    .filter_map(|i| seen.insert(i.quote.as_str()).then_some(i.quote.as_str()))
+                    .collect()
+            };
+
+            // Resolve legs for every unique quote currency concurrently.
+            let resolved_legs: HashMap<&str, Vec<Instrument>> =
+                join_all(unique_quotes.into_iter().map(|quote| {
+                    let intervals = &intervals;
+                    async move {
+                        let is_fiat = quote.parse::<Currency>().is_ok();
+                        self.resolve_legs(
+                            quote,
+                            base_currency,
+                            if is_fiat {
+                                (tri_fiat, tri_fiat)
+                            } else {
+                                (tri_crypto, tri_crypto_pegged)
+                            },
+                            if is_fiat {
+                                InstrumentType::Forex
+                            } else {
+                                InstrumentType::Crypto
+                            },
+                            intervals,
+                            tri_strategy,
+                        )
+                        .await
+                        .map(|legs| (quote, legs))
+                    }
+                }))
+                .await
+                .into_iter()
+                .filter_map(|result| match result {
+                    Ok(pair) => Some(pair),
+                    Err(e) => {
+                        warn!("Skipping unconvertible quote currency: {e}");
+                        None
+                    },
+                })
+                .collect();
+
+            // Build per-instrument leg symbols from the pre-resolved results.
+            // Instruments whose quote could not be resolved get empty legs.
             for instr in &instruments {
-                let base = &instr.base;
-                let quote = &instr.quote;
-
-                // Skip if already denominated in base — no extra legs needed.
-                if base.as_ref().is_some_and(|b| b == base_currency) || quote == base_currency {
+                if instr.base.as_ref().is_some_and(|b| b == base_currency)
+                    || &instr.quote == base_currency
+                {
                     instrument_leg_symbols.push(vec![]);
-                    continue;
+                } else if let Some(legs) = resolved_legs.get(instr.quote.as_str()) {
+                    instrument_leg_symbols.push(
+                        legs.iter().map(|l| l.symbol.clone()).collect(),
+                    );
+                } else {
+                    instrument_leg_symbols.push(vec![]);
                 }
+            }
 
-                let is_fiat = quote.parse::<Currency>().is_ok();
-                let it = if is_fiat {
-                    InstrumentType::Forex
-                } else {
-                    InstrumentType::Crypto
-                };
-
-                let (mid, mid_pegged) = if is_fiat {
-                    (tri_fiat, tri_fiat)
-                } else {
-                    (tri_crypto, tri_crypto_pegged)
-                };
-
-                // Fetch the legs for this instrument
-                let resolved = self
-                    .resolve_legs(
-                        quote,
-                        base_currency,
-                        (mid, mid_pegged),
-                        it,
-                        &intervals,
-                        tri_strategy,
-                    )
-                    .await?;
-
-                // Add the leg symbols to the instrument's profile
-                instrument_leg_symbols.push(resolved.iter().map(|l| l.symbol.clone()).collect());
-
-                for leg in resolved {
+            // Consume resolved legs into the flat leg map.
+            for (_, legs) in resolved_legs {
+                for leg in legs {
                     leg_map.entry(leg.symbol.clone()).or_insert(leg);
                 }
             }
@@ -576,7 +606,15 @@ impl Engine {
         }
 
         if mid.1 != base {
-            legs.push(self.load_instrument_bidirectional(mid.1, base, it, intervals).await?);
+            // When both the pegged mid-currency and the target base are fiat
+            // currencies, resolve the leg via the Forex provider
+            let leg_it = if mid.1.parse::<Currency>().is_ok() && base.parse::<Currency>().is_ok() {
+                InstrumentType::Forex
+            } else {
+                it
+            };
+
+            legs.push(self.load_instrument_bidirectional(mid.1, base, leg_it, intervals).await?);
         }
 
         if legs.is_empty() {

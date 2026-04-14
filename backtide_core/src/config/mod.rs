@@ -1,4 +1,5 @@
 use crate::config::interface::*;
+use crate::config::models::dataframe_backend::DataframeBackend;
 use crate::config::models::log_level::LogLevel;
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
 use pyo3::prelude::*;
@@ -12,6 +13,7 @@ pub mod utils;
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "backtide.config")?;
 
+    m.add_class::<DataframeBackend>()?;
     m.add_class::<LogLevel>()?;
     m.add_class::<TriangulationStrategy>()?;
 

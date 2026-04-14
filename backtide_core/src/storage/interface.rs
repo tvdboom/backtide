@@ -1,27 +1,46 @@
 //! Python interface for the storage module.
 
+use crate::config::interface::Config;
+use crate::config::models::dataframe_backend::DataframeBackend;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-/// Return all stored OHLCV bars as a pandas DataFrame.
+/// Build a DataFrame from a Python dict, using the configured backend.
+fn dict_to_dataframe<'py>(
+    py: Python<'py>,
+    data: &Bound<'py, PyDict>,
+) -> PyResult<Bound<'py, PyAny>> {
+    match Config::get()?.display.dataframe_backend {
+        DataframeBackend::Pandas => {
+            let pd = py.import("pandas")?;
+            pd.call_method1("DataFrame", (data,))
+        },
+        DataframeBackend::Polars => {
+            let pl = py.import("polars")?;
+            pl.call_method1("from_dict", (data,))
+        },
+    }
+}
+
+/// Return all stored OHLCV bars as a dataframe.
 ///
-/// Each row represents a single bar. The DataFrame columns are:
+/// Each row represents a single bar. The dataframe columns are:
 /// `symbol`, `instrument_type`, `interval`, `provider`, `open_ts`,
 /// `close_ts`, `open_ts_exchange`, `open`, `high`, `low`, `close`,
 /// `adj_close`, `volume`, and `n_trades`.
 ///
 /// Returns
 /// -------
-/// pd.DataFrame
+/// pd.DataFrame | pl.DataFrame
 ///     All bars currently held in the database.
 ///
 /// See Also
 /// --------
-/// - backtide.storage:delete_symbols
 /// - backtide.data:download_instruments
+/// - backtide.storage:get_bars_summary
 /// - backtide.storage:get_dividends
 ///
 /// Examples
@@ -86,19 +105,18 @@ pub fn get_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
     data.set_item("volume", PyList::new(py, &volume)?)?;
     data.set_item("n_trades", PyList::new(py, &n_trades)?)?;
 
-    let pd = py.import("pandas")?;
-    let df = pd.call_method1("DataFrame", (data,))?;
+    let df = dict_to_dataframe(py, &data)?;
     Ok(df.unbind())
 }
 
-/// Return a pre-aggregated summary of stored bars as a pandas DataFrame.
+/// Return a pre-aggregated summary of stored bars as a dataframe.
 ///
 /// Each row represents one (symbol, interval, provider) series. The `sparkline`
 /// column contains the last 365 `adj_close` values.
 ///
 /// Returns
 /// -------
-/// pd.DataFrame
+/// pd.DataFrame | pl.DataFrame
 ///     One summary row per stored series.
 ///
 /// Examples
@@ -145,19 +163,18 @@ pub fn get_bars_summary(py: Python<'_>) -> PyResult<Py<PyAny>> {
     data.set_item("n_rows", PyList::new(py, &n_rows)?)?;
     data.set_item("sparkline", PyList::new(py, &sparklines)?)?;
 
-    let pd = py.import("pandas")?;
-    let df = pd.call_method1("DataFrame", (data,))?;
+    let df = dict_to_dataframe(py, &data)?;
     Ok(df.unbind())
 }
 
-/// Return all stored dividend events as a pandas DataFrame.
+/// Return all stored dividend events as a dataframe.
 ///
 /// Each row represents a single dividend payment. The DataFrame columns
 /// are: `symbol`, `provider`, `ex_date`, and `amount`.
 ///
 /// Returns
 /// -------
-/// pd.DataFrame
+/// pd.DataFrame | pl.DataFrame
 ///     All dividend events currently held in the database.
 ///
 /// See Also
@@ -198,8 +215,7 @@ pub fn get_dividends(py: Python<'_>) -> PyResult<Py<PyAny>> {
     data.set_item("ex_date", PyList::new(py, &ex_dates)?)?;
     data.set_item("amount", PyList::new(py, &amounts)?)?;
 
-    let pd = py.import("pandas")?;
-    let df = pd.call_method1("DataFrame", (data,))?;
+    let df = dict_to_dataframe(py, &data)?;
     Ok(df.unbind())
 }
 

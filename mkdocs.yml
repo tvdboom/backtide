@@ -131,6 +131,7 @@ nav:
             - resolve_profiles: api/data/resolve_profiles.md
         - storage:
             - get_bars: api/storage/get_bars.md
+            - get_bars_summary: api/storage/get_bars_summary.md
             - get_dividends: api/storage/get_dividends.md
             - delete_symbols: api/storage/delete_symbols.md
         - models:
@@ -154,6 +155,7 @@ nav:
             - config:
                 - Config: api/models/config/config.md
                 - DataConfig: api/models/config/dataconfig.md
+                - DataframeBackend: api/models/config/dataframebackend.md
                 - DisplayConfig: api/models/config/displayconfig.md
                 - GeneralConfig: api/models/config/generalconfig.md
                 - LogLevel: api/models/config/loglevel.md

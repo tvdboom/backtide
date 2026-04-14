@@ -10,6 +10,7 @@ from datetime import datetime as dt
 from pathlib import Path
 import re
 from typing import Any
+import pandas as pd
 from zoneinfo import ZoneInfo
 
 import streamlit as st
@@ -18,6 +19,14 @@ from backtide.constants import MOMENT_TO_STRFTIME
 from backtide.core.data import Instrument, InstrumentType, list_instruments
 from backtide.utils.constants import MAX_PRELOADED_INSTRUMENTS
 from backtide.utils.utils import to_list
+
+
+def _to_pandas(df: Any) -> pd.DataFrame:
+    """Ensure a DataFrame is pandas, converting from polars if needed."""
+    if hasattr(df, "to_pandas"):
+        return df.to_pandas(use_pyarrow_extension_array=True)
+
+    return df
 
 
 def _get_instrument_type_description(instrument_type: InstrumentType) -> tuple[str, str]:
