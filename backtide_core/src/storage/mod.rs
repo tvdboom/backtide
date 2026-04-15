@@ -1,4 +1,4 @@
-use crate::storage::interface::{delete_symbols, get_bars, get_bars_summary, get_dividends};
+use crate::storage::interface::*;
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
@@ -13,9 +13,10 @@ pub mod traits;
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "backtide.storage")?;
 
-    m.add_function(wrap_pyfunction!(get_bars, &m)?)?;
-    m.add_function(wrap_pyfunction!(get_bars_summary, &m)?)?;
-    m.add_function(wrap_pyfunction!(get_dividends, &m)?)?;
+    m.add_function(wrap_pyfunction!(query_bars, &m)?)?;
+    m.add_function(wrap_pyfunction!(query_bars_summary, &m)?)?;
+    m.add_function(wrap_pyfunction!(query_dividends, &m)?)?;
+    m.add_function(wrap_pyfunction!(query_instruments, &m)?)?;
     m.add_function(wrap_pyfunction!(delete_symbols, &m)?)?;
 
     parent.add_submodule(&m)?;

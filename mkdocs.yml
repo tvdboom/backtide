@@ -125,14 +125,15 @@ nav:
             - load_config: api/config/load_config.md
             - set_config: api/config/set_config.md
         - data:
-            - download_instruments: api/data/download_instruments.md
-            - get_instruments: api/data/get_instruments.md
+            - download_bars: api/data/download_bars.md
+            - fetch_instruments: api/data/fetch_instruments.md
             - list_instruments: api/data/list_instruments.md
             - resolve_profiles: api/data/resolve_profiles.md
         - storage:
-            - get_bars: api/storage/get_bars.md
-            - get_bars_summary: api/storage/get_bars_summary.md
-            - get_dividends: api/storage/get_dividends.md
+            - query_bars: api/storage/query_bars.md
+            - query_bars_summary: api/storage/query_bars_summary.md
+            - query_dividends: api/storage/query_dividends.md
+            - query_instruments: api/storage/query_instruments.md
             - delete_symbols: api/storage/delete_symbols.md
         - models:
             - backtest:

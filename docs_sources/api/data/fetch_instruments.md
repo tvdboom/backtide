@@ -1,10 +1,11 @@
-# get_bars_summary
------------------
+# fetch_instruments
+-------------------
 
-:: backtide.storage:get_bars_summary
+:: backtide.data:fetch_instruments
     :: signature
     :: head
     :: table:
+        - parameters
         - returns
     :: see also
 
@@ -13,3 +14,4 @@
 ## Example
 
 :: examples
+

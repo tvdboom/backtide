@@ -11,7 +11,7 @@ use strum::{Display, EnumString, IntoEnumIterator};
 /// - backtide.data:Instrument
 /// - backtide.data:InstrumentType
 /// - backtide.data:Interval
-#[pyclass(skip_from_py_object)]
+#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.data")]
 #[derive(
     Clone,
     Copy,
@@ -37,8 +37,19 @@ impl Provider {
     #[classattr]
     const __RUST_ENUM__: bool = true;
 
+    #[new]
+    fn new(s: &str) -> PyResult<Self> {
+        s.parse()
+            .map_err(|_| PyValueError::new_err(format!("Unknown provider {s:?}.")))
+    }
+
     fn __repr__(&self) -> String {
         self.to_string()
+    }
+
+    pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
+        let cls = py.get_type::<Provider>().into_any();
+        Ok((cls, (self.to_string(),)))
     }
 
     /// List the supported intervals.

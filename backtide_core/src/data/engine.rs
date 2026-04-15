@@ -20,7 +20,8 @@ use crate::utils::progress::{progress_bar, progress_spinner};
 use futures::future::{join_all, try_join_all};
 use futures::stream::{self, StreamExt};
 use indexmap::IndexMap;
-use std::collections::{HashMap, HashSet};
+use itertools::Itertools;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
@@ -30,8 +31,112 @@ impl Engine {
     // Public interface
     // ────────────────────────────────────────────────────────────────────────
 
-    /// Download instruments from a list of [`InstrumentProfile`]s and store the
-    /// results in the database.
+    /// Fetch instruments concurrently, using the cache where possible.
+    #[instrument(skip(self, symbols), fields(n_symbols = symbols.len(), ?instrument_type))]
+    pub fn fetch_instruments(
+        &self,
+        symbols: Vec<Symbol>,
+        instrument_type: InstrumentType,
+    ) -> DataResult<Vec<Instrument>> {
+        self.rt.block_on(async {
+            let tasks: Vec<_> =
+                symbols.iter().map(|s| self.load_instrument(s, instrument_type)).collect();
+            join_all(tasks).await.into_iter().collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    /// List the most important instruments for a given instrument type, capped at `limit`.
+    ///
+    /// Instruments already stored in the database are returned first.  Only when
+    /// the DB holds fewer than `limit` matching rows does the method fall back to
+    /// the network provider to fill the gap.  Network results are persisted so
+    /// that subsequent calls can be served entirely from storage.
+    ///
+    /// When `exchanges` is provided, the `limit` is distributed evenly across the
+    /// specified exchanges (returning the top instruments by liquidity per exchange).
+    #[instrument(skip(self, exchanges), fields(?instrument_type, n_exchanges = exchanges.as_ref().map_or(0, |e| e.len())))]
+    pub fn list_instruments(
+        &self,
+        instrument_type: InstrumentType,
+        exchanges: Option<Vec<Exchange>>,
+        limit: usize,
+        verbose: bool,
+    ) -> DataResult<Vec<Instrument>> {
+        let provider = self.provider(instrument_type);
+
+        // ── Phase 1: Check the database ─────────────────────────────────────
+
+        let db_instruments = self
+            .query_instruments(
+                Some(instrument_type),
+                Some(provider),
+                exchanges.as_deref(),
+                Some(limit),
+            )
+            .unwrap_or_default();
+
+        if db_instruments.len() >= limit {
+            debug!(n = db_instruments.len(), "The db has enough instruments, skipping download.");
+            return Ok(db_instruments.into_iter().take(limit).collect());
+        }
+
+        // ── Phase 2: Download the remainder from the network ────────────────
+
+        let pb =
+            verbose.then(|| progress_spinner(format!("Listing {instrument_type} instruments...")));
+
+        let network_instruments = self.rt.block_on(
+            self.providers.get(&instrument_type).unwrap().list_instruments(
+                instrument_type,
+                exchanges,
+                limit,
+            ),
+        );
+
+        let instruments = match network_instruments {
+            Ok(n) => n,
+            Err(e) => {
+                // Network failed — return whatever the DB had.
+                if db_instruments.is_empty() {
+                    return Err(e);
+                }
+
+                if let Some(ref pb) = pb {
+                    pb.finish_and_clear();
+                }
+
+                warn!("Failed to download instruments ({e}), returning DB-only instruments.");
+                return Ok(db_instruments);
+            },
+        };
+
+        if let Some(ref pb) = pb {
+            pb.set_message("Storing instruments in the database...");
+        }
+
+        // Persist network results to the database.
+        if let Err(e) = self.write_instruments(&instruments) {
+            warn!("Failed to store instruments in the database: {e}");
+        }
+
+        if let Some(ref pb) = pb {
+            pb.finish_and_clear();
+        }
+
+        // ── Phase 3: Merge, dedup by symbol, cap at limit ───────────────────
+
+        let instruments: Vec<Instrument> = instruments
+            .into_iter()
+            .chain(db_instruments)
+            .unique_by(|i| i.symbol.clone())
+            .take(limit)
+            .collect();
+
+        Ok(instruments)
+    }
+
+    /// Download bars from a list of [`InstrumentProfile`] and store the results in
+    /// the database.
     ///
     /// * Checks what is already in storage — skips completed ranges and only downloads
     ///   the missing head/tail (or both) for partial ones.
@@ -43,7 +148,7 @@ impl Engine {
     /// When `start` or `end` is provided, the per-instrument range is clamped so that
     /// no data before `start` or after `end` is requested from the provider.
     #[instrument(skip(self, profiles), fields(n_profiles = profiles.len(), start, end))]
-    pub fn download_instruments(
+    pub fn download_bars(
         &self,
         profiles: &[InstrumentProfile],
         start: Option<u64>,
@@ -54,7 +159,7 @@ impl Engine {
             // Build a list of (symbol, instrument_type, interval, start, end) tasks
             let mut tasks: Vec<(String, InstrumentType, Interval, u64, u64)> = Vec::new();
 
-            let stored_ranges = self.get_bar_ranges()?;
+            let stored_ranges = self.query_bar_ranges()?;
 
             for profile in profiles {
                 let symbol = &profile.instrument.symbol;
@@ -203,7 +308,6 @@ impl Engine {
 
                         bar_series.push(BarSeries {
                             symbol: symbol.clone(),
-                            instrument_type: it,
                             interval,
                             provider: provider_enum,
                             bars: download.bars,
@@ -237,6 +341,18 @@ impl Engine {
                 info!("Dividend bulk write complete.");
             }
 
+            // Write instrument metadata for every profile that was requested.
+            let instruments: Vec<Instrument> = profiles
+                .iter()
+                .unique_by(|p| p.instrument.symbol.clone())
+                .map(|p| p.instrument.clone())
+                .collect();
+
+            if !instruments.is_empty() {
+                info!(n = instruments.len(), "Writing instrument metadata...");
+                self.write_instruments(&instruments)?;
+            }
+
             // ── Phase 3: build result summary ────────────────────────────
 
             let mut n_succeeded = 0usize;
@@ -256,66 +372,10 @@ impl Engine {
         })
     }
 
-    /// Fetch instruments concurrently, using the cache where possible.
-    #[instrument(skip(self, symbols), fields(?instrument_type, n_symbols = symbols.len()))]
-    pub fn get_instruments(
-        &self,
-        symbols: Vec<Symbol>,
-        instrument_type: InstrumentType,
-    ) -> DataResult<Vec<Instrument>> {
-        self.rt.block_on(async {
-            let tasks: Vec<_> =
-                symbols.iter().map(|s| self.load_instrument(s, instrument_type)).collect();
-            join_all(tasks).await.into_iter().collect::<Result<Vec<_>, _>>()
-        })
-    }
-
-    /// List the most important instruments for a given instrument type, capped at `limit`.
-    ///
-    /// When `exchanges` is `None`, delegates directly to the provider.
-    /// When `exchanges` is `Some`, distributes `limit` evenly across the
-    /// specified exchanges (returning the top instruments by volume×price
-    /// per exchange).
-    #[instrument(skip(self, exchanges), fields(?instrument_type, n_exchanges = exchanges.as_ref().map_or(0, |e| e.len())))]
-    pub fn list_instruments(
-        &self,
-        instrument_type: InstrumentType,
-        exchanges: Option<Vec<Exchange>>,
-        limit: usize,
-        verbose: bool,
-    ) -> DataResult<Vec<Instrument>> {
-        let pb =
-            verbose.then(|| progress_spinner(format!("Listing {instrument_type} instruments...")));
-
-        let instruments =
-            self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
-                instrument_type,
-                exchanges,
-                limit,
-            ))?;
-
-        if let Some(ref pb) = pb {
-            pb.finish_and_clear();
-        }
-
-        // Warm the instrument cache so subsequent resolve_profiles calls don't
-        // need to re-fetch each symbol individually.
-        self.rt.block_on(async {
-            for instr in &instruments {
-                self.cache
-                    .instrument_cache
-                    .insert(instr.symbol.clone(), Arc::new(instr.clone()))
-                    .await;
-            }
-        });
-
-        Ok(instruments)
-    }
-
     /// Resolves all instruments required to price the given symbols in the
     /// portfolio base currency, including any triangulation intermediaries.
     ///
-    /// Returns a flat, deduplicated list of [`InstrumentProfile`]s — direct
+    /// Returns a flat, deduplicated list of [`InstrumentProfile`] — direct
     /// instruments first, followed by currency-conversion legs.
     #[instrument(skip(self, symbols), fields(?instrument_type, ?intervals, n_symbols = symbols.len()))]
     pub fn resolve_profiles(
@@ -342,17 +402,15 @@ impl Engine {
             let mut instrument_leg_symbols: Vec<Vec<Symbol>> = Vec::new();
 
             // Collect the unique quote currencies that need conversion legs.
-            let unique_quotes: Vec<&str> = {
-                let mut seen = HashSet::new();
-                instruments
-                    .iter()
-                    .filter(|i| {
-                        !(i.base.as_ref().is_some_and(|b| b == base_currency)
-                            || &i.quote == base_currency)
-                    })
-                    .filter_map(|i| seen.insert(i.quote.as_str()).then_some(i.quote.as_str()))
-                    .collect()
-            };
+            let unique_quotes: Vec<&str> = instruments
+                .iter()
+                .filter(|i| {
+                    !(i.base.as_ref().is_some_and(|b| b == base_currency)
+                        || &i.quote == base_currency)
+                })
+                .unique_by(|i| i.quote.as_str())
+                .map(|i| i.quote.as_str())
+                .collect();
 
             // Resolve legs for every unique quote currency concurrently.
             let resolved_legs: HashMap<&str, Vec<Instrument>> =
@@ -464,11 +522,10 @@ impl Engine {
             .await?;
 
             // Merge into a single flat vec, deduplicating by symbol.
-            let mut seen = HashSet::new();
             let profiles: Vec<_> = instrument_profiles
                 .into_iter()
                 .chain(leg_profiles)
-                .filter(|p| seen.insert(p.instrument.symbol.clone()))
+                .unique_by(|p| p.instrument.symbol.clone())
                 .collect();
 
             Ok(profiles)
@@ -496,7 +553,7 @@ impl Engine {
         }
 
         let provider = self.providers.get(&instrument_type).unwrap();
-        let instr = provider.get_instrument(symbol, instrument_type).await?;
+        let instr = provider.fetch_instrument(symbol, instrument_type).await?;
         self.cache.instrument_cache.insert(symbol.clone(), Arc::new(instr.clone())).await;
         debug!(%symbol, "Instrument cached");
         Ok(instr)
@@ -518,7 +575,7 @@ impl Engine {
                 return Ok::<_, DataError>((iv, range.0, range.1));
             }
 
-            let (start, end) = provider.get_download_range(instrument.clone(), iv).await?;
+            let (start, end) = provider.fetch_range(instrument.clone(), iv).await?;
             self.cache.range_cache.insert(key, (start, end)).await;
             Ok::<_, DataError>((iv, start, end))
         }))

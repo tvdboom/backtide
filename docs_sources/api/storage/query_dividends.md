@@ -1,7 +1,7 @@
-# get_bars
-----------
+# query_dividends
+---------------
 
-:: backtide.storage:get_bars
+:: backtide.storage:query_dividends
     :: signature
     :: head
     :: table:
@@ -13,3 +13,4 @@
 ## Example
 
 :: examples
+

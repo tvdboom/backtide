@@ -9,29 +9,28 @@ import pandas as pd
 import pytest
 
 from backtide.data import Interval
-from backtide.storage import delete_symbols, get_bars, get_dividends
+from backtide.storage import delete_symbols, query_bars, query_dividends
 
 
-class TestGetBars:
-    """Tests for the 'get_bars' function."""
+class TestQueryBars:
+    """Tests for the 'query_bars' function."""
 
     def test_returns_dataframe(self):
-        """get_bars always returns a pandas DataFrame."""
-        result = get_bars()
+        """query_bars always returns a pandas DataFrame."""
+        result = query_bars()
         assert isinstance(result, pd.DataFrame)
 
     def test_empty_database(self):
         """A fresh database returns an empty DataFrame."""
-        result = get_bars()
+        result = query_bars()
         assert isinstance(result, pd.DataFrame)
         assert result.empty
 
     def test_expected_columns(self):
         """The DataFrame has the expected column names even when empty."""
-        result = get_bars()
+        result = query_bars()
         expected = {
             "symbol",
-            "instrument_type",
             "interval",
             "provider",
             "open_ts",
@@ -48,23 +47,23 @@ class TestGetBars:
         assert set(result.columns) == expected
 
 
-class TestGetDividends:
-    """Tests for the 'get_dividends' function."""
+        result = query_dividends()
+        result = query_dividends()
 
     def test_returns_dataframe(self):
-        """get_dividends always returns a pandas DataFrame."""
-        result = get_dividends()
+        """query_dividends always returns a pandas DataFrame."""
+        result = query_dividends()
         assert isinstance(result, pd.DataFrame)
 
     def test_empty_database(self):
         """A fresh database returns an empty DataFrame."""
-        result = get_dividends()
+        result = query_dividends()
         assert isinstance(result, pd.DataFrame)
         assert result.empty
 
     def test_expected_columns(self):
         """The DataFrame has the expected column names even when empty."""
-        result = get_dividends()
+        result = query_dividends()
         expected = {"symbol", "provider", "ex_date", "amount"}
         assert set(result.columns) == expected
 

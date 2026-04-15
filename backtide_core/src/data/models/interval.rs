@@ -13,7 +13,7 @@ use strum::{EnumIter, IntoEnumIterator};
 /// - backtide.data:Bar
 /// - backtide.data:Instrument
 /// - backtide.data:InstrumentType
-#[pyclass(skip_from_py_object, module = "backtide.data")]
+#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.data")]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, EnumIter, Serialize, Deserialize)]
 pub enum Interval {
     OneMinute,
@@ -76,15 +76,6 @@ impl Interval {
         let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self == other
-    }
-
-    fn __hash__(&self) -> u64 {
-        *self as u64
-    }
-
     fn __repr__(&self) -> String {
         self.to_string()
     }

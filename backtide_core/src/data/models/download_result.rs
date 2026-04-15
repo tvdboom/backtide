@@ -2,7 +2,7 @@
 
 use pyo3::{pyclass, pymethods};
 
-/// Summary returned by [`download_instruments`] after all tasks finish.
+/// Summary returned by [`download_bars`] after all tasks finish.
 ///
 /// Individual task failures are captured as warnings rather than aborting
 /// the entire download, so callers can report partial success.
@@ -20,8 +20,8 @@ use pyo3::{pyclass, pymethods};
 ///
 /// See Also
 /// --------
-/// - backtide.data:download_instruments
-/// - backtide.data:get_instruments
+/// - backtide.data:download_bars
+/// - backtide.data:fetch_instruments
 /// - backtide.data:list_instruments
 #[derive(Debug, Clone)]
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.core.data")]

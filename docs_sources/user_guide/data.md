@@ -130,7 +130,7 @@ available. An [`InstrumentProfile`] wraps an instrument with the metadata needed
 to download it: the per-interval date range the provider can serve and the
 currency-conversion legs required to reach the portfolio base currency.
 
-You can fetch instruments directly with [`get_instruments`], but to download
+result = download_bars(profiles)
 bars you need profiles.
 
 ### Resolving profiles
@@ -155,16 +155,16 @@ for p in profiles:
 
 ### Downloading bars
 
-Pass the resolved profiles to [`download_instruments`]. It checks what is
+Pass the resolved profiles to [`download_bars`]. It checks what is
 already in the database, downloads only the missing portions, and writes
 everything (including any dividend data for stocks and ETFs) in a single
 bulk transaction.
 
 ```pycon
-from backtide.data import resolve_profiles, download_instruments
+from backtide.data import resolve_profiles, download_bars
 
 profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", "1d")
-result = download_instruments(profiles)
+result = download_bars(profiles)
 
 print(result.n_succeeded, "succeeded,", result.n_failed, "failed")
 ```
@@ -174,10 +174,10 @@ with Unix-timestamp boundaries:
 
 ```pycon
 from datetime import datetime, timezone
-from backtide.data import resolve_profiles, download_instruments
+from backtide.data import resolve_profiles, download_bars
 
 profiles = resolve_profiles("BTC-EUR", "crypto", "1d")
-result = download_instruments(
+result = download_bars(
     profiles,
     start=int(datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp()),
     end=int(datetime(2024, 4, 1, tzinfo=timezone.utc).timestamp()),

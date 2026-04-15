@@ -117,13 +117,13 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
     automatically downloaded as well.
 
     """
-    from backtide.data import download_instruments, resolve_profiles
+    from backtide.data import download_bars, resolve_profiles
 
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
 
     profiles = resolve_profiles(list(symbols), instrument_type, list(interval), verbose=verbose)
-    result = download_instruments(profiles, start=start, end=end, verbose=verbose)
+    result = download_bars(profiles, start=start, end=end, verbose=verbose)
 
     for warn in result.warnings:
         click.echo(f"   ⚠️  {warn}", err=True)

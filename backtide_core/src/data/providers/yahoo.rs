@@ -12,6 +12,7 @@ use crate::data::models::dividend::Dividend;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::forex_pair::ForexPair;
 use crate::data::models::instrument::Instrument;
+use crate::data::models::provider::Provider;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
@@ -424,7 +425,7 @@ impl YahooFinance {
 impl DataProvider for YahooFinance {
     /// Fetch metadata for a single symbol via the chart endpoint.
     #[instrument(skip(self), fields(%symbol))]
-    async fn get_instrument(
+    async fn fetch_instrument(
         &self,
         symbol: &Symbol,
         instrument_type: InstrumentType,
@@ -464,7 +465,7 @@ impl DataProvider for YahooFinance {
     /// history window, so the value reflects what is actually
     /// downloadable rather than the Instrument's listing date.
     #[instrument(skip(self, instr), fields(symbol = %instr.symbol, ?interval))]
-    async fn get_download_range(
+    async fn fetch_range(
         &self,
         instr: Instrument,
         interval: Interval,
@@ -636,6 +637,7 @@ impl DataProvider for YahooFinance {
                             quote,
                             instrument_type: InstrumentType::Forex,
                             exchange: "CCY".to_owned(), // "CCY" is Yahoo's placeholder code for the interbank FX market
+                            provider: Provider::Yahoo,
                         }
                     })
                     .collect();
@@ -680,7 +682,7 @@ impl DataProvider for YahooFinance {
         };
 
         // Clamp `start` to the provider's rolling window at download time, since
-        // `get_download_range` may have been called much earlier.
+        // `fetch_range` may have been called much earlier.
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let buffer = interval.minutes() * 60;
         let start = match interval {
@@ -820,11 +822,12 @@ impl TryFrom<YahooQuote> for Instrument {
             quote,
             instrument_type,
             exchange,
+            provider: Provider::Yahoo,
         })
     }
 }
 
-// ── Screener response envelope ───────────────────────────────────────────────
+
 
 #[derive(Debug, Deserialize)]
 struct ScreenerResponse {
@@ -945,6 +948,7 @@ impl TryFrom<ChartMeta> for Instrument {
             quote,
             instrument_type,
             exchange,
+            provider: Provider::Yahoo,
         })
     }
 }

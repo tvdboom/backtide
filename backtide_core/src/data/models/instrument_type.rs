@@ -11,7 +11,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// - backtide.data:Bar
 /// - backtide.data:Instrument
 /// - backtide.data:Interval
-#[pyclass(skip_from_py_object, module = "backtide.data")]
+#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.data")]
 #[derive(
     Clone,
     Copy,
@@ -61,15 +61,6 @@ impl InstrumentType {
         let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self == other
-    }
-
-    fn __hash__(&self) -> u64 {
-        *self as u64
-    }
-
     pub fn __str__(&self) -> &'static str {
         match self {
             Self::Stocks => "Stocks",

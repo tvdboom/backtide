@@ -13,14 +13,14 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait DataProvider: Send + Sync {
     /// Get a single instrument given its symbol.
-    async fn get_instrument(
+    async fn fetch_instrument(
         &self,
         symbol: &Symbol,
         instrument_type: InstrumentType,
     ) -> DataResult<Instrument>;
 
     /// Returns the usable download range for an instrument at a given interval.
-    async fn get_download_range(
+    async fn fetch_range(
         &self,
         instrument: Instrument,
         interval: Interval,

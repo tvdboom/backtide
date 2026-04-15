@@ -1,11 +1,10 @@
-# download_instruments
-----------------------
+# query_bars
+----------
 
-:: backtide.data:download_instruments
+:: backtide.storage:query_bars
     :: signature
     :: head
     :: table:
-        - parameters
         - returns
     :: see also
 
@@ -14,3 +13,4 @@
 ## Example
 
 :: examples
+

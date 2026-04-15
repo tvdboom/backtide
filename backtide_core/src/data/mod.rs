@@ -1,5 +1,5 @@
 use crate::data::interface::{
-    download_instruments, get_instruments, list_instruments, resolve_profiles,
+    download_bars, fetch_instruments, list_instruments, resolve_profiles,
 };
 use crate::data::models::bar::Bar;
 use crate::data::models::country::Country;
@@ -36,10 +36,10 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Interval>()?;
     m.add_class::<Provider>()?;
 
-    m.add_function(wrap_pyfunction!(get_instruments, &m)?)?;
+    m.add_function(wrap_pyfunction!(fetch_instruments, &m)?)?;
     m.add_function(wrap_pyfunction!(resolve_profiles, &m)?)?;
     m.add_function(wrap_pyfunction!(list_instruments, &m)?)?;
-    m.add_function(wrap_pyfunction!(download_instruments, &m)?)?;
+    m.add_function(wrap_pyfunction!(download_bars, &m)?)?;
 
     parent.add_submodule(&m)?;
 

@@ -9,15 +9,25 @@ import base64
 from datetime import datetime as dt
 from pathlib import Path
 import re
+from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
 from tzlocal import get_localzone
-
 from backtide.constants import MOMENT_TO_STRFTIME
-from backtide.core.data import Instrument, InstrumentType, list_instruments
+from backtide.core.data import (
+    Currency,
+    Exchange,
+    Instrument,
+    InstrumentType,
+    Interval,
+    list_instruments,
+)
+from backtide.core.storage import (
+    query_bars_summary,
+)
 from backtide.utils.constants import MAX_PRELOADED_INSTRUMENTS
 from backtide.utils.utils import _to_list
 
@@ -110,12 +120,20 @@ def _get_provider_logo(provider: str) -> str:
     return f"data:image/png;base64,{data}"
 
 
-@st.cache_resource(ttl=3600, show_spinner=False)
-def _list_instruments(instrument_type: InstrumentType) -> list[Instrument]:
-    """Cache the major instruments per instrument type."""
-    if instrument_type is None:
-        instrument_type = InstrumentType.get_default()
-    return list_instruments(instrument_type, limit=MAX_PRELOADED_INSTRUMENTS, verbose=False)
+@st.cache_data(show_spinner="Fetching instruments...")
+def _list_instruments(
+    instrument_type: InstrumentType,
+    *,
+    limit: int = MAX_PRELOADED_INSTRUMENTS,
+) -> list[Instrument]:
+    """Return instruments for the given type, capped at `limit`.
+
+    Delegates to `list_instruments`, which queries the local DB first and
+    only falls back to the network when the DB holds fewer than `limit`
+    matching instruments.
+
+    """
+    return list_instruments(instrument_type, limit=limit, verbose=False)
 
 
 def _moment_to_strftime(fmt: str) -> str:
@@ -141,9 +159,15 @@ def _parse_date(ts: int, fmt: str, tz: ZoneInfo) -> str:
 def _to_pandas(df: Any) -> pd.DataFrame:
     """Ensure a DataFrame is pandas, converting from polars if needed."""
     if hasattr(df, "to_pandas"):
-        return df.to_pandas(use_pyarrow_extension_array=True)
+        return df.to_pandas()
 
     return df
+
+
+@st.cache_data(show_spinner="Loading stored data...")
+def _query_bars_summary() -> pd.DataFrame:
+    """Load and cache the raw storage summary from the database."""
+    return _to_pandas(query_bars_summary())
 
 
 def _to_upper_values(key: str):
@@ -152,3 +176,407 @@ def _to_upper_values(key: str):
         st.session_state[key] = [
             s.upper() if isinstance(s, str) else s for s in _to_list(st.session_state[key])
         ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Instrument card rendering (shared by download & experiment pages)
+# ─────────────────────────────────────────────────────────────────────────────
+
+CARD_CSS = """
+    <style>
+        .section {
+            font-size: 12px;
+            font-weight: 600;
+            color: #888;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin: 18px 0 8px;
+        }
+
+        .card {
+            position: relative;
+            min-height: 215px;
+            border: 1px solid rgba(0,0,0, 0.2);
+            border-radius: 12px;
+            padding: 1.2rem 1.4rem;
+            margin-bottom: 10px;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 12px;
+        }
+
+        .logo {
+            height: 64px;
+            border-radius: 6px;
+            margin-top: -4px;
+        }
+
+        .quote {
+            height: 32px;
+            margin-top: 4px;
+        }
+
+        .title {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .symbol {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .flag {
+            height: 20px;
+            margin-top: -4px;
+            margin-left: 12px;
+        }
+
+        .name {
+            font-size: 20px;
+            opacity: 0.7;
+        }
+
+        .badge {
+            font-size: 16px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: rgba(250,250,250,0.07);
+            border: 1px solid rgba(250,250,250,0.1);
+            white-space: nowrap;
+        }
+
+        .badge.leg {
+            background: rgba(99,179,237,0.12);
+            color: #63b3ed;
+            font-weight: 600;
+        }
+
+        .intervals {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            border-top: 1px solid rgba(250,250,250,0.08);
+            padding-top: 10px;
+        }
+
+        .interval-row {
+            display: grid;
+            grid-template-columns: 60px 230px 80px 100px;
+            gap: 12px;
+            font-size: 13px;
+        }
+
+        .iv-label {
+            font-weight: 600;
+            font-size: 18px;
+            opacity: 0.7;
+            text-align: right;
+        }
+
+        .iv-range {
+            font-size: 18px;
+            text-align: right;
+        }
+
+        .iv-rows {
+            font-size: 18px;
+            opacity: 0.6;
+            text-align: right;
+        }
+
+        .legs-row {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(250,250,250,0.08);
+        }
+
+        .meta-right {
+            position: absolute;
+            top: 1.2rem;
+            right: 1.4rem;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+        }
+
+        .provider {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+        }
+
+        .provider img {
+            width: 60px;
+            border-radius: 2px;
+        }
+
+        .meta-inline {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 1px;
+            margin-top: 30px;
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .meta-label {
+            font-size: 14px;
+            font-weight: 600;
+            opacity: 0.5;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .meta-value {
+            margin-top: -5px;
+            font-size: 18px;
+        }
+    </style>
+    """
+
+
+def draw_cards(
+    profiles,
+    *,
+    cfg,
+    tz: ZoneInfo,
+    instrument_type: InstrumentType,
+    full_history: bool,
+    start_ts=None,
+    end_ts=None,
+) -> tuple[str, int]:
+    """Generate HTML code to draw the instrument cards.
+
+    Parameters
+    ----------
+    profiles
+        List of ``InstrumentProfile`` (or compatible duck-typed objects) with
+        at least: ``symbol``, ``name``, ``instrument_type``, ``exchange``,
+        ``quote``, ``earliest_ts``, ``latest_ts``, ``legs``.
+    cfg
+        Application configuration (needs ``display.date_format``,
+        ``display.logokit_api_key``, ``data.providers``).
+    tz
+        Timezone used to format dates.
+    instrument_type
+        The currently selected instrument type.
+    full_history
+        Whether the full available history is used.
+    start_ts, end_ts
+        Date range boundaries (``datetime.date``) when *full_history* is
+        ``False``.
+
+    Returns
+    -------
+    tuple[str, int]
+        The HTML string and the estimated total number of bars.
+
+    """
+    html = "<div class='section'></div>"
+
+    get_flag = lambda code: f"https://flagcdn.com/80x60/{code.lower()}.png"
+    parse_date = lambda date: date.strftime(_moment_to_strftime(cfg.display.date_format))
+
+    total_rows = 0
+    for profile in profiles:
+        interval_rows = ""
+        for interval in Interval.variants():
+            start_iv = profile.earliest_ts.get(interval)
+            end_iv = profile.latest_ts.get(interval)
+            if not (start_iv and end_iv):
+                continue
+
+            iv_start = dt.fromtimestamp(start_iv, tz=tz).date()
+            iv_end = dt.fromtimestamp(end_iv, tz=tz).date()
+            if not full_history:
+                iv_start = max(start_ts, iv_start)
+                iv_end = min(end_ts, iv_end)
+
+            # Estimate rows for this interval
+            delta_minutes = max((iv_end - iv_start).total_seconds() / 60, 1)
+            delta_days = (iv_end - iv_start).days
+
+            if profile.instrument_type.is_equity:
+                # Stocks / ETF markets open 8/5
+                if interval.is_intraday():
+                    rows = max(int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1)
+                else:
+                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
+            elif instrument_type == InstrumentType.Forex:
+                # Forex markets open 24/5
+                if interval.is_intraday():
+                    rows = max(int(delta_minutes * (5 / 7) // interval.minutes()), 1)
+                else:
+                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
+            else:
+                # Crypto markets open 24/7
+                rows = max(int(delta_minutes // interval.minutes()), 1)
+
+            total_rows += rows
+
+            n_years = iv_end.year - iv_start.year
+
+            # Adjust if end is before the anniversary
+            anniversary = iv_start.replace(year=iv_start.year + n_years)
+            if anniversary > iv_end:
+                n_years -= 1
+                anniversary = iv_start.replace(year=iv_start.year + n_years)
+
+            # Remaining days after full years
+            remaining_days = (iv_end - anniversary).days
+
+            if n_years > 0:
+                n_days_str = f"{n_years}y {remaining_days}d"
+            else:
+                n_days_str = f"{remaining_days}d"
+
+            interval_rows += f"""
+                <div class="interval-row">
+                    <span class="iv-label">{interval}</span>
+                    <span class="iv-range">
+                        {parse_date(iv_start)} &nbsp → &nbsp {parse_date(iv_end)}
+                    </span>
+                    <span class="iv-range">{n_days_str}</span>
+                    <span class="iv-rows">~{_fmt_number(rows)} bars</span>
+                </div>"""
+
+        if logokit_key := cfg.display.logokit_api_key:
+            url = _get_logokit_url(profile.symbol, profile.instrument_type, logokit_key)
+            logo = f"<img src='{url}' class='logo'>"
+        else:
+            logo = ""
+
+        name = profile.name if profile.instrument_type.is_equity else ""
+
+        legs = ""
+        if profile.legs:
+            badges = "".join(f'<span class="badge leg">{leg}</span>' for leg in profile.legs)
+            legs = f'<div class="legs-row"><span style="font-size:16px">via</span>{badges}</div>'
+
+        # Use the profile's own provider when available (e.g. from storage);
+        # fall back to the configured provider for the instrument type.
+        if hasattr(profile, "provider") and profile.provider:
+            provider = str(profile.provider)
+        else:
+            provider = str(cfg.data.providers[profile.instrument_type])
+        provider_html = f"""
+            <div class="provider">
+                <img src="{_get_provider_logo(provider)}" alt="{provider}">
+            </div>"""
+
+        flag = ""
+        meta_inline = ""
+        if profile.instrument_type.is_equity:
+            if isinstance(profile.exchange, Exchange):
+                flag = f"<img src='{get_flag(profile.exchange.country.alpha2)}' class='flag'>"
+                exchange = f"{profile.exchange.name} ({profile.exchange})"
+            else:
+                exchange = profile.exchange
+
+            meta_inline = f"""
+                <div class="meta-inline">
+                    <span class="meta-label">Exchange</span>
+                    <span class="meta-value">{exchange}</span>
+                    <span class="meta-label" style="margin-top:8px;">Currency</span>
+                    <span class="meta-value">{profile.quote}</span>
+                </div>"""
+
+        elif profile.instrument_type == InstrumentType.Crypto:
+            if isinstance(profile.quote, Currency):
+                img = get_flag(profile.quote.country.alpha2)
+            elif logokit_key:
+                img = _get_logokit_url(
+                    profile.symbol, profile.instrument_type, logokit_key, use_quote=True
+                )
+            else:
+                img = ""
+
+            if img:
+                meta_inline = f"""
+                    <div class="meta-inline">
+                        <span class="meta-label">Quote</span>
+                        <span class="meta-value"><img src='{img}' class='quote'></span>
+                    </div>"""
+
+        html += f"""
+            <div class="card">
+              <div class="card-header">
+                {logo}
+                <div>
+                    <div class="symbol">{profile.symbol}{flag}</div>
+                    <div class="name">{name}</div>
+                </div>
+                <div class="meta-right">
+                    {provider_html}
+                    {meta_inline}
+                </div>
+              </div>
+              <div class="intervals">{interval_rows}</div>
+              {legs}
+            </div>"""
+
+    return html, total_rows
+
+
+def _storage_to_card_profiles(
+    summary_df: pd.DataFrame,
+    symbols: list,
+    instrument_type: InstrumentType,
+) -> list:
+    """Convert storage summary rows into profile-like objects for :func:`draw_cards`.
+
+    Each returned object is a :class:`~types.SimpleNamespace` that quacks like
+    an ``InstrumentProfile`` — just enough for the card renderer to work.
+    """
+    profiles: list[SimpleNamespace] = []
+
+    for sym in symbols:
+        sym_str = (
+            sym if isinstance(sym, str) else (sym.symbol if hasattr(sym, "symbol") else str(sym))
+        )
+        it_str = str(instrument_type).lower()
+        rows = summary_df[
+            (summary_df["symbol"].astype(str) == sym_str)
+            & (summary_df["instrument_type"].astype(str).str.lower() == it_str)
+        ]
+        if rows.empty:
+            continue
+
+        earliest: dict[Interval, int] = {}
+        latest: dict[Interval, int] = {}
+        for _, row in rows.iterrows():
+            try:
+                iv = Interval(str(row["interval"]))
+            except (ValueError, RuntimeError):
+                continue
+            earliest[iv] = int(row["first_ts"])
+            latest[iv] = int(row["last_ts"])
+
+        first = rows.iloc[0]
+        profiles.append(
+            SimpleNamespace(
+                symbol=sym_str,
+                name=str(first.get("name", "")),
+                instrument_type=instrument_type,
+                exchange=str(first.get("exchange", "")),
+                quote=str(first.get("quote", "")),
+                earliest_ts=earliest,
+                latest_ts=latest,
+                legs=[],
+                provider=str(first["provider"]),
+            )
+        )
+
+    return profiles

@@ -1,7 +1,7 @@
-# get_instruments
------------------
+# query_instruments
+------------------
 
-:: backtide.data:get_instruments
+:: backtide.storage:query_instruments
     :: signature
     :: head
     :: table:
@@ -14,3 +14,4 @@
 ## Example
 
 :: examples
+

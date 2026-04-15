@@ -1,9 +1,17 @@
 """Type stubs for `backtide.core.storage` (auto-generated)."""
 
-__all__ = ["delete_symbols", "get_bars", "get_bars_summary", "get_dividends"]
+__all__ = [
+    "delete_symbols",
+    "query_bars",
+    "query_bars_summary",
+    "query_dividends",
+    "query_instruments",
+]
 
 import pandas as pd
 import polars as pl
+
+from backtide.core.data import Instrument
 
 def delete_symbols(symbol=None, interval=None, provider=None, *, series=None) -> int:
     """Delete bars (and orphaned dividends) from the database.
@@ -36,9 +44,9 @@ def delete_symbols(symbol=None, interval=None, provider=None, *, series=None) ->
 
     See Also
     --------
-    - backtide.data:download_instruments
-    - backtide.storage:get_bars
-    - backtide.storage:get_dividends
+    - backtide.data:download_bars
+    - backtide.storage:query_bars
+    - backtide.storage:query_dividends
 
     Examples
     --------
@@ -57,13 +65,13 @@ def delete_symbols(symbol=None, interval=None, provider=None, *, series=None) ->
 
     """
 
-def get_bars() -> pd.DataFrame | pl.DataFrame:
+def query_bars() -> pd.DataFrame | pl.DataFrame:
     """Return all stored OHLCV bars as a dataframe.
 
     Each row represents a single bar. The dataframe columns are:
-    `symbol`, `instrument_type`, `interval`, `provider`, `open_ts`,
-    `close_ts`, `open_ts_exchange`, `open`, `high`, `low`, `close`,
-    `adj_close`, `volume`, and `n_trades`.
+    `symbol`, `interval`, `provider`, `open_ts`, `close_ts`,
+    `open_ts_exchange`, `open`, `high`, `low`, `close`, `adj_close`,
+    `volume`, and `n_trades`.
 
     Returns
     -------
@@ -72,22 +80,22 @@ def get_bars() -> pd.DataFrame | pl.DataFrame:
 
     See Also
     --------
-    - backtide.data:download_instruments
-    - backtide.storage:get_bars_summary
-    - backtide.storage:get_dividends
+    - backtide.data:download_bars
+    - backtide.storage:query_bars_summary
+    - backtide.storage:query_dividends
 
     Examples
     --------
     ```pycon
-    from backtide.storage import get_bars
+    from backtide.storage import query_bars
 
-    df = get_bars()
+    df = query_bars()
     print(df.head())
     ```
 
     """
 
-def get_bars_summary() -> pd.DataFrame | pl.DataFrame:
+def query_bars_summary() -> pd.DataFrame | pl.DataFrame:
     """Return a pre-aggregated summary of stored bars as a dataframe.
 
     Each row represents one (symbol, interval, provider) series. The `sparkline`
@@ -101,15 +109,15 @@ def get_bars_summary() -> pd.DataFrame | pl.DataFrame:
     Examples
     --------
     ```pycon
-    from backtide.storage import get_bars_summary
+    from backtide.storage import query_bars_summary
 
-    df = get_bars_summary()
+    df = query_bars_summary()
     print(df.head())
     ```
 
     """
 
-def get_dividends() -> pd.DataFrame | pl.DataFrame:
+def query_dividends() -> pd.DataFrame | pl.DataFrame:
     """Return all stored dividend events as a dataframe.
 
     Each row represents a single dividend payment. The DataFrame columns
@@ -123,16 +131,65 @@ def get_dividends() -> pd.DataFrame | pl.DataFrame:
     See Also
     --------
     - backtide.storage:delete_symbols
-    - backtide.data:download_instruments
-    - backtide.storage:get_bars
+    - backtide.data:download_bars
+    - backtide.storage:query_bars
 
     Examples
     --------
     ```pycon
-    from backtide.storage import get_dividends
+    from backtide.storage import query_dividends
 
-    df = get_dividends()
+    df = query_dividends()
     print(df.head())
+    ```
+
+    """
+
+def query_instruments(
+    instrument_type=None,
+    provider=None,
+    exchange=None,
+    *,
+    limit=None,
+) -> list[Instrument]:
+    """Return stored instrument metadata, optionally filtered.
+
+    When called with no arguments, returns all instruments. When
+    ``instrument_type``, ``provider``, and/or ``exchange`` are given, only
+    matching rows are returned.
+
+    Parameters
+    ----------
+    instrument_type : str | InstrumentType | None, default=None
+        Filter by instrument type.
+
+    provider : str | Provider | None, default=None
+        Filter by data provider.
+
+    exchange : str | Exchange | list[str | Exchange] | None, default=None
+        Filter by exchange. Accepts a single exchange or a list.
+
+    limit : int | None, default=None
+        Maximum number of instruments to return. ``None`` means no limit.
+
+    Returns
+    -------
+    list[Instrument]
+        Matching instruments from the database.
+
+    Examples
+    --------
+    ```pycon
+    from backtide.storage import query_instruments
+
+    # All instruments
+    all_instruments = query_instruments()
+
+    # Filtered
+    stocks = query_instruments("stocks", "yahoo", limit=100)
+
+    # Filtered by exchange
+    nyse = query_instruments("stocks", exchange="XNYS")
     ```
 
     """

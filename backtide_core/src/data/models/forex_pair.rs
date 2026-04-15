@@ -16,7 +16,7 @@ use strum::{EnumIter, EnumString};
 /// - backtide.data:Country
 /// - backtide.data:Currency
 /// - backtide.data:Exchange
-#[pyclass(skip_from_py_object)]
+#[pyclass(skip_from_py_object, frozen, eq, hash)]
 #[derive(
     Clone,
     Copy,
@@ -202,15 +202,6 @@ impl ForexPair {
         let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self == other
-    }
-
-    fn __hash__(&self) -> u64 {
-        *self as u64
-    }
-
     fn __repr__(&self) -> String {
         self.to_string()
     }

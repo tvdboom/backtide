@@ -7,7 +7,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 ///
 /// The minimum logging level that are displayed, i.e., if `log_level="info"`,
 /// all `info`, `warn` and `error` messages are displayed.
-#[pyclass(skip_from_py_object, module = "backtide.config")]
+#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.config")]
 #[derive(
     Clone,
     Copy,

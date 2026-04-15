@@ -74,20 +74,20 @@ fn parse_instrument(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
 ///
 /// See Also
 /// --------
-/// - backtide.data:download_instruments
+/// - backtide.data:download_bars
 /// - backtide.data:list_instruments
 /// - backtide.data:resolve_profiles
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.data import get_instruments
+/// from backtide.data import fetch_instruments
 ///
-/// print(get_instruments(["AAPL", "MSFT"], "stocks"))
+/// print(fetch_instruments(["AAPL", "MSFT"], "stocks"))
 /// ```
 #[pyfunction]
 #[pyo3(signature = (symbols: "str | Instrument | Sequence[str | Instrument]", instrument_type: "str | InstrumentType") -> "list[Instrument]")]
-pub fn get_instruments(
+pub fn fetch_instruments(
     symbols: Bound<'_, PyAny>,
     instrument_type: Bound<'_, PyAny>,
 ) -> PyResult<Vec<Instrument>> {
@@ -95,7 +95,7 @@ pub fn get_instruments(
     let instrument_type = instrument_type.extract::<InstrumentType>()?;
 
     let engine = Engine::get()?;
-    Ok(engine.get_instruments(symbols, instrument_type)?)
+    Ok(engine.fetch_instruments(symbols, instrument_type)?)
 }
 
 /// Resolve the instrument profiles needed to download a set of symbols.
@@ -126,8 +126,8 @@ pub fn get_instruments(
 ///
 /// See Also
 /// --------
-/// - backtide.data:download_instruments
-/// - backtide.data:get_instruments
+/// - backtide.data:download_bars
+/// - backtide.data:fetch_instruments
 /// - backtide.data:list_instruments
 ///
 /// Examples
@@ -155,8 +155,10 @@ pub fn resolve_profiles(
 
 /// List available instruments for a given instrument type.
 ///
-/// The function may not return all available instruments, but a subset of the most
-/// important ones instead.
+/// Returns instruments already stored in the database first.  Only when the
+/// DB holds fewer than `limit` matching rows does it fall back to the network
+/// provider to fill the gap.  Network results are persisted so that subsequent
+/// calls can be served entirely from storage.
 ///
 /// Parameters
 /// ----------
@@ -182,8 +184,8 @@ pub fn resolve_profiles(
 ///
 /// See Also
 /// --------
-/// - backtide.data:download_instruments
-/// - backtide.data:get_instruments
+/// - backtide.data:download_bars
+/// - backtide.data:fetch_instruments
 /// - backtide.data:resolve_profiles
 ///
 /// Examples
@@ -238,27 +240,27 @@ pub fn list_instruments(
 ///
 /// See Also
 /// --------
-/// - backtide.storage:get_bars
-/// - backtide.data:get_instruments
+/// - backtide.storage:query_bars
+/// - backtide.data:fetch_instruments
 /// - backtide.data:resolve_profiles
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.data import resolve_profiles, download_instruments
+/// from backtide.data import resolve_profiles, download_bars
 ///
 /// profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", "1d")
-/// result = download_instruments(profiles)
+/// result = download_bars(profiles)
 /// print(result)
 /// ```
 #[pyfunction]
 #[pyo3(signature = (profiles, start=None, end=None, *, verbose=true))]
-pub fn download_instruments(
+pub fn download_bars(
     profiles: Vec<InstrumentProfile>,
     start: Option<u64>,
     end: Option<u64>,
     verbose: bool,
 ) -> PyResult<DownloadResult> {
     let engine = Engine::get()?;
-    Ok(engine.download_instruments(&profiles, start, end, verbose)?)
+    Ok(engine.download_bars(&profiles, start, end, verbose)?)
 }

@@ -1,10 +1,11 @@
-# get_dividends
----------------
+# download_bars
+----------------------
 
-:: backtide.storage:get_dividends
+:: backtide.data:download_bars
     :: signature
     :: head
     :: table:
+        - parameters
         - returns
     :: see also
 
@@ -13,3 +14,4 @@
 ## Example
 
 :: examples
+

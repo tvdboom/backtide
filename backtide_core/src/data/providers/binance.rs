@@ -8,6 +8,7 @@ use crate::data::models::bar::Bar;
 use crate::data::models::bar_download::BarDownload;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument::Instrument;
+use crate::data::models::provider::Provider;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::providers::traits::DataProvider;
@@ -128,7 +129,7 @@ impl Binance {
 impl DataProvider for Binance {
     /// Fetch metadata for a single symbol.
     #[instrument(skip(self), fields(%symbol))]
-    async fn get_instrument(
+    async fn fetch_instrument(
         &self,
         symbol: &Symbol,
         instrument_type: InstrumentType,
@@ -157,7 +158,7 @@ impl DataProvider for Binance {
 
     /// Returns the usable download range for an instrument at a given interval.
     #[instrument(skip(self, instrument), fields(symbol = %instrument.symbol, ?interval))]
-    async fn get_download_range(
+    async fn fetch_range(
         &self,
         instrument: Instrument,
         interval: Interval,
@@ -338,6 +339,7 @@ impl TryFrom<SymbolInfo> for Instrument {
             quote,
             instrument_type: InstrumentType::Crypto,
             exchange: "BINANCE".to_owned(), // Binance has no MIC code.
+            provider: Provider::Binance,
         })
     }
 }

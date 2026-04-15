@@ -13,58 +13,58 @@ from backtide.data import (
     InstrumentProfile,
     InstrumentType,
     Interval,
-    get_instruments,
+    fetch_instruments,
     list_instruments,
     resolve_profiles,
 )
 
 
-class TestGetInstruments:
-    """Tests for the 'get_instruments' function."""
+class TestFetchInstruments:
+    """Tests for the 'fetch_instruments' function."""
 
     def test_single_str(self):
         """A single string symbol returns a list of Instrument."""
-        result = get_instruments("AAPL", "stocks")
+        result = fetch_instruments("AAPL", "stocks")
         assert isinstance(result, list)
         assert len(result) == 1
         assert all(isinstance(i, Instrument) for i in result)
 
     def test_list_of_str(self):
         """A list of symbols returns one Instrument per symbol."""
-        result = get_instruments(["AAPL", "MSFT"], "stocks")
+        result = fetch_instruments(["AAPL", "MSFT"], "stocks")
         assert isinstance(result, list)
         assert len(result) == 2
         assert all(isinstance(i, Instrument) for i in result)
 
     def test_instrument_type_as_enum(self):
         """Passing InstrumentType enum works the same as a string."""
-        result = get_instruments("AAPL", InstrumentType("stocks"))
+        result = fetch_instruments("AAPL", InstrumentType("stocks"))
         assert len(result) == 1
         assert isinstance(result[0], Instrument)
 
     def test_instrument_as_input(self):
         """An Instrument object can be used in place of a string symbol."""
-        instruments = get_instruments("AAPL", "stocks")
-        result = get_instruments(instruments[0], "stocks")
+        instruments = fetch_instruments("AAPL", "stocks")
+        result = fetch_instruments(instruments[0], "stocks")
         assert len(result) == 1
         assert result[0].symbol == "AAPL"
 
     def test_list_of_instruments_as_input(self):
         """A list of Instrument objects works as input."""
-        instruments = get_instruments(["AAPL", "MSFT"], "stocks")
-        result = get_instruments(instruments, "stocks")
+        instruments = fetch_instruments(["AAPL", "MSFT"], "stocks")
+        result = fetch_instruments(instruments, "stocks")
         assert len(result) == 2
 
     def test_crypto_symbol(self):
         """Crypto symbols resolve correctly."""
-        result = get_instruments("BTC-USD", "crypto")
+        result = fetch_instruments("BTC-USD", "crypto")
         assert len(result) == 1
         assert result[0].symbol == "BTC-USD"
 
     def test_invalid_instrument_type_raises(self):
         """An invalid instrument_type string raises ValueError."""
         with pytest.raises(ValueError, match="Unknown instrument_type"):
-            get_instruments("AAPL", "invalid_type")
+            fetch_instruments("AAPL", "invalid_type")
 
 
 class TestResolveProfiles:
@@ -101,7 +101,7 @@ class TestResolveProfiles:
 
     def test_instrument_as_symbol(self):
         """Instrument object can be used as symbol input."""
-        instruments = get_instruments("AAPL", "stocks")
+        instruments = fetch_instruments("AAPL", "stocks")
         result = resolve_profiles(instruments[0], "stocks", "1d")
         assert len(result) >= 1
 

@@ -12,339 +12,23 @@ import streamlit as st
 
 from backtide.core.config import get_config
 from backtide.core.data import (
-    Currency,
-    Exchange,
-    InstrumentProfile,
     InstrumentType,
     Interval,
-    download_instruments,
+    download_bars,
     resolve_profiles,
 )
 from backtide.ui.utils import (
+    CARD_CSS,
     _clear_state,
     _fmt_number,
     _get_instrument_type_description,
-    _get_logokit_url,
-    _get_provider_logo,
     _get_timezone,
     _list_instruments,
-    _moment_to_strftime,
     _to_upper_values,
+    draw_cards,
 )
 from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
 from backtide.utils.utils import _to_list
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helper functionalities
-# ─────────────────────────────────────────────────────────────────────────────
-
-CARD_CSS = """
-    <style>
-        .section {
-            font-size: 12px;
-            font-weight: 600;
-            color: #888;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            margin: 18px 0 8px;
-        }
-
-        .card {
-            position: relative;
-            min-height: 215px;
-            border: 1px solid rgba(0,0,0, 0.2);
-            border-radius: 12px;
-            padding: 1.2rem 1.4rem;
-            margin-bottom: 10px;
-        }
-
-        .card-header {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            margin-bottom: 12px;
-        }
-
-        .logo {
-            height: 64px;
-            border-radius: 6px;
-            margin-top: -4px;
-        }
-
-        .quote {
-            height: 32px;
-            margin-top: 4px;
-        }
-
-        .title {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .symbol {
-            font-size: 22px;
-            font-weight: 700;
-        }
-
-        .flag {
-            height: 20px;
-            margin-top: -4px;
-            margin-left: 12px;
-        }
-
-        .name {
-            font-size: 20px;
-            opacity: 0.7;
-        }
-
-        .badge {
-            font-size: 16px;
-            padding: 3px 8px;
-            border-radius: 6px;
-            background: rgba(250,250,250,0.07);
-            border: 1px solid rgba(250,250,250,0.1);
-            white-space: nowrap;
-        }
-
-        .badge.leg {
-            background: rgba(99,179,237,0.12);
-            color: #63b3ed;
-            font-weight: 600;
-        }
-
-        .intervals {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            border-top: 1px solid rgba(250,250,250,0.08);
-            padding-top: 10px;
-        }
-
-        .interval-row {
-            display: grid;
-            grid-template-columns: 60px 230px 80px 100px;
-            gap: 12px;
-            font-size: 13px;
-        }
-
-        .iv-label {
-            font-weight: 600;
-            font-size: 18px;
-            opacity: 0.7;
-            text-align: right;
-        }
-
-        .iv-range {
-            font-size: 18px;
-            text-align: right;
-        }
-
-        .iv-rows {
-            font-size: 18px;
-            opacity: 0.6;
-            text-align: right;
-        }
-
-        .legs-row {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            align-items: center;
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid rgba(250,250,250,0.08);
-        }
-
-        .meta-right {
-            position: absolute;
-            top: 1.2rem;
-            right: 1.4rem;
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            gap: 4px;
-        }
-
-        .provider {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-        }
-
-        .provider img {
-            width: 60px;
-            border-radius: 2px;
-        }
-
-        .meta-inline {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            gap: 1px;
-            margin-top: 30px;
-            margin-left: auto;
-            text-align: right;
-        }
-
-        .meta-label {
-            font-size: 14px;
-            font-weight: 600;
-            opacity: 0.5;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-        }
-
-        .meta-value {
-            margin-top: -5px;
-            font-size: 18px;
-        }
-    </style>
-    """
-
-
-def draw_cards(profiles: list[InstrumentProfile]) -> tuple[str, int]:
-    """Generate HTML code to draw the instrument cards."""
-    html = "<div class='section'></div>"
-
-    get_flag = lambda code: f"https://flagcdn.com/80x60/{code.lower()}.png"
-    parse_date = lambda date: date.strftime(_moment_to_strftime(cfg.display.date_format))
-
-    total_rows = 0
-    for profile in profiles:
-        interval_rows = ""
-        for interval in Interval.variants():
-            start_iv = profile.earliest_ts.get(interval)
-            end_iv = profile.latest_ts.get(interval)
-            if not (start_iv and end_iv):
-                continue
-
-            iv_start = dt.fromtimestamp(start_iv, tz=tz).date()
-            iv_end = dt.fromtimestamp(end_iv, tz=tz).date()
-            if not full_history:
-                iv_start = max(start_ts, iv_start)
-                iv_end = min(end_ts, iv_end)
-
-            # Estimate rows for this interval
-            delta_minutes = max((iv_end - iv_start).total_seconds() / 60, 1)
-            delta_days = (iv_end - iv_start).days
-
-            if profile.instrument_type.is_equity:
-                # Stocks / ETF markets open 8/5
-                if interval.is_intraday():
-                    rows = max(int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1)
-                else:
-                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
-            elif instrument_type == InstrumentType.Forex:
-                # Forex markets open 24/5
-                if interval.is_intraday():
-                    rows = max(int(delta_minutes * (5 / 7) // interval.minutes()), 1)
-                else:
-                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
-            else:
-                # Crypto markets open 24/7
-                rows = max(int(delta_minutes // interval.minutes()), 1)
-
-            total_rows += rows
-
-            n_years = iv_end.year - iv_start.year
-
-            # Adjust if end is before the anniversary
-            anniversary = iv_start.replace(year=iv_start.year + n_years)
-            if anniversary > iv_end:
-                n_years -= 1
-                anniversary = iv_start.replace(year=iv_start.year + n_years)
-
-            # Remaining days after full years
-            remaining_days = (iv_end - anniversary).days
-
-            if n_years > 0:
-                n_days_str = f"{n_years}y {remaining_days}d"
-            else:
-                n_days_str = f"{remaining_days}d"
-
-            interval_rows += f"""
-                <div class="interval-row">
-                    <span class="iv-label">{interval}</span>
-                    <span class="iv-range">
-                        {parse_date(iv_start)} &nbsp → &nbsp {parse_date(iv_end)}
-                    </span>
-                    <span class="iv-range">{n_days_str}</span>
-                    <span class="iv-rows">~{_fmt_number(rows)} bars</span>
-                </div>"""
-
-        if logokit_key := cfg.display.logokit_api_key:
-            url = _get_logokit_url(profile.symbol, profile.instrument_type, logokit_key)
-            logo = f"<img src='{url}' class='logo'>"
-        else:
-            logo = ""
-
-        name = profile.name if profile.instrument_type.is_equity else ""
-
-        legs = ""
-        if profile.legs:
-            badges = "".join(f'<span class="badge leg">{leg}</span>' for leg in profile.legs)
-            legs = f'<div class="legs-row"><span style="font-size:16px">via</span>{badges}</div>'
-
-        provider = str(cfg.data.providers[profile.instrument_type])
-        provider_html = f"""
-            <div class="provider">
-                <img src="{_get_provider_logo(provider)}" alt="{provider}">
-            </div>"""
-
-        flag = ""
-        meta_inline = ""
-        if profile.instrument_type.is_equity:
-            if isinstance(profile.exchange, Exchange):
-                flag = f"<img src='{get_flag(profile.exchange.country.alpha2)}' class='flag'>"
-                exchange = f"{profile.exchange.name} ({profile.exchange})"
-            else:
-                exchange = profile.exchange
-
-            meta_inline = f"""
-                <div class="meta-inline">
-                    <span class="meta-label">Exchange</span>
-                    <span class="meta-value">{exchange}</span>
-                    <span class="meta-label" style="margin-top:8px;">Currency</span>
-                    <span class="meta-value">{profile.quote}</span>
-                </div>"""
-
-        elif profile.instrument_type == InstrumentType.Crypto:
-            if isinstance(profile.quote, Currency):
-                img = get_flag(profile.quote.country.alpha2)
-            elif logokit_key:
-                img = _get_logokit_url(
-                    profile.symbol, profile.instrument_type, logokit_key, use_quote=True
-                )
-            else:
-                img = ""
-
-            if img:
-                meta_inline = f"""
-                    <div class="meta-inline">
-                        <span class="meta-label">Quote</span>
-                        <span class="meta-value"><img src='{img}' class='quote'></span>
-                    </div>"""
-
-        html += f"""
-            <div class="card">
-              <div class="card-header">
-                {logo}
-                <div>
-                    <div class="symbol">{profile.symbol}{flag}</div>
-                    <div class="name">{name}</div>
-                </div>
-                <div class="meta-right">
-                    {provider_html}
-                    {meta_inline}
-                </div>
-              </div>
-              <div class="intervals">{interval_rows}</div>
-              {legs}
-            </div>"""
-
-    return html, total_rows
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Download interface
@@ -379,11 +63,11 @@ all_instruments = _list_instruments(instrument_type)
 if not st.session_state.get("_currency"):
     st.session_state._currency = "All"
 
-if currency := st.session_state.get("_currency"):
+if (currency := st.session_state.get("_currency", "All")) != "All":
     filtered_instruments = [
         inst
         for inst in all_instruments
-        if currency == "All" or inst.base == currency or str(inst.quote) == currency
+        if inst.base == currency or str(inst.quote) == currency
     ]
 else:
     filtered_instruments = all_instruments
@@ -506,7 +190,15 @@ if profiles and intervals:
     st.divider()
 
     with st.expander("Download details", icon=":material/archive:", expanded=False):
-        html, n_bars = draw_cards(profiles)
+        html, n_bars = draw_cards(
+            profiles,
+            cfg=cfg,
+            tz=tz,
+            instrument_type=instrument_type,
+            full_history=full_history,
+            start_ts=start_ts,
+            end_ts=end_ts,
+        )
         st.html(CARD_CSS + html)
 
     estimated_memory = (n_bars * BYTES_PER_ROW) / (1024**2)
@@ -569,7 +261,7 @@ if st.button(
                 dl_end = int(dt.combine(end_ts, dt.min.time(), tzinfo=tz).timestamp())
 
             with st.spinner("Downloading data..."):
-                result = download_instruments(profiles, start=dl_start, end=dl_end, verbose=False)
+                result = download_bars(profiles, start=dl_start, end=dl_end, verbose=False)
         except RuntimeError as ex:
             st.error(f"Download error: {ex}", icon=":material/error:")
         else:

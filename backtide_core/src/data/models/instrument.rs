@@ -2,6 +2,7 @@ use crate::constants::Symbol;
 use crate::data::models::currency::Currency;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument_type::InstrumentType;
+use crate::data::models::provider::Provider;
 use pyo3::prelude::*;
 use pyo3::types::PyString;
 use serde::Deserialize;
@@ -32,8 +33,8 @@ use serde::Deserialize;
 /// exchange : str | [Exchange]
 ///     The exchange this instrument is listed in.
 ///
-/// exchange_name : str
-///     Human-readable exchange name.
+/// provider : [Provider]
+///     The data provider that sourced this instrument.
 ///
 /// See Also
 /// --------
@@ -49,6 +50,7 @@ pub struct Instrument {
     pub quote: String,
     pub instrument_type: InstrumentType,
     pub exchange: String,
+    pub provider: Provider,
 }
 
 #[pymethods]
@@ -57,6 +59,7 @@ impl Instrument {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
+    #[pyo3(signature = (symbol, name, base, quote, instrument_type, exchange, provider))]
     fn new(
         symbol: Symbol,
         name: String,
@@ -64,6 +67,7 @@ impl Instrument {
         quote: String,
         instrument_type: InstrumentType,
         exchange: String,
+        provider: Provider,
     ) -> Self {
         Self {
             symbol,
@@ -72,6 +76,7 @@ impl Instrument {
             quote,
             instrument_type,
             exchange,
+            provider,
         }
     }
 
@@ -81,7 +86,15 @@ impl Instrument {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        (Symbol, String, Option<String>, String, InstrumentType, String),
+        (
+            Symbol,
+            String,
+            Option<String>,
+            String,
+            InstrumentType,
+            String,
+            Provider,
+        ),
     )> {
         let cls = py.get_type::<Instrument>().into_any();
         Ok((
@@ -93,19 +106,21 @@ impl Instrument {
                 self.quote.clone(),
                 self.instrument_type,
                 self.exchange.clone(),
+                self.provider.clone(),
             ),
         ))
     }
 
     pub fn __repr__(&self) -> String {
         format!(
-            "Instrument(symbol={:?}, name={:?}, base={}, quote={:?}, instrument_type={:?}, exchange={:?})",
+            "Instrument(symbol={:?}, name={:?}, base={}, quote={:?}, instrument_type={:?}, exchange={:?}, provider={:?})",
             self.symbol,
             self.name,
             self.base.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
             self.quote,
             self.instrument_type.to_string(),
             self.exchange,
+            self.provider,
         )
     }
 

@@ -7,7 +7,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 ///
 /// With which approach to convert currencies to the `base_currency`. Read
 /// more in the [user guide][currency-conversion].
-#[pyclass(skip_from_py_object, module = "backtide.config")]
+#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.config")]
 #[derive(
     Clone,
     Copy,

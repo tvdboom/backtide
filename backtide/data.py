@@ -16,8 +16,8 @@ from backtide.core.data import (
     InstrumentType,
     Interval,
     Provider,
-    download_instruments,
-    get_instruments,
+    download_bars,
+    fetch_instruments,
     list_instruments,
     resolve_profiles,
 )

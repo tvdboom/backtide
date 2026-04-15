@@ -19,7 +19,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// - backtide.backtest:CommissionType
 /// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:StrategyType
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.backtest")]
 #[derive(
     Clone,
     Copy,
@@ -62,15 +62,6 @@ impl OrderType {
         let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self == other
-    }
-
-    fn __hash__(&self) -> u64 {
-        *self as u64
-    }
-
     pub fn __str__(&self) -> String {
         self.to_string()
     }

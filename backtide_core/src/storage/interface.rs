@@ -25,12 +25,18 @@ fn dict_to_dataframe<'py>(
     }
 }
 
+/// Flatten `Option<String>` to `String`, replacing `None` with `""`.
+#[inline]
+fn opt_str(v: Option<String>) -> String {
+    v.unwrap_or_default()
+}
+
 /// Return all stored OHLCV bars as a dataframe.
 ///
 /// Each row represents a single bar. The dataframe columns are:
-/// `symbol`, `instrument_type`, `interval`, `provider`, `open_ts`,
-/// `close_ts`, `open_ts_exchange`, `open`, `high`, `low`, `close`,
-/// `adj_close`, `volume`, and `n_trades`.
+/// `symbol`, `interval`, `provider`, `open_ts`, `close_ts`,
+/// `open_ts_exchange`, `open`, `high`, `low`, `close`, `adj_close`,
+/// `volume`, and `n_trades`.
 ///
 /// Returns
 /// -------
@@ -39,26 +45,25 @@ fn dict_to_dataframe<'py>(
 ///
 /// See Also
 /// --------
-/// - backtide.data:download_instruments
-/// - backtide.storage:get_bars_summary
-/// - backtide.storage:get_dividends
+/// - backtide.data:download_bars
+/// - backtide.storage:query_bars_summary
+/// - backtide.storage:query_dividends
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.storage import get_bars
+/// from backtide.storage import query_bars
 ///
-/// df = get_bars()
+/// df = query_bars()
 /// print(df.head())
 /// ```
 #[pyfunction]
-pub fn get_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
+pub fn query_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let engine = Engine::get()?;
-    let rows = engine.get_all_bars()?;
+    let rows = engine.query_bars(None, None, None, None)?;
 
     let n = rows.len();
     let mut symbols = Vec::with_capacity(n);
-    let mut instrument_types = Vec::with_capacity(n);
     let mut intervals = Vec::with_capacity(n);
     let mut providers = Vec::with_capacity(n);
     let mut open_ts = Vec::with_capacity(n);
@@ -74,7 +79,6 @@ pub fn get_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
 
     for r in rows {
         symbols.push(r.symbol);
-        instrument_types.push(r.instrument_type);
         intervals.push(r.interval);
         providers.push(r.provider);
         open_ts.push(r.bar.open_ts);
@@ -91,7 +95,6 @@ pub fn get_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
 
     let data = PyDict::new(py);
     data.set_item("symbol", PyList::new(py, &symbols)?)?;
-    data.set_item("instrument_type", PyList::new(py, &instrument_types)?)?;
     data.set_item("interval", PyList::new(py, &intervals)?)?;
     data.set_item("provider", PyList::new(py, &providers)?)?;
     data.set_item("open_ts", PyList::new(py, &open_ts)?)?;
@@ -122,21 +125,25 @@ pub fn get_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.storage import get_bars_summary
+/// from backtide.storage import query_bars_summary
 ///
-/// df = get_bars_summary()
+/// df = query_bars_summary()
 /// print(df.head())
 /// ```
 #[pyfunction]
-pub fn get_bars_summary(py: Python<'_>) -> PyResult<Py<PyAny>> {
+pub fn query_bars_summary(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let engine = Engine::get()?;
-    let rows = engine.get_bars_summary()?;
+    let rows = engine.query_bars_summary()?;
 
     let n = rows.len();
     let mut symbols = Vec::with_capacity(n);
     let mut instrument_types = Vec::with_capacity(n);
     let mut intervals = Vec::with_capacity(n);
     let mut providers = Vec::with_capacity(n);
+    let mut names = Vec::with_capacity(n);
+    let mut bases = Vec::with_capacity(n);
+    let mut quotes = Vec::with_capacity(n);
+    let mut exchanges = Vec::with_capacity(n);
     let mut first_ts = Vec::with_capacity(n);
     let mut last_ts = Vec::with_capacity(n);
     let mut n_rows = Vec::with_capacity(n);
@@ -147,6 +154,10 @@ pub fn get_bars_summary(py: Python<'_>) -> PyResult<Py<PyAny>> {
         instrument_types.push(r.instrument_type);
         intervals.push(r.interval);
         providers.push(r.provider);
+        names.push(opt_str(r.name));
+        bases.push(opt_str(r.base));
+        quotes.push(opt_str(r.quote));
+        exchanges.push(opt_str(r.exchange));
         first_ts.push(r.first_ts);
         last_ts.push(r.last_ts);
         n_rows.push(r.n_rows);
@@ -158,6 +169,10 @@ pub fn get_bars_summary(py: Python<'_>) -> PyResult<Py<PyAny>> {
     data.set_item("instrument_type", PyList::new(py, &instrument_types)?)?;
     data.set_item("interval", PyList::new(py, &intervals)?)?;
     data.set_item("provider", PyList::new(py, &providers)?)?;
+    data.set_item("name", PyList::new(py, &names)?)?;
+    data.set_item("base", PyList::new(py, &bases)?)?;
+    data.set_item("quote", PyList::new(py, &quotes)?)?;
+    data.set_item("exchange", PyList::new(py, &exchanges)?)?;
     data.set_item("first_ts", PyList::new(py, &first_ts)?)?;
     data.set_item("last_ts", PyList::new(py, &last_ts)?)?;
     data.set_item("n_rows", PyList::new(py, &n_rows)?)?;
@@ -180,21 +195,21 @@ pub fn get_bars_summary(py: Python<'_>) -> PyResult<Py<PyAny>> {
 /// See Also
 /// --------
 /// - backtide.storage:delete_symbols
-/// - backtide.data:download_instruments
-/// - backtide.storage:get_bars
+/// - backtide.data:download_bars
+/// - backtide.storage:query_bars
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.storage import get_dividends
+/// from backtide.storage import query_dividends
 ///
-/// df = get_dividends()
+/// df = query_dividends()
 /// print(df.head())
 /// ```
 #[pyfunction]
-pub fn get_dividends(py: Python<'_>) -> PyResult<Py<PyAny>> {
+pub fn query_dividends(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let engine = Engine::get()?;
-    let rows = engine.get_all_dividends()?;
+    let rows = engine.query_dividends(None, None, None)?;
 
     let n = rows.len();
     let mut symbols = Vec::with_capacity(n);
@@ -249,9 +264,9 @@ pub fn get_dividends(py: Python<'_>) -> PyResult<Py<PyAny>> {
 ///
 /// See Also
 /// --------
-/// - backtide.data:download_instruments
-/// - backtide.storage:get_bars
-/// - backtide.storage:get_dividends
+/// - backtide.data:download_bars
+/// - backtide.storage:query_bars
+/// - backtide.storage:query_dividends
 ///
 /// Examples
 /// --------
@@ -307,4 +322,73 @@ pub fn delete_symbols(
 
     let engine = Engine::get()?;
     Ok(engine.delete_symbols(&tuples)?)
+}
+
+/// Return stored instrument metadata, optionally filtered.
+///
+/// When called with no arguments, returns all instruments. When
+/// ``instrument_type``, ``provider``, and/or ``exchange`` are given, only
+/// matching rows are returned.
+///
+/// Parameters
+/// ----------
+/// instrument_type : str | InstrumentType | None, default=None
+///     Filter by instrument type.
+///
+/// provider : str | Provider | None, default=None
+///     Filter by data provider.
+///
+/// exchange : str | Exchange | list[str | Exchange] | None, default=None
+///     Filter by exchange. Accepts a single exchange or a list.
+///
+/// limit : int | None, default=None
+///     Maximum number of instruments to return. ``None`` means no limit.
+///
+/// Returns
+/// -------
+/// list[Instrument]
+///     Matching instruments from the database.
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.storage import query_instruments
+///
+/// # All instruments
+/// all_instruments = query_instruments()
+///
+/// # Filtered
+/// stocks = query_instruments("stocks", "yahoo", limit=100)
+///
+/// # Filtered by exchange
+/// nyse = query_instruments("stocks", exchange="XNYS")
+/// ```
+#[pyfunction]
+#[pyo3(signature = (instrument_type=None, provider=None, exchange=None, *, limit=None))]
+pub fn query_instruments(
+    instrument_type: Option<Bound<'_, PyAny>>,
+    provider: Option<Bound<'_, PyAny>>,
+    exchange: Option<Bound<'_, PyAny>>,
+    limit: Option<usize>,
+) -> PyResult<Vec<crate::data::models::instrument::Instrument>> {
+    use crate::data::models::exchange::Exchange;
+    use crate::data::models::instrument_type::InstrumentType;
+
+    let it = instrument_type.map(|v| v.extract::<InstrumentType>()).transpose()?;
+    let prov = provider.map(|v| v.extract::<Provider>()).transpose()?;
+
+    let exchanges: Option<Vec<Exchange>> = exchange
+        .map(|v| {
+            if let Ok(seq) = v.extract::<Vec<Bound<'_, PyAny>>>() {
+                seq.iter()
+                    .map(|item| item.extract::<Exchange>().map_err(Into::into))
+                    .collect::<PyResult<Vec<_>>>()
+            } else {
+                Ok(vec![v.extract::<Exchange>()?])
+            }
+        })
+        .transpose()?;
+
+    let engine = Engine::get()?;
+    Ok(engine.query_instruments(it, prov, exchanges.as_deref(), limit)?)
 }

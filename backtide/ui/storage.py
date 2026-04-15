@@ -12,8 +12,14 @@ import streamlit as st
 
 from backtide.core.config import get_config
 from backtide.core.data import InstrumentType
-from backtide.core.storage import delete_symbols, get_bars_summary
-from backtide.ui.utils import _fmt_number, _get_logokit_url, _get_timezone, _parse_date, _to_pandas
+from backtide.core.storage import delete_symbols
+from backtide.ui.utils import (
+    _fmt_number,
+    _get_logokit_url,
+    _get_timezone,
+    _query_bars_summary,
+    _parse_date,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
@@ -23,10 +29,11 @@ from backtide.ui.utils import _fmt_number, _get_logokit_url, _get_timezone, _par
 @st.cache_data(show_spinner="Loading bars from database...")
 def _load_storage_df(date_fmt: str, tz: ZoneInfo, logokit_key: str | None) -> pd.DataFrame:
     """Load and cache the stored data from the database."""
-    raw = _to_pandas(get_bars_summary())
+    raw = _query_bars_summary()
     df = pd.DataFrame(
         {
             "Symbol": raw["symbol"],
+            "Name": raw["name"],
             "Interval": raw["interval"],
             "Instrument type": raw["instrument_type"],
             "Provider": raw["provider"],
@@ -69,7 +76,7 @@ def _confirm_delete(series: list[pd.Series]):
 
     if col2.button("Delete", width="stretch", type="primary", icon=":material/delete:"):
         delete_symbols(series=[(g["Symbol"], g["Interval"], g["Provider"]) for g in series])
-        _load_storage_df.clear()
+        st.cache_data.clear()
         st.rerun()
 
 
@@ -100,6 +107,7 @@ if bars_df.empty:
 metrics_container = st.container()
 
 column_config = {
+    "Name": st.column_config.TextColumn(width="medium"),
     "Instrument type": st.column_config.TextColumn(width="small"),
     "Bars": st.column_config.NumberColumn(format="%d"),
     "Price": st.column_config.LineChartColumn(help="Closing price for the last 365 intervals."),

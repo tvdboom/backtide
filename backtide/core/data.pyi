@@ -11,8 +11,8 @@ __all__ = [
     "InstrumentType",
     "Interval",
     "Provider",
-    "download_instruments",
-    "get_instruments",
+    "download_bars",
+    "fetch_instruments",
     "list_instruments",
     "resolve_profiles",
 ]
@@ -444,7 +444,7 @@ class Currency:
     def variants() -> list[Currency]: ...
 
 class DownloadResult:
-    """Summary returned by [`download_instruments`] after all tasks finish.
+    """Summary returned by [`download_bars`] after all tasks finish.
 
     Individual task failures are captured as warnings rather than aborting
     the entire download, so callers can report partial success.
@@ -462,8 +462,8 @@ class DownloadResult:
 
     See Also
     --------
-    - backtide.data:download_instruments
-    - backtide.data:get_instruments
+    - backtide.data:download_bars
+    - backtide.data:fetch_instruments
     - backtide.data:list_instruments
 
     """
@@ -632,8 +632,8 @@ class Instrument:
     exchange : str | [Exchange]
         The exchange this instrument is listed in.
 
-    exchange_name : str
-        Human-readable exchange name.
+    provider : [Provider]
+        The data provider that sourced this instrument.
 
     See Also
     --------
@@ -647,6 +647,7 @@ class Instrument:
     exchange: str | Exchange
     instrument_type: InstrumentType
     name: str
+    provider: Provider
     quote: str | Currency
     symbol: str
 
@@ -828,7 +829,7 @@ class Provider:
     def __str__(self, /): ...
     def intervals(self) -> list[Interval]: ...
 
-def download_instruments(profiles, start=None, end=None, *, verbose=True) -> DownloadResult:
+def download_bars(profiles, start=None, end=None, *, verbose=True) -> DownloadResult:
     """Download OHLCV data for the instruments described in a list of profiles.
 
     Concurrently downloads all instruments and legs, skipping data already stored
@@ -859,23 +860,23 @@ def download_instruments(profiles, start=None, end=None, *, verbose=True) -> Dow
 
     See Also
     --------
-    - backtide.storage:get_bars
-    - backtide.data:get_instruments
+    - backtide.storage:query_bars
+    - backtide.data:fetch_instruments
     - backtide.data:resolve_profiles
 
     Examples
     --------
     ```pycon
-    from backtide.data import resolve_profiles, download_instruments
+    from backtide.data import resolve_profiles, download_bars
 
     profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", "1d")
-    result = download_instruments(profiles)
+    result = download_bars(profiles)
     print(result)
     ```
 
     """
 
-def get_instruments(symbols, instrument_type) -> list[Instrument]:
+def fetch_instruments(symbols, instrument_type) -> list[Instrument]:
     """Get instruments given their symbols.
 
     Parameters
@@ -894,16 +895,16 @@ def get_instruments(symbols, instrument_type) -> list[Instrument]:
 
     See Also
     --------
-    - backtide.data:download_instruments
+    - backtide.data:download_bars
     - backtide.data:list_instruments
     - backtide.data:resolve_profiles
 
     Examples
     --------
     ```pycon
-    from backtide.data import get_instruments
+    from backtide.data import fetch_instruments
 
-    print(get_instruments(["AAPL", "MSFT"], "stocks"))
+    print(fetch_instruments(["AAPL", "MSFT"], "stocks"))
     ```
 
     """
@@ -917,8 +918,10 @@ def list_instruments(
 ) -> list[Instrument]:
     """List available instruments for a given instrument type.
 
-    The function may not return all available instruments, but a subset of the most
-    important ones instead.
+    Returns instruments already stored in the database first.  Only when the
+    DB holds fewer than `limit` matching rows does it fall back to the network
+    provider to fill the gap.  Network results are persisted so that subsequent
+    calls can be served entirely from storage.
 
     Parameters
     ----------
@@ -944,8 +947,8 @@ def list_instruments(
 
     See Also
     --------
-    - backtide.data:download_instruments
-    - backtide.data:get_instruments
+    - backtide.data:download_bars
+    - backtide.data:fetch_instruments
     - backtide.data:resolve_profiles
 
     Examples
@@ -993,8 +996,8 @@ def resolve_profiles(
 
     See Also
     --------
-    - backtide.data:download_instruments
-    - backtide.data:get_instruments
+    - backtide.data:download_bars
+    - backtide.data:fetch_instruments
     - backtide.data:list_instruments
 
     Examples

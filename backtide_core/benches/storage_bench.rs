@@ -23,7 +23,6 @@ use std::time::Duration;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 use backtide_core::data::models::bar::Bar;
-use backtide_core::data::models::instrument_type::InstrumentType;
 use backtide_core::data::models::interval::Interval;
 use backtide_core::data::models::provider::Provider;
 use backtide_core::storage::duckdb::DuckDb;
@@ -74,7 +73,6 @@ fn fresh_db() -> (DuckDb, tempfile::TempDir) {
 fn make_series(symbol: &str, bars: Vec<Bar>) -> BarSeries {
     BarSeries {
         symbol: symbol.to_owned(),
-        instrument_type: InstrumentType::Stocks,
         interval: Interval::OneDay,
         provider: Provider::Yahoo,
         bars,
@@ -114,10 +112,10 @@ fn bench_batch_bar_insert(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark [`Storage::get_all_bars`] read latency for a single symbol.
+/// Benchmark [`Storage::query_bars`] read latency for a single symbol.
 ///
 /// Pre-populates a DuckDB instance with 1 000 daily bars for one symbol,
-/// then repeatedly calls `get_all_bars`. Measures the full table scan
+/// then repeatedly calls `query_bars`. Measures the full table scan
 /// for a single-series database.
 fn bench_historical_read_1sym(c: &mut Criterion) {
     let (db, _dir) = fresh_db();
@@ -126,12 +124,12 @@ fn bench_historical_read_1sym(c: &mut Criterion) {
 
     c.bench_function("historical_read/1sym", |b| {
         b.iter(|| {
-            db.get_all_bars().expect("read query failed");
+            db.query_bars(None, None, None, None).expect("read query failed");
         });
     });
 }
 
-/// Benchmark [`Storage::get_all_bars`] read latency across 10 symbols.
+/// Benchmark [`Storage::query_bars`] read latency across 10 symbols.
 ///
 /// Seeds the database with 10 symbols × 1 000 bars each (10 000 bars
 /// total), then measures how long the full table scan takes.
@@ -147,7 +145,7 @@ fn bench_historical_read_10sym(c: &mut Criterion) {
 
     c.bench_function("historical_read/10sym", |b| {
         b.iter(|| {
-            db.get_all_bars().expect("read query failed");
+            db.query_bars(None, None, None, None).expect("read query failed");
         });
     });
 }

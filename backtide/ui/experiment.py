@@ -36,11 +36,16 @@ from backtide.backtest import (
 from backtide.config import get_config
 from backtide.data import Currency, InstrumentType, Interval
 from backtide.ui.utils import (
+    CARD_CSS,
     _clear_state,
+    _fmt_number,
     _get_instrument_type_description,
     _get_timezone,
     _list_instruments,
+    _query_bars_summary,
+    _storage_to_card_profiles,
     _to_upper_values,
+    draw_cards,
 )
 from backtide.utils.constants import (
     INDICATOR_PLACEHOLDER,
@@ -412,79 +417,200 @@ with tab2:
         help="Select the type of financial instrument you want to backtest.",
     )
 
-    all_instruments = _list_instruments(instrument_type)
+    # ── Symbol selection ─────────────────────────────────────────────────────
 
-    # Filter instruments based on the selected currency
-    if not st.session_state.get("_currency"):
-        st.session_state._currency = "All"
+    # Read the toggle value from session state before the multiselect so the
+    # options list can depend on it. The actual toggle widget is placed below.
 
-    if currency := st.session_state.get("_currency"):
-        filtered_instruments = [
-            inst
-            for inst in all_instruments
-            if currency == "All" or inst.base == currency or str(inst.quote) == currency
-        ]
+    _use_storage = st.session_state.get("use_storage", False)
+
+    summary_df = None
+
+    if _use_storage:
+        summary_df = _query_bars_summary()
+
+        # Metadata lookups (populated below when data exists)
+        name_lookup: dict[str, str] = {}
+        quote_lookup: dict[str, str] = {}
+
+        if summary_df.empty:
+            all_stored_symbols: list[str] = []
+            stored_symbols: list[str] = []
+        else:
+            stored = summary_df[summary_df["instrument_type"] == str(instrument_type).lower()]
+
+            # Build per-symbol metadata lookups (first row per symbol wins)
+            meta = stored.drop_duplicates("symbol").set_index("symbol")
+            name_lookup = meta["name"].to_dict()
+
+            all_stored_symbols = sorted(meta.index.tolist())
+
+            # Filter stored symbols by selected currency
+            if not st.session_state.get("_currency"):
+                st.session_state._currency = "All"
+
+            if (currency := st.session_state.get("_currency", "All")) != "All":
+                quote_lookup = meta["quote"].to_dict()
+                stored_symbols = [
+                    s for s in all_stored_symbols if quote_lookup.get(s) == currency or currency in s
+                ]
+            else:
+                stored_symbols = all_stored_symbols
+
+        col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
+
+        symbols = col1.multiselect(
+            label="Symbols",
+            key="symbols",
+            options=stored_symbols,
+            format_func=lambda s: f"{s} - {name_lookup[s]}" if name_lookup.get(s) else s,
+            placeholder="Select one or more symbols...",
+            max_selections=MAX_INSTRUMENT_SELECTION,
+            help="Symbols that have data stored in the local database.",
+        )
+
+        if not stored_symbols:
+            st.warning(
+                "The database is empty. Head over to the **Download** page to "
+                "fetch some market data first.",
+                icon=":material/warning:",
+            )
+
+        # Build currency options from instrument metadata
+        quotes = sorted(set(q for q in quote_lookup.values() if q))
+        cur_options = ["All", *quotes] if quotes else ["All"]
+
+        col2.selectbox(
+            label="Currency",
+            index=cur_options.index(st.session_state.get("_currency", "All"))
+            if st.session_state.get("_currency", "All") in cur_options
+            else 0,
+            key="currency",
+            options=cur_options,
+            on_change=lambda: st.session_state.update(_currency=st.session_state.currency),
+            placeholder="All",
+            help="Filter the stored symbols by their quote currency.",
+        )
     else:
-        filtered_instruments = all_instruments
+        all_instruments = _list_instruments(instrument_type)
 
-    col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
-    symbol_d, currency_d = _get_instrument_type_description(instrument_type)
+        # Filter instruments based on the selected currency
+        if not st.session_state.get("_currency"):
+            st.session_state._currency = "All"
 
-    if all(x in filtered_instruments for x in _to_list(st.session_state.get("symbols"))):
-        default = st.session_state.symbols
-    else:
-        default = None
+        if (currency := st.session_state.get("_currency", "All")) != "All":
+            filtered_instruments = [
+                inst
+                for inst in all_instruments
+                if inst.base == currency or str(inst.quote) == currency
+            ]
+        else:
+            filtered_instruments = all_instruments
 
-    symbols = col1.multiselect(
-        label="Symbols",
-        key="symbols",
-        options=sorted(filtered_instruments, key=lambda a: a.symbol),
-        default=default,
-        format_func=lambda a: (
-            f"{a.symbol} - {a.name}"
-            if instrument_type in (InstrumentType.Stocks, InstrumentType.Etf)
-            else a.symbol
+        col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
+        symbol_d, currency_d = _get_instrument_type_description(instrument_type)
+
+        if all(x in filtered_instruments for x in _to_list(st.session_state.get("symbols"))):
+            default = st.session_state.symbols
+        else:
+            default = None
+
+        symbols = col1.multiselect(
+            label="Symbols",
+            key="symbols",
+            options=sorted(filtered_instruments, key=lambda a: a.symbol),
+            default=default,
+            format_func=lambda a: (
+                f"{a.symbol} - {a.name}"
+                if instrument_type in (InstrumentType.Stocks, InstrumentType.Etf)
+                else a.symbol
+            ),
+            placeholder="Select one or more symbols...",
+            max_selections=MAX_INSTRUMENT_SELECTION,
+            accept_new_options=True,
+            on_change=lambda: _to_upper_values("symbols"),
+            help=symbol_d,
+        )
+
+        # Symbols can become symbol - name when changing currency, so extract the symbol part
+        symbols = [s.split(" - ")[0] if isinstance(s, str) else s for s in symbols]
+
+        options = ["All", *sorted(dict.fromkeys(str(a.quote) for a in all_instruments))]
+        col2.selectbox(
+            label="Currency",
+            index=options.index(st.session_state._currency),
+            key="currency",
+            options=options,
+            on_change=lambda: st.session_state.update(_currency=st.session_state.currency),
+            placeholder="All",
+            help=currency_d,
+        )
+
+    # ── Use stored data toggle (placed after the symbol selector) ────────────
+
+    use_storage = st.toggle(
+        label="Use stored data",
+        key="use_storage",
+        value=False,
+        on_change=lambda: _clear_state(["symbols", "start_date", "end_date"]),
+        help=(
+            "When enabled, the backtest uses whatever data is already saved in the local "
+            "database for the selected symbols and interval. No new data is downloaded, and "
+            "the date range is determined entirely by what is available in storage."
         ),
-        placeholder="Select one or more symbols...",
-        max_selections=MAX_INSTRUMENT_SELECTION,
-        accept_new_options=True,
-        on_change=lambda: _to_upper_values("symbols"),
-        help=symbol_d,
     )
 
-    # Symbols can become symbol - name when changing currency, so extract the symbol part
-    symbols = [s.split(" - ")[0] if isinstance(s, str) else s for s in symbols]
-
-    options = ["All", *sorted(dict.fromkeys(str(a.quote) for a in all_instruments))]
-    col2.selectbox(
-        label="Currency",
-        index=options.index(st.session_state._currency),
-        key="currency",
-        options=options,
-        on_change=lambda: st.session_state.update(_currency=st.session_state.currency),
-        placeholder="All",
-        help=currency_d,
-    )
+    # ── History / date range ─────────────────────────────────────────────────
 
     full_history = st.toggle(
         label="Use full available history",
         key="full_history",
         value=True,
         help=(
+            "Whether to use all data available in storage for the selected symbols. "
+            "If toggled off, select the start and end dates within the stored range."
+        )
+        if use_storage
+        else (
             "Whether to use the maximum available history for all selected symbols. "
             "If toggled off, select the start and end dates for the simulation."
         ),
     )
 
     if not full_history:
+        # Compute date range bounds from storage when applicable
+        if use_storage and summary_df is not None and not summary_df.empty and symbols:
+            sym_strs = [s if isinstance(s, str) else getattr(s, "symbol", str(s)) for s in symbols]
+            it_str = str(instrument_type).lower()
+            sym_rows = summary_df[
+                (summary_df["symbol"].astype(str).isin(sym_strs))
+                & (summary_df["instrument_type"].astype(str).str.lower() == it_str)
+            ]
+            if not sym_rows.empty:
+                storage_min = datetime.fromtimestamp(int(sym_rows["first_ts"].min()), tz=tz).date()
+                storage_max = min(
+                    datetime.fromtimestamp(int(sym_rows["last_ts"].max()), tz=tz).date(),
+                    datetime.now(tz=tz).date(),
+                )
+            else:
+                storage_min = datetime(2000, 1, 1, tzinfo=tz).date()
+                storage_max = datetime.now(tz=tz).date()
+            min_date = storage_min
+            max_date = storage_max
+            default_start = storage_min
+        else:
+            min_date = "2000-01-01"
+            max_date = datetime.now(tz=tz).date()
+            default_start = None
+
         col1, col2 = st.columns(2)
 
         start_date = col1.date_input(
             label="Start date",
             key="start_date",
-            value=None,
-            min_value="2000-01-01",
-            max_value=datetime.now(tz=tz).date(),
+            value=default_start,
+            min_value=min_date,
+            max_value=max_date,
             help=(
                 "Run backtest simulation starting from this date. If the historical data "
                 "does not go so far back, it starts from the available history for that symbol."
@@ -494,14 +620,16 @@ with tab2:
         end_date = col2.date_input(
             label="End date",
             key="end_date",
-            value="today",
+            value=max_date if use_storage else "today",
             min_value=start_date,
-            max_value="today",
+            max_value=max_date if use_storage else "today",
             help="Run backtest simulation up to this date.",
         )
     else:
         start_date = None
         end_date = None
+
+    # ── Interval ─────────────────────────────────────────────────────────────
 
     interval = st.pills(
         label="Interval",
@@ -516,6 +644,43 @@ with tab2:
             "greatly influences the simulation's speed."
         ),
     )
+
+    # ── Storage cards ────────────────────────────────────────────────────────
+
+    if use_storage and symbols and summary_df is not None and not summary_df.empty:
+        storage_profiles = _storage_to_card_profiles(summary_df, symbols, instrument_type)
+        if storage_profiles:
+            with st.expander("Stored data details", icon=":material/database:", expanded=False):
+                html, n_bars = draw_cards(
+                    storage_profiles,
+                    cfg=cfg,
+                    tz=tz,
+                    instrument_type=instrument_type,
+                    full_history=full_history,
+                    start_ts=start_date,
+                    end_ts=end_date,
+                )
+                st.html(CARD_CSS + html)
+
+            col1, col2 = st.columns(2)
+            col1.metric(
+                ":material/candlestick_chart: Estimated bars",
+                _fmt_number(n_bars),
+                border=True,
+            )
+
+            missing = [
+                (s if isinstance(s, str) else getattr(s, "symbol", str(s)))
+                for s in symbols
+                if (s if isinstance(s, str) else getattr(s, "symbol", str(s)))
+                not in {p.symbol for p in storage_profiles}
+            ]
+            if missing:
+                st.warning(
+                    f"No stored data found for: **{', '.join(missing)}**. "
+                    f"Download them first from the **Download** page.",
+                    icon=":material/warning:",
+                )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1325,11 +1490,12 @@ if st.button(
     else:
         display_name = experiment_name or st.session_state.experiment_id
         base_cur = st.session_state.get("base_currency", Currency.get_default())
-        date_range = f"{start_date} -> {end_date}" if not full_history else "full history"
+        source = "stored data" if use_storage else "full history"
+        date_range = f"{start_date} → {end_date}" if not full_history else source
         with st.spinner(f'Running "{display_name}"...'):
             # TODO: implement backtest execution logic
             st.success(
-                f"Backtest **{display_name}** queued successfully - "
+                f"Backtest **{display_name}** queued successfully — "
                 f"{len(symbols)} symbol(s), {date_range}, "
                 f"starting cash {base_cur} {starting_amount:,.2f}.",
                 icon=":material/check_circle:",

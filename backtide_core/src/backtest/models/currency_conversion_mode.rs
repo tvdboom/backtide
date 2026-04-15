@@ -19,7 +19,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// - backtide.backtest:ConversionPeriod
 /// - backtide.data:Currency
 /// - backtide.backtest:ExchangeExpConfig
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.backtest")]
 #[derive(
     Clone,
     Copy,
@@ -58,15 +58,6 @@ impl CurrencyConversionMode {
         let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self == other
-    }
-
-    fn __hash__(&self) -> u64 {
-        *self as u64
-    }
-
     fn __repr__(&self) -> String {
         self.to_string()
     }
