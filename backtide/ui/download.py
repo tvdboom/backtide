@@ -32,6 +32,7 @@ from backtide.ui.utils import (
     _to_upper_values,
 )
 from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
+from backtide.utils.utils import _to_list
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
@@ -358,14 +359,17 @@ st.title("Download", text_alignment="center")
 
 st.divider()
 
-instrument_type = st.segmented_control(
+instrument_type = st.segmented_control(  # ty: ignore[no-matching-overload]
     label="Instrument type",
     key="instrument_type",
     required=True,
     options=InstrumentType.variants(),
-    default=st.session_state.instrument_type,
+    default=st.session_state.get("_instrument_type") or InstrumentType.get_default(),
     format_func=lambda at: f"{at.icon()} {at}",
-    on_change=_clear_state(["symbols", "_currency"]),
+    on_change=lambda: (
+        _clear_state(["symbols", "_currency"]),
+        st.session_state.update(_instrument_type=st.session_state.instrument_type),
+    ),
     help="Select the type of financial instrument you want to download.",
 )
 
@@ -387,10 +391,16 @@ else:
 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
 instrument_d, currency_d = _get_instrument_type_description(instrument_type)
 
+if all(x in filtered_instruments for x in _to_list(st.session_state.get("symbols"))):
+    default = st.session_state.symbols
+else:
+    default = None
+
 symbols = col1.multiselect(
     label="Symbols",
     key="symbols",
     options=sorted(filtered_instruments, key=lambda a: a.symbol),
+    default=default,
     format_func=lambda a: (
         f"{a.symbol} - {a.name}"
         if a.instrument_type in (InstrumentType.Stocks, InstrumentType.Etf)
@@ -399,7 +409,7 @@ symbols = col1.multiselect(
     placeholder="Select one or more symbols...",
     max_selections=MAX_INSTRUMENT_SELECTION,
     accept_new_options=True,
-    on_change=_to_upper_values("symbols"),
+    on_change=lambda: _to_upper_values("symbols"),
     help=instrument_d,
 )
 
@@ -414,9 +424,9 @@ try:
         profiles = resolve_profiles(symbols, instrument_type, intervals, verbose=False)
         direct = profiles[: len(symbols)]  # Direct profiles (no legs)
     else:
-        profiles = None
-        direct = None
+        profiles = direct = None
 except RuntimeError as ex:
+    profiles = direct = None
     st.error(ex, icon=":material/error:")
 
 options = ["All", *sorted(dict.fromkeys(str(inst.quote) for inst in all_instruments))]
@@ -489,7 +499,7 @@ intervals = st.pills(
     ),
 )
 
-if profiles and start_ts and latest_ts and intervals:
+if profiles and intervals:
     BYTES_PER_ROW = 120  # Estimated memory required per OHLC bar
     ROWS_PER_SECOND = 40_000  # Estimated number of rows downloaded per second
 

@@ -49,6 +49,7 @@ from backtide.utils.constants import (
     STRATEGY_PLACEHOLDER,
     TAG_PATTERN,
 )
+from backtide.utils.utils import _to_list
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
@@ -397,14 +398,17 @@ with tab1:
 # ─────────────────────────────────────────────────────────────────────────────
 
 with tab2:
-    instrument_type = st.segmented_control(
+    instrument_type = st.segmented_control(  # ty: ignore[no-matching-overload]
         label="Instrument type",
         key="instrument_type",
         required=True,
         options=InstrumentType.variants(),
-        default=st.session_state.instrument_type,
+        default=st.session_state.get("_instrument_type", InstrumentType.get_default()),
         format_func=lambda at: f"{at.icon()} {at}",
-        on_change=_clear_state(["symbols", "_currency"]),
+        on_change=lambda: (
+            _clear_state(["symbols", "_currency"]),
+            st.session_state.update(_instrument_type=st.session_state.instrument_type),
+        ),
         help="Select the type of financial instrument you want to backtest.",
     )
 
@@ -426,10 +430,16 @@ with tab2:
     col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
     symbol_d, currency_d = _get_instrument_type_description(instrument_type)
 
+    if all(x in filtered_instruments for x in _to_list(st.session_state.get("symbols"))):
+        default = st.session_state.symbols
+    else:
+        default = None
+
     symbols = col1.multiselect(
         label="Symbols",
         key="symbols",
         options=sorted(filtered_instruments, key=lambda a: a.symbol),
+        default=default,
         format_func=lambda a: (
             f"{a.symbol} - {a.name}"
             if instrument_type in (InstrumentType.Stocks, InstrumentType.Etf)
@@ -438,7 +448,7 @@ with tab2:
         placeholder="Select one or more symbols...",
         max_selections=MAX_INSTRUMENT_SELECTION,
         accept_new_options=True,
-        on_change=_to_upper_values("symbols"),
+        on_change=lambda: _to_upper_values("symbols"),
         help=symbol_d,
     )
 

@@ -19,7 +19,7 @@ from tzlocal import get_localzone
 from backtide.constants import MOMENT_TO_STRFTIME
 from backtide.core.data import Instrument, InstrumentType, list_instruments
 from backtide.utils.constants import MAX_PRELOADED_INSTRUMENTS
-from backtide.utils.utils import to_list
+from backtide.utils.utils import _to_list
 
 
 def _get_timezone(tz: str | None) -> ZoneInfo:
@@ -150,5 +150,5 @@ def _to_upper_values(key: str):
     """Convert values in a streamlit state to uppercase."""
     if key in st.session_state:
         st.session_state[key] = [
-            s.upper() if isinstance(s, str) else s for s in to_list(st.session_state[key])
+            s.upper() if isinstance(s, str) else s for s in _to_list(st.session_state[key])
         ]

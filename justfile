@@ -11,10 +11,10 @@ default:
 
 # Build the Rust extension and regenerate stubs
 build:
-    maturin develop
+    maturin develop -m backtide_core/Cargo.toml
     @just stubs
 
-# Regenerate .pyi stub files from the compiled module
+# Generate stub files from the compiled module
 stubs:
     python scripts/generate_stubs.py
 
