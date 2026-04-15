@@ -34,11 +34,19 @@ pub enum Provider {
 
 #[pymethods]
 impl Provider {
+    #[classattr]
+    const __RUST_ENUM__: bool = true;
+
     fn __repr__(&self) -> String {
         self.to_string()
     }
 
     /// List the supported intervals.
+    ///
+    /// Returns
+    /// -------
+    /// list[[Interval]]
+    ///     Supported intervals.
     fn intervals(&self) -> Vec<Interval> {
         match self {
             Provider::Coinbase => Interval::iter().filter(|i| *i != Interval::OneWeek).collect(),

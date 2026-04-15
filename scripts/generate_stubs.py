@@ -109,7 +109,7 @@ def _parse_attributes_from_doc(doc: str | None) -> dict[str, str]:
     if not doc:
         return {}
 
-    doc = _strip_rust_doc_prefixes(doc)
+    doc = _clean_rust_docs(doc)
 
     attrs: dict[str, str] = {}
     lines = doc.split("\n")
@@ -151,7 +151,7 @@ def _extract_return_type_from_doc(doc: str | None, class_name: str = "") -> str 
     if not doc:
         return None
 
-    doc = _strip_rust_doc_prefixes(doc)
+    doc = _clean_rust_docs(doc)
 
     lines = doc.split("\n")
     in_returns = False
@@ -164,8 +164,8 @@ def _extract_return_type_from_doc(doc: str | None, class_name: str = "") -> str 
             continue
         if in_returns and stripped:
             ret_type = _clean_type(stripped)
-            if ret_type == "self" and class_name:
-                ret_type = class_name
+            if class_name:
+                ret_type = re.sub(r"\bself\b", class_name, ret_type)
             return ret_type
         if in_returns and not stripped:
             in_returns = False
@@ -202,10 +202,19 @@ def _parse_text_signature(text_sig: str | None, name: str) -> str | None:
 # Rust triple-slash doc comment prefix that sometimes leaks through PyO3.
 _RUST_DOC_RE = re.compile(r"^(\s*)///\s?", re.MULTILINE)
 
+# Mojibake arrow: PyO3 on Windows can turn the Rust `->` into U+2192 (→)
+# whose UTF-8 bytes (\xe2\x86\x92) are then misinterpreted as CP-1252,
+# yielding the three-character sequence â (U+00E2) † (U+2020) ' (U+2019).
+_MOJIBAKE_ARROW = "\u00e2\u2020\u2019"  # â†'
+_UNICODE_ARROW = "\u2192"  # →
 
-def _strip_rust_doc_prefixes(text: str) -> str:
-    """Remove ``/// `` prefixes that leak from Rust doc-comments into PyO3 docstrings."""
-    return _RUST_DOC_RE.sub(r"\1", text)
+
+def _clean_rust_docs(text: str) -> str:
+    """Clean `/// ` prefixes and misinterpreted bytes that leak into docstrings."""
+    text = _RUST_DOC_RE.sub(r"\1", text)
+    text = text.replace(_MOJIBAKE_ARROW, "->")
+    text = text.replace(_UNICODE_ARROW, "->")
+    return text
 
 
 def _format_docstring(doc: str | None, indent: str = "    ") -> str:
@@ -213,7 +222,7 @@ def _format_docstring(doc: str | None, indent: str = "    ") -> str:
     if not doc:
         return f"{indent}...\n"
 
-    doc = _strip_rust_doc_prefixes(doc)
+    doc = _clean_rust_docs(doc)
 
     lines = doc.strip().split("\n")
     if len(lines) == 1:
@@ -225,7 +234,7 @@ def _format_docstring(doc: str | None, indent: str = "    ") -> str:
             result += f"{indent}{line}\n"
         else:
             result += "\n"
-    result += f'{indent}"""\n'
+    result += f'\n{indent}"""\n'
     return result
 
 
@@ -260,29 +269,29 @@ def _get_descriptor_names(cls: type) -> set[str]:
     return attrs
 
 
+def _get_enum_variants(cls: type) -> list[str]:
+    """Return sorted names of class-level attributes that are instances of *cls*.
+
+    PyO3 enum variants (``#[pyclass]`` with ``#[pyo3(enum)]``) are exposed as
+    class attributes whose value is an instance of the enum class itself.
+
+    """
+    variants: list[str] = []
+    for name in dir(cls):
+        if name.startswith("_"):
+            continue
+        try:
+            member = getattr(cls, name)
+        except AttributeError:
+            continue
+        if isinstance(member, cls):
+            variants.append(name)
+    return sorted(variants)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Stub generators
 # ─────────────────────────────────────────────────────────────────────────────
-
-# Well-known method names whose return type can be inferred when the docstring
-# does not contain a formal Returns section. "{cls}" is replaced with the
-# enclosing class name at generation time.
-_KNOWN_RETURN_TYPES: dict[str, str] = {
-    "get_default": "{cls}",
-    "variants": "list[{cls}]",
-    "icon": "str",
-    "intervals": "list[Interval]",
-    "description": "str",
-    "to_dict": "dict",
-    "to_toml": "str",
-    "datetime_format": "str",
-    "is_intraday": "bool",
-    "minutes": "int",
-    "format": "str",
-    "clear_cache": "None",
-    "set_config": "None",
-    "init_logging": "None",
-}
 
 
 def _generate_method_stub(
@@ -297,10 +306,6 @@ def _generate_method_stub(
 
     sig = _parse_text_signature(text_sig, name)
     ret_type = _extract_return_type_from_doc(doc, class_name=class_name)
-
-    # Fall back to the well-known table when the docstring has no return type.
-    if not ret_type and name in _KNOWN_RETURN_TYPES:
-        ret_type = _KNOWN_RETURN_TYPES[name].format(cls=class_name or "Self")
 
     if sig:
         ret_str = f" -> {ret_type}" if ret_type else ""
@@ -329,6 +334,7 @@ def _generate_class_stub(name: str, cls: type, all_doc_types: dict[str, str]) ->
 
     descriptor_names = _get_descriptor_names(cls)
     doc_types = _parse_attributes_from_doc(doc)
+    enum_variants = _get_enum_variants(cls)
 
     for attr_name in sorted(descriptor_names):
         # 1st: own docstring, 2nd: cross-class lookup, 3rd: Any
@@ -336,6 +342,12 @@ def _generate_class_stub(name: str, cls: type, all_doc_types: dict[str, str]) ->
         lines.append(f"    {attr_name}: {attr_type}\n")
 
     if descriptor_names:
+        lines.append("\n")
+
+    # ── Enum variants ───────────────────────────────────────────────────
+
+    if enum_variants:
+        lines.extend(f"    {variant}: ClassVar[{name}]\n" for variant in enum_variants)
         lines.append("\n")
 
     # ── Methods ─────────────────────────────────────────────────────────
@@ -346,6 +358,8 @@ def _generate_class_stub(name: str, cls: type, all_doc_types: dict[str, str]) ->
         if member_name in SKIP_MEMBERS:
             continue
         if member_name in descriptor_names:
+            continue
+        if member_name in enum_variants:
             continue
 
         try:
@@ -418,9 +432,6 @@ def _generate_function_stub(name: str, func: object) -> str:
 
     sig = _parse_text_signature(text_sig, name)
     ret_type = _extract_return_type_from_doc(doc)
-
-    if not ret_type and name in _KNOWN_RETURN_TYPES:
-        ret_type = _KNOWN_RETURN_TYPES[name].format(cls="Self")
 
     ret_str = f" -> {ret_type}" if ret_type else ""
 
@@ -504,7 +515,7 @@ def generate_submodule_stub(submodule_name: str) -> str:
     body = "".join(body_lines)
 
     # Only emit typing imports that are actually used in the body.
-    typing_imports = [name for name in ("Any",) if re.search(rf"\b{name}\b", body)]
+    typing_imports = [name for name in ("Any", "ClassVar") if re.search(rf"\b{name}\b", body)]
     if typing_imports:
         lines.append(f"from typing import {', '.join(typing_imports)}\n")
         lines.append("\n")

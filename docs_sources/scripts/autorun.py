@@ -175,7 +175,7 @@ def formatter(
         Source formatted to HTML.
 
     """
-    to_html = md.preprocessors["fenced_code_block"].extension.superfences[0]["formatter"]
+    to_html = md.preprocessors["fenced_code_block"].extension.superfences[0]["formatter"]  # ty: ignore[unresolved-attribute]
 
     # Show title of page for debugging purposes
     print(md.lines[0])  # noqa: T201

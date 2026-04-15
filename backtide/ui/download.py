@@ -7,7 +7,6 @@ Description: Page to download new data.
 
 from datetime import datetime as dt
 from datetime import timedelta
-from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -22,13 +21,14 @@ from backtide.core.data import (
     resolve_profiles,
 )
 from backtide.ui.utils import (
+    _clear_state,
     _fmt_number,
     _get_instrument_type_description,
     _get_logokit_url,
     _get_provider_logo,
+    _get_timezone,
     _list_instruments,
     _moment_to_strftime,
-    _prevent_deselection,
     _to_upper_values,
 )
 from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
@@ -202,7 +202,7 @@ CARD_CSS = """
     """
 
 
-def draw_cards(profiles: list[InstrumentProfile]) -> int:
+def draw_cards(profiles: list[InstrumentProfile]) -> tuple[str, int]:
     """Generate HTML code to draw the instrument cards."""
     html = "<div class='section'></div>"
 
@@ -350,10 +350,7 @@ def draw_cards(profiles: list[InstrumentProfile]) -> int:
 # ─────────────────────────────────────────────────────────────────────────────
 
 cfg = get_config()
-if cfg.display.timezone:
-    tz = ZoneInfo(cfg.display.timezone)
-else:
-    tz = dt.now().astimezone().tzinfo
+tz = _get_timezone(cfg.display.timezone)
 
 st.set_page_config(page_title="Backtide - Download")
 
@@ -361,21 +358,14 @@ st.title("Download", text_alignment="center")
 
 st.divider()
 
-if st.session_state.get("instrument_type") is None:
-    _cache = st.session_state.get("_cache", {})
-    st.session_state.instrument_type = _cache.get("instrument_type", InstrumentType.get_default())
-
 instrument_type = st.segmented_control(
     label="Instrument type",
     key="instrument_type",
+    required=True,
     options=InstrumentType.variants(),
     default=st.session_state.instrument_type,
     format_func=lambda at: f"{at.icon()} {at}",
-    on_change=_prevent_deselection(
-        key="instrument_type",
-        default=InstrumentType.get_default(),
-        reset=["symbols", "_currency"],
-    ),
+    on_change=_clear_state(["symbols", "_currency"]),
     help="Select the type of financial instrument you want to download.",
 )
 
@@ -450,7 +440,7 @@ full_history = st.toggle(
 )
 
 today = dt.now(tz=tz).date()
-if profiles and intervals:
+if profiles and intervals and direct:
     earliest_ts = dt.fromtimestamp(min(min(p.earliest_ts.values()) for p in direct), tz=tz).date()
     latest_ts = dt.fromtimestamp(max(max(p.latest_ts.values()) for p in direct), tz=tz).date()
 else:
@@ -499,9 +489,7 @@ intervals = st.pills(
     ),
 )
 
-is_enabled = profiles and start_ts and latest_ts and intervals
-
-if is_enabled:
+if profiles and start_ts and latest_ts and intervals:
     BYTES_PER_ROW = 120  # Estimated memory required per OHLC bar
     ROWS_PER_SECOND = 40_000  # Estimated number of rows downloaded per second
 
@@ -551,14 +539,14 @@ if st.button(
     label="Downloading..." if downloading else "Download",
     icon=":material/get_app:",
     type="primary",
-    disabled=not is_enabled or downloading,
+    disabled=not (profiles and start_ts and latest_ts and intervals) or downloading,
     shortcut="Enter",
     width="stretch",
     key="downloading",
 ):
     if latest_ts > dt.now(tz=tz).date():
         st.error("End date cannot be in the future.", icon=":material/error:")
-    elif start_ts > latest_ts:  # ty:ignore[unsupported-operator]
+    elif start_ts > latest_ts:
         st.error("Start date must be equal or prior to end date.", icon=":material/error:")
     else:
         try:

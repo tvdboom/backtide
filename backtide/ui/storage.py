@@ -5,7 +5,6 @@ Description: Overview of the stored data page.
 
 """
 
-from datetime import datetime as dt
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -14,7 +13,7 @@ import streamlit as st
 from backtide.core.config import get_config
 from backtide.core.data import InstrumentType
 from backtide.core.storage import delete_symbols, get_bars_summary
-from backtide.ui.utils import _fmt_number, _get_logokit_url, _parse_date, _to_pandas
+from backtide.ui.utils import _fmt_number, _get_logokit_url, _get_timezone, _parse_date, _to_pandas
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
@@ -55,7 +54,7 @@ def _load_storage_df(date_fmt: str, tz: ZoneInfo, logokit_key: str | None) -> pd
 
 
 @st.dialog("Confirm deletion", width="medium")
-def _confirm_delete(series: pd.Series):
+def _confirm_delete(series: list[pd.Series]):
     """Show a modal asking the user to confirm deletion of selected series."""
     text = "\n".join([f"* {g['Symbol']}  -  {g['Interval']}" for g in series])
     st.warning(
@@ -79,12 +78,8 @@ def _confirm_delete(series: pd.Series):
 # ─────────────────────────────────────────────────────────────────────────────
 
 cfg = get_config()
+tz = _get_timezone(cfg.display.timezone)
 logokit_key = cfg.display.logokit_api_key
-
-if cfg.display.timezone:
-    tz = ZoneInfo(cfg.display.timezone)
-else:
-    tz = dt.now().astimezone().tzinfo
 
 st.set_page_config(page_title="Backtide - Storage")
 
@@ -122,7 +117,7 @@ event = st.dataframe(
     on_select="rerun",
 )
 
-indices = event.selection.rows if event and event.selection else None
+indices = event.selection.rows if event and event.selection else None  # ty: ignore[unresolved-attribute]
 selected = bars_df.iloc[indices] if indices else bars_df
 
 with metrics_container:

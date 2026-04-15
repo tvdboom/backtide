@@ -2,15 +2,16 @@
 
 __all__ = ["clear_cache", "init_logging"]
 
-def clear_cache() -> None:
+def clear_cache():
     """Clears/invalidates all cache stored by the engine.
 
     See Also
     --------
     - backtide.utils:init_logging
+
     """
 
-def init_logging(log_level) -> None:
+def init_logging(log_level):
     """Initialize the global logging subscriber.
 
     The logging level can only be set before it's used anywhere, so call this
@@ -26,4 +27,5 @@ def init_logging(log_level) -> None:
     See Also
     --------
     - backtide.utils:clear_cache
+
     """

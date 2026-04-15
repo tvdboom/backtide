@@ -248,7 +248,7 @@ pub fn list_instruments(
 /// from backtide.data import resolve_profiles, download_instruments
 ///
 /// profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", "1d")
-/// result = download_instruments(profiles)  # no run
+/// result = download_instruments(profiles)
 /// print(result)
 /// ```
 #[pyfunction]

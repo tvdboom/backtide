@@ -23,6 +23,7 @@ class TestGetBars:
     def test_empty_database(self):
         """A fresh database returns an empty DataFrame."""
         result = get_bars()
+        assert isinstance(result, pd.DataFrame)
         assert result.empty
 
     def test_expected_columns(self):
@@ -58,6 +59,7 @@ class TestGetDividends:
     def test_empty_database(self):
         """A fresh database returns an empty DataFrame."""
         result = get_dividends()
+        assert isinstance(result, pd.DataFrame)
         assert result.empty
 
     def test_expected_columns(self):

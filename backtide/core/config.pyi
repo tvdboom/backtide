@@ -13,6 +13,8 @@ __all__ = [
     "set_config",
 ]
 
+from typing import ClassVar
+
 from backtide.core.data import Currency, InstrumentType, Provider
 
 class Config:
@@ -36,6 +38,7 @@ class Config:
     - backtide.config:get_config
     - backtide.config:load_config
     - backtide.config:set_config
+
     """
 
     data: DataConfig
@@ -66,9 +69,9 @@ class DataConfig:
     storage_path : str, default=".backtide"
         File-system path to the location to store the database and cache.
 
-    providers : dict[str | [InstrumentType], str | [Provider]] | None, default=None
-        Which data provider to use for each instrument type. If `None`, it
-        defaults to `{"stocks": "yahoo", "etf": "yahoo", "forex": "yahoo",
+    providers : dict[[InstrumentType], [Provider]]
+        Which data provider to use for each instrument type. When constructing,
+        it defaults to: `{"stocks": "yahoo", "etf": "yahoo", "forex": "yahoo",
         "crypto": "binance"}`.
 
     See Also
@@ -76,9 +79,10 @@ class DataConfig:
     - backtide.config:get_config
     - backtide.config:load_config
     - backtide.config:set_config
+
     """
 
-    providers: dict[str | InstrumentType, str | Provider] | None
+    providers: dict[InstrumentType, Provider]
     storage_path: str
 
     def __eq__(self, value, /): ...
@@ -99,7 +103,11 @@ class DataframeBackend:
 
     Controls which DataFrame library is used when storage functions return
     tabular data. Read more in the [user guide][configuration].
+
     """
+
+    Pandas: ClassVar[DataframeBackend]
+    Polars: ClassVar[DataframeBackend]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -160,6 +168,7 @@ class DisplayConfig:
     - backtide.config:get_config
     - backtide.config:load_config
     - backtide.config:set_config
+
     """
 
     address: str | None
@@ -200,16 +209,16 @@ class GeneralConfig:
         The fiat currency used as an intermediate between a fiat currency and
         `base_currency`. This method is chosen when no direct conversion path exists
         or when this method has longer history and `triangulation_strategy="earliest"`
-        For example, if converting `PLN â†’ THB` and no `PLN-THB` pair is available, the
-        engine will route through this currency as `PLN` â†’ `triangulation_fiat` â†’ `THB`.
+        For example, if converting `PLN -> THB` and no `PLN-THB` pair is available, the
+        engine will route through this currency as `PLN` -> `triangulation_fiat` -> `THB`.
         The chosen currency is expected to have pairs with all the currencies the
         project works with.
 
     triangulation_crypto : str, default="USDT"
         The cryptocurrency used as an intermediate when no direct conversion
         path exists between a crypto and `base_currency`. For example, to calculate
-        the value of `BTC`, the engine will route `BTC` â†’ `triangulation_crypto` â†’
-        `triangulation_crypto_pegged` â†’ `base_currency`. The selected crypto is
+        the value of `BTC`, the engine will route `BTC` -> `triangulation_crypto` ->
+        `triangulation_crypto_pegged` -> `base_currency`. The selected crypto is
         expected to be a stablecoin pegged to the `triangulation_crypto_pegged`
         fiat currency.
 
@@ -228,6 +237,7 @@ class GeneralConfig:
     - backtide.config:get_config
     - backtide.config:load_config
     - backtide.config:set_config
+
     """
 
     base_currency: str | Currency
@@ -255,7 +265,14 @@ class LogLevel:
 
     The minimum logging level that are displayed, i.e., if `log_level="info"`,
     all `info`, `warn` and `error` messages are displayed.
+
     """
+
+    Debug: ClassVar[LogLevel]
+    Error: ClassVar[LogLevel]
+    Info: ClassVar[LogLevel]
+    Trace: ClassVar[LogLevel]
+    Warn: ClassVar[LogLevel]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -278,7 +295,11 @@ class TriangulationStrategy:
 
     With which approach to convert currencies to the `base_currency`. Read
     more in the [user guide][currency-conversion].
+
     """
+
+    Direct: ClassVar[TriangulationStrategy]
+    Earliest: ClassVar[TriangulationStrategy]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -323,6 +344,7 @@ def get_config() -> Config:
     cfg = get_config()
     pprint(cfg.to_dict())
     ```
+
     """
 
 def load_config(path) -> Config:
@@ -355,9 +377,10 @@ def load_config(path) -> Config:
     # Use the configuration from a custom file location
     set_config(load_config("path/to/config.toml")) # norun
     ```
+
     """
 
-def set_config(config) -> None:
+def set_config(config):
     """Set the global configuration.
 
     The configuration can only be set before it's used anywhere, so call this
@@ -390,4 +413,5 @@ def set_config(config) -> None:
     cfg = get_config()
     print(cfg.general.base_currency)
     ```
+
     """

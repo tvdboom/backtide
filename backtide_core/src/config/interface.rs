@@ -310,9 +310,9 @@ impl GeneralConfig {
 /// storage_path : str, default=".backtide"
 ///     File-system path to the location to store the database and cache.
 ///
-/// providers : dict[str | [InstrumentType], str | [Provider]] | None, default=None
-///     Which data provider to use for each instrument type. If `None`, it
-///     defaults to `{"stocks": "yahoo", "etf": "yahoo", "forex": "yahoo",
+/// providers : dict[[InstrumentType], [Provider]]
+///     Which data provider to use for each instrument type. When constructing,
+///     it defaults to: `{"stocks": "yahoo", "etf": "yahoo", "forex": "yahoo",
 ///     "crypto": "binance"}`.
 ///
 /// See Also

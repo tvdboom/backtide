@@ -17,7 +17,7 @@ __all__ = [
     "resolve_profiles",
 ]
 
-from typing import Any
+from typing import Any, ClassVar
 
 class Bar:
     """A single OHLCV candle for one symbol at one interval.
@@ -63,6 +63,7 @@ class Bar:
     - backtide.data:Instrument
     - backtide.data:InstrumentType
     - backtide.data:Interval
+
     """
 
     adj_close: float
@@ -113,12 +114,163 @@ class Country:
     - backtide.data:Bar
     - backtide.data:Currency
     - backtide.data:Exchange
+
     """
 
     alpha2: str
     alpha3: str
     flag: str
     name: str
+
+    AFG: ClassVar[Country]
+    AGO: ClassVar[Country]
+    ALB: ClassVar[Country]
+    ARE: ClassVar[Country]
+    ARG: ClassVar[Country]
+    ARM: ClassVar[Country]
+    AUS: ClassVar[Country]
+    AUT: ClassVar[Country]
+    AZE: ClassVar[Country]
+    BDI: ClassVar[Country]
+    BEL: ClassVar[Country]
+    BEN: ClassVar[Country]
+    BGD: ClassVar[Country]
+    BGR: ClassVar[Country]
+    BHR: ClassVar[Country]
+    BIH: ClassVar[Country]
+    BLR: ClassVar[Country]
+    BOL: ClassVar[Country]
+    BRA: ClassVar[Country]
+    BRN: ClassVar[Country]
+    BTN: ClassVar[Country]
+    BWA: ClassVar[Country]
+    CAN: ClassVar[Country]
+    CHE: ClassVar[Country]
+    CHL: ClassVar[Country]
+    CHN: ClassVar[Country]
+    CIV: ClassVar[Country]
+    CMR: ClassVar[Country]
+    COD: ClassVar[Country]
+    COG: ClassVar[Country]
+    COL: ClassVar[Country]
+    CRI: ClassVar[Country]
+    CUB: ClassVar[Country]
+    CYM: ClassVar[Country]
+    CYP: ClassVar[Country]
+    CZE: ClassVar[Country]
+    DEU: ClassVar[Country]
+    DNK: ClassVar[Country]
+    DOM: ClassVar[Country]
+    DZA: ClassVar[Country]
+    ECU: ClassVar[Country]
+    EGY: ClassVar[Country]
+    ESP: ClassVar[Country]
+    EST: ClassVar[Country]
+    ETH: ClassVar[Country]
+    EUR: ClassVar[Country]
+    FIN: ClassVar[Country]
+    FJI: ClassVar[Country]
+    FRA: ClassVar[Country]
+    GBR: ClassVar[Country]
+    GEO: ClassVar[Country]
+    GHA: ClassVar[Country]
+    GRC: ClassVar[Country]
+    GTM: ClassVar[Country]
+    HKG: ClassVar[Country]
+    HND: ClassVar[Country]
+    HRV: ClassVar[Country]
+    HTI: ClassVar[Country]
+    HUN: ClassVar[Country]
+    IDN: ClassVar[Country]
+    IND: ClassVar[Country]
+    IRL: ClassVar[Country]
+    IRN: ClassVar[Country]
+    IRQ: ClassVar[Country]
+    ISL: ClassVar[Country]
+    ISR: ClassVar[Country]
+    ITA: ClassVar[Country]
+    JAM: ClassVar[Country]
+    JOR: ClassVar[Country]
+    JPN: ClassVar[Country]
+    KAZ: ClassVar[Country]
+    KEN: ClassVar[Country]
+    KGZ: ClassVar[Country]
+    KHM: ClassVar[Country]
+    KOR: ClassVar[Country]
+    KWT: ClassVar[Country]
+    LAO: ClassVar[Country]
+    LBN: ClassVar[Country]
+    LBY: ClassVar[Country]
+    LKA: ClassVar[Country]
+    LTU: ClassVar[Country]
+    LUX: ClassVar[Country]
+    LVA: ClassVar[Country]
+    MAC: ClassVar[Country]
+    MAR: ClassVar[Country]
+    MDA: ClassVar[Country]
+    MDV: ClassVar[Country]
+    MEX: ClassVar[Country]
+    MKD: ClassVar[Country]
+    MLT: ClassVar[Country]
+    MMR: ClassVar[Country]
+    MNE: ClassVar[Country]
+    MNG: ClassVar[Country]
+    MOZ: ClassVar[Country]
+    MRT: ClassVar[Country]
+    MUS: ClassVar[Country]
+    MYS: ClassVar[Country]
+    NAM: ClassVar[Country]
+    NGA: ClassVar[Country]
+    NIC: ClassVar[Country]
+    NLD: ClassVar[Country]
+    NOR: ClassVar[Country]
+    NPL: ClassVar[Country]
+    NZL: ClassVar[Country]
+    OMN: ClassVar[Country]
+    PAK: ClassVar[Country]
+    PAN: ClassVar[Country]
+    PER: ClassVar[Country]
+    PHL: ClassVar[Country]
+    PNG: ClassVar[Country]
+    POL: ClassVar[Country]
+    PRT: ClassVar[Country]
+    PRY: ClassVar[Country]
+    PSE: ClassVar[Country]
+    QAT: ClassVar[Country]
+    ROU: ClassVar[Country]
+    RUS: ClassVar[Country]
+    RWA: ClassVar[Country]
+    SAU: ClassVar[Country]
+    SDN: ClassVar[Country]
+    SEN: ClassVar[Country]
+    SGP: ClassVar[Country]
+    SLV: ClassVar[Country]
+    SRB: ClassVar[Country]
+    SUR: ClassVar[Country]
+    SVK: ClassVar[Country]
+    SVN: ClassVar[Country]
+    SWE: ClassVar[Country]
+    SYC: ClassVar[Country]
+    SYR: ClassVar[Country]
+    THA: ClassVar[Country]
+    TJK: ClassVar[Country]
+    TKM: ClassVar[Country]
+    TTO: ClassVar[Country]
+    TUN: ClassVar[Country]
+    TUR: ClassVar[Country]
+    TWN: ClassVar[Country]
+    TZA: ClassVar[Country]
+    UGA: ClassVar[Country]
+    UKR: ClassVar[Country]
+    URY: ClassVar[Country]
+    USA: ClassVar[Country]
+    UZB: ClassVar[Country]
+    VEN: ClassVar[Country]
+    VNM: ClassVar[Country]
+    YEM: ClassVar[Country]
+    ZAF: ClassVar[Country]
+    ZMB: ClassVar[Country]
+    ZWE: ClassVar[Country]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -165,6 +317,7 @@ class Currency:
     - backtide.data:Country
     - backtide.data:Exchange
     - backtide.data:Interval
+
     """
 
     country: Country
@@ -172,6 +325,104 @@ class Currency:
     name: str
     symbol: str
     symbol_prefix: bool
+
+    AED: ClassVar[Currency]
+    AFN: ClassVar[Currency]
+    ALL: ClassVar[Currency]
+    AMD: ClassVar[Currency]
+    AOA: ClassVar[Currency]
+    ARS: ClassVar[Currency]
+    AUD: ClassVar[Currency]
+    AZN: ClassVar[Currency]
+    BAM: ClassVar[Currency]
+    BDT: ClassVar[Currency]
+    BGN: ClassVar[Currency]
+    BHD: ClassVar[Currency]
+    BND: ClassVar[Currency]
+    BRL: ClassVar[Currency]
+    CAD: ClassVar[Currency]
+    CHF: ClassVar[Currency]
+    CLP: ClassVar[Currency]
+    CNY: ClassVar[Currency]
+    COP: ClassVar[Currency]
+    CRC: ClassVar[Currency]
+    CZK: ClassVar[Currency]
+    DKK: ClassVar[Currency]
+    DOP: ClassVar[Currency]
+    DZD: ClassVar[Currency]
+    EGP: ClassVar[Currency]
+    EUR: ClassVar[Currency]
+    FJD: ClassVar[Currency]
+    GBP: ClassVar[Currency]
+    GEL: ClassVar[Currency]
+    GHS: ClassVar[Currency]
+    GTQ: ClassVar[Currency]
+    HKD: ClassVar[Currency]
+    HNL: ClassVar[Currency]
+    HUF: ClassVar[Currency]
+    IDR: ClassVar[Currency]
+    ILS: ClassVar[Currency]
+    INR: ClassVar[Currency]
+    IQD: ClassVar[Currency]
+    ISK: ClassVar[Currency]
+    JMD: ClassVar[Currency]
+    JOD: ClassVar[Currency]
+    JPY: ClassVar[Currency]
+    KES: ClassVar[Currency]
+    KRW: ClassVar[Currency]
+    KWD: ClassVar[Currency]
+    KYD: ClassVar[Currency]
+    KZT: ClassVar[Currency]
+    LBP: ClassVar[Currency]
+    LKR: ClassVar[Currency]
+    LYD: ClassVar[Currency]
+    MAD: ClassVar[Currency]
+    MDL: ClassVar[Currency]
+    MKD: ClassVar[Currency]
+    MOP: ClassVar[Currency]
+    MUR: ClassVar[Currency]
+    MVR: ClassVar[Currency]
+    MXN: ClassVar[Currency]
+    MYR: ClassVar[Currency]
+    MZN: ClassVar[Currency]
+    NAD: ClassVar[Currency]
+    NGN: ClassVar[Currency]
+    NIO: ClassVar[Currency]
+    NOK: ClassVar[Currency]
+    NPR: ClassVar[Currency]
+    NZD: ClassVar[Currency]
+    OMR: ClassVar[Currency]
+    PEN: ClassVar[Currency]
+    PGK: ClassVar[Currency]
+    PHP: ClassVar[Currency]
+    PKR: ClassVar[Currency]
+    PLN: ClassVar[Currency]
+    PYG: ClassVar[Currency]
+    QAR: ClassVar[Currency]
+    RON: ClassVar[Currency]
+    RSD: ClassVar[Currency]
+    RUB: ClassVar[Currency]
+    RWF: ClassVar[Currency]
+    SAR: ClassVar[Currency]
+    SCR: ClassVar[Currency]
+    SEK: ClassVar[Currency]
+    SGD: ClassVar[Currency]
+    SRD: ClassVar[Currency]
+    THB: ClassVar[Currency]
+    TND: ClassVar[Currency]
+    TRY: ClassVar[Currency]
+    TTD: ClassVar[Currency]
+    TWD: ClassVar[Currency]
+    TZS: ClassVar[Currency]
+    UAH: ClassVar[Currency]
+    UGX: ClassVar[Currency]
+    USD: ClassVar[Currency]
+    UYU: ClassVar[Currency]
+    UZS: ClassVar[Currency]
+    VND: ClassVar[Currency]
+    YER: ClassVar[Currency]
+    ZAR: ClassVar[Currency]
+    ZMW: ClassVar[Currency]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -214,6 +465,7 @@ class DownloadResult:
     - backtide.data:download_instruments
     - backtide.data:get_instruments
     - backtide.data:list_instruments
+
     """
 
     n_failed: int
@@ -264,6 +516,7 @@ class Exchange:
     - backtide.data:Country
     - backtide.data:Currency
     - backtide.data:Interval
+
     """
 
     city: str
@@ -272,6 +525,69 @@ class Exchange:
     mic: str
     name: str
     yahoo_code: str
+
+    BVMF: ClassVar[Exchange]
+    XADS: ClassVar[Exchange]
+    XAMS: ClassVar[Exchange]
+    XASE: ClassVar[Exchange]
+    XASX: ClassVar[Exchange]
+    XATH: ClassVar[Exchange]
+    XBKK: ClassVar[Exchange]
+    XBOG: ClassVar[Exchange]
+    XBOM: ClassVar[Exchange]
+    XBRU: ClassVar[Exchange]
+    XBUD: ClassVar[Exchange]
+    XBUE: ClassVar[Exchange]
+    XCAI: ClassVar[Exchange]
+    XCOL: ClassVar[Exchange]
+    XCSE: ClassVar[Exchange]
+    XDFM: ClassVar[Exchange]
+    XDHA: ClassVar[Exchange]
+    XDUB: ClassVar[Exchange]
+    XETR: ClassVar[Exchange]
+    XHEL: ClassVar[Exchange]
+    XHKG: ClassVar[Exchange]
+    XICE: ClassVar[Exchange]
+    XIDX: ClassVar[Exchange]
+    XIST: ClassVar[Exchange]
+    XJPX: ClassVar[Exchange]
+    XKAR: ClassVar[Exchange]
+    XKLS: ClassVar[Exchange]
+    XKRX: ClassVar[Exchange]
+    XKUW: ClassVar[Exchange]
+    XLIM: ClassVar[Exchange]
+    XLIS: ClassVar[Exchange]
+    XLIT: ClassVar[Exchange]
+    XLON: ClassVar[Exchange]
+    XLUX: ClassVar[Exchange]
+    XMAD: ClassVar[Exchange]
+    XMEX: ClassVar[Exchange]
+    XMIL: ClassVar[Exchange]
+    XMOS: ClassVar[Exchange]
+    XNAS: ClassVar[Exchange]
+    XNCM: ClassVar[Exchange]
+    XNGS: ClassVar[Exchange]
+    XNSE: ClassVar[Exchange]
+    XNYS: ClassVar[Exchange]
+    XNZE: ClassVar[Exchange]
+    XOSL: ClassVar[Exchange]
+    XPAR: ClassVar[Exchange]
+    XPHS: ClassVar[Exchange]
+    XPRA: ClassVar[Exchange]
+    XRIS: ClassVar[Exchange]
+    XSAU: ClassVar[Exchange]
+    XSES: ClassVar[Exchange]
+    XSGO: ClassVar[Exchange]
+    XSHE: ClassVar[Exchange]
+    XSHG: ClassVar[Exchange]
+    XSTC: ClassVar[Exchange]
+    XSTO: ClassVar[Exchange]
+    XSWX: ClassVar[Exchange]
+    XTAI: ClassVar[Exchange]
+    XTAL: ClassVar[Exchange]
+    XTSX: ClassVar[Exchange]
+    XWAR: ClassVar[Exchange]
+    XWBO: ClassVar[Exchange]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -324,6 +640,7 @@ class Instrument:
     - backtide.data:Bar
     - backtide.data:InstrumentProfile
     - backtide.data:Interval
+
     """
 
     base: str | Currency | None
@@ -374,6 +691,7 @@ class InstrumentProfile:
     - backtide.data:Bar
     - backtide.data:Instrument
     - backtide.data:Interval
+
     """
 
     base: str | Currency | None
@@ -408,9 +726,15 @@ class InstrumentType:
     - backtide.data:Bar
     - backtide.data:Instrument
     - backtide.data:Interval
+
     """
 
     is_equity: Any
+
+    Crypto: ClassVar[InstrumentType]
+    Etf: ClassVar[InstrumentType]
+    Forex: ClassVar[InstrumentType]
+    Stocks: ClassVar[InstrumentType]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -441,7 +765,17 @@ class Interval:
     - backtide.data:Bar
     - backtide.data:Instrument
     - backtide.data:InstrumentType
+
     """
+
+    FifteenMinutes: ClassVar[Interval]
+    FiveMinutes: ClassVar[Interval]
+    FourHours: ClassVar[Interval]
+    OneDay: ClassVar[Interval]
+    OneHour: ClassVar[Interval]
+    OneMinute: ClassVar[Interval]
+    OneWeek: ClassVar[Interval]
+    ThirtyMinutes: ClassVar[Interval]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -471,7 +805,13 @@ class Provider:
     - backtide.data:Instrument
     - backtide.data:InstrumentType
     - backtide.data:Interval
+
     """
+
+    Binance: ClassVar[Provider]
+    Coinbase: ClassVar[Provider]
+    Kraken: ClassVar[Provider]
+    Yahoo: ClassVar[Provider]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -529,9 +869,10 @@ def download_instruments(profiles, start=None, end=None, *, verbose=True) -> Dow
     from backtide.data import resolve_profiles, download_instruments
 
     profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", "1d")
-    result = download_instruments(profiles)  # no run
+    result = download_instruments(profiles)
     print(result)
     ```
+
     """
 
 def get_instruments(symbols, instrument_type) -> list[Instrument]:
@@ -564,6 +905,7 @@ def get_instruments(symbols, instrument_type) -> list[Instrument]:
 
     print(get_instruments(["AAPL", "MSFT"], "stocks"))
     ```
+
     """
 
 def list_instruments(
@@ -613,6 +955,7 @@ def list_instruments(
 
     print(list_instruments("crypto", limit=5))
     ```
+
     """
 
 def resolve_profiles(
@@ -661,4 +1004,5 @@ def resolve_profiles(
 
     print(resolve_profiles(["AAPL", "MSFT"], "stocks", "1d"))
     ```
+
     """

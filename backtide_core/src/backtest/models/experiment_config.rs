@@ -1046,9 +1046,7 @@ impl ExperimentConfig {
     /// Returns
     /// -------
     /// dict
-    ///     Self as dict with `general`, `data`, `portfolio`,
-    ///     `strategy`, `indicators`, `exchange` and `engine`
-    ///     sections.
+    ///     Self as dict.
     pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         Ok(pythonize(py, &self.to_inner(py))?.unbind())
     }

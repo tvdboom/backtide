@@ -121,11 +121,23 @@ impl IndicatorType {
         }
     }
 
+    /// Return the default variant.
+    ///
+    /// Returns
+    /// -------
+    /// self
+    ///     The default variant.
     #[staticmethod]
     fn get_default(py: Python<'_>) -> Py<Self> {
         Py::new(py, Self::SMA).unwrap()
     }
 
+    /// Return all variants.
+    ///
+    /// Returns
+    /// -------
+    /// list[self]
+    ///     All variants of this type.
     #[staticmethod]
     fn variants(py: Python<'_>) -> Vec<Py<Self>> {
         Self::iter().map(|v| Py::new(py, v).unwrap()).collect()

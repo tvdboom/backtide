@@ -36,9 +36,10 @@ from backtide.backtest import (
 from backtide.config import get_config
 from backtide.data import Currency, InstrumentType, Interval
 from backtide.ui.utils import (
+    _clear_state,
     _get_instrument_type_description,
+    _get_timezone,
     _list_instruments,
-    _prevent_deselection,
     _to_upper_values,
 )
 from backtide.utils.constants import (
@@ -52,6 +53,8 @@ from backtide.utils.constants import (
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
+
+USER_CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
 
 
 def _build_experiment_config() -> ExperimentConfig:
@@ -197,7 +200,7 @@ def _on_config_upload():
 
         st.session_state["predefined_strategies"] = list(imported.strategy.predefined_strategies)
         st.session_state["custom_strategies"] = [
-            {"source": ":material/code: Code editor", "code": s.code}
+            {"source": USER_CODE_OPTIONS[0], "code": s.code}
             for s in imported.strategy.custom_strategies
         ]
         for i, s in enumerate(imported.strategy.custom_strategies):
@@ -207,7 +210,7 @@ def _on_config_upload():
 
         st.session_state["builtin_indicators"] = list(imported.indicators.builtin_indicators)
         st.session_state["custom_indicators"] = [
-            {"source": ":material/code: Code editor", "code": s.code}
+            {"source": USER_CODE_OPTIONS[0], "code": s.code}
             for s in imported.indicators.custom_indicators
         ]
         for i, s in enumerate(imported.indicators.custom_indicators):
@@ -268,6 +271,7 @@ def _on_config_upload():
 # ─────────────────────────────────────────────────────────────────────────────
 
 cfg = get_config()
+tz = _get_timezone(cfg.display.timezone)
 
 st.set_page_config(page_title="Backtide - Experiment", layout="centered")
 st.title("Experiment", text_alignment="center")
@@ -393,23 +397,14 @@ with tab1:
 # ─────────────────────────────────────────────────────────────────────────────
 
 with tab2:
-    if st.session_state.get("instrument_type") is None:
-        _cache = st.session_state.get("_cache", {})
-        st.session_state.instrument_type = _cache.get(
-            "instrument_type", InstrumentType.get_default()
-        )
-
     instrument_type = st.segmented_control(
         label="Instrument type",
         key="instrument_type",
+        required=True,
         options=InstrumentType.variants(),
         default=st.session_state.instrument_type,
         format_func=lambda at: f"{at.icon()} {at}",
-        on_change=_prevent_deselection(
-            key="instrument_type",
-            default=InstrumentType.get_default(),
-            reset=["symbols", "_currency"],
-        ),
+        on_change=_clear_state(["symbols", "_currency"]),
         help="Select the type of financial instrument you want to backtest.",
     )
 
@@ -479,7 +474,7 @@ with tab2:
             key="start_date",
             value=None,
             min_value="2000-01-01",
-            max_value=datetime.now().date(),
+            max_value=datetime.now(tz=tz).date(),
             help=(
                 "Run backtest simulation starting from this date. If the historical data "
                 "does not go so far back, it starts from the available history for that symbol."
@@ -501,6 +496,7 @@ with tab2:
     interval = st.pills(
         label="Interval",
         key="interval",
+        required=True,
         options=Interval.variants(),
         selection_mode="single",
         default=Interval.get_default(),
@@ -669,13 +665,14 @@ with tab4:
             source = st.segmented_control(
                 label="Source",
                 key=f"strategy_source_{i}",
-                options=[":material/code: Code editor", ":material/upload_file: Upload file"],
-                default=strategy_entry.get("source", ":material/code: Code editor"),
+                required=True,
+                options=USER_CODE_OPTIONS,
+                default=strategy_entry.get("source", USER_CODE_OPTIONS[0]),
                 label_visibility="collapsed",
             )
 
             strategy_code: str | None = None
-            if source == ":material/code: Code editor":
+            if source == USER_CODE_OPTIONS[0]:
                 resp = code_editor(
                     code=strategy_entry.get("code") or STRATEGY_PLACEHOLDER,
                     key=f"strategy_code_editor_{i}",
@@ -727,9 +724,7 @@ with tab4:
         icon=":material/add:",
         type="secondary",
     ):
-        st.session_state.custom_strategies.append(
-            {"source": ":material/code: Code editor", "code": ""},
-        )
+        st.session_state.custom_strategies.append({"source": USER_CODE_OPTIONS[0], "code": ""})
         st.rerun()
 
 
@@ -819,13 +814,13 @@ with tab5:
             source = st.segmented_control(
                 label="Source",
                 key=f"indicator_source_{i}",
-                options=[":material/code: Code editor", ":material/upload_file: Upload file"],
-                default=indicator_entry.get("source", ":material/code: Code editor"),
+                options=USER_CODE_OPTIONS,
+                default=indicator_entry.get("source", USER_CODE_OPTIONS[0]),
                 label_visibility="collapsed",
             )
 
             code: str | None = None
-            if source == ":material/code: Code editor":
+            if source == USER_CODE_OPTIONS[1]:
                 resp = code_editor(
                     code=indicator_entry.get("code") or INDICATOR_PLACEHOLDER,
                     key=f"indicator_code_editor_{i}",
@@ -878,7 +873,7 @@ with tab5:
         type="secondary",
     ):
         st.session_state.custom_indicators.append(
-            {"source": ":material/code: Code editor", "code": ""},
+            {"source": USER_CODE_OPTIONS[0], "code": ""},
         )
         st.rerun()
 
@@ -1313,9 +1308,9 @@ if st.button(
     shortcut="Enter",
     width="stretch",
 ):
-    if not full_history and end_date > datetime.now().date():
+    if end_date and end_date > datetime.now().date():
         st.error("End date cannot be in the future.", icon=":material/error:")
-    elif not full_history and start_date > end_date:  # ty:ignore[unsupported-operator]
+    elif start_date and end_date and start_date > end_date:
         st.error("Start date must be equal or prior to end date.", icon=":material/error:")
     else:
         display_name = experiment_name or st.session_state.experiment_id

@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+from tzlocal import get_localzone
 
 from backtide.constants import MOMENT_TO_STRFTIME
 from backtide.core.data import Instrument, InstrumentType, list_instruments
@@ -21,12 +22,18 @@ from backtide.utils.constants import MAX_PRELOADED_INSTRUMENTS
 from backtide.utils.utils import to_list
 
 
-def _to_pandas(df: Any) -> pd.DataFrame:
-    """Ensure a DataFrame is pandas, converting from polars if needed."""
-    if hasattr(df, "to_pandas"):
-        return df.to_pandas(use_pyarrow_extension_array=True)
+def _get_timezone(tz: str | None) -> ZoneInfo:
+    """Return the timezone from config or local."""
+    if tz:
+        return ZoneInfo(tz)
+    else:
+        return get_localzone()
 
-    return df
+
+def _clear_state(keys: list[str]):
+    """Remove `keys` from Streamlit's state."""
+    for k in keys:
+        st.session_state.pop(k, None)
 
 
 def _get_instrument_type_description(instrument_type: InstrumentType) -> tuple[str, str]:
@@ -113,9 +120,9 @@ def _list_instruments(instrument_type: InstrumentType) -> list[Instrument]:
 
 def _moment_to_strftime(fmt: str) -> str:
     """Convert a momentjs string to strftime format."""
-    regex = re.compile(
-        "|".join(sorted(map(re.escape, MOMENT_TO_STRFTIME.keys()), key=len, reverse=True)),
-    )
+    tokens = [re.escape(k) for k in MOMENT_TO_STRFTIME]
+    tokens.sort(key=len, reverse=True)
+    regex = re.compile("|".join(tokens))
 
     def replace(match: re.Match) -> str:
         """Replace a token in the string."""
@@ -131,24 +138,12 @@ def _parse_date(ts: int, fmt: str, tz: ZoneInfo) -> str:
     return dt.fromtimestamp(ts, tz=tz).strftime(fmt)
 
 
-def _prevent_deselection(key: str, default: Any, reset: list[str] | None = None):
-    """On-change function to call for widgets for which a valid must be selected.
+def _to_pandas(df: Any) -> pd.DataFrame:
+    """Ensure a DataFrame is pandas, converting from polars if needed."""
+    if hasattr(df, "to_pandas"):
+        return df.to_pandas(use_pyarrow_extension_array=True)
 
-    Additionally, remove entries in the `reset` keys from Streamlit's state.
-
-    """
-    if "_cache" not in st.session_state:
-        st.session_state["_cache"] = {}
-    cache = st.session_state["_cache"]
-
-    if st.session_state.get(key) is None:
-        st.session_state[key] = cache.get(key, default)
-    else:
-        if reset and cache.get(key) != st.session_state[key]:
-            for k in reset:
-                st.session_state.pop(k, None)
-
-        cache[key] = st.session_state[key]
+    return df
 
 
 def _to_upper_values(key: str):

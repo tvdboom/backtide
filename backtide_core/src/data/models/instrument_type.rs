@@ -80,12 +80,22 @@ impl InstrumentType {
     }
 
     /// Return the default variant.
+    ///
+    /// Returns
+    /// -------
+    /// self
+    ///     The default variant.
     #[staticmethod]
     fn get_default(py: Python<'_>) -> Py<Self> {
         Py::new(py, Self::Stocks).unwrap()
     }
 
     /// Return all variants.
+    ///
+    /// Returns
+    /// -------
+    /// list[self]
+    ///     All variants of this type.
     #[staticmethod]
     fn variants(py: Python<'_>) -> Vec<Py<Self>> {
         Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
@@ -98,6 +108,11 @@ impl InstrumentType {
     }
 
     /// Material icon to visually represent this instrument type.
+    ///
+    /// Returns
+    /// -------
+    /// str
+    ///     Material icon identifier.
     pub fn icon(&self) -> &'static str {
         match self {
             Self::Stocks => ":material/candlestick_chart:",

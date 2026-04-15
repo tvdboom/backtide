@@ -26,19 +26,21 @@ dependencies = [
     "streamlit_code_editor>=0.1.22",
     "pandas>=2.3.3",
     "pyyaml>=6.0.3",
+    "tzlocal>=5.0",
 ]
 
 [project.optional-dependencies]
 polars = ["polars>=1.0"]
 
 [dependency-groups]
-# Although already in the pre-commit, required for the IDE's language server
-lint = [
-    "ruff>=0.15.7",
-    "ty>=0.0.25",
-]
+# Utilities for the developer or for the IDE's language server
 dev = [
-    "tox>=4.50.3",
+    "ruff>=0.15.7",
+    "rust-just>=1.49.0",
+    "ty>=0.0.30",
+]
+tox = [
+    "tox>=4.53.0",
     "tox-uv>=1.33.4",
 ]
 pre-commit = [

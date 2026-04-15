@@ -54,6 +54,7 @@ def delete_symbols(symbol=None, interval=None, provider=None, *, series=None) ->
     # Bulk-delete specific series
     delete_symbols(series=[("AAPL", "1d", "yahoo"), ("MSFT", "1h", "yahoo")])  # norun
     ```
+
     """
 
 def get_bars() -> pd.DataFrame | pl.DataFrame:
@@ -83,6 +84,7 @@ def get_bars() -> pd.DataFrame | pl.DataFrame:
     df = get_bars()
     print(df.head())
     ```
+
     """
 
 def get_bars_summary() -> pd.DataFrame | pl.DataFrame:
@@ -104,6 +106,7 @@ def get_bars_summary() -> pd.DataFrame | pl.DataFrame:
     df = get_bars_summary()
     print(df.head())
     ```
+
     """
 
 def get_dividends() -> pd.DataFrame | pl.DataFrame:
@@ -131,4 +134,5 @@ def get_dividends() -> pd.DataFrame | pl.DataFrame:
     df = get_dividends()
     print(df.head())
     ```
+
     """

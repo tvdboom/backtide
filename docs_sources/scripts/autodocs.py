@@ -184,7 +184,7 @@ class AutoDocs:
 
         """
         toc = "<table markdown style='font-size: 0.9em'>"
-        for obj in self.obj:
+        for obj in self.obj:  # ty: ignore[not-iterable]
             func = AutoDocs(obj)
 
             name = f"[{obj.__name__}][] ({obj.acronym})"
@@ -293,9 +293,9 @@ class AutoDocs:
 
         if isclass(self.obj) and check_is_enum(self.obj):
             if getattr(self.obj, "__members__", None):
-                members = self.obj.__members__
+                members = self.obj.__members__  # ty: ignore[unresolved-attribute]
             else:
-                members = self.obj.variants()
+                members = self.obj.variants()  # ty: ignore[unresolved-attribute]
 
             description += "\n\n" + "\n".join(f"- {k}" for k in members) + "\n\n"
 
@@ -395,7 +395,7 @@ class AutoDocs:
                     if isinstance(obj, property):
                         obj = obj.fget
                     elif obj.__class__.__name__ == "cached_property":
-                        obj = obj.func
+                        obj = obj.func  # ty: ignore[unresolved-attribute]
 
                     # Get the return type. Sometimes it returns a string 'Pandas'
                     # and sometimes a class pd.DataFrame. Unclear why
@@ -527,7 +527,7 @@ class AutoDocs:
 
 
 def render(markdown: str, **kwargs) -> str:  # noqa: ARG001
-    """Render the markdown page.
+    """Render the Markdown page.
 
     This function is the landing point for the mkdocs-simple-hooks
     plugin, called in mkdocs.yml.
@@ -574,7 +574,7 @@ def render(markdown: str, **kwargs) -> str:  # noqa: ARG001
             elif "description" in command:
                 text = autodocs.get_description()
             elif "table" in command:
-                text = autodocs.get_table(command["table"])
+                text = autodocs.get_table(command["table"])  # ty: ignore[invalid-argument-type]
             elif "see also" in command:
                 text = autodocs.get_see_also()
             elif "notes" in command:

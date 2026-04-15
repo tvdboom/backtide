@@ -21,7 +21,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
       - run: |
-          uv sync --group dev
+          uv sync --group tox
           uv run tox -e pre-commit
 
   unit-tests:
@@ -38,7 +38,7 @@ jobs:
           enable-cache: true
       - name: Run tests
         run: |
-          uv sync --group dev
+          uv sync --group tox
           uv run tox -m unit
       - uses: codecov/codecov-action@v4
         if: ${{ matrix.os == 'ubuntu-latest' }}
@@ -56,7 +56,7 @@ jobs:
           enable-cache: true
       - name: Run Cargo tests
         run: |
-          uv sync --group dev
+          uv sync --group tox
           uv run tox -e cargo-test
 
   documentation:
@@ -71,5 +71,5 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
       - run: |
-          uv sync --group dev
+          uv sync --group tox
           uv run tox -e docs

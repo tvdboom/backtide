@@ -28,6 +28,7 @@ And operating systems:
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
 * **[streamlit](https://streamlit.io/)** (>=1.55.0)
 * **[streamlit-code-editor](https://github.com/bouzidanas/streamlit-code-editor)** (>=0.1.22)
+* **[tzlocal](https://github.com/regebro/tzlocal)** (>=5.0)
 
 
 ### Optional

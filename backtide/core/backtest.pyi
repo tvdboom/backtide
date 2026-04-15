@@ -19,6 +19,8 @@ __all__ = [
     "StrategyType",
 ]
 
+from typing import ClassVar
+
 from backtide.core.data import Currency, InstrumentType, Interval
 
 class CodeSnippet:
@@ -37,6 +39,7 @@ class CodeSnippet:
     - backtide.backtest:ExperimentConfig
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:StrategyExpConfig
+
     """
 
     code: str
@@ -65,7 +68,12 @@ class CommissionType:
     - backtide.data:Currency
     - backtide.backtest:ExchangeExpConfig
     - backtide.backtest:OrderType
+
     """
+
+    Fixed: ClassVar[CommissionType]
+    Percentage: ClassVar[CommissionType]
+    PercentagePlusFixed: ClassVar[CommissionType]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -96,7 +104,12 @@ class ConversionPeriod:
     - backtide.data:Currency
     - backtide.backtest:CurrencyConversionMode
     - backtide.backtest:ExchangeExpConfig
+
     """
+
+    Day: ClassVar[ConversionPeriod]
+    Month: ClassVar[ConversionPeriod]
+    Week: ClassVar[ConversionPeriod]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -133,9 +146,15 @@ class CurrencyConversionMode:
     - backtide.backtest:ConversionPeriod
     - backtide.data:Currency
     - backtide.backtest:ExchangeExpConfig
+
     """
 
     name: str
+
+    CustomInterval: ClassVar[CurrencyConversionMode]
+    EndOfPeriod: ClassVar[CurrencyConversionMode]
+    HoldUntilThreshold: ClassVar[CurrencyConversionMode]
+    Immediate: ClassVar[CurrencyConversionMode]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -187,6 +206,7 @@ class DataExpConfig:
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:PortfolioExpConfig
     - backtide.backtest:StrategyExpConfig
+
     """
 
     end_date: str | None
@@ -223,9 +243,14 @@ class EmptyBarPolicy:
     --------
     - backtide.data:Bar
     - backtide.data:Interval
+
     """
 
     name: str
+
+    FillWithNaN: ClassVar[EmptyBarPolicy]
+    ForwardFill: ClassVar[EmptyBarPolicy]
+    Skip: ClassVar[EmptyBarPolicy]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -280,6 +305,7 @@ class EngineExpConfig:
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:PortfolioExpConfig
     - backtide.backtest:StrategyExpConfig
+
     """
 
     benchmark: str
@@ -371,6 +397,7 @@ class ExchangeExpConfig:
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:PortfolioExpConfig
     - backtide.backtest:StrategyExpConfig
+
     """
 
     allow_margin: bool
@@ -443,6 +470,7 @@ class ExperimentConfig:
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:PortfolioExpConfig
     - backtide.backtest:StrategyExpConfig
+
     """
 
     data: DataExpConfig
@@ -494,6 +522,7 @@ class GeneralExpConfig:
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:PortfolioExpConfig
     - backtide.backtest:StrategyExpConfig
+
     """
 
     description: str
@@ -534,6 +563,7 @@ class IndicatorExpConfig:
     - backtide.backtest:GeneralExpConfig
     - backtide.backtest:PortfolioExpConfig
     - backtide.backtest:StrategyExpConfig
+
     """
 
     builtin_indicators: list[str | IndicatorType]
@@ -569,9 +599,23 @@ class IndicatorType:
     - backtide.data:Bar
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:StrategyType
+
     """
 
     name: str
+
+    ADX: ClassVar[IndicatorType]
+    ATR: ClassVar[IndicatorType]
+    BB: ClassVar[IndicatorType]
+    CCI: ClassVar[IndicatorType]
+    EMA: ClassVar[IndicatorType]
+    MACD: ClassVar[IndicatorType]
+    OBV: ClassVar[IndicatorType]
+    RSI: ClassVar[IndicatorType]
+    SMA: ClassVar[IndicatorType]
+    STOCH: ClassVar[IndicatorType]
+    VWAP: ClassVar[IndicatorType]
+    WMA: ClassVar[IndicatorType]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -609,9 +653,20 @@ class OrderType:
     - backtide.backtest:CommissionType
     - backtide.backtest:ExchangeExpConfig
     - backtide.backtest:StrategyType
+
     """
 
     name: str
+
+    Limit: ClassVar[OrderType]
+    Market: ClassVar[OrderType]
+    SettlePosition: ClassVar[OrderType]
+    StopLoss: ClassVar[OrderType]
+    StopLossLimit: ClassVar[OrderType]
+    TakeProfit: ClassVar[OrderType]
+    TakeProfitLimit: ClassVar[OrderType]
+    TrailingStop: ClassVar[OrderType]
+    TrailingStopLimit: ClassVar[OrderType]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -655,6 +710,7 @@ class PortfolioExpConfig:
     - backtide.backtest:GeneralExpConfig
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:StrategyExpConfig
+
     """
 
     base_currency: str | Currency
@@ -695,6 +751,7 @@ class StrategyExpConfig:
     - backtide.backtest:GeneralExpConfig
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:PortfolioExpConfig
+
     """
 
     custom_strategies: list[CodeSnippet]
@@ -733,10 +790,32 @@ class StrategyType:
     - backtide.backtest:IndicatorType
     - backtide.backtest:OrderType
     - backtide.backtest:StrategyExpConfig
+
     """
 
     is_rotation: bool
     name: str
+
+    AdaptiveRsi: ClassVar[StrategyType]
+    AlphaRsiPro: ClassVar[StrategyType]
+    BollingerBands: ClassVar[StrategyType]
+    BuyAndHold: ClassVar[StrategyType]
+    DoubleTop: ClassVar[StrategyType]
+    HybridAlphaRsi: ClassVar[StrategyType]
+    Macd: ClassVar[StrategyType]
+    Momentum: ClassVar[StrategyType]
+    MultiBbRotation: ClassVar[StrategyType]
+    RiskAverse: ClassVar[StrategyType]
+    Roc: ClassVar[StrategyType]
+    RocRotation: ClassVar[StrategyType]
+    Rsi: ClassVar[StrategyType]
+    Rsrs: ClassVar[StrategyType]
+    RsrsRotation: ClassVar[StrategyType]
+    SmaCrossover: ClassVar[StrategyType]
+    SmaNaive: ClassVar[StrategyType]
+    TripleRsiRotation: ClassVar[StrategyType]
+    TurtleTrading: ClassVar[StrategyType]
+    Vcp: ClassVar[StrategyType]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...

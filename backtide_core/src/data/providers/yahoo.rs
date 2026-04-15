@@ -238,11 +238,11 @@ impl YahooFinance {
 
     /// Derive `(base, quote)` currency strings from a Yahoo symbol.
     ///
-    /// - Equity `"AAPL"`    â†’ `(None, currency)`
-    /// - Equity `"PBR-A"`   â†’ `(None, currency)`  (dash is part of the ticker)
-    /// - Forex `"EURUSD=X"` â†’ `(Some("EUR"), "USD")`
-    /// - Forex `"JPY=X"`    â†’ `(Some("USD"), "JPY")` (implicit USD base)
-    /// - Crypto `"BTC-USD"` â†’ `(Some("BTC"), "USD")`
+    /// - Equity `"AAPL"`    -> `(None, currency)`
+    /// - Equity `"PBR-A"`   -> `(None, currency)`  (dash is part of the ticker)
+    /// - Forex `"EURUSD=X"` -> `(Some("EUR"), "USD")`
+    /// - Forex `"JPY=X"`    -> `(Some("USD"), "JPY")` (implicit USD base)
+    /// - Crypto `"BTC-USD"` -> `(Some("BTC"), "USD")`
     fn parse_base_quote(
         symbol: &str,
         currency: &str,
