@@ -17,7 +17,7 @@ __all__ = [
     "resolve_profiles",
 ]
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
 class Bar:
     """A single OHLCV candle for one symbol at one interval.
@@ -730,7 +730,7 @@ class InstrumentType:
 
     """
 
-    is_equity: Any
+    is_equity: bool
 
     Crypto: ClassVar[InstrumentType]
     Etf: ClassVar[InstrumentType]
@@ -918,10 +918,8 @@ def list_instruments(
 ) -> list[Instrument]:
     """List available instruments for a given instrument type.
 
-    Returns instruments already stored in the database first.  Only when the
-    DB holds fewer than `limit` matching rows does it fall back to the network
-    provider to fill the gap.  Network results are persisted so that subsequent
-    calls can be served entirely from storage.
+    When `exchanges` is provided, the `limit` is distributed evenly across the
+    specified exchanges.
 
     Parameters
     ----------

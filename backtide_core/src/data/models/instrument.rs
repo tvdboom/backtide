@@ -86,15 +86,7 @@ impl Instrument {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        (
-            Symbol,
-            String,
-            Option<String>,
-            String,
-            InstrumentType,
-            String,
-            Provider,
-        ),
+        (Symbol, String, Option<String>, String, InstrumentType, String, Provider),
     )> {
         let cls = py.get_type::<Instrument>().into_any();
         Ok((
@@ -106,7 +98,7 @@ impl Instrument {
                 self.quote.clone(),
                 self.instrument_type,
                 self.exchange.clone(),
-                self.provider.clone(),
+                self.provider,
             ),
         ))
     }

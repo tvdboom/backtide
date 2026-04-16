@@ -45,15 +45,10 @@ impl Engine {
         })
     }
 
-    /// List the most important instruments for a given instrument type, capped at `limit`.
-    ///
-    /// Instruments already stored in the database are returned first.  Only when
-    /// the DB holds fewer than `limit` matching rows does the method fall back to
-    /// the network provider to fill the gap.  Network results are persisted so
-    /// that subsequent calls can be served entirely from storage.
+    /// List the most liquid instruments for a given instrument type.
     ///
     /// When `exchanges` is provided, the `limit` is distributed evenly across the
-    /// specified exchanges (returning the top instruments by liquidity per exchange).
+    /// specified exchanges.
     #[instrument(skip(self, exchanges), fields(?instrument_type, n_exchanges = exchanges.as_ref().map_or(0, |e| e.len())))]
     pub fn list_instruments(
         &self,
@@ -62,75 +57,19 @@ impl Engine {
         limit: usize,
         verbose: bool,
     ) -> DataResult<Vec<Instrument>> {
-        let provider = self.provider(instrument_type);
-
-        // ── Phase 1: Check the database ─────────────────────────────────────
-
-        let db_instruments = self
-            .query_instruments(
-                Some(instrument_type),
-                Some(provider),
-                exchanges.as_deref(),
-                Some(limit),
-            )
-            .unwrap_or_default();
-
-        if db_instruments.len() >= limit {
-            debug!(n = db_instruments.len(), "The db has enough instruments, skipping download.");
-            return Ok(db_instruments.into_iter().take(limit).collect());
-        }
-
-        // ── Phase 2: Download the remainder from the network ────────────────
-
         let pb =
             verbose.then(|| progress_spinner(format!("Listing {instrument_type} instruments...")));
 
-        let network_instruments = self.rt.block_on(
-            self.providers.get(&instrument_type).unwrap().list_instruments(
+        let instruments =
+            self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
                 instrument_type,
                 exchanges,
                 limit,
-            ),
-        );
-
-        let instruments = match network_instruments {
-            Ok(n) => n,
-            Err(e) => {
-                // Network failed — return whatever the DB had.
-                if db_instruments.is_empty() {
-                    return Err(e);
-                }
-
-                if let Some(ref pb) = pb {
-                    pb.finish_and_clear();
-                }
-
-                warn!("Failed to download instruments ({e}), returning DB-only instruments.");
-                return Ok(db_instruments);
-            },
-        };
-
-        if let Some(ref pb) = pb {
-            pb.set_message("Storing instruments in the database...");
-        }
-
-        // Persist network results to the database.
-        if let Err(e) = self.write_instruments(&instruments) {
-            warn!("Failed to store instruments in the database: {e}");
-        }
+            ))?;
 
         if let Some(ref pb) = pb {
             pb.finish_and_clear();
         }
-
-        // ── Phase 3: Merge, dedup by symbol, cap at limit ───────────────────
-
-        let instruments: Vec<Instrument> = instruments
-            .into_iter()
-            .chain(db_instruments)
-            .unique_by(|i| i.symbol.clone())
-            .take(limit)
-            .collect();
 
         Ok(instruments)
     }

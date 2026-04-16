@@ -47,8 +47,8 @@ class TestQueryBars:
         assert set(result.columns) == expected
 
 
-        result = query_dividends()
-        result = query_dividends()
+class TestQueryDividends:
+    """Tests for the 'query_dividends' function."""
 
     def test_returns_dataframe(self):
         """query_dividends always returns a pandas DataFrame."""

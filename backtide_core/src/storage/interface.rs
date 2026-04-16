@@ -380,9 +380,7 @@ pub fn query_instruments(
     let exchanges: Option<Vec<Exchange>> = exchange
         .map(|v| {
             if let Ok(seq) = v.extract::<Vec<Bound<'_, PyAny>>>() {
-                seq.iter()
-                    .map(|item| item.extract::<Exchange>().map_err(Into::into))
-                    .collect::<PyResult<Vec<_>>>()
+                seq.iter().map(|item| item.extract::<Exchange>()).collect::<PyResult<Vec<_>>>()
             } else {
                 Ok(vec![v.extract::<Exchange>()?])
             }

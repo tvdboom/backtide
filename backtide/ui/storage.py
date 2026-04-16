@@ -17,8 +17,8 @@ from backtide.ui.utils import (
     _fmt_number,
     _get_logokit_url,
     _get_timezone,
-    _query_bars_summary,
     _parse_date,
+    _query_bars_summary,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────

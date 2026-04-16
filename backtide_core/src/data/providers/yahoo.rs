@@ -12,9 +12,9 @@ use crate::data::models::dividend::Dividend;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::forex_pair::ForexPair;
 use crate::data::models::instrument::Instrument;
-use crate::data::models::provider::Provider;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
+use crate::data::models::provider::Provider;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
 use crate::utils::http::{paginate, HttpClient, HttpClientConfig};
@@ -465,11 +465,7 @@ impl DataProvider for YahooFinance {
     /// history window, so the value reflects what is actually
     /// downloadable rather than the Instrument's listing date.
     #[instrument(skip(self, instr), fields(symbol = %instr.symbol, ?interval))]
-    async fn fetch_range(
-        &self,
-        instr: Instrument,
-        interval: Interval,
-    ) -> DataResult<(u64, u64)> {
+    async fn fetch_range(&self, instr: Instrument, interval: Interval) -> DataResult<(u64, u64)> {
         let symbol = Self::parse_canonical_symbol(&instr.symbol, instr.instrument_type)?;
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
@@ -826,8 +822,6 @@ impl TryFrom<YahooQuote> for Instrument {
         })
     }
 }
-
-
 
 #[derive(Debug, Deserialize)]
 struct ScreenerResponse {

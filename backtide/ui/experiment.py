@@ -8,6 +8,7 @@ Description: Run a new backtest page.
 import ast
 from datetime import datetime
 import json
+import logging
 import tomllib
 import uuid
 
@@ -34,18 +35,21 @@ from backtide.backtest import (
     StrategyType,
 )
 from backtide.config import get_config
+from backtide.core.data import resolve_profiles
 from backtide.data import Currency, InstrumentType, Interval
 from backtide.ui.utils import (
-    CARD_CSS,
+    _CARD_CSS,
     _clear_state,
+    _default,
+    _draw_cards,
     _fmt_number,
     _get_instrument_type_description,
     _get_timezone,
     _list_instruments,
+    _persist,
     _query_bars_summary,
     _storage_to_card_profiles,
     _to_upper_values,
-    draw_cards,
 )
 from backtide.utils.constants import (
     INDICATOR_PLACEHOLDER,
@@ -54,7 +58,12 @@ from backtide.utils.constants import (
     STRATEGY_PLACEHOLDER,
     TAG_PATTERN,
 )
-from backtide.utils.utils import _to_list
+
+# Disable streamlit warnings spawned by the thread running _build_experiment_config
+logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(
+    logging.ERROR
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
@@ -63,10 +72,11 @@ from backtide.utils.utils import _to_list
 USER_CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
 
 
-def _build_experiment_config() -> ExperimentConfig:
-    """Snapshot the current widget state into an ExperimentConfig."""
+def _build_experiment_config() -> str:
+    """Return the current experiment configuration in as a toml string."""
     ss = st.session_state
-    return ExperimentConfig(
+
+    cfg = ExperimentConfig(
         general=GeneralExpConfig(
             name=experiment_name or ss.experiment_id,
             tags=ss.get("tags", []),
@@ -83,7 +93,7 @@ def _build_experiment_config() -> ExperimentConfig:
         portfolio=PortfolioExpConfig(
             initial_cash=float(ss.get("initial_cash", 10_000)),
             base_currency=ss.get("base_currency", "USD"),
-            starting_positions=ss.get("starting_positions", {}),
+            positions=ss.get("starting_positions", []),
         ),
         strategy=StrategyExpConfig(
             predefined_strategies=list(ss.get("predefined_strategies", [])),
@@ -146,23 +156,21 @@ def _build_experiment_config() -> ExperimentConfig:
         ),
     )
 
+    return cfg.to_toml()
+
 
 def _on_config_upload():
-    """Set the experiment config based on the session_state.
+    """Set the experiment config based on an uploaded file.
 
     Because callbacks execute before any widget is instantiated, we can
     freely set session-state keys that are bound to widgets.
 
     """
-    upload = st.session_state.get("_config_upload")
+    upload = st.session_state.get("config_upload")
+
     if upload is None:
         # File was cleared by the user.
-        st.session_state.pop("_import_hash", None)
         return
-
-    _upload_hash = hash(upload.getvalue())
-    if st.session_state.get("_import_hash") == _upload_hash:
-        return  # Same file already processed.
 
     try:
         if upload.name.endswith(".json"):
@@ -200,7 +208,7 @@ def _on_config_upload():
 
         st.session_state["initial_cash"] = int(imported.portfolio.initial_cash)
         st.session_state["base_currency"] = imported.portfolio.base_currency
-        st.session_state["starting_positions"] = dict(imported.portfolio.starting_positions)
+        st.session_state["positions"] = imported.portfolio.positions
 
         # ── Strategy ─────────────────────────────────────────────────────────
 
@@ -260,15 +268,8 @@ def _on_config_upload():
         )
         st.session_state["empty_bar_policy"] = eng.empty_bar_policy
 
-        st.session_state["_import_hash"] = _upload_hash
         st.session_state["_import_success"] = f"Loaded configuration from `{upload.name}`."
-    except (
-        yaml.YAMLError,
-        json.JSONDecodeError,
-        tomllib.TOMLDecodeError,
-        TypeError,
-        ValueError,
-    ) as ex:
+    except Exception as ex:  # noqa: BLE001
         st.session_state["_import_error"] = f"Failed to parse file: {ex}"
 
 
@@ -313,42 +314,53 @@ with tab1:
 
     experiment_name = col1.text_input(
         label="Experiment name",
-        key="experiment_name",
+        key=(key := "experiment_name"),
+        value=_default(key),
         placeholder=st.session_state.experiment_id,
         max_chars=40,
-        on_change=lambda: st.session_state.update(
-            experiment_name=INVALID_FILENAME_CHARS.sub(
-                "", st.session_state.get("experiment_name", "")
-            )
-        ),
+        on_change=lambda k=key: _persist(k),
         help=(
             "A human-readable name to identify this experiment (optional). "
-            "If no name is filled in, an automatic GUID is assigned instead. "
-            "Characters not allowed in file names are stripped automatically."
+            "If no name is filled in, an automatic ID is assigned instead. "
         ),
     )
 
-    exp_cfg = _build_experiment_config()
+    experiment_name = experiment_name or st.session_state.experiment_id
+
+    # Validate experiment name for invalid filename characters.
+    if chars := INVALID_FILENAME_CHARS.findall(experiment_name):
+        st.error(
+            f"The following characters are not allowed in experiment names: "
+            f"**{' '.join(repr(c) for c in sorted(set(chars)))}** "
+        )
+        experiment_name = None
 
     col2.download_button(
         label="Download configuration",
-        data=exp_cfg.to_toml(),
-        file_name=f"{exp_cfg.general.name}.toml",
+        data=_build_experiment_config,
+        file_name=f"{experiment_name or st.session_state.experiment_id}.toml",
         mime="application/toml",
         icon=":material/download:",
         type="secondary",
         on_click="ignore",
         width="stretch",
+        disabled=experiment_name is None,
         help="Persist the current experiment configuration to disk.",
     )
 
     tags = st.multiselect(
         label="Tags",
-        key="tags",
-        options=[],
-        default=[],
+        key=(key := "tags"),
+        options=_default(key, []),
+        default=_default(key, []),
         accept_new_options=True,
         placeholder="Add tags...",
+        on_change=lambda k=key: (
+            st.session_state.update(
+                tags=list(dict.fromkeys([tag.strip().lower() for tag in st.session_state.tags]))
+            ),
+            _persist(k),
+        ),
         help=(
             "Add descriptive tags to organize and filter experiments (e.g., intraday, crypto, "
             "mean-reversion)."
@@ -356,26 +368,21 @@ with tab1:
     )
 
     # Normalize and validate the provided tags
-    if tags:
-        valid_tags = []
-        for tag in tags:
-            tag = tag.strip().lower()
-            if TAG_PATTERN.fullmatch(tag):
-                valid_tags.append(tag)
-            else:
-                st.error(
-                    f"Invalid tag: {tag}. Tags must must be one word with â‰¤15 chars consisting "
-                    f"only of alphanumeric characters, underscores or dashes.",
-                )
-
-        tags = sorted(set(valid_tags))
+    for tag in tags:
+        if not TAG_PATTERN.fullmatch(tag):
+            st.error(
+                f"Invalid tag: {tag}. Tags must can be at most 20 chars consisting "
+                f"only of alphanumeric characters, space, underscore or dash."
+            )
 
     description = st.text_area(
         label="Description",
-        key="description",
+        key=(key := "description"),
+        value=_default(key),
         height=200,
         max_chars=1500,
         placeholder="Add a description...",
+        on_change=lambda k=key: _persist(k),
         help=(
             "Summarize the purpose and setup of this run to help you understand and compare "
             "results later. Example information to include are strategy assumptions, parameter "
@@ -383,19 +390,18 @@ with tab1:
         ),
     )
 
-    # Show feedback from a previous import (survives rerun).
-    if _import_msg := st.session_state.pop("_import_success", None):
-        st.success(_import_msg)
-    if _import_err := st.session_state.pop("_import_error", None):
-        st.error(_import_err)
-
     st.file_uploader(
         label="Import configuration",
-        key="_config_upload",
+        key="config_upload",
         type=["toml", "yaml", "yml", "json"],
         on_change=_on_config_upload,
         help="Upload a TOML, YAML or JSON file to pre-fill the experiment configuration.",
     )
+
+    if _import_msg := st.session_state.pop("_import_success", None):
+        st.success(_import_msg)
+    if _import_err := st.session_state.pop("_import_error", None):
+        st.error(_import_err)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -405,15 +411,12 @@ with tab1:
 with tab2:
     instrument_type = st.segmented_control(  # ty: ignore[no-matching-overload]
         label="Instrument type",
-        key="instrument_type",
+        key=(key := "instrument_type"),
         required=True,
         options=InstrumentType.variants(),
-        default=st.session_state.get("_instrument_type", InstrumentType.get_default()),
-        format_func=lambda at: f"{at.icon()} {at}",
-        on_change=lambda: (
-            _clear_state(["symbols", "_currency"]),
-            st.session_state.update(_instrument_type=st.session_state.instrument_type),
-        ),
+        default=_default(key, InstrumentType.get_default()),
+        format_func=lambda x: f"{x.icon()} {x}",
+        on_change=lambda k=key: (_clear_state("symbols", "currency"), _persist(k)),
         help="Select the type of financial instrument you want to backtest.",
     )
 
@@ -452,7 +455,9 @@ with tab2:
             if (currency := st.session_state.get("_currency", "All")) != "All":
                 quote_lookup = meta["quote"].to_dict()
                 stored_symbols = [
-                    s for s in all_stored_symbols if quote_lookup.get(s) == currency or currency in s
+                    s
+                    for s in all_stored_symbols
+                    if quote_lookup.get(s) == currency or currency in s
                 ]
             else:
                 stored_symbols = all_stored_symbols
@@ -461,11 +466,12 @@ with tab2:
 
         symbols = col1.multiselect(
             label="Symbols",
-            key="symbols",
+            key=(key := "symbols"),
             options=stored_symbols,
             format_func=lambda s: f"{s} - {name_lookup[s]}" if name_lookup.get(s) else s,
             placeholder="Select one or more symbols...",
             max_selections=MAX_INSTRUMENT_SELECTION,
+            on_change=lambda: _persist("symbols"),
             help="Symbols that have data stored in the local database.",
         )
 
@@ -480,17 +486,6 @@ with tab2:
         quotes = sorted(set(q for q in quote_lookup.values() if q))
         cur_options = ["All", *quotes] if quotes else ["All"]
 
-        col2.selectbox(
-            label="Currency",
-            index=cur_options.index(st.session_state.get("_currency", "All"))
-            if st.session_state.get("_currency", "All") in cur_options
-            else 0,
-            key="currency",
-            options=cur_options,
-            on_change=lambda: st.session_state.update(_currency=st.session_state.currency),
-            placeholder="All",
-            help="Filter the stored symbols by their quote currency.",
-        )
     else:
         all_instruments = _list_instruments(instrument_type)
 
@@ -499,60 +494,65 @@ with tab2:
             st.session_state._currency = "All"
 
         if (currency := st.session_state.get("_currency", "All")) != "All":
-            filtered_instruments = [
-                inst
-                for inst in all_instruments
-                if inst.base == currency or str(inst.quote) == currency
-            ]
+            fi = {
+                k: v
+                for k, v in all_instruments.items()
+                if v.base == currency or str(v.quote) == currency
+            }
         else:
-            filtered_instruments = all_instruments
+            fi = all_instruments
 
         col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
         symbol_d, currency_d = _get_instrument_type_description(instrument_type)
 
-        if all(x in filtered_instruments for x in _to_list(st.session_state.get("symbols"))):
-            default = st.session_state.symbols
-        else:
-            default = None
-
         symbols = col1.multiselect(
             label="Symbols",
-            key="symbols",
-            options=sorted(filtered_instruments, key=lambda a: a.symbol),
-            default=default,
-            format_func=lambda a: (
-                f"{a.symbol} - {a.name}"
-                if instrument_type in (InstrumentType.Stocks, InstrumentType.Etf)
-                else a.symbol
+            key=(key := "symbols"),
+            options=sorted(list(fi) + _default(key, [])),
+            default=_default(key, []),
+            format_func=lambda s: (
+                f"{s} - {fi[s].name}" if s in fi and fi[s].instrument_type.is_equity else s
             ),
             placeholder="Select one or more symbols...",
             max_selections=MAX_INSTRUMENT_SELECTION,
             accept_new_options=True,
-            on_change=lambda: _to_upper_values("symbols"),
+            on_change=lambda: (_to_upper_values("symbols"), _persist("symbols")),
             help=symbol_d,
         )
 
-        # Symbols can become symbol - name when changing currency, so extract the symbol part
+        # Symbols can become 'symbol - name' when changing currency -> extract the symbol
         symbols = [s.split(" - ")[0] if isinstance(s, str) else s for s in symbols]
 
-        options = ["All", *sorted(dict.fromkeys(str(a.quote) for a in all_instruments))]
-        col2.selectbox(
-            label="Currency",
-            index=options.index(st.session_state._currency),
-            key="currency",
-            options=options,
-            on_change=lambda: st.session_state.update(_currency=st.session_state.currency),
-            placeholder="All",
-            help=currency_d,
-        )
+        profiles = direct = None
+        interval = _default("interval", Interval.get_default())
+        try:
+            if symbols:
+                profiles = resolve_profiles(symbols, instrument_type, interval, verbose=False)
+                direct = profiles[: len(symbols)]  # Direct profiles (no legs)
+        except RuntimeError as ex:
+            st.error(ex, icon=":material/error:")
+
+    options = ["All", *sorted(dict.fromkeys(str(x.quote) for x in all_instruments.values()))]
+    col2.selectbox(
+        label="Currency",
+        key=(key := "currency"),
+        options=options,
+        index=options.index(_default(key)),
+        placeholder="All",
+        on_change=lambda k=key: _persist(k),
+        help=currency_d,
+    )
 
     # ── Use stored data toggle (placed after the symbol selector) ────────────
 
     use_storage = st.toggle(
         label="Use stored data",
         key="use_storage",
-        value=False,
-        on_change=lambda: _clear_state(["symbols", "start_date", "end_date"]),
+        value=_default("use_storage", fallback=False),
+        on_change=lambda: (
+            _clear_state("symbols", "start_date", "end_date"),
+            _persist("use_storage"),
+        ),
         help=(
             "When enabled, the backtest uses whatever data is already saved in the local "
             "database for the selected symbols and interval. No new data is downloaded, and "
@@ -564,14 +564,10 @@ with tab2:
 
     full_history = st.toggle(
         label="Use full available history",
-        key="full_history",
-        value=True,
+        key=(key := "full_history"),
+        value=_default(key, True),
+        on_change=lambda k=key: _persist(k),
         help=(
-            "Whether to use all data available in storage for the selected symbols. "
-            "If toggled off, select the start and end dates within the stored range."
-        )
-        if use_storage
-        else (
             "Whether to use the maximum available history for all selected symbols. "
             "If toggled off, select the start and end dates for the simulation."
         ),
@@ -607,10 +603,12 @@ with tab2:
 
         start_date = col1.date_input(
             label="Start date",
-            key="start_date",
-            value=default_start,
+            key=(key := "start_date"),
+            value=_default(key, default_start),
             min_value=min_date,
             max_value=max_date,
+            format=cfg.display.date_format,
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Run backtest simulation starting from this date. If the historical data "
                 "does not go so far back, it starts from the available history for that symbol."
@@ -619,10 +617,12 @@ with tab2:
 
         end_date = col2.date_input(
             label="End date",
-            key="end_date",
-            value=max_date if use_storage else "today",
+            key=(key := "end_date"),
+            value=_default(key, max_date if use_storage else "today"),
             min_value=start_date,
             max_value=max_date if use_storage else "today",
+            format=cfg.display.date_format,
+            on_change=lambda k=key: _persist(k),
             help="Run backtest simulation up to this date.",
         )
     else:
@@ -633,11 +633,12 @@ with tab2:
 
     interval = st.pills(
         label="Interval",
-        key="interval",
+        key=(key := "interval"),
         required=True,
-        options=Interval.variants(),
+        options=cfg.data.providers[instrument_type].intervals(),
         selection_mode="single",
-        default=Interval.get_default(),
+        default=_default(key, Interval.get_default()),
+        on_change=lambda k=key: _persist(k),
         help=(
             "The frequency of the data points. Each interval is one tick of the simulation. "
             "After every tick, the strategy is evaluated and orders are resolved. The interval "
@@ -651,7 +652,7 @@ with tab2:
         storage_profiles = _storage_to_card_profiles(summary_df, symbols, instrument_type)
         if storage_profiles:
             with st.expander("Stored data details", icon=":material/database:", expanded=False):
-                html, n_bars = draw_cards(
+                html, n_bars = _draw_cards(
                     storage_profiles,
                     cfg=cfg,
                     tz=tz,
@@ -660,7 +661,7 @@ with tab2:
                     start_ts=start_date,
                     end_ts=end_date,
                 )
-                st.html(CARD_CSS + html)
+                st.html(_CARD_CSS + html)
 
             col1, col2 = st.columns(2)
             col1.metric(
@@ -688,17 +689,16 @@ with tab2:
 # ─────────────────────────────────────────────────────────────────────────────
 
 with tab3:
-    base_currency = st.session_state.get("base_currency", cfg.general.base_currency)
-
     col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
 
     starting_amount = col1.number_input(
         label="Initial cash",
         key="initial_cash",
         min_value=100,
-        value=10_000,
+        value=_default("initial_cash", 10_000),
         step=1_000,
         placeholder="Insert the initial cash...",
+        on_change=lambda: _persist("initial_cash"),
         help="Cash balance available at the start of the simulation.",
     )
 
@@ -706,7 +706,8 @@ with tab3:
         label="Base currency",
         key="base_currency",
         options=Currency.variants(),
-        index=Currency.variants().index(base_currency),
+        index=Currency.variants().index(_default("base_currency", cfg.general.base_currency)),
+        on_change=lambda: _persist("base_currency"),
         help=(
             "The currency your portfolio is denominated in during the backtest. All trades, "
             "P&L, margin, leverage and position sizing are tracked in this currency. Instrument "
@@ -714,39 +715,38 @@ with tab3:
         ),
     )
 
-    with st.expander("Starting positions"):
+    with st.expander(
+        label="Starting positions",
+        key=(key := "positions_expander"),
+        icon=":material/inventory:",
+        expanded=bool(_default(key)),
+        on_change=lambda k=key: _persist(k),
+    ):
         st.caption(
             "Pre-load the portfolio with existing holdings at the start of the simulation. "
             "Each row represents one position.",
         )
 
-        if symbols:
-            _saved_positions = st.session_state.get("starting_positions", {})
-            positions_data = st.data_editor(
-                data=[
-                    {
-                        "Symbol": a.symbol if hasattr(a, "symbol") else str(a),
-                        "Quantity": _saved_positions.get(
-                            a.symbol if hasattr(a, "symbol") else str(a), 0
-                        ),
-                    }
-                    for a in symbols
-                ],
+        if direct:
+            if "starting_positions" not in st.session_state:
+                st.session_state._positions = [{"Symbol": p.symbol, "Quantity": 0} for p in direct]
+
+            positions = st.data_editor(
+                data=st.session_state._positions,
                 num_rows="fixed",
                 hide_index=True,
                 column_config={
-                    "Symbol": st.column_config.TextColumn("Symbol", width="medium", disabled=True),
-                    "Quantity": st.column_config.NumberColumn(
-                        "Quantity",
-                        min_value=0,
-                    ),
+                    "Symbol": st.column_config.TextColumn(width="medium", disabled=True),
+                    "Quantity": st.column_config.NumberColumn(min_value=0),
                 },
             )
 
             # Persist non-zero positions back to session state.
-            st.session_state["starting_positions"] = {
-                row["Symbol"]: row["Quantity"] for row in positions_data if row["Quantity"]
-            }
+            st.session_state["_positions"] = [
+                {"Symbol": row["Symbol"], "Quantity": row["Quantity"]}
+                for row in positions
+                if row["Quantity"]
+            ]
         else:
             st.caption("No symbols selected.")
 
@@ -790,16 +790,23 @@ with tab4:
 
     selected_predefined = st.multiselect(
         label="Built-in strategies",
-        key="predefined_strategies",
+        key=(key := "predefined_strategies"),
         options=StrategyType.variants(),
         format_func=lambda s: s.name,
-        default=[],
+        default=_default(key, []),
         placeholder="Select strategies...",
+        on_change=lambda k=key: _persist(k),
         help="Choose built-in strategies to run alongside your custom ones.",
     )
 
     if selected_predefined:
-        with st.expander("Strategy descriptions", icon=":material/info:"):
+        with st.expander(
+            label="Strategy descriptions",
+            key=(key := "strategy_expander"),
+            icon=":material/info:",
+            expanded=bool(_default(key)),
+            on_change=lambda k=key: _persist(k),
+        ):
             for strategy in selected_predefined:
                 category = "Portfolio Rotation" if strategy.is_rotation else "Single asset"
                 st.markdown(f"**{strategy.name}** · _{category}_")
@@ -807,28 +814,30 @@ with tab4:
 
     st.divider()
 
-    if "custom_strategies" not in st.session_state:
-        st.session_state.custom_strategies = []
-
     st.markdown("**Custom strategies**")
     st.caption(
         "Add one or more custom strategy functions. Each strategy is evaluated "
         "independently during the simulation.",
     )
 
-    custom_strategy_codes: list[str] = []
+    if "custom_strategies" not in st.session_state:
+        st.session_state.custom_strategies = []
 
-    for i, strategy_entry in enumerate(st.session_state.custom_strategies):
+    for i, custom_strategy in enumerate(st.session_state.custom_strategies):
         with st.container(border=True):
-            header_col, remove_col = st.columns([5, 1], vertical_alignment="center")
-            header_col.text_input(
+            col1, col2 = st.columns([5, 1], vertical_alignment="center")
+
+            name = col1.text_input(
                 label="Strategy name",
-                key=f"strategy_name_{i}",
+                key=(key := f"strategy_name_{i}"),
+                value=_default(key),
+                max_chars=40,
                 placeholder=f"Strategy {i + 1}",
                 label_visibility="collapsed",
+                on_change=lambda k=key: _persist(k),
             )
 
-            if remove_col.button(
+            if col2.button(
                 label="Remove",
                 key=f"remove_strategy_{i}",
                 icon=":material/close:",
@@ -839,17 +848,18 @@ with tab4:
 
             source = st.segmented_control(
                 label="Source",
-                key=f"strategy_source_{i}",
+                key=(key := f"strategy_source_{i}"),
                 required=True,
                 options=USER_CODE_OPTIONS,
-                default=strategy_entry.get("source", USER_CODE_OPTIONS[0]),
+                default=_default(key, USER_CODE_OPTIONS[0]),
                 label_visibility="collapsed",
+                on_change=lambda k=key: _persist(k),
             )
 
-            strategy_code: str | None = None
+            code: str | None = None
             if source == USER_CODE_OPTIONS[0]:
                 resp = code_editor(
-                    code=strategy_entry.get("code") or STRATEGY_PLACEHOLDER,
+                    code=custom_strategy.get("code") or STRATEGY_PLACEHOLDER,
                     key=f"strategy_code_editor_{i}",
                     buttons=[
                         {
@@ -869,37 +879,40 @@ with tab4:
                         },
                     ],
                 )
-                strategy_code = resp["text"]
+                code = resp["text"]
             else:
-                uploaded_file = st.file_uploader(
+                strategy_file = st.file_uploader(
                     label="Strategy file",
                     key=f"strategy_file_{i}",
-                    type=["py"],
+                    type="py",
                     accept_multiple_files=False,
                     label_visibility="collapsed",
                     help=(
                         "Upload a Python file that defines a top-level function with signature: "
-                        "`strategy(data, state, indicators)`."
+                        "`strategy(data, state, indicators) -> list[Order]`."
                     ),
                 )
 
-                if uploaded_file is not None:
-                    strategy_code = uploaded_file.read().decode("utf-8")
+                if strategy_file is not None:
+                    code = strategy_file.read().decode("utf-8")
                     with st.expander("Preview uploaded file"):
-                        st.code(strategy_code, language="python", line_numbers=True)
+                        st.code(code, language="python", line_numbers=True)
                 else:
                     st.info("No file uploaded yet.", icon=":material/upload_file:")
 
-            if strategy_code:
-                if _check_strategy_code(strategy_code, i):
-                    custom_strategy_codes.append(strategy_code)
+            if code:
+                _check_strategy_code(code, i)
+
+        st.session_state.custom_strategies[i] = {"name": name, "source": source, "code": code}
 
     if st.button(
         label="Add strategy",
         icon=":material/add:",
         type="secondary",
     ):
-        st.session_state.custom_strategies.append({"source": USER_CODE_OPTIONS[0], "code": ""})
+        st.session_state.custom_strategies.append(
+            {"name": "", "source": USER_CODE_OPTIONS[0], "code": ""}
+        )
         st.rerun()
 
 
@@ -918,11 +931,12 @@ with tab5:
 
     selected_indicators = st.multiselect(
         label="Built-in indicators",
-        key="builtin_indicators",
+        key=(key := "builtin_indicators"),
         options=IndicatorType.variants(),
         format_func=lambda i: f"{i} - {i.name}",
-        default=[],
+        default=_default(key, []),
         placeholder="Select indicators...",
+        on_change=lambda k=key: _persist(k),
         help=(
             "Choose zero or more predefined indicators to compute on each bar. They will "
             "be available in your strategy function via the `indicators` argument."
@@ -965,19 +979,21 @@ with tab5:
         "are passed to your strategy together with the built-in indicators.",
     )
 
-    custom_indicator_codes: list[str] = []
-
-    for i, indicator_entry in enumerate(st.session_state.custom_indicators):
+    for i, custom_indicator in enumerate(st.session_state.custom_indicators):
         with st.container(border=True):
-            header_col, remove_col = st.columns([5, 1], vertical_alignment="center")
-            header_col.text_input(
+            col1, col2 = st.columns([5, 1], vertical_alignment="center")
+
+            name = col1.text_input(
                 label="Indicator name",
-                key=f"indicator_name_{i}",
+                key=(key := f"indicator_name_{i}"),
+                value=_default(key),
+                max_chars=40,
                 placeholder=f"Indicator {i + 1}",
                 label_visibility="collapsed",
+                on_change=lambda k=key: _persist(k),
             )
 
-            if remove_col.button(
+            if col2.button(
                 label="Remove",
                 key=f"remove_indicator_{i}",
                 icon=":material/close:",
@@ -988,16 +1004,18 @@ with tab5:
 
             source = st.segmented_control(
                 label="Source",
-                key=f"indicator_source_{i}",
+                key=(key := f"indicator_source_{i}"),
+                required=True,
                 options=USER_CODE_OPTIONS,
-                default=indicator_entry.get("source", USER_CODE_OPTIONS[0]),
+                default=_default(key, USER_CODE_OPTIONS[0]),
                 label_visibility="collapsed",
+                on_change=lambda k=key: _persist(k),
             )
 
             code: str | None = None
-            if source == USER_CODE_OPTIONS[1]:
+            if source == USER_CODE_OPTIONS[0]:
                 resp = code_editor(
-                    code=indicator_entry.get("code") or INDICATOR_PLACEHOLDER,
+                    code=custom_indicator.get("code") or INDICATOR_PLACEHOLDER,
                     key=f"indicator_code_editor_{i}",
                     buttons=[
                         {
@@ -1022,12 +1040,12 @@ with tab5:
                 indicator_file = st.file_uploader(
                     label="Indicator file",
                     key=f"indicator_file_{i}",
-                    type=["py"],
+                    type="py",
                     accept_multiple_files=False,
                     label_visibility="collapsed",
                     help=(
                         "Upload a Python file that defines a top-level function with signature: "
-                        "`indicator(data)` returning `dict[str, float]`."
+                        "`indicator(data) -> dict[str, float]`."
                     ),
                 )
 
@@ -1039,8 +1057,9 @@ with tab5:
                     st.info("No file uploaded yet.", icon=":material/upload_file:")
 
             if code:
-                if _check_indicator_code(code, i):
-                    custom_indicator_codes.append(code)
+                _check_indicator_code(code, i)
+
+        st.session_state.custom_indicators[i] = {"name": name, "source": source, "code": code}
 
     if st.button(
         label="Add indicator",
@@ -1048,7 +1067,7 @@ with tab5:
         type="secondary",
     ):
         st.session_state.custom_indicators.append(
-            {"source": USER_CODE_OPTIONS[0], "code": ""},
+            {"name": "", "source": USER_CODE_OPTIONS[0], "code": ""},
         )
         st.rerun()
 
@@ -1071,8 +1090,9 @@ with tab6:
                 label="Commission type",
                 key="commission_type",
                 options=variants,
-                index=variants.index(CommissionType.get_default()),
+                index=variants.index(_default("commission_type", CommissionType.get_default())),
                 horizontal=False,
+                on_change=lambda: _persist("commission_type"),
                 help=(
                     "How trading commissions are calculated. **Percentage** charges a fraction "
                     "of the trade notional value. **Fixed amount** charges a flat commission per "
@@ -1091,9 +1111,10 @@ with tab6:
                     key="commission_pct",
                     min_value=0.0,
                     max_value=100.0,
-                    value=0.1,
+                    value=_default("commission_pct", 0.1),
                     step=0.01,
                     format="%.2f",
+                    on_change=lambda: _persist("commission_pct"),
                     help=(
                         "Commission charged per executed order, applied as a percentage of "
                         "the trade's notional value."
@@ -1105,9 +1126,10 @@ with tab6:
                     label=f"Commission ({base_cur} per trade)",
                     key="commission_fixed",
                     min_value=0.0,
-                    value=1.0,
+                    value=_default("commission_fixed", 1.0),
                     step=0.5,
                     format="%.2f",
+                    on_change=lambda: _persist("commission_fixed"),
                     help=f"Flat commission charged per executed order in {base_cur}.",
                 )
                 commission_pct = 0.0
@@ -1117,18 +1139,20 @@ with tab6:
                     key="commission_pct",
                     min_value=0.0,
                     max_value=100.0,
-                    value=0.1,
+                    value=_default("commission_pct", 0.1),
                     step=0.01,
                     format="%.2f",
+                    on_change=lambda: _persist("commission_pct"),
                     help="Percentage of the commission, applied to the trade's notional value.",
                 )
                 commission_fixed = st.number_input(
                     label=f"Commission ({base_cur} per trade)",
                     key="commission_fixed",
                     min_value=0.0,
-                    value=1.0,
+                    value=_default("commission_fixed", 1.0),
                     step=0.5,
                     format="%.2f",
+                    on_change=lambda: _persist("commission_fixed"),
                     help=(
                         f"Fixed portion of the commission in {base_cur}, added on top of the "
                         "percentage commission."
@@ -1143,9 +1167,10 @@ with tab6:
             key="slippage",
             min_value=0.0,
             max_value=100.0,
-            value=0.05,
+            value=_default("slippage", 0.05),
             step=0.01,
             format="%.2f",
+            on_change=lambda: _persist("slippage"),
             help=(
                 "Simulated market impact. Each fill price is moved adversely by this percentage "
                 "(buys filled higher, sells filled lower)."
@@ -1159,7 +1184,8 @@ with tab6:
             label="Allowed order types",
             key="allowed_order_types",
             options=OrderType.variants(),
-            default=[OrderType.get_default()],
+            default=_default("allowed_order_types", [OrderType.get_default()]),
+            on_change=lambda: _persist("allowed_order_types"),
             help=(
                 "Which order types the engine accepts during the simulation. "
                 "**Market** orders fill immediately at the current price. "
@@ -1174,7 +1200,8 @@ with tab6:
         partial_fills = st.toggle(
             label="Partial fills",
             key="partial_fills",
-            value=False,
+            value=_default("partial_fills", fallback=False),
+            on_change=lambda: _persist("partial_fills"),
             help=(
                 "Simulate partial order fills based on available bar volume. When disabled, "
                 "orders are filled entirely or not at all."
@@ -1189,7 +1216,8 @@ with tab6:
         enable_margin = col_toggle.toggle(
             label="Allow margin trading",
             key="allow_margin",
-            value=True,
+            value=_default("allow_margin", fallback=True),
+            on_change=lambda: _persist("allow_margin"),
             help=(
                 "Safety guardrail for margin usage. When enabled (default), the strategy "
                 "may use leverage if it chooses to — the actual decision is made in your "
@@ -1204,9 +1232,10 @@ with tab6:
                 key="max_leverage",
                 min_value=1.0,
                 max_value=10.0,
-                value=1.0,
+                value=_default("max_leverage", 1.0),
                 step=0.5,
                 format="%.1f",
+                on_change=lambda: _persist("max_leverage"),
                 help=(
                     "Maximum leverage ratio. A value of 2.0 means the strategy can borrow "
                     "up to 1x the portfolio value on top of its own capital. Exceeding this "
@@ -1221,9 +1250,10 @@ with tab6:
                 key="initial_margin",
                 min_value=0.0,
                 max_value=100.0,
-                value=50.0,
+                value=_default("initial_margin", 50.0),
                 step=5.0,
                 format="%.1f",
+                on_change=lambda: _persist("initial_margin"),
                 help=(
                     "Minimum equity as a percentage of position value required when opening "
                     "a new leveraged position. For example, 50% means you must put up at "
@@ -1236,9 +1266,10 @@ with tab6:
                 key="maintenance_margin",
                 min_value=0.0,
                 max_value=100.0,
-                value=25.0,
+                value=_default("maintenance_margin", 25.0),
                 step=5.0,
                 format="%.1f",
+                on_change=lambda: _persist("maintenance_margin"),
                 help=(
                     "Minimum equity as a percentage of position value that must be maintained. "
                     "If equity drops below this threshold a margin call is triggered."
@@ -1250,9 +1281,10 @@ with tab6:
                 key="margin_interest",
                 min_value=0.0,
                 max_value=100.0,
-                value=0.0,
+                value=_default("margin_interest", 0.0),
                 step=0.5,
                 format="%.2f",
+                on_change=lambda: _persist("margin_interest"),
                 help=(
                     "Annualized interest rate charged on borrowed funds. Accrued daily and "
                     "deducted from the portfolio cash balance."
@@ -1267,7 +1299,8 @@ with tab6:
         allow_short_selling = st.toggle(
             label="Allow short selling",
             key="allow_short_selling",
-            value=True,
+            value=_default("allow_short_selling", fallback=True),
+            on_change=lambda: _persist("allow_short_selling"),
             help=(
                 "Safety guardrail for short positions. When enabled (default), the strategy "
                 "may open short positions if it chooses to - the actual decision is made in "
@@ -1282,9 +1315,10 @@ with tab6:
                 key="borrow_rate",
                 min_value=0.0,
                 max_value=100.0,
-                value=0.0,
+                value=_default("borrow_rate", 0.0),
                 step=0.5,
                 format="%.2f",
+                on_change=lambda: _persist("borrow_rate"),
                 help=(
                     "Annualized cost of borrowing shares for short positions. Accrued daily "
                     "and deducted from the portfolio cash balance."
@@ -1299,8 +1333,9 @@ with tab6:
             key="max_position_size",
             min_value=1,
             max_value=100,
-            value=100,
+            value=_default("max_position_size", 100),
             step=5,
+            on_change=lambda: _persist("max_position_size"),
             help=(
                 "Maximum allocation to a single position as a percentage of total "
                 "portfolio value. Applies to both long and short positions. Set to "
@@ -1317,7 +1352,10 @@ with tab6:
             key="conversion_mode",
             options=variants,
             format_func=lambda x: x.name,
-            index=variants.index(CurrencyConversionMode.get_default()),
+            index=variants.index(
+                _default("conversion_mode", CurrencyConversionMode.get_default())
+            ),
+            on_change=lambda: _persist("conversion_mode"),
             help=(
                 "Determines how proceeds in a foreign currency are converted back to "
                 "the base currency. **Immediately** converts at the time of the trade. "
@@ -1333,9 +1371,10 @@ with tab6:
                 label=f"Conversion threshold ({base_cur})",
                 key="conversion_threshold",
                 min_value=0.0,
-                value=1_000.0,
+                value=_default("conversion_threshold", 1_000.0),
                 step=100.0,
                 format="%.2f",
+                on_change=lambda: _persist("conversion_threshold"),
                 help=(
                     f"Foreign currency balances are converted to {base_cur} once their "
                     f"equivalent value reaches this threshold."
@@ -1347,7 +1386,10 @@ with tab6:
                 label="Conversion period",
                 key="conversion_period",
                 options=variants,
-                index=variants.index(ConversionPeriod.get_default()),
+                index=variants.index(
+                    _default("conversion_period", ConversionPeriod.get_default())
+                ),
+                on_change=lambda: _persist("conversion_period"),
                 help="How often foreign currency balances are converted to the base currency.",
             )
         elif conversion_mode == CurrencyConversionMode("CustomInterval"):
@@ -1355,8 +1397,9 @@ with tab6:
                 label="Conversion interval (bars)",
                 key="conversion_interval",
                 min_value=1,
-                value=5,
+                value=_default("conversion_interval", 5),
                 step=1,
+                on_change=lambda: _persist("conversion_interval"),
                 help=(
                     "Number of bars between automatic conversions of foreign currency "
                     "balances to the base currency."
@@ -1376,8 +1419,9 @@ with tab7:
             label="Warmup period (bars)",
             key="warmup_period",
             min_value=0,
-            value=0,
+            value=_default("warmup_period", 0),
             step=1,
+            on_change=lambda: _persist("warmup_period"),
             help=(
                 "Number of initial bars to skip before the strategy starts executing. "
                 "During the warmup window indicators are computed but no orders are placed. "
@@ -1388,7 +1432,8 @@ with tab7:
         trade_on_close = st.toggle(
             label="Trade on close",
             key="trade_on_close",
-            value=False,
+            value=_default("trade_on_close", fallback=False),
+            on_change=lambda: _persist("trade_on_close"),
             help=(
                 "When enabled, orders are filled at the current bar's close price. "
                 "When disabled (default), orders are filled at the next bar's open price, "
@@ -1404,9 +1449,10 @@ with tab7:
             key="risk_free_rate",
             min_value=0.0,
             max_value=100.0,
-            value=0.0,
+            value=_default("risk_free_rate", 0.0),
             step=0.1,
             format="%.2f",
+            on_change=lambda: _persist("risk_free_rate"),
             help=(
                 "Annualized risk-free rate used for computing the Sharpe ratio and other "
                 "risk-adjusted performance metrics."
@@ -1418,6 +1464,7 @@ with tab7:
             key="benchmark",
             placeholder="e.g. SPY",
             max_chars=20,
+            on_change=lambda: _persist("benchmark"),
             help=(
                 "Optional benchmark ticker for relative performance comparison. Leave empty "
                 "to skip benchmark tracking."
@@ -1430,7 +1477,8 @@ with tab7:
         exclusive_orders = st.toggle(
             label="Exclusive orders",
             key="exclusive_orders",
-            value=False,
+            value=_default("exclusive_orders", fallback=False),
+            on_change=lambda: _persist("exclusive_orders"),
             help=(
                 "When enabled, submitting a new order automatically cancels all pending "
                 "orders. Useful for strategies that should only have one active order at a time."
@@ -1441,9 +1489,10 @@ with tab7:
             label="Random seed",
             key="random_seed",
             min_value=0,
-            value=None,
+            value=_default("random_seed"),
             step=1,
             placeholder="Leave empty for non-deterministic",
+            on_change=lambda: _persist("random_seed"),
             help=(
                 "Fixed seed for the random number generator to ensure reproducible results. "
                 "Leave empty for non-deterministic execution."
@@ -1459,7 +1508,8 @@ with tab7:
             key="empty_bar_policy",
             options=variants,
             format_func=lambda x: x.name,
-            index=variants.index(EmptyBarPolicy.get_default()),
+            index=variants.index(_default("empty_bar_policy", EmptyBarPolicy.get_default())),
+            on_change=lambda: _persist("empty_bar_policy"),
             help=(
                 "How to handle bars with no trading activity (e.g. market closures during "
                 "intraday backtests, holidays or illiquid periods).\n\n"

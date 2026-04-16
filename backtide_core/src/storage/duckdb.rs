@@ -196,12 +196,11 @@ impl Storage for DuckDb {
     ) -> StorageResult<Vec<StoredBar>> {
         let conn = self.conn.lock().unwrap();
 
-        let mut sql =
-            "SELECT symbol, interval, provider,
+        let mut sql = "SELECT symbol, interval, provider,
                     open_ts, close_ts, open_ts_exchange,
                     open, high, low, close, adj_close, volume, n_trades
              FROM bars"
-                .to_owned();
+            .to_owned();
 
         let mut params: Vec<String> = Vec::new();
         let mut clauses: Vec<&str> = Vec::new();
@@ -262,10 +261,9 @@ impl Storage for DuckDb {
     ) -> StorageResult<Vec<StoredDividend>> {
         let conn = self.conn.lock().unwrap();
 
-        let mut sql =
-            "SELECT symbol, provider, ex_date, amount
+        let mut sql = "SELECT symbol, provider, ex_date, amount
              FROM dividends"
-                .to_owned();
+            .to_owned();
 
         let mut params: Vec<String> = Vec::new();
         let mut clauses: Vec<&str> = Vec::new();
@@ -314,10 +312,9 @@ impl Storage for DuckDb {
     ) -> StorageResult<Vec<Instrument>> {
         let conn = self.conn.lock().unwrap();
 
-        let mut sql =
-            "SELECT symbol, provider, instrument_type, name, base, quote, exchange
+        let mut sql = "SELECT symbol, provider, instrument_type, name, base, quote, exchange
              FROM instruments"
-                .to_owned();
+            .to_owned();
 
         let mut params: Vec<String> = Vec::new();
         let mut clauses: Vec<String> = Vec::new();
@@ -352,9 +349,8 @@ impl Storage for DuckDb {
         let rows = stmt
             .query_map(params_from_iter(params.iter()), |row| {
                 let it_str: String = row.get(2)?;
-                let it = instrument_type.unwrap_or_else(|| {
-                    it_str.parse::<InstrumentType>().unwrap()
-                });
+                let it =
+                    instrument_type.unwrap_or_else(|| it_str.parse::<InstrumentType>().unwrap());
                 let prov = provider.unwrap_or_else(|| {
                     let s: String = row.get(1).unwrap();
                     s.parse::<Provider>().unwrap()
@@ -529,14 +525,13 @@ impl Storage for DuckDb {
         }
 
         let mut total_deleted = 0u64;
-        let columns = ["symbol", "(symbol, interval)", "(symbol, provider)", "(symbol, interval, provider)"];
+        let columns =
+            ["symbol", "(symbol, interval)", "(symbol, provider)", "(symbol, interval, provider)"];
         for (col, vals) in columns.iter().zip(&groups) {
             if !vals.is_empty() {
                 let list = vals.iter().join(", ");
-                total_deleted += conn.execute(
-                    &format!("DELETE FROM bars WHERE {col} IN ({list})"),
-                    [],
-                )? as u64;
+                total_deleted +=
+                    conn.execute(&format!("DELETE FROM bars WHERE {col} IN ({list})"), [])? as u64;
             }
         }
 

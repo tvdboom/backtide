@@ -39,8 +39,7 @@ impl Provider {
 
     #[new]
     fn new(s: &str) -> PyResult<Self> {
-        s.parse()
-            .map_err(|_| PyValueError::new_err(format!("Unknown provider {s:?}.")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown provider {s:?}.")))
     }
 
     fn __repr__(&self) -> String {

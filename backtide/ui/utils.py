@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 from tzlocal import get_localzone
-from backtide.constants import MOMENT_TO_STRFTIME
+
 from backtide.core.data import (
     Currency,
     Exchange,
@@ -28,7 +28,7 @@ from backtide.core.data import (
 from backtide.core.storage import (
     query_bars_summary,
 )
-from backtide.utils.constants import MAX_PRELOADED_INSTRUMENTS
+from backtide.utils.constants import MAX_PRELOADED_INSTRUMENTS, MOMENT_TO_STRFTIME
 from backtide.utils.utils import _to_list
 
 
@@ -40,10 +40,23 @@ def _get_timezone(tz: str | None) -> ZoneInfo:
         return get_localzone()
 
 
-def _clear_state(keys: list[str]):
-    """Remove `keys` from Streamlit's state."""
+def _clear_state(*keys: str):
+    """Remove `keys` from Streamlit's state (including shadow keys)."""
     for k in keys:
-        st.session_state.pop(k, None)
+        st.session_state[k] = []
+        st.session_state.pop(f"_{k}", None)
+
+
+def _persist(*keys: str):
+    """Copy widget values to shadow keys so they survive page navigation."""
+    for k in keys:
+        if k in st.session_state:
+            st.session_state[f"_{k}"] = st.session_state[k]
+
+
+def _default(key: str, fallback: Any = None) -> Any:
+    """Return the persisted shadow value for *key*, or *fallback*."""
+    return st.session_state.get(f"_{key}", fallback)
 
 
 def _get_instrument_type_description(instrument_type: InstrumentType) -> tuple[str, str]:
@@ -125,15 +138,9 @@ def _list_instruments(
     instrument_type: InstrumentType,
     *,
     limit: int = MAX_PRELOADED_INSTRUMENTS,
-) -> list[Instrument]:
-    """Return instruments for the given type, capped at `limit`.
-
-    Delegates to `list_instruments`, which queries the local DB first and
-    only falls back to the network when the DB holds fewer than `limit`
-    matching instruments.
-
-    """
-    return list_instruments(instrument_type, limit=limit, verbose=False)
+) -> dict[str, Instrument]:
+    """Return available instruments for the given type."""
+    return {x.symbol: x for x in list_instruments(instrument_type, limit=limit, verbose=False)}
 
 
 def _moment_to_strftime(fmt: str) -> str:
@@ -182,7 +189,7 @@ def _to_upper_values(key: str):
 # Instrument card rendering (shared by download & experiment pages)
 # ─────────────────────────────────────────────────────────────────────────────
 
-CARD_CSS = """
+_CARD_CSS = """
     <style>
         .section {
             font-size: 12px;
@@ -347,7 +354,7 @@ CARD_CSS = """
     """
 
 
-def draw_cards(
+def _draw_cards(
     profiles,
     *,
     cfg,

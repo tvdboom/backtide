@@ -18,17 +18,18 @@ from backtide.core.data import (
     resolve_profiles,
 )
 from backtide.ui.utils import (
-    CARD_CSS,
+    _CARD_CSS,
     _clear_state,
+    _default,
+    _draw_cards,
     _fmt_number,
     _get_instrument_type_description,
     _get_timezone,
     _list_instruments,
+    _persist,
     _to_upper_values,
-    draw_cards,
 )
 from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
-from backtide.utils.utils import _to_list
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Download interface
@@ -45,15 +46,12 @@ st.divider()
 
 instrument_type = st.segmented_control(  # ty: ignore[no-matching-overload]
     label="Instrument type",
-    key="instrument_type",
+    key=(key := "instrument_type"),
     required=True,
     options=InstrumentType.variants(),
-    default=st.session_state.get("_instrument_type") or InstrumentType.get_default(),
-    format_func=lambda at: f"{at.icon()} {at}",
-    on_change=lambda: (
-        _clear_state(["symbols", "_currency"]),
-        st.session_state.update(_instrument_type=st.session_state.instrument_type),
-    ),
+    default=_default(key, InstrumentType.get_default()),
+    format_func=lambda x: f"{x.icon()} {x}",
+    on_change=lambda k=key: (_clear_state("symbols", "currency"), _persist(k)),
     help="Select the type of financial instrument you want to download.",
 )
 
@@ -64,69 +62,58 @@ if not st.session_state.get("_currency"):
     st.session_state._currency = "All"
 
 if (currency := st.session_state.get("_currency", "All")) != "All":
-    filtered_instruments = [
-        inst
-        for inst in all_instruments
-        if inst.base == currency or str(inst.quote) == currency
-    ]
+    fi = {
+        k: v for k, v in all_instruments.items() if v.base == currency or str(v.quote) == currency
+    }
 else:
-    filtered_instruments = all_instruments
+    fi = all_instruments
 
 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
-instrument_d, currency_d = _get_instrument_type_description(instrument_type)
-
-if all(x in filtered_instruments for x in _to_list(st.session_state.get("symbols"))):
-    default = st.session_state.symbols
-else:
-    default = None
+symbol_d, currency_d = _get_instrument_type_description(instrument_type)
 
 symbols = col1.multiselect(
     label="Symbols",
-    key="symbols",
-    options=sorted(filtered_instruments, key=lambda a: a.symbol),
-    default=default,
-    format_func=lambda a: (
-        f"{a.symbol} - {a.name}"
-        if a.instrument_type in (InstrumentType.Stocks, InstrumentType.Etf)
-        else a.symbol
+    key=(key := "symbols"),
+    options=sorted(list(fi) + _default(key, [])),
+    default=_default(key, []),
+    format_func=lambda s: (
+        f"{s} - {fi[s].name}" if s in fi and fi[s].instrument_type.is_equity else s
     ),
     placeholder="Select one or more symbols...",
     max_selections=MAX_INSTRUMENT_SELECTION,
     accept_new_options=True,
-    on_change=lambda: _to_upper_values("symbols"),
-    help=instrument_d,
+    on_change=lambda: (_to_upper_values("symbols"), _persist("symbols")),
+    help=symbol_d,
 )
 
-# Symbols can become symbol - name when changing currency, so extract the symbol part
+# Symbols can become 'symbol - name' when changing currency -> extract the symbol
 symbols = [s.split(" - ")[0] if isinstance(s, str) else s for s in symbols]
 
-intervals = st.session_state.get("intervals", Interval.get_default())
-
+profiles = direct = None
+intervals = _default("intervals", Interval.get_default())
 try:
-    # Convert custom symbols to instruments and add conversion currencies
     if symbols and intervals:
         profiles = resolve_profiles(symbols, instrument_type, intervals, verbose=False)
         direct = profiles[: len(symbols)]  # Direct profiles (no legs)
-    else:
-        profiles = direct = None
 except RuntimeError as ex:
-    profiles = direct = None
     st.error(ex, icon=":material/error:")
 
-options = ["All", *sorted(dict.fromkeys(str(inst.quote) for inst in all_instruments))]
+options = ["All", *sorted(dict.fromkeys(str(x.quote) for x in all_instruments.values()))]
 col2.selectbox(
     label="Currency",
-    index=options.index(st.session_state._currency),
-    key="currency",
+    key=(key := "currency"),
     options=options,
-    on_change=lambda: st.session_state.update(_currency=st.session_state.currency),
+    index=options.index(_default(key)),
     placeholder="All",
+    on_change=lambda k=key: _persist(k),
     help=currency_d,
 )
 
 full_history = st.toggle(
     label="Download full history",
-    value=True,
+    key=(key := "full_history"),
+    value=_default(key, fallback=True),
+    on_change=lambda k=key: _persist(k),
     help=(
         "Whether to download the maximum available history for all selected symbols and FX rates. "
         "If toggled off, select the start and end download dates."
@@ -152,10 +139,12 @@ else:
 
     start_ts = col1.date_input(
         label="Start date",
-        value=earliest_ts,
+        key=(key := "start_date"),
+        value=_default(key, earliest_ts),
         min_value=earliest_ts,
         max_value="today",
         format=cfg.display.date_format,
+        on_change=lambda k=key: _persist(k),
         help=(
             "Download data starting from this date. A download can start later if the "
             "provider doesn't have the data this far back, but it can't start earlier."
@@ -164,19 +153,22 @@ else:
 
     end_ts = col2.date_input(
         label="End date",
-        value=latest_ts,
+        key=(key := "end_date"),
+        value=_default(key, latest_ts),
         min_value=start_ts + timedelta(days=1),
         max_value="today",
         format=cfg.display.date_format,
+        on_change=lambda k=key: _persist(k),
         help="Download data up to this date.",
     )
 
 intervals = st.pills(
     label="Interval",
-    key="intervals",
+    key=(key := "intervals"),
     options=cfg.data.providers[instrument_type].intervals(),
     selection_mode="multi",
-    default=Interval.get_default(),
+    default=_default(key, Interval.get_default()),
+    on_change=lambda k=key: _persist(k),
     help=(
         "The frequency of the data points to download. Note that full history is "
         "only available for intervals >= 1d."
@@ -189,8 +181,14 @@ if profiles and intervals:
 
     st.divider()
 
-    with st.expander("Download details", icon=":material/archive:", expanded=False):
-        html, n_bars = draw_cards(
+    with st.expander(
+        label="Download details",
+        key=(key := "details_expander"),
+        icon=":material/archive:",
+        expanded=bool(_default(key)),
+        on_change=lambda k=key: _persist(k),
+    ):
+        html, n_bars = _draw_cards(
             profiles,
             cfg=cfg,
             tz=tz,
@@ -199,7 +197,7 @@ if profiles and intervals:
             start_ts=start_ts,
             end_ts=end_ts,
         )
-        st.html(CARD_CSS + html)
+        st.html(_CARD_CSS + html)
 
     estimated_memory = (n_bars * BYTES_PER_ROW) / (1024**2)
     estimated_seconds = int(n_bars / ROWS_PER_SECOND)
@@ -239,12 +237,12 @@ downloading = st.session_state.get("downloading", False)
 
 if st.button(
     label="Downloading..." if downloading else "Download",
+    key="downloading",
     icon=":material/get_app:",
     type="primary",
     disabled=not (profiles and start_ts and latest_ts and intervals) or downloading,
     shortcut="Enter",
     width="stretch",
-    key="downloading",
 ):
     if latest_ts > dt.now(tz=tz).date():
         st.error("End date cannot be in the future.", icon=":material/error:")

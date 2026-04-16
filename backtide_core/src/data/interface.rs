@@ -155,10 +155,8 @@ pub fn resolve_profiles(
 
 /// List available instruments for a given instrument type.
 ///
-/// Returns instruments already stored in the database first.  Only when the
-/// DB holds fewer than `limit` matching rows does it fall back to the network
-/// provider to fill the gap.  Network results are persisted so that subsequent
-/// calls can be served entirely from storage.
+/// When `exchanges` is provided, the `limit` is distributed evenly across the
+/// specified exchanges.
 ///
 /// Parameters
 /// ----------
