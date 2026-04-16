@@ -93,7 +93,7 @@ def _build_experiment_config() -> str:
         portfolio=PortfolioExpConfig(
             initial_cash=float(ss.get("initial_cash", 10_000)),
             base_currency=ss.get("base_currency", "USD"),
-            positions=ss.get("starting_positions", []),
+            starting_positions=ss.get("starting_positions", []),
         ),
         strategy=StrategyExpConfig(
             predefined_strategies=list(ss.get("predefined_strategies", [])),
@@ -422,13 +422,9 @@ with tab2:
 
     # ── Symbol selection ─────────────────────────────────────────────────────
 
-    # Read the toggle value from session state before the multiselect so the
-    # options list can depend on it. The actual toggle widget is placed below.
-
     _use_storage = st.session_state.get("use_storage", False)
 
     summary_df = None
-
     if _use_storage:
         summary_df = _query_bars_summary()
 
@@ -728,11 +724,9 @@ with tab3:
         )
 
         if direct:
-            if "starting_positions" not in st.session_state:
-                st.session_state._positions = [{"Symbol": p.symbol, "Quantity": 0} for p in direct]
-
+            existing = {r["Symbol"]: r["Quantity"] for r in _default("starting_positions", [])}
             positions = st.data_editor(
-                data=st.session_state._positions,
+                data=[{"Symbol": p.symbol, "Quantity": existing.get(p.symbol, 0)} for p in direct],
                 num_rows="fixed",
                 hide_index=True,
                 column_config={
@@ -741,12 +735,7 @@ with tab3:
                 },
             )
 
-            # Persist non-zero positions back to session state.
-            st.session_state["_positions"] = [
-                {"Symbol": row["Symbol"], "Quantity": row["Quantity"]}
-                for row in positions
-                if row["Quantity"]
-            ]
+            st.session_state["_starting_positions"] = positions
         else:
             st.caption("No symbols selected.")
 

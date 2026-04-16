@@ -722,6 +722,11 @@ class InstrumentProfile:
 class InstrumentType:
     """The category an [`Instrument`] belongs to.
 
+    Attributes
+    ----------
+    is_equity : bool
+        Whether the instrument type has ownership stakes (true for stocks and ETF).
+
     See Also
     --------
     - backtide.data:Bar
