@@ -99,7 +99,7 @@ bars_df = _load_storage_df(cfg.display.date_format, tz, logokit_key)
 
 if bars_df.empty:
     st.info(
-        "There database is empty. Head over to the **Download** page to fetch some market data.",
+        "The database is empty. Head over to the **Download** page to fetch some market data.",
         icon=":material/info:",
     )
     st.stop()
@@ -107,8 +107,7 @@ if bars_df.empty:
 metrics_container = st.container()
 
 column_config = {
-    "Name": st.column_config.TextColumn(width="medium"),
-    "Instrument type": st.column_config.TextColumn(width="small"),
+    "Symbol": st.column_config.TextColumn(pinned=True),
     "Bars": st.column_config.NumberColumn(format="%d"),
     "Price": st.column_config.LineChartColumn(help="Closing price for the last 365 intervals."),
 }
@@ -120,6 +119,7 @@ event = st.dataframe(
     bars_df,
     height="stretch",
     column_config=column_config,
+    column_order=[c for c in bars_df.columns if c not in ("Instrument type", "Provider")],
     hide_index=bars_df.index.name is None,
     selection_mode="multi-row",
     on_select="rerun",

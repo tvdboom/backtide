@@ -59,7 +59,7 @@ impl Instrument {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (symbol, name, base, quote, instrument_type, exchange, provider))]
+    #[pyo3(signature = (symbol: "str", name: "str", base: "str | None", quote: "str", instrument_type: "str | InstrumentType", exchange: "str | Exchange", provider: "str | Provider"))]
     fn new(
         symbol: Symbol,
         name: String,

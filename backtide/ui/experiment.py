@@ -6,7 +6,8 @@ Description: Run a new backtest page.
 """
 
 import ast
-from datetime import datetime as dt, timedelta
+from datetime import datetime as dt
+from datetime import timedelta
 import json
 import logging
 import tomllib
@@ -16,7 +17,6 @@ from code_editor import code_editor
 import streamlit as st
 import yaml
 
-from backtide.storage import query_instruments
 from backtide.backtest import (
     CodeSnippet,
     CommissionType,
@@ -37,7 +37,8 @@ from backtide.backtest import (
 )
 from backtide.config import get_config
 from backtide.core.data import resolve_profiles
-from backtide.data import Currency, InstrumentType, Interval
+from backtide.data import Currency, InstrumentProfile, InstrumentType, Interval
+from backtide.storage import query_instruments
 from backtide.ui.utils import (
     _CARD_CSS,
     _clear_state,
@@ -47,6 +48,7 @@ from backtide.ui.utils import (
     _get_timezone,
     _list_instruments,
     _persist,
+    _query_bars_summary,
     _to_upper_values,
 )
 from backtide.utils.constants import (
@@ -197,9 +199,7 @@ def _on_config_upload():
                     str(imported.data.start_date)
                 ).date()
             if imported.data.end_date:
-                st.session_state["end_date"] = dt.fromisoformat(
-                    str(imported.data.end_date)
-                ).date()
+                st.session_state["end_date"] = dt.fromisoformat(str(imported.data.end_date)).date()
         st.session_state["interval"] = imported.data.interval
 
         # ── Portfolio ────────────────────────────────────────────────────────
@@ -418,7 +418,7 @@ with tab2:
         help="Select the type of financial instrument you want to backtest.",
     )
 
-    if _default("use_storage", False):
+    if _default("use_storage", fallback=False):
         provider = cfg.data.providers[instrument_type]
         all_instruments = {x.symbol: x for x in query_instruments(instrument_type, provider)}
     else:
@@ -447,7 +447,7 @@ with tab2:
         ),
         placeholder="Select one or more symbols...",
         max_selections=MAX_INSTRUMENT_SELECTION,
-        accept_new_options=not _default("use_storage", False),
+        accept_new_options=not _default("use_storage", fallback=False),
         on_change=lambda: (_to_upper_values("symbols"), _persist("symbols")),
         help=symbol_d,
     )
@@ -466,18 +466,9 @@ with tab2:
         help=currency_d,
     )
 
-    profiles = direct = None
-    interval = _default("interval", Interval.get_default())
-    try:
-        if symbols:
-            profiles = resolve_profiles(symbols, instrument_type, interval, verbose=False)
-            direct = profiles[: len(symbols)]  # Direct profiles (no legs)
-    except RuntimeError as ex:
-        st.error(ex, icon=":material/error:")
-
     if not all_instruments:
         st.info(
-            "There database is empty. Head over to the **Download** page to fetch some market data.",
+            "The database is empty. Head over to the **Download** page to fetch some market data.",
             icon=":material/info:",
         )
 
@@ -486,7 +477,7 @@ with tab2:
         key=(key := "use_storage"),
         value=_default(key, fallback=False),
         on_change=lambda k=key: (
-            _clear_state("symbols", "start_date", "end_date"),
+            _clear_state("symbols", "currency", "start_date", "end_date"),
             _persist(k),
         ),
         help=(
@@ -499,7 +490,7 @@ with tab2:
     full_history = st.toggle(
         label="Use full available history",
         key=(key := "full_history"),
-        value=_default(key, True),
+        value=_default(key, fallback=True),
         on_change=lambda k=key: _persist(k),
         help=(
             "Whether to use the maximum available history for all selected symbols. "
@@ -507,9 +498,42 @@ with tab2:
         ),
     )
 
+    profiles = direct = []
+    interval = _default("interval", Interval.get_default())
+
+    summary = None
+    raise_missing_interval = None
+
+    try:
+        if symbols:
+            if use_storage:
+                summary = _query_bars_summary()
+                summary = summary[summary["interval"] == str(interval)]
+
+                for symbol in symbols:
+                    if len(df := summary[summary["symbol"] == symbol]) > 0:
+                        row = df.iloc[0]
+                        profiles.append(
+                            InstrumentProfile(
+                                instrument=fi[symbol],
+                                earliest_ts={interval: row["first_ts"]},
+                                latest_ts={interval: row["last_ts"]},
+                                legs=[],
+                            )
+                        )
+                    else:
+                        raise_missing_interval = symbol
+            else:
+                profiles = resolve_profiles(symbols, instrument_type, interval, verbose=False)
+                direct = profiles[: len(symbols)]  # Direct profiles (no legs)
+    except RuntimeError as ex:
+        st.error(ex, icon=":material/error:")
+
     today = dt.now(tz=tz).date()
     if direct:
-        earliest_ts = dt.fromtimestamp(min(min(p.earliest_ts.values()) for p in direct), tz=tz).date()
+        earliest_ts = dt.fromtimestamp(
+            min(min(p.earliest_ts.values()) for p in direct), tz=tz
+        ).date()
         latest_ts = dt.fromtimestamp(max(max(p.latest_ts.values()) for p in direct), tz=tz).date()
 
         # Correct latest_ts since some providers return closing bar at 00:00 (so tomorrow)
@@ -564,15 +588,22 @@ with tab2:
         ),
     )
 
+    if raise_missing_interval:
+        st.error(
+            f"No data in the database for symbol **{raise_missing_interval}** "
+            f"and interval **{interval}**.",
+            icon=":material/error:",
+        )
+
     if profiles:
         st.divider()
 
         with st.expander(
-                label="Backtest details",
-                key=(key := "details_expander"),
-                icon=":material/candlestick_chart:",
-                expanded=bool(_default(key)),
-                on_change=lambda k=key: _persist(k),
+            label="Backtest details",
+            key=(key := "details_expander"),
+            icon=":material/candlestick_chart:",
+            expanded=bool(_default(key)),
+            on_change=lambda k=key: _persist(k),
         ):
             html, n_bars = _draw_cards(
                 profiles,
@@ -582,6 +613,7 @@ with tab2:
                 full_history=full_history,
                 start_ts=start_ts,
                 end_ts=end_ts,
+                summary=summary,
             )
             st.html(_CARD_CSS + html)
 

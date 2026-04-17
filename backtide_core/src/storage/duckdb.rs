@@ -189,9 +189,9 @@ impl Storage for DuckDb {
     /// Return stored bars, optionally filtered by symbol/interval/provider with a limit.
     fn query_bars(
         &self,
-        symbol: Option<&str>,
-        interval: Option<Interval>,
-        provider: Option<Provider>,
+        symbols: Option<&[&str]>,
+        intervals: Option<&[Interval]>,
+        providers: Option<&[Provider]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredBar>> {
         let conn = self.conn.lock().unwrap();
@@ -203,19 +203,28 @@ impl Storage for DuckDb {
             .to_owned();
 
         let mut params: Vec<String> = Vec::new();
-        let mut clauses: Vec<&str> = Vec::new();
+        let mut clauses: Vec<String> = Vec::new();
 
-        if let Some(symbol) = symbol {
-            clauses.push("symbol = ?");
-            params.push(symbol.to_owned());
+        if let Some(syms) = symbols {
+            if !syms.is_empty() {
+                let ph: Vec<&str> = syms.iter().map(|_| "?").collect();
+                clauses.push(format!("symbol IN ({})", ph.join(", ")));
+                params.extend(syms.iter().map(|s| s.to_string()));
+            }
         }
-        if let Some(interval) = interval {
-            clauses.push("interval = ?");
-            params.push(interval.to_string());
+        if let Some(ivs) = intervals {
+            if !ivs.is_empty() {
+                let ph: Vec<&str> = ivs.iter().map(|_| "?").collect();
+                clauses.push(format!("interval IN ({})", ph.join(", ")));
+                params.extend(ivs.iter().map(|i| i.to_string()));
+            }
         }
-        if let Some(provider) = provider {
-            clauses.push("provider = ?");
-            params.push(provider.to_string());
+        if let Some(provs) = providers {
+            if !provs.is_empty() {
+                let ph: Vec<&str> = provs.iter().map(|_| "?").collect();
+                clauses.push(format!("provider IN ({})", ph.join(", ")));
+                params.extend(provs.iter().map(|p| p.to_string()));
+            }
         }
         if !clauses.is_empty() {
             sql.push_str(" WHERE ");
@@ -255,8 +264,8 @@ impl Storage for DuckDb {
     /// Return stored dividends, optionally filtered by symbol/provider with a limit.
     fn query_dividends(
         &self,
-        symbol: Option<&str>,
-        provider: Option<Provider>,
+        symbols: Option<&[&str]>,
+        providers: Option<&[Provider]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredDividend>> {
         let conn = self.conn.lock().unwrap();
@@ -266,15 +275,21 @@ impl Storage for DuckDb {
             .to_owned();
 
         let mut params: Vec<String> = Vec::new();
-        let mut clauses: Vec<&str> = Vec::new();
+        let mut clauses: Vec<String> = Vec::new();
 
-        if let Some(s) = symbol {
-            clauses.push("symbol = ?");
-            params.push(s.to_owned());
+        if let Some(syms) = symbols {
+            if !syms.is_empty() {
+                let ph: Vec<&str> = syms.iter().map(|_| "?").collect();
+                clauses.push(format!("symbol IN ({})", ph.join(", ")));
+                params.extend(syms.iter().map(|s| s.to_string()));
+            }
         }
-        if let Some(prov) = provider {
-            clauses.push("provider = ?");
-            params.push(prov.to_string());
+        if let Some(provs) = providers {
+            if !provs.is_empty() {
+                let ph: Vec<&str> = provs.iter().map(|_| "?").collect();
+                clauses.push(format!("provider IN ({})", ph.join(", ")));
+                params.extend(provs.iter().map(|p| p.to_string()));
+            }
         }
         if !clauses.is_empty() {
             sql.push_str(" WHERE ");
@@ -305,8 +320,8 @@ impl Storage for DuckDb {
     /// Return stored instrument metadata, optionally filtered by type/provider/exchanges with a limit.
     fn query_instruments(
         &self,
-        instrument_type: Option<InstrumentType>,
-        provider: Option<Provider>,
+        instrument_types: Option<&[InstrumentType]>,
+        providers: Option<&[Provider]>,
         exchanges: Option<&[Exchange]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<Instrument>> {
@@ -319,13 +334,19 @@ impl Storage for DuckDb {
         let mut params: Vec<String> = Vec::new();
         let mut clauses: Vec<String> = Vec::new();
 
-        if let Some(instrument_type) = instrument_type {
-            clauses.push("instrument_type = ?".to_owned());
-            params.push(instrument_type.to_string());
+        if let Some(its) = instrument_types {
+            if !its.is_empty() {
+                let ph: Vec<&str> = its.iter().map(|_| "?").collect();
+                clauses.push(format!("instrument_type IN ({})", ph.join(", ")));
+                params.extend(its.iter().map(|i| i.to_string()));
+            }
         }
-        if let Some(provider) = provider {
-            clauses.push("provider = ?".to_owned());
-            params.push(provider.to_string());
+        if let Some(provs) = providers {
+            if !provs.is_empty() {
+                let ph: Vec<&str> = provs.iter().map(|_| "?").collect();
+                clauses.push(format!("provider IN ({})", ph.join(", ")));
+                params.extend(provs.iter().map(|p| p.to_string()));
+            }
         }
         if let Some(exs) = exchanges {
             if !exs.is_empty() {
@@ -349,12 +370,9 @@ impl Storage for DuckDb {
         let rows = stmt
             .query_map(params_from_iter(params.iter()), |row| {
                 let it_str: String = row.get(2)?;
-                let it =
-                    instrument_type.unwrap_or_else(|| it_str.parse::<InstrumentType>().unwrap());
-                let prov = provider.unwrap_or_else(|| {
-                    let s: String = row.get(1).unwrap();
-                    s.parse::<Provider>().unwrap()
-                });
+                let it = it_str.parse::<InstrumentType>().unwrap();
+                let prov_str: String = row.get(1)?;
+                let prov = prov_str.parse::<Provider>().unwrap();
                 Ok(Instrument {
                     symbol: row.get(0)?,
                     name: row.get::<_, Option<String>>(3)?.unwrap_or_default(),

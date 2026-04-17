@@ -19,12 +19,12 @@ impl Engine {
     /// Returns stored bars, optionally filtered.
     pub fn query_bars(
         &self,
-        symbol: Option<&str>,
-        interval: Option<Interval>,
-        provider: Option<Provider>,
+        symbols: Option<&[&str]>,
+        intervals: Option<&[Interval]>,
+        providers: Option<&[Provider]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredBar>> {
-        self.db.query_bars(symbol, interval, provider, limit)
+        self.db.query_bars(symbols, intervals, providers, limit)
     }
 
     /// Returns all stored (symbol, interval, provider) -> (min_ts, max_ts) in one query.
@@ -40,22 +40,22 @@ impl Engine {
     /// Returns stored dividends, optionally filtered.
     pub fn query_dividends(
         &self,
-        symbol: Option<&str>,
-        provider: Option<Provider>,
+        symbols: Option<&[&str]>,
+        providers: Option<&[Provider]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredDividend>> {
-        self.db.query_dividends(symbol, provider, limit)
+        self.db.query_dividends(symbols, providers, limit)
     }
 
     /// Returns stored instrument metadata, optionally filtered.
     pub fn query_instruments(
         &self,
-        instrument_type: Option<InstrumentType>,
-        provider: Option<Provider>,
+        instrument_types: Option<&[InstrumentType]>,
+        providers: Option<&[Provider]>,
         exchanges: Option<&[Exchange]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<Instrument>> {
-        self.db.query_instruments(instrument_type, provider, exchanges, limit)
+        self.db.query_instruments(instrument_types, providers, exchanges, limit)
     }
 
     /// Writes many bar series to storage in a single transaction.

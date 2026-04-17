@@ -28,25 +28,25 @@ pub trait Storage: Send + Sync {
     /// Return stored bars, optionally filtered by symbol/interval/provider with a limit.
     fn query_bars(
         &self,
-        symbol: Option<&str>,
-        interval: Option<Interval>,
-        provider: Option<Provider>,
+        symbols: Option<&[&str]>,
+        intervals: Option<&[Interval]>,
+        providers: Option<&[Provider]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredBar>>;
 
     /// Return stored dividends, optionally filtered by symbol/provider with a limit.
     fn query_dividends(
         &self,
-        symbol: Option<&str>,
-        provider: Option<Provider>,
+        symbols: Option<&[&str]>,
+        providers: Option<&[Provider]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredDividend>>;
 
     /// Return stored instrument metadata, optionally filtered by type/provider/exchanges with a limit.
     fn query_instruments(
         &self,
-        instrument_type: Option<InstrumentType>,
-        provider: Option<Provider>,
+        instrument_types: Option<&[InstrumentType]>,
+        providers: Option<&[Provider]>,
         exchanges: Option<&[Exchange]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<Instrument>>;

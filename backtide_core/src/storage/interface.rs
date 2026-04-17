@@ -2,14 +2,18 @@
 
 use crate::config::interface::Config;
 use crate::config::models::dataframe_backend::DataframeBackend;
+use crate::data::models::exchange::Exchange;
+use crate::data::models::instrument::Instrument;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-use crate::data::models::exchange::Exchange;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_type::InstrumentType;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Helper functions
+// ────────────────────────────────────────────────────────────────────────────
 
 /// Build a DataFrame from a Python dict, using the configured backend.
 fn dict_to_dataframe<'py>(
@@ -28,23 +32,120 @@ fn dict_to_dataframe<'py>(
     }
 }
 
-/// Flatten `Option<String>` to `String`, replacing `None` with `""`.
-#[inline]
-fn opt_str(v: Option<String>) -> String {
-    v.unwrap_or_default()
+/// Parse a Python value that may be a single item or a list into `Vec<T>`.
+fn parse_one_or_many<'py, T>(value: Bound<'py, PyAny>) -> PyResult<Vec<T>>
+where
+    T: for<'a> pyo3::FromPyObject<'a, 'py>,
+    for<'a> <T as pyo3::FromPyObject<'a, 'py>>::Error: Into<pyo3::PyErr>,
+{
+    if let Ok(seq) = value.extract::<Vec<Bound<'py, PyAny>>>() {
+        seq.iter().map(|item| item.extract::<T>().map_err(Into::into)).collect::<PyResult<Vec<_>>>()
+    } else {
+        Ok(vec![value.extract::<T>().map_err(Into::into)?])
+    }
 }
 
-/// Return all stored OHLCV bars as a dataframe.
+/// Build a column as a [`PyList`] by mapping a field over a slice of rows.
+macro_rules! col {
+    ($py:expr, $rows:expr, $f:expr) => {
+        PyList::new($py, $rows.iter().map($f))?
+    };
+}
+
+/// Build a [`PyDict`] column-store from a slice of rows and convert it to a
+/// dataframe in a single expression.
+macro_rules! to_df {
+    ($py:expr, $rows:expr, { $($key:literal => $f:expr),* $(,)? }) => {{
+        let data = PyDict::new($py);
+        $(data.set_item($key, col!($py, $rows, $f))?;)*
+        dict_to_dataframe($py, &data).map(Bound::unbind)
+    }};
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Public interface
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Return stored instrument metadata, optionally filtered.
+///
+/// When called with no arguments, returns all instruments. When
+/// `instrument_type`, `provider`, and/or `exchange` are given, only
+/// matching rows are returned.
+///
+/// Parameters
+/// ----------
+/// instrument_type : str | InstrumentType | list[str | InstrumentType] | None, default=None
+///     Filter by instrument type. Accepts a single value or a list.
+///
+/// provider : str | Provider | list[str | Provider] | None, default=None
+///     Filter by data provider. Accepts a single value or a list.
+///
+/// exchange : str | Exchange | list[str | Exchange] | None, default=None
+///     Filter by exchange. Accepts a single exchange or a list.
+///
+/// limit : int | None, default=None
+///     Maximum number of instruments to return. ``None`` means no limit.
+///
+/// Returns
+/// -------
+/// list[Instrument]
+///     Matching instruments from the database.
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.storage import query_instruments
+///
+/// # All instruments
+/// all_instruments = query_instruments()
+///
+/// # Filtered
+/// stocks = query_instruments("stocks", "yahoo", limit=100)
+///
+/// # Filtered by exchange
+/// nyse = query_instruments("stocks", exchange="XNYS")
+/// ```
+#[pyfunction]
+#[pyo3(signature = (instrument_type: "str | InstrumentType | list[str | InstrumentType] | None"=None, provider: "str | Provider | list[str | Provider] | None"=None, exchange: "str | Exchange | list[str | Exchange] | None"=None, *, limit: "int | None"=None))]
+pub fn query_instruments(
+    instrument_type: Option<Bound<'_, PyAny>>,
+    provider: Option<Bound<'_, PyAny>>,
+    exchange: Option<Bound<'_, PyAny>>,
+    limit: Option<usize>,
+) -> PyResult<Vec<Instrument>> {
+    let its: Option<Vec<InstrumentType>> = instrument_type.map(parse_one_or_many).transpose()?;
+    let provs: Option<Vec<Provider>> = provider.map(parse_one_or_many).transpose()?;
+    let exchanges: Option<Vec<Exchange>> = exchange.map(parse_one_or_many).transpose()?;
+
+    let engine = Engine::get()?;
+    Ok(engine.query_instruments(its.as_deref(), provs.as_deref(), exchanges.as_deref(), limit)?)
+}
+
+/// Return stored OHLCV bars as a dataframe.
 ///
 /// Each row represents a single bar. The dataframe columns are:
 /// `symbol`, `interval`, `provider`, `open_ts`, `close_ts`,
 /// `open_ts_exchange`, `open`, `high`, `low`, `close`, `adj_close`,
 /// `volume`, and `n_trades`.
 ///
+/// Parameters
+/// ----------
+/// symbol : str | list[str] | None, default=None
+///     Filter by symbol. Accepts a single symbol or a list. `None` returns all.
+///
+/// interval : str | Interval | list[str | Interval] | None, default=None
+///     Filter by bar interval. Accepts a single value or a list.
+///
+/// provider : str | Provider | list[str | Provider] | None, default=None
+///     Filter by data provider. Accepts a single value or a list.
+///
+/// limit : int | None, default=None
+///     Maximum number of rows to return. `None` means no limit.
+///
 /// Returns
 /// -------
 /// pd.DataFrame | pl.DataFrame
-///     All bars currently held in the database.
+///     Matching bars from the database.
 ///
 /// See Also
 /// --------
@@ -61,58 +162,42 @@ fn opt_str(v: Option<String>) -> String {
 /// print(df.head())
 /// ```
 #[pyfunction]
-pub fn query_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
-    let engine = Engine::get()?;
-    let rows = engine.query_bars(None, None, None, None)?;
+#[pyo3(signature = (symbol: "str | list[str] | None"=None, interval: "str | Interval | list[str | Interval] | None"=None, provider: "str | Provider | list[str | Provider] | None"=None, *, limit: "int | None"=None))]
+pub fn query_bars(
+    py: Python<'_>,
+    symbol: Option<Bound<'_, PyAny>>,
+    interval: Option<Bound<'_, PyAny>>,
+    provider: Option<Bound<'_, PyAny>>,
+    limit: Option<usize>,
+) -> PyResult<Py<PyAny>> {
+    let symbols: Option<Vec<String>> = symbol.map(parse_one_or_many).transpose()?;
+    let intervals: Option<Vec<Interval>> = interval.map(parse_one_or_many).transpose()?;
+    let providers: Option<Vec<Provider>> = provider.map(parse_one_or_many).transpose()?;
 
-    let n = rows.len();
-    let mut symbols = Vec::with_capacity(n);
-    let mut intervals = Vec::with_capacity(n);
-    let mut providers = Vec::with_capacity(n);
-    let mut open_ts = Vec::with_capacity(n);
-    let mut close_ts = Vec::with_capacity(n);
-    let mut open_ts_exchange = Vec::with_capacity(n);
-    let mut open = Vec::with_capacity(n);
-    let mut high = Vec::with_capacity(n);
-    let mut low = Vec::with_capacity(n);
-    let mut close = Vec::with_capacity(n);
-    let mut adj_close = Vec::with_capacity(n);
-    let mut volume = Vec::with_capacity(n);
-    let mut n_trades: Vec<Option<i32>> = Vec::with_capacity(n);
+    let sym_refs: Option<Vec<&str>> =
+        symbols.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+    let rows = Engine::get()?.query_bars(
+        sym_refs.as_deref(),
+        intervals.as_deref(),
+        providers.as_deref(),
+        limit,
+    )?;
 
-    for r in rows {
-        symbols.push(r.symbol);
-        intervals.push(r.interval);
-        providers.push(r.provider);
-        open_ts.push(r.bar.open_ts);
-        close_ts.push(r.bar.close_ts);
-        open_ts_exchange.push(r.bar.open_ts_exchange);
-        open.push(r.bar.open);
-        high.push(r.bar.high);
-        low.push(r.bar.low);
-        close.push(r.bar.close);
-        adj_close.push(r.bar.adj_close);
-        volume.push(r.bar.volume);
-        n_trades.push(r.bar.n_trades);
-    }
-
-    let data = PyDict::new(py);
-    data.set_item("symbol", PyList::new(py, &symbols)?)?;
-    data.set_item("interval", PyList::new(py, &intervals)?)?;
-    data.set_item("provider", PyList::new(py, &providers)?)?;
-    data.set_item("open_ts", PyList::new(py, &open_ts)?)?;
-    data.set_item("close_ts", PyList::new(py, &close_ts)?)?;
-    data.set_item("open_ts_exchange", PyList::new(py, &open_ts_exchange)?)?;
-    data.set_item("open", PyList::new(py, &open)?)?;
-    data.set_item("high", PyList::new(py, &high)?)?;
-    data.set_item("low", PyList::new(py, &low)?)?;
-    data.set_item("close", PyList::new(py, &close)?)?;
-    data.set_item("adj_close", PyList::new(py, &adj_close)?)?;
-    data.set_item("volume", PyList::new(py, &volume)?)?;
-    data.set_item("n_trades", PyList::new(py, &n_trades)?)?;
-
-    let df = dict_to_dataframe(py, &data)?;
-    Ok(df.unbind())
+    to_df!(py, rows, {
+        "symbol"           => |r| &r.symbol,
+        "interval"         => |r| &r.interval,
+        "provider"         => |r| &r.provider,
+        "open_ts"          => |r| r.bar.open_ts,
+        "close_ts"         => |r| r.bar.close_ts,
+        "open_ts_exchange" => |r| r.bar.open_ts_exchange,
+        "open"             => |r| r.bar.open,
+        "high"             => |r| r.bar.high,
+        "low"              => |r| r.bar.low,
+        "close"            => |r| r.bar.close,
+        "adj_close"        => |r| r.bar.adj_close,
+        "volume"           => |r| r.bar.volume,
+        "n_trades"         => |r| r.bar.n_trades,
+    })
 }
 
 /// Return a pre-aggregated summary of stored bars as a dataframe.
@@ -135,65 +220,52 @@ pub fn query_bars(py: Python<'_>) -> PyResult<Py<PyAny>> {
 /// ```
 #[pyfunction]
 pub fn query_bars_summary(py: Python<'_>) -> PyResult<Py<PyAny>> {
-    let engine = Engine::get()?;
-    let rows = engine.query_bars_summary()?;
+    let rows = Engine::get()?.query_bars_summary()?;
 
-    let n = rows.len();
-    let mut symbols = Vec::with_capacity(n);
-    let mut instrument_types = Vec::with_capacity(n);
-    let mut intervals = Vec::with_capacity(n);
-    let mut providers = Vec::with_capacity(n);
-    let mut names = Vec::with_capacity(n);
-    let mut bases = Vec::with_capacity(n);
-    let mut quotes = Vec::with_capacity(n);
-    let mut exchanges = Vec::with_capacity(n);
-    let mut first_ts = Vec::with_capacity(n);
-    let mut last_ts = Vec::with_capacity(n);
-    let mut n_rows = Vec::with_capacity(n);
-    let mut sparklines: Vec<Py<PyAny>> = Vec::with_capacity(n);
-
-    for r in rows {
-        symbols.push(r.symbol);
-        instrument_types.push(r.instrument_type);
-        intervals.push(r.interval);
-        providers.push(r.provider);
-        names.push(opt_str(r.name));
-        bases.push(opt_str(r.base));
-        quotes.push(opt_str(r.quote));
-        exchanges.push(opt_str(r.exchange));
-        first_ts.push(r.first_ts);
-        last_ts.push(r.last_ts);
-        n_rows.push(r.n_rows);
-        sparklines.push(PyList::new(py, &r.sparkline)?.unbind().into());
-    }
+    // Sparklines are nested PyLists — materialise them fallibly up front
+    // since the col! / to_df! macros cannot propagate errors from inner
+    // PyList::new calls.
+    let sparklines = rows
+        .iter()
+        .map(|r| PyList::new(py, &r.sparkline).map(Bound::unbind))
+        .collect::<PyResult<Vec<_>>>()?;
 
     let data = PyDict::new(py);
-    data.set_item("symbol", PyList::new(py, &symbols)?)?;
-    data.set_item("instrument_type", PyList::new(py, &instrument_types)?)?;
-    data.set_item("interval", PyList::new(py, &intervals)?)?;
-    data.set_item("provider", PyList::new(py, &providers)?)?;
-    data.set_item("name", PyList::new(py, &names)?)?;
-    data.set_item("base", PyList::new(py, &bases)?)?;
-    data.set_item("quote", PyList::new(py, &quotes)?)?;
-    data.set_item("exchange", PyList::new(py, &exchanges)?)?;
-    data.set_item("first_ts", PyList::new(py, &first_ts)?)?;
-    data.set_item("last_ts", PyList::new(py, &last_ts)?)?;
-    data.set_item("n_rows", PyList::new(py, &n_rows)?)?;
+    data.set_item("symbol", col!(py, rows, |r| &r.symbol))?;
+    data.set_item("instrument_type", col!(py, rows, |r| &r.instrument_type))?;
+    data.set_item("interval", col!(py, rows, |r| &r.interval))?;
+    data.set_item("provider", col!(py, rows, |r| &r.provider))?;
+    data.set_item("name", col!(py, rows, |r| r.name.as_deref().unwrap_or_default()))?;
+    data.set_item("base", col!(py, rows, |r| r.base.as_deref().unwrap_or_default()))?;
+    data.set_item("quote", col!(py, rows, |r| r.quote.as_deref().unwrap_or_default()))?;
+    data.set_item("exchange", col!(py, rows, |r| r.exchange.as_deref().unwrap_or_default()))?;
+    data.set_item("first_ts", col!(py, rows, |r| r.first_ts))?;
+    data.set_item("last_ts", col!(py, rows, |r| r.last_ts))?;
+    data.set_item("n_rows", col!(py, rows, |r| r.n_rows))?;
     data.set_item("sparkline", PyList::new(py, &sparklines)?)?;
-
-    let df = dict_to_dataframe(py, &data)?;
-    Ok(df.unbind())
+    dict_to_dataframe(py, &data).map(Bound::unbind)
 }
 
-/// Return all stored dividend events as a dataframe.
+/// Return stored dividend events as a dataframe.
 ///
 /// Each row represents a single dividend payment. The DataFrame columns
 /// are: `symbol`, `provider`, `ex_date`, and `amount`.
 ///
+/// Parameters
+/// ----------
+/// symbol : str | list[str] | None, default=None
+///     Filter by symbol. Accepts a single symbol or a list. ``None`` returns all.
+///
+/// provider : str | Provider | list[str | Provider] | None, default=None
+///     Filter by data provider. Accepts a single value or a list.
+///
+/// limit : int | None, default=None
+///     Maximum number of rows to return. ``None`` means no limit.
+///
 /// Returns
 /// -------
 /// pd.DataFrame | pl.DataFrame
-///     All dividend events currently held in the database.
+///     Matching dividend events from the database.
 ///
 /// See Also
 /// --------
@@ -210,31 +282,26 @@ pub fn query_bars_summary(py: Python<'_>) -> PyResult<Py<PyAny>> {
 /// print(df.head())
 /// ```
 #[pyfunction]
-pub fn query_dividends(py: Python<'_>) -> PyResult<Py<PyAny>> {
-    let engine = Engine::get()?;
-    let rows = engine.query_dividends(None, None, None)?;
+#[pyo3(signature = (symbol: "str | list[str] | None"=None, provider: "str | Provider | list[str | Provider] | None"=None, *, limit: "int | None"=None))]
+pub fn query_dividends(
+    py: Python<'_>,
+    symbol: Option<Bound<'_, PyAny>>,
+    provider: Option<Bound<'_, PyAny>>,
+    limit: Option<usize>,
+) -> PyResult<Py<PyAny>> {
+    let symbols: Option<Vec<String>> = symbol.map(parse_one_or_many).transpose()?;
+    let providers: Option<Vec<Provider>> = provider.map(parse_one_or_many).transpose()?;
 
-    let n = rows.len();
-    let mut symbols = Vec::with_capacity(n);
-    let mut providers = Vec::with_capacity(n);
-    let mut ex_dates = Vec::with_capacity(n);
-    let mut amounts = Vec::with_capacity(n);
+    let sym_refs: Option<Vec<&str>> =
+        symbols.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+    let rows = Engine::get()?.query_dividends(sym_refs.as_deref(), providers.as_deref(), limit)?;
 
-    for r in rows {
-        symbols.push(r.symbol);
-        providers.push(r.provider);
-        ex_dates.push(r.dividend.ex_date);
-        amounts.push(r.dividend.amount);
-    }
-
-    let data = PyDict::new(py);
-    data.set_item("symbol", PyList::new(py, &symbols)?)?;
-    data.set_item("provider", PyList::new(py, &providers)?)?;
-    data.set_item("ex_date", PyList::new(py, &ex_dates)?)?;
-    data.set_item("amount", PyList::new(py, &amounts)?)?;
-
-    let df = dict_to_dataframe(py, &data)?;
-    Ok(df.unbind())
+    to_df!(py, rows, {
+        "symbol"   => |r| &r.symbol,
+        "provider" => |r| &r.provider,
+        "ex_date"  => |r| r.dividend.ex_date,
+        "amount"   => |r| r.dividend.amount,
+    })
 }
 
 /// Delete bars (and orphaned dividends) from the database.
@@ -286,7 +353,7 @@ pub fn query_dividends(py: Python<'_>) -> PyResult<Py<PyAny>> {
 /// delete_symbols(series=[("AAPL", "1d", "yahoo"), ("MSFT", "1h", "yahoo")])  # norun
 /// ```
 #[pyfunction]
-#[pyo3(signature = (symbol=None, interval=None, provider=None, *, series=None))]
+#[pyo3(signature = (symbol: "str | list[str] | None"=None, interval: "str | Interval | None"=None, provider: "str | Provider | None"=None, *, series: "list[tuple[str, str, str]] | None"=None))]
 pub fn delete_symbols(
     symbol: Option<Bound<'_, PyAny>>,
     interval: Option<Bound<'_, PyAny>>,
@@ -323,70 +390,5 @@ pub fn delete_symbols(
         ));
     };
 
-    let engine = Engine::get()?;
-    Ok(engine.delete_symbols(&tuples)?)
-}
-
-/// Return stored instrument metadata, optionally filtered.
-///
-/// When called with no arguments, returns all instruments. When
-/// `instrument_type`, `provider`, and/or `exchange` are given, only
-/// matching rows are returned.
-///
-/// Parameters
-/// ----------
-/// instrument_type : str | InstrumentType | None, default=None
-///     Filter by instrument type.
-///
-/// provider : str | Provider | None, default=None
-///     Filter by data provider.
-///
-/// exchange : str | Exchange | list[str | Exchange] | None, default=None
-///     Filter by exchange. Accepts a single exchange or a list.
-///
-/// limit : int | None, default=None
-///     Maximum number of instruments to return. ``None`` means no limit.
-///
-/// Returns
-/// -------
-/// list[Instrument]
-///     Matching instruments from the database.
-///
-/// Examples
-/// --------
-/// ```pycon
-/// from backtide.storage import query_instruments
-///
-/// # All instruments
-/// all_instruments = query_instruments()
-///
-/// # Filtered
-/// stocks = query_instruments("stocks", "yahoo", limit=100)
-///
-/// # Filtered by exchange
-/// nyse = query_instruments("stocks", exchange="XNYS")
-/// ```
-#[pyfunction]
-#[pyo3(signature = (instrument_type=None, provider=None, exchange=None, *, limit=None))]
-pub fn query_instruments(
-    instrument_type: Option<Bound<'_, PyAny>>,
-    provider: Option<Bound<'_, PyAny>>,
-    exchange: Option<Bound<'_, PyAny>>,
-    limit: Option<usize>,
-) -> PyResult<Vec<Instrument>> {
-    let it = instrument_type.map(|v| v.extract::<InstrumentType>()).transpose()?;
-    let prov = provider.map(|v| v.extract::<Provider>()).transpose()?;
-
-    let exchanges: Option<Vec<Exchange>> = exchange
-        .map(|v| {
-            if let Ok(seq) = v.extract::<Vec<Bound<'_, PyAny>>>() {
-                seq.iter().map(|item| item.extract::<Exchange>()).collect::<PyResult<Vec<_>>>()
-            } else {
-                Ok(vec![v.extract::<Exchange>()?])
-            }
-        })
-        .transpose()?;
-
-    let engine = Engine::get()?;
-    Ok(engine.query_instruments(it, prov, exchanges.as_deref(), limit)?)
+    Ok(Engine::get()?.delete_symbols(&tuples)?)
 }

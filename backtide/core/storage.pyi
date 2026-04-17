@@ -65,18 +65,38 @@ def delete_symbols(symbol=None, interval=None, provider=None, *, series=None) ->
 
     """
 
-def query_bars() -> pd.DataFrame | pl.DataFrame:
-    """Return all stored OHLCV bars as a dataframe.
+def query_bars(
+    symbol=None,
+    interval=None,
+    provider=None,
+    *,
+    limit=None,
+) -> pd.DataFrame | pl.DataFrame:
+    """Return stored OHLCV bars as a dataframe, optionally filtered.
 
     Each row represents a single bar. The dataframe columns are:
     `symbol`, `interval`, `provider`, `open_ts`, `close_ts`,
     `open_ts_exchange`, `open`, `high`, `low`, `close`, `adj_close`,
     `volume`, and `n_trades`.
 
+    Parameters
+    ----------
+    symbol : str | list[str] | None, default=None
+        Filter by symbol. Accepts a single symbol or a list. ``None`` returns all.
+
+    interval : str | Interval | list[str | Interval] | None, default=None
+        Filter by bar interval. Accepts a single value or a list.
+
+    provider : str | Provider | list[str | Provider] | None, default=None
+        Filter by data provider. Accepts a single value or a list.
+
+    limit : int | None, default=None
+        Maximum number of rows to return. ``None`` means no limit.
+
     Returns
     -------
     pd.DataFrame | pl.DataFrame
-        All bars currently held in the database.
+        Matching bars from the database.
 
     See Also
     --------
@@ -117,16 +137,32 @@ def query_bars_summary() -> pd.DataFrame | pl.DataFrame:
 
     """
 
-def query_dividends() -> pd.DataFrame | pl.DataFrame:
-    """Return all stored dividend events as a dataframe.
+def query_dividends(
+    symbol=None,
+    provider=None,
+    *,
+    limit=None,
+) -> pd.DataFrame | pl.DataFrame:
+    """Return stored dividend events as a dataframe, optionally filtered.
 
     Each row represents a single dividend payment. The DataFrame columns
     are: `symbol`, `provider`, `ex_date`, and `amount`.
 
+    Parameters
+    ----------
+    symbol : str | list[str] | None, default=None
+        Filter by symbol. Accepts a single symbol or a list. ``None`` returns all.
+
+    provider : str | Provider | list[str | Provider] | None, default=None
+        Filter by data provider. Accepts a single value or a list.
+
+    limit : int | None, default=None
+        Maximum number of rows to return. ``None`` means no limit.
+
     Returns
     -------
     pd.DataFrame | pl.DataFrame
-        All dividend events currently held in the database.
+        Matching dividend events from the database.
 
     See Also
     --------
@@ -155,16 +191,16 @@ def query_instruments(
     """Return stored instrument metadata, optionally filtered.
 
     When called with no arguments, returns all instruments. When
-    ``instrument_type``, ``provider``, and/or ``exchange`` are given, only
+    `instrument_type`, `provider`, and/or `exchange` are given, only
     matching rows are returned.
 
     Parameters
     ----------
-    instrument_type : str | InstrumentType | None, default=None
-        Filter by instrument type.
+    instrument_type : str | InstrumentType | list[str | InstrumentType] | None, default=None
+        Filter by instrument type. Accepts a single value or a list.
 
-    provider : str | Provider | None, default=None
-        Filter by data provider.
+    provider : str | Provider | list[str | Provider] | None, default=None
+        Filter by data provider. Accepts a single value or a list.
 
     exchange : str | Exchange | list[str | Exchange] | None, default=None
         Filter by exchange. Accepts a single exchange or a list.

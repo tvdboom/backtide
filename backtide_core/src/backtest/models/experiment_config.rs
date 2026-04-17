@@ -13,6 +13,7 @@ use crate::backtest::models::strategy_type::StrategyType;
 use crate::data::models::currency::Currency;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
+use itertools::Itertools;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -20,6 +21,7 @@ use pyo3::types::PyDict;
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
 // ────────────────────────────────────────────────────────────────────────────
 // CodeSnippet
 // ────────────────────────────────────────────────────────────────────────────
@@ -28,10 +30,10 @@ use std::collections::HashMap;
 ///
 /// Attributes
 /// ----------
-/// name : str
+/// name : str, default=""
 ///     Human-readable label for the snippet.
 ///
-/// code : str
+/// code : str, default=""
 ///     Python source code.
 ///
 /// See Also
@@ -52,7 +54,7 @@ impl CodeSnippet {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (name="", code=""))]
+    #[pyo3(signature = (name: "str"="", code: "str"=""))]
     fn new(name: &str, code: &str) -> Self {
         Self {
             name: name.to_owned(),
@@ -73,13 +75,13 @@ impl CodeSnippet {
 ///
 /// Attributes
 /// ----------
-/// name : str
+/// name : str, default=""
 ///     A human-readable name to identify this experiment.
 ///
-/// tags : list[str]
-///     Descriptive tags for organising and filtering experiments.
+/// tags : list[str], default=[]
+///     Descriptive tags for organizing and filtering experiments.
 ///
-/// description : str
+/// description : str, default=""
 ///     Free-text description of the experiment.
 ///
 /// See Also
@@ -105,7 +107,7 @@ impl GeneralExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (name="", tags=vec![], description=""))]
+    #[pyo3(signature = (name: "str"="", tags: "list[str]"=vec![], description: "str"=""))]
     fn new(name: &str, tags: Vec<String>, description: &str) -> Self {
         Self {
             name: name.to_owned(),
@@ -116,8 +118,10 @@ impl GeneralExpConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "GeneralExpConfig(name={:?}, tags={:?}, description={:?})",
-            self.name, self.tags, self.description,
+            "GeneralExpConfig(name={:?}, tags=[{:?}], description={:?})",
+            self.name,
+            self.tags.iter().map(|s| s.to_string()).join(", "),
+            self.description,
         )
     }
 
@@ -140,22 +144,22 @@ impl GeneralExpConfig {
 ///
 /// Attributes
 /// ----------
-/// instrument_type : str | [InstrumentType]
+/// instrument_type : str | [InstrumentType], default="stocks"
 ///     The category of financial instrument.
 ///
-/// symbols : list[str]
+/// symbols : list[str], default=[]
 ///     Ticker symbols included in the backtest.
 ///
-/// full_history : bool
+/// full_history : bool, default=True
 ///     If `True`, use the maximum available history for every symbol.
 ///
-/// start_date : str | None
+/// start_date : str | None, default=None
 ///     ISO-8601 start date. Ignored when `full_history` is `True`.
 ///
-/// end_date : str | None
+/// end_date : str | None, default=None
 ///     ISO-8601 end date.
 ///
-/// interval : str | [Interval]
+/// interval : str | [Interval], default="1d"
 ///     Bar interval.
 ///
 /// See Also
@@ -198,12 +202,12 @@ impl DataExpConfig {
 
     #[new]
     #[pyo3(signature = (
-        instrument_type = InstrumentType::Stocks,
-        symbols = vec![],
-        full_history = true,
-        start_date = None,
-        end_date = None,
-        interval = Interval::default(),
+        instrument_type: "str | InstrumentType" = InstrumentType::Stocks,
+        symbols: "list[str]" = vec![],
+        full_history: "bool" = true,
+        start_date: "str | None" = None,
+        end_date: "str | None" = None,
+        interval: "str | Interval" = Interval::default(),
     ))]
     fn new(
         instrument_type: InstrumentType,
@@ -249,13 +253,13 @@ impl DataExpConfig {
 ///
 /// Attributes
 /// ----------
-/// initial_cash : float
+/// initial_cash : float, default=10000.0
 ///     Cash balance at the start of the simulation.
 ///
-/// base_currency : str | [Currency]
+/// base_currency : str | [Currency], default="USD"
 ///     ISO 4217 code the portfolio is denominated in.
 ///
-/// starting_positions : dict[str, int]
+/// starting_positions : dict[str, int], default={}
 ///     Pre-loaded positions `{symbol: quantity}`.
 ///
 /// See Also
@@ -293,9 +297,9 @@ impl PortfolioExpConfig {
 
     #[new]
     #[pyo3(signature = (
-        initial_cash = 10_000.0,
-        base_currency = Currency::default(),
-        starting_positions = HashMap::new(),
+        initial_cash: "float" = 10_000.0,
+        base_currency: "str | Currency" = Currency::default(),
+        starting_positions: "dict[str, int]" = HashMap::new(),
     ))]
     fn new(
         initial_cash: f64,
@@ -335,10 +339,10 @@ impl PortfolioExpConfig {
 ///
 /// Attributes
 /// ----------
-/// predefined_strategies : list[str | [StrategyType]]
+/// predefined_strategies : list[str | [StrategyType]], default=[]
 ///     Built-in strategies to run.
 ///
-/// custom_strategies : list[CodeSnippet]
+/// custom_strategies : list[CodeSnippet], default=[]
 ///     User-defined strategy code snippets.
 ///
 /// See Also
@@ -404,7 +408,7 @@ impl StrategyExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (predefined_strategies=vec![], custom_strategies=vec![]))]
+    #[pyo3(signature = (predefined_strategies: "list[str | StrategyType]"=vec![], custom_strategies: "list[CodeSnippet]"=vec![]))]
     fn new(
         predefined_strategies: Vec<StrategyType>,
         custom_strategies: Vec<Py<CodeSnippet>>,
@@ -446,10 +450,10 @@ impl StrategyExpConfig {
 ///
 /// Attributes
 /// ----------
-/// builtin_indicators : list[str | [IndicatorType]]
+/// builtin_indicators : list[str | [IndicatorType]], default=[]
 ///     Built-in indicators to compute.
 ///
-/// custom_indicators : list[[CodeSnippet]]
+/// custom_indicators : list[[CodeSnippet]], default=[]
 ///     User-defined indicator code snippets.
 ///
 /// See Also
@@ -515,7 +519,7 @@ impl IndicatorExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (builtin_indicators=vec![], custom_indicators=vec![]))]
+    #[pyo3(signature = (builtin_indicators: "list[str | IndicatorType]"=vec![], custom_indicators: "list[CodeSnippet]"=vec![]))]
     fn new(
         builtin_indicators: Vec<IndicatorType>,
         custom_indicators: Vec<Py<CodeSnippet>>,
@@ -557,58 +561,58 @@ impl IndicatorExpConfig {
 ///
 /// Attributes
 /// ----------
-/// commission_type : str | [CommissionType]
+/// commission_type : str | [CommissionType], default="percentage"
 ///     Fee structure applied to every executed order.
 ///
-/// commission_pct : float
+/// commission_pct : float, default=0.1
 ///     Percentage commission per trade.
 ///
-/// commission_fixed : float
+/// commission_fixed : float, default=0.0
 ///     Fixed commission per trade.
 ///
-/// slippage : float
+/// slippage : float, default=0.05
 ///     Simulated market-impact percentage.
 ///
-/// allowed_order_types : list[str | [OrderType]]
+/// allowed_order_types : list[str | [OrderType]], default=["market"]
 ///     Which order types the engine accepts.
 ///
-/// partial_fills : bool
+/// partial_fills : bool, default=False
 ///     Whether to simulate partial order fills.
 ///
-/// allow_margin : bool
+/// allow_margin : bool, default=True
 ///     Whether margin trading is enabled.
 ///
-/// max_leverage : float
+/// max_leverage : float, default=1.0
 ///     Maximum leverage ratio.
 ///
-/// initial_margin : float
+/// initial_margin : float, default=50.0
 ///     Initial margin percentage.
 ///
-/// maintenance_margin : float
+/// maintenance_margin : float, default=25.0
 ///     Maintenance margin percentage.
 ///
-/// margin_interest : float
+/// margin_interest : float, default=0.0
 ///     Annual interest rate on borrowed funds.
 ///
-/// allow_short_selling : bool
+/// allow_short_selling : bool, default=True
 ///     Whether short selling is permitted.
 ///
-/// borrow_rate : float
+/// borrow_rate : float, default=0.0
 ///     Annual borrow cost for short positions.
 ///
-/// max_position_size : int
+/// max_position_size : int, default=100
 ///     Max allocation to one position (% of portfolio).
 ///
-/// conversion_mode : str | [CurrencyConversionMode]
+/// conversion_mode : str | [CurrencyConversionMode], default="immediate"
 ///     How foreign-currency proceeds are converted.
 ///
-/// conversion_threshold : float | None
+/// conversion_threshold : float | None, default=None
 ///     Threshold for `HoldUntilThreshold` mode.
 ///
-/// conversion_period : str | [ConversionPeriod] | None
+/// conversion_period : str | [ConversionPeriod] | None, default=None
 ///     Period for `EndOfPeriod` mode.
 ///
-/// conversion_interval : int | None
+/// conversion_interval : int | None, default=None
 ///     Bar count for `CustomInterval` mode.
 ///
 /// See Also
@@ -675,24 +679,24 @@ impl ExchangeExpConfig {
 
     #[new]
     #[pyo3(signature = (
-        commission_type = CommissionType::default(),
-        commission_pct = 0.1,
-        commission_fixed = 0.0,
-        slippage = 0.05,
-        allowed_order_types = vec![OrderType::Market],
-        partial_fills = false,
-        allow_margin = true,
-        max_leverage = 1.0,
-        initial_margin = 50.0,
-        maintenance_margin = 25.0,
-        margin_interest = 0.0,
-        allow_short_selling = true,
-        borrow_rate = 0.0,
-        max_position_size = 100,
-        conversion_mode = CurrencyConversionMode::default(),
-        conversion_threshold = None,
-        conversion_period = None,
-        conversion_interval = None,
+        commission_type: "str | CommissionType" = CommissionType::default(),
+        commission_pct: "float" = 0.1,
+        commission_fixed: "float" = 0.0,
+        slippage: "float" = 0.05,
+        allowed_order_types: "list[str | OrderType]" = vec![OrderType::Market],
+        partial_fills: "bool" = false,
+        allow_margin: "bool" = true,
+        max_leverage: "float" = 1.0,
+        initial_margin: "float" = 50.0,
+        maintenance_margin: "float" = 25.0,
+        margin_interest: "float" = 0.0,
+        allow_short_selling: "bool" = true,
+        borrow_rate: "float" = 0.0,
+        max_position_size: "int" = 100,
+        conversion_mode: "str | CurrencyConversionMode" = CurrencyConversionMode::default(),
+        conversion_threshold: "float | None" = None,
+        conversion_period: "str | ConversionPeriod | None" = None,
+        conversion_interval: "int | None" = None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -763,25 +767,25 @@ impl ExchangeExpConfig {
 ///
 /// Attributes
 /// ----------
-/// warmup_period : int
+/// warmup_period : int, default=0
 ///     Bars to skip before the strategy starts.
 ///
-/// trade_on_close : bool
+/// trade_on_close : bool, default=False
 ///     Fill orders at the close price of the current bar.
 ///
-/// risk_free_rate : float
+/// risk_free_rate : float, default=0.0
 ///     Annualised risk-free rate for metrics.
 ///
-/// benchmark : str
+/// benchmark : str, default=""
 ///     Optional benchmark ticker symbol.
 ///
-/// exclusive_orders : bool
+/// exclusive_orders : bool, default=False
 ///     Cancel pending orders when a new order is submitted.
 ///
-/// random_seed : int | None
+/// random_seed : int | None, default=None
 ///     Fixed RNG seed for reproducibility.
 ///
-/// empty_bar_policy : str | [EmptyBarPolicy]
+/// empty_bar_policy : str | [EmptyBarPolicy], default="forward_fill"
 ///     How to handle bars with no data.
 ///
 /// See Also
@@ -826,13 +830,13 @@ impl EngineExpConfig {
 
     #[new]
     #[pyo3(signature = (
-        warmup_period = 0,
-        trade_on_close = false,
-        risk_free_rate = 0.0,
-        benchmark = "",
-        exclusive_orders = false,
-        random_seed = None,
-        empty_bar_policy = EmptyBarPolicy::default(),
+        warmup_period: "int" = 0,
+        trade_on_close: "bool" = false,
+        risk_free_rate: "float" = 0.0,
+        benchmark: "str" = "",
+        exclusive_orders: "bool" = false,
+        random_seed: "int | None" = None,
+        empty_bar_policy: "str | EmptyBarPolicy" = EmptyBarPolicy::default(),
     ))]
     fn new(
         warmup_period: u32,
@@ -993,13 +997,13 @@ impl ExperimentConfig {
 
     #[new]
     #[pyo3(signature = (
-        general = GeneralExpConfig::default(),
-        data = DataExpConfig::default(),
-        portfolio = PortfolioExpConfig::default(),
-        strategy = None,
-        indicators = None,
-        exchange = ExchangeExpConfig::default(),
-        engine = EngineExpConfig::default(),
+        general: "GeneralExpConfig" = GeneralExpConfig::default(),
+        data: "DataExpConfig" = DataExpConfig::default(),
+        portfolio: "PortfolioExpConfig" = PortfolioExpConfig::default(),
+        strategy: "StrategyExpConfig | None" = None,
+        indicators: "IndicatorExpConfig | None" = None,
+        exchange: "ExchangeExpConfig" = ExchangeExpConfig::default(),
+        engine: "EngineExpConfig" = EngineExpConfig::default(),
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(

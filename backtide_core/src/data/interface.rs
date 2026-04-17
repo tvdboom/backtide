@@ -12,6 +12,10 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
 use pyo3::{pyfunction, Bound, FromPyObject, PyAny, PyResult};
 
+// ────────────────────────────────────────────────────────────────────────────
+// Helper functions
+// ────────────────────────────────────────────────────────────────────────────
+
 /// Parse input from Python into a vec of T.
 fn parse_input<'py, T>(param: Bound<'py, PyAny>) -> PyResult<Vec<T>>
 where
@@ -55,6 +59,10 @@ fn parse_instrument(symbols: Bound<'_, PyAny>) -> PyResult<Vec<Symbol>> {
         }
     }
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Public interface
+// ────────────────────────────────────────────────────────────────────────────
 
 /// Get instruments given their symbols.
 ///
@@ -138,7 +146,7 @@ pub fn fetch_instruments(
 /// print(resolve_profiles(["AAPL", "MSFT"], "stocks", "1d"))
 /// ```
 #[pyfunction]
-#[pyo3(signature = (symbols, instrument_type, interval, *, verbose=true))]
+#[pyo3(signature = (symbols: "str | Instrument | Sequence[str | Instrument]", instrument_type: "str | InstrumentType", interval: "str | Interval | list[str | Interval]", *, verbose: "bool"=true))]
 pub fn resolve_profiles(
     symbols: Bound<'_, PyAny>,
     instrument_type: Bound<'_, PyAny>,
@@ -252,7 +260,7 @@ pub fn list_instruments(
 /// print(result)
 /// ```
 #[pyfunction]
-#[pyo3(signature = (profiles, start=None, end=None, *, verbose=true))]
+#[pyo3(signature = (profiles: "list[InstrumentProfile]", start: "int | None"=None, end: "int | None"=None, *, verbose: "bool"=true))]
 pub fn download_bars(
     profiles: Vec<InstrumentProfile>,
     start: Option<u64>,

@@ -703,6 +703,7 @@ class InstrumentProfile:
     latest_ts: dict[Interval, int]
     legs: list[str]
     name: str
+    provider: Provider
     quote: str | Currency
     symbol: str
 

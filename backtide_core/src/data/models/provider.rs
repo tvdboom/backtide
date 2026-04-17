@@ -43,7 +43,7 @@ impl Provider {
     }
 
     fn __repr__(&self) -> String {
-        self.to_string()
+        self.to_string().to_lowercase()
     }
 
     pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {

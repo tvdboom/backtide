@@ -77,14 +77,16 @@ impl Config {
 ///
 /// Attributes
 /// ----------
-/// general : [GeneralConfig]
-///     Portfolio-wide settings.
+/// general : [GeneralConfig] | None, default=None
+///     Portfolio-wide settings. If `None`, uses `GeneralConfig` defaults.
 ///
-/// data : [DataConfig]
-///     Settings that control how market data is fetched and stored.
+/// data : [DataConfig] | None, default=None
+///     Settings that control how market data is fetched and stored. If
+///     `None`, uses `DataConfig` defaults.
 ///
-/// display : [DisplayConfig]
-///     Settings that control how values are presented in the application's frontend.
+/// display : [DisplayConfig] | None, default=None
+///     Settings that control how values are presented in the application's
+///     frontend. If `None`, uses `DisplayConfig` defaults.
 ///
 /// See Also
 /// --------
@@ -133,7 +135,7 @@ impl PyConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (general=None, data=None, display=None))]
+    #[pyo3(signature = (general: "GeneralConfig | None"=None, data: "DataConfig | None"=None, display: "DisplayConfig | None"=None))]
     fn new(
         py: Python<'_>,
         general: Option<Py<GeneralConfig>>,
@@ -252,29 +254,29 @@ impl GeneralConfig {
 
     #[new]
     #[pyo3(signature = (
-        base_currency=None,
-        triangulation_strategy=None,
-        triangulation_fiat=None,
-        triangulation_crypto="USDT",
-        triangulation_crypto_pegged=None,
-        log_level=None
+        base_currency: "str | Currency" = Currency::default(),
+        triangulation_strategy: "str | TriangulationStrategy" = TriangulationStrategy::default(),
+        triangulation_fiat: "str | Currency" = Currency::default(),
+        triangulation_crypto: "str" = "USDT",
+        triangulation_crypto_pegged: "str | Currency" = Currency::default(),
+        log_level: "str | LogLevel" = LogLevel::default()
     ))]
     fn new(
-        base_currency: Option<Currency>,
-        triangulation_strategy: Option<TriangulationStrategy>,
-        triangulation_fiat: Option<Currency>,
+        base_currency: Currency,
+        triangulation_strategy: TriangulationStrategy,
+        triangulation_fiat: Currency,
         triangulation_crypto: &str,
-        triangulation_crypto_pegged: Option<Currency>,
-        log_level: Option<LogLevel>,
-    ) -> PyResult<Self> {
-        Ok(Self {
-            base_currency: base_currency.unwrap_or_default(),
-            triangulation_strategy: triangulation_strategy.unwrap_or_default(),
-            triangulation_fiat: triangulation_fiat.unwrap_or_default(),
+        triangulation_crypto_pegged: Currency,
+        log_level: LogLevel,
+    ) -> Self {
+        Self {
+            base_currency,
+            triangulation_strategy,
+            triangulation_fiat,
             triangulation_crypto: triangulation_crypto.to_owned(),
-            triangulation_crypto_pegged: triangulation_crypto_pegged.unwrap_or_default(),
-            log_level: log_level.unwrap_or_default(),
-        })
+            triangulation_crypto_pegged,
+            log_level,
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -344,7 +346,7 @@ impl DataConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (storage_path=".backtide", providers: "dict[str | InstrumentType, str | Provider] | None"=None))]
+    #[pyo3(signature = (storage_path: "str"=".backtide", providers: "dict[str | InstrumentType, str | Provider] | None"=None))]
     fn new(storage_path: &str, providers: Option<Bound<'_, PyAny>>) -> PyResult<Self> {
         let mut resolved = DataConfig::default().providers;
         if let Some(obj) = providers {
@@ -463,16 +465,16 @@ impl DisplayConfig {
 
     #[new]
     #[pyo3(signature = (
-        dataframe_backend=None,
-        date_format="YYYY-MM-DD",
-        time_format="HH:MM",
-        timezone=None,
-        logokit_api_key=None,
-        address=None,
-        port=8501
+        dataframe_backend: "str | DataframeBackend" = DataframeBackend::default(),
+        date_format: "str"="YYYY-MM-DD",
+        time_format: "str"="HH:MM",
+        timezone: "str | None"=None,
+        logokit_api_key: "str | None"=None,
+        address: "str | None"=None,
+        port: "int"=8501
     ))]
     fn new(
-        dataframe_backend: Option<DataframeBackend>,
+        dataframe_backend: DataframeBackend,
         date_format: &str,
         time_format: &str,
         timezone: Option<&str>,
@@ -481,7 +483,7 @@ impl DisplayConfig {
         port: u16,
     ) -> Self {
         Self {
-            dataframe_backend: dataframe_backend.unwrap_or_default(),
+            dataframe_backend,
             date_format: date_format.to_owned(),
             time_format: time_format.to_owned(),
             timezone: timezone.map(|s| s.to_owned()),

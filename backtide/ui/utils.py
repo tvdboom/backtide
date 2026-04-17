@@ -6,13 +6,12 @@ Description: Utility functions for the UI.
 """
 
 import base64
-from datetime import datetime as dt
+from datetime import datetime as dt, date
 from pathlib import Path
 import re
-from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
-
+from backtide.config import Config
 import pandas as pd
 import streamlit as st
 from tzlocal import get_localzone
@@ -23,7 +22,7 @@ from backtide.core.data import (
     Instrument,
     InstrumentType,
     Interval,
-    list_instruments,
+    list_instruments, InstrumentProfile, Provider,
 )
 from backtide.core.storage import (
     query_bars_summary,
@@ -118,9 +117,9 @@ def _get_logokit_url(
 
 
 @st.cache_data
-def _get_provider_logo(provider: str) -> str:
+def _get_provider_logo(provider: Provider) -> str:
     """Load the logo image from a provider."""
-    path = Path(f"images/providers/{provider.lower()}.png")
+    path = Path(f"images/providers/{provider}.png")
     data = base64.b64encode(path.read_bytes()).decode()
     return f"data:image/png;base64,{data}"
 
@@ -354,40 +353,19 @@ _CARD_CSS = """
 
 
 def _draw_cards(
-    profiles,
+    profiles: list[InstrumentProfile],
     *,
-    cfg,
+    cfg: Config,
     tz: ZoneInfo,
     instrument_type: InstrumentType,
     full_history: bool,
-    start_ts=None,
-    end_ts=None,
+    start_ts: date | None = None,
+    end_ts: date | None = None,
+    summary: pd.DataFrame | None = None,
 ) -> tuple[str, int]:
     """Generate HTML code to draw the instrument cards.
 
-    Parameters
-    ----------
-    profiles
-        List of ``InstrumentProfile`` (or compatible duck-typed objects) with
-        at least: ``symbol``, ``name``, ``instrument_type``, ``exchange``,
-        ``quote``, ``earliest_ts``, ``latest_ts``, ``legs``.
-    cfg
-        Application configuration (needs ``display.date_format``,
-        ``display.logokit_api_key``, ``data.providers``).
-    tz
-        Timezone used to format dates.
-    instrument_type
-        The currently selected instrument type.
-    full_history
-        Whether the full available history is used.
-    start_ts, end_ts
-        Date range boundaries (``datetime.date``) when *full_history* is
-        ``False``.
-
-    Returns
-    -------
-    tuple[str, int]
-        The HTML string and the estimated total number of bars.
+    Returns the HTML string and the (estimated) total number of bars.
 
     """
     html = "<div class='section'></div>"
@@ -410,25 +388,33 @@ def _draw_cards(
                 iv_start = max(start_ts, iv_start)
                 iv_end = min(end_ts, iv_end)
 
-            # Estimate rows for this interval
-            delta_minutes = max((iv_end - iv_start).total_seconds() / 60, 1)
-            delta_days = (iv_end - iv_start).days
+            if summary is None:
+                # Estimate rows for this interval
+                delta_minutes = max((iv_end - iv_start).total_seconds() / 60, 1)
+                delta_days = (iv_end - iv_start).days
 
-            if profile.instrument_type.is_equity:
-                # Stocks / ETF markets open 8/5
-                if interval.is_intraday():
-                    rows = max(int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1)
+                if profile.instrument_type.is_equity:
+                    # Stocks / ETF markets open 8/5
+                    if interval.is_intraday():
+                        rows = max(int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1)
+                    else:
+                        rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
+                elif instrument_type == InstrumentType.Forex:
+                    # Forex markets open 24/5
+                    if interval.is_intraday():
+                        rows = max(int(delta_minutes * (5 / 7) // interval.minutes()), 1)
+                    else:
+                        rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
                 else:
-                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
-            elif instrument_type == InstrumentType.Forex:
-                # Forex markets open 24/5
-                if interval.is_intraday():
-                    rows = max(int(delta_minutes * (5 / 7) // interval.minutes()), 1)
-                else:
-                    rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
+                    # Crypto markets open 24/7
+                    rows = max(int(delta_minutes // interval.minutes()), 1)
             else:
-                # Crypto markets open 24/7
-                rows = max(int(delta_minutes // interval.minutes()), 1)
+                # Extract the exact number of rows from the storage summary
+                rows = summary[summary["symbol"] == profile.symbol].iloc[0, 10]
+
+                from backtide.storage import query_bars
+
+                print(query_bars(profile.symbol, profile.instrument_type, profile.provider))!!
 
             total_rows += rows
 
@@ -455,7 +441,7 @@ def _draw_cards(
                         {parse_date(iv_start)} &nbsp → &nbsp {parse_date(iv_end)}
                     </span>
                     <span class="iv-range">{n_days_str}</span>
-                    <span class="iv-rows">~{_fmt_number(rows)} bars</span>
+                    <span class="iv-rows">{'~' if summary is None else ''}{_fmt_number(rows)} bars</span>
                 </div>"""
 
         if logokit_key := cfg.display.logokit_api_key:
@@ -471,15 +457,9 @@ def _draw_cards(
             badges = "".join(f'<span class="badge leg">{leg}</span>' for leg in profile.legs)
             legs = f'<div class="legs-row"><span style="font-size:16px">via</span>{badges}</div>'
 
-        # Use the profile's own provider when available (e.g. from storage);
-        # fall back to the configured provider for the instrument type.
-        if hasattr(profile, "provider") and profile.provider:
-            provider = str(profile.provider)
-        else:
-            provider = str(cfg.data.providers[profile.instrument_type])
         provider_html = f"""
             <div class="provider">
-                <img src="{_get_provider_logo(provider)}" alt="{provider}">
+                <img src="{_get_provider_logo(profile.provider)}" alt="{profile.provider}">
             </div>"""
 
         flag = ""
@@ -534,55 +514,3 @@ def _draw_cards(
             </div>"""
 
     return html, total_rows
-
-
-def _storage_to_card_profiles(
-    summary_df: pd.DataFrame,
-    symbols: list,
-    instrument_type: InstrumentType,
-) -> list:
-    """Convert storage summary rows into profile-like objects for :func:`draw_cards`.
-
-    Each returned object is a :class:`~types.SimpleNamespace` that quacks like
-    an ``InstrumentProfile`` — just enough for the card renderer to work.
-    """
-    profiles: list[SimpleNamespace] = []
-
-    for sym in symbols:
-        sym_str = (
-            sym if isinstance(sym, str) else (sym.symbol if hasattr(sym, "symbol") else str(sym))
-        )
-        it_str = str(instrument_type).lower()
-        rows = summary_df[
-            (summary_df["symbol"].astype(str) == sym_str)
-            & (summary_df["instrument_type"].astype(str).str.lower() == it_str)
-        ]
-        if rows.empty:
-            continue
-
-        earliest: dict[Interval, int] = {}
-        latest: dict[Interval, int] = {}
-        for _, row in rows.iterrows():
-            try:
-                iv = Interval(str(row["interval"]))
-            except (ValueError, RuntimeError):
-                continue
-            earliest[iv] = int(row["first_ts"])
-            latest[iv] = int(row["last_ts"])
-
-        first = rows.iloc[0]
-        profiles.append(
-            SimpleNamespace(
-                symbol=sym_str,
-                name=str(first.get("name", "")),
-                instrument_type=instrument_type,
-                exchange=str(first.get("exchange", "")),
-                quote=str(first.get("quote", "")),
-                earliest_ts=earliest,
-                latest_ts=latest,
-                legs=[],
-                provider=str(first["provider"]),
-            )
-        )
-
-    return profiles

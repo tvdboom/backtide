@@ -2,6 +2,7 @@ use crate::constants::Symbol;
 use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
+use crate::data::models::provider::Provider;
 use pyo3::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -118,5 +119,9 @@ impl InstrumentProfile {
     #[getter]
     fn exchange(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         self.instrument.exchange(py)
+    }
+    #[getter]
+    fn provider(&self) -> Provider {
+        self.instrument.provider
     }
 }
