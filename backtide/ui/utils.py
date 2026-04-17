@@ -6,23 +6,27 @@ Description: Utility functions for the UI.
 """
 
 import base64
-from datetime import datetime as dt, date
+from datetime import date
+from datetime import datetime as dt
 from pathlib import Path
 import re
 from typing import Any
 from zoneinfo import ZoneInfo
-from backtide.config import Config
+
 import pandas as pd
 import streamlit as st
 from tzlocal import get_localzone
 
+from backtide.config import Config
 from backtide.core.data import (
     Currency,
     Exchange,
     Instrument,
+    InstrumentProfile,
     InstrumentType,
     Interval,
-    list_instruments, InstrumentProfile, Provider,
+    Provider,
+    list_instruments,
 )
 from backtide.core.storage import (
     query_bars_summary,
@@ -36,6 +40,7 @@ def _clear_state(*keys: str):
     for k in keys:
         st.session_state[k] = []
         st.session_state.pop(f"_{k}", None)
+
 
 def _default(key: str, fallback: Any = None) -> Any:
     """Return the persisted shadow value for *key*, or *fallback*."""
@@ -359,8 +364,8 @@ def _draw_cards(
     tz: ZoneInfo,
     instrument_type: InstrumentType,
     full_history: bool,
-    start_ts: date | None = None,
-    end_ts: date | None = None,
+    start_ts: date,
+    end_ts: date,
     summary: pd.DataFrame | None = None,
 ) -> tuple[str, int]:
     """Generate HTML code to draw the instrument cards.
@@ -396,7 +401,9 @@ def _draw_cards(
                 if profile.instrument_type.is_equity:
                     # Stocks / ETF markets open 8/5
                     if interval.is_intraday():
-                        rows = max(int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1)
+                        rows = max(
+                            int(delta_minutes * (5 / 7) * (8 / 24) // interval.minutes()), 1
+                        )
                     else:
                         rows = max(int(delta_days * (5 / 7) // (interval.minutes() / 1440)), 1)
                 elif instrument_type == InstrumentType.Forex:
@@ -414,7 +421,7 @@ def _draw_cards(
 
                 from backtide.storage import query_bars
 
-                print(query_bars(profile.symbol, profile.instrument_type, profile.provider))!!
+                print(query_bars(profile.symbol, interval, profile.provider))
 
             total_rows += rows
 
@@ -441,7 +448,9 @@ def _draw_cards(
                         {parse_date(iv_start)} &nbsp → &nbsp {parse_date(iv_end)}
                     </span>
                     <span class="iv-range">{n_days_str}</span>
-                    <span class="iv-rows">{'~' if summary is None else ''}{_fmt_number(rows)} bars</span>
+                    <span class="iv-rows">
+                        {"~" if summary is None else ""}{_fmt_number(rows)} bars
+                    </span>
                 </div>"""
 
         if logokit_key := cfg.display.logokit_api_key:

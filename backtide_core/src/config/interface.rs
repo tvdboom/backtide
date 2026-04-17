@@ -77,16 +77,15 @@ impl Config {
 ///
 /// Attributes
 /// ----------
-/// general : [GeneralConfig] | None, default=None
-///     Portfolio-wide settings. If `None`, uses `GeneralConfig` defaults.
+/// general : [GeneralConfig]
+///     Portfolio-wide settings.
 ///
-/// data : [DataConfig] | None, default=None
-///     Settings that control how market data is fetched and stored. If
-///     `None`, uses `DataConfig` defaults.
+/// data : [DataConfig]
+///     Settings that control how market data is fetched and stored.
 ///
-/// display : [DisplayConfig] | None, default=None
+/// display : [DisplayConfig]
 ///     Settings that control how values are presented in the application's
-///     frontend. If `None`, uses `DisplayConfig` defaults.
+///     frontend.
 ///
 /// See Also
 /// --------

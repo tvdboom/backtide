@@ -37,7 +37,7 @@ from backtide.backtest import (
 )
 from backtide.config import get_config
 from backtide.core.data import resolve_profiles
-from backtide.data import Currency, InstrumentProfile, InstrumentType, Interval
+from backtide.data import Currency, InstrumentProfile, InstrumentType
 from backtide.storage import query_instruments
 from backtide.ui.utils import (
     _CARD_CSS,
@@ -79,24 +79,27 @@ def _build_experiment_config() -> str:
     cfg = ExperimentConfig(
         general=GeneralExpConfig(
             name=experiment_name or ss.experiment_id,
-            tags=ss.get("tags", []),
-            description=ss.get("description", ""),
+            tags=ss.get("tags", exp.general.tags),
+            description=ss.get("description", exp.general.description),
         ),
         data=DataExpConfig(
-            instrument_type=ss.get("instrument_type", "stocks"),
-            symbols=[s.symbol if hasattr(s, "symbol") else str(s) for s in ss.get("symbols", [])],
-            full_history=ss.get("full_history", True),
+            instrument_type=ss.get("instrument_type", exp.data.instrument_type),
+            symbols=[
+                s.symbol if hasattr(s, "symbol") else str(s)
+                for s in ss.get("symbols", exp.data.symbols)
+            ],
+            full_history=ss.get("full_history", exp.data.full_history),
             start_date=str(ss.get("start_date")) if ss.get("start_date") else None,
             end_date=str(ss.get("end_date")) if ss.get("end_date") else None,
-            interval=ss.get("interval", "1d"),
+            interval=ss.get("interval", exp.data.interval),
         ),
         portfolio=PortfolioExpConfig(
-            initial_cash=float(ss.get("initial_cash", 10_000)),
-            base_currency=ss.get("base_currency", "USD"),
-            starting_positions=ss.get("starting_positions", []),
+            initial_cash=ss.get("initial_cash", exp.portfolio.initial_cash),
+            base_currency=ss.get("base_currency", exp.portfolio.base_currency),
+            starting_positions=ss.get("starting_positions", exp.portfolio.starting_positions),
         ),
         strategy=StrategyExpConfig(
-            predefined_strategies=list(ss.get("predefined_strategies", [])),
+            predefined_strategies=ss.get("predefined_strategies", []),
             custom_strategies=[
                 CodeSnippet(
                     name=ss.get(f"strategy_name_{i}", f"Strategy {i + 1}"),
@@ -106,7 +109,7 @@ def _build_experiment_config() -> str:
             ],
         ),
         indicators=IndicatorExpConfig(
-            builtin_indicators=list(ss.get("builtin_indicators", [])),
+            builtin_indicators=ss.get("builtin_indicators", []),
             custom_indicators=[
                 CodeSnippet(
                     name=ss.get(f"indicator_name_{i}", f"Indicator {i + 1}"),
@@ -116,43 +119,33 @@ def _build_experiment_config() -> str:
             ],
         ),
         exchange=ExchangeExpConfig(
-            commission_type=ss.get("commission_type", "Percentage"),
-            commission_pct=float(ss.get("commission_pct", 0.1)),
-            commission_fixed=float(ss.get("commission_fixed", 0.0)),
-            slippage=float(ss.get("slippage", 0.05)),
-            allowed_order_types=list(ss.get("allowed_order_types", ["Market"])),
-            partial_fills=ss.get("partial_fills", False),
-            allow_margin=ss.get("allow_margin", True),
-            max_leverage=float(ss.get("max_leverage", 1.0)),
-            initial_margin=float(ss.get("initial_margin", 50.0)),
-            maintenance_margin=float(ss.get("maintenance_margin", 25.0)),
-            margin_interest=float(ss.get("margin_interest", 0.0)),
-            allow_short_selling=ss.get("allow_short_selling", True),
-            borrow_rate=float(ss.get("borrow_rate", 0.0)),
-            max_position_size=int(ss.get("max_position_size", 100)),
-            conversion_mode=ss.get("conversion_mode", "Immediate"),
-            conversion_threshold=(
-                float(ss["conversion_threshold"])
-                if ss.get("conversion_threshold") is not None
-                else None
-            ),
-            conversion_period=(
-                ss["conversion_period"] if ss.get("conversion_period") is not None else None
-            ),
-            conversion_interval=(
-                int(ss["conversion_interval"])
-                if ss.get("conversion_interval") is not None
-                else None
-            ),
+            commission_type=ss.get("commission_type", exp.exchange.commission_type),
+            commission_pct=ss.get("commission_pct", exp.exchange.commission_pct),
+            commission_fixed=ss.get("commission_fixed", exp.exchange.commission_fixed),
+            slippage=ss.get("slippage", exp.exchange.slippage),
+            allowed_order_types=ss.get("allowed_order_types", exp.exchange.allowed_order_types),
+            partial_fills=ss.get("partial_fills", exp.exchange.partial_fills),
+            allow_margin=ss.get("allow_margin", exp.exchange.allow_margin),
+            max_leverage=ss.get("max_leverage", exp.exchange.max_leverage),
+            initial_margin=ss.get("initial_margin", exp.exchange.initial_margin),
+            maintenance_margin=ss.get("maintenance_margin", exp.exchange.maintenance_margin),
+            margin_interest=ss.get("margin_interest", exp.exchange.margin_interest),
+            allow_short_selling=ss.get("allow_short_selling", exp.exchange.allow_short_selling),
+            borrow_rate=ss.get("borrow_rate", exp.exchange.borrow_rate),
+            max_position_size=ss.get("max_position_size", exp.exchange.max_position_size),
+            conversion_mode=ss.get("conversion_mode", exp.exchange.conversion_mode),
+            conversion_threshold=ss.get("conversion_threshold"),
+            conversion_period=ss.get("conversion_period"),
+            conversion_interval=ss.get("conversion_interval"),
         ),
         engine=EngineExpConfig(
-            warmup_period=int(ss.get("warmup_period", 0)),
-            trade_on_close=ss.get("trade_on_close", False),
-            risk_free_rate=float(ss.get("risk_free_rate", 0.0)),
-            benchmark=ss.get("benchmark", ""),
-            exclusive_orders=ss.get("exclusive_orders", False),
-            random_seed=int(ss["random_seed"]) if ss.get("random_seed") is not None else None,
-            empty_bar_policy=ss.get("empty_bar_policy", "ForwardFill"),
+            warmup_period=ss.get("warmup_period", exp.engine.warmup_period),
+            trade_on_close=ss.get("trade_on_close", exp.engine.trade_on_close),
+            risk_free_rate=ss.get("risk_free_rate", exp.engine.risk_free_rate),
+            benchmark=ss.get("benchmark", exp.engine.benchmark),
+            exclusive_orders=ss.get("exclusive_orders", exp.engine.exclusive_orders),
+            random_seed=ss.get("random_seed"),
+            empty_bar_policy=ss.get("empty_bar_policy", exp.engine.empty_bar_policy),
         ),
     )
 
@@ -180,62 +173,60 @@ def _on_config_upload():
         else:
             raw = yaml.safe_load(upload)
 
-        imported = ExperimentConfig.from_dict(raw)
+        exp = ExperimentConfig.from_dict(raw)
 
         # ── General ──────────────────────────────────────────────────────────
 
-        st.session_state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", imported.general.name)
-        st.session_state["tags"] = list(imported.general.tags)
-        st.session_state["description"] = imported.general.description
+        st.session_state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", exp.general.name)
+        st.session_state["tags"] = exp.general.tags
+        st.session_state["description"] = exp.general.description
 
         # ── Data ─────────────────────────────────────────────────────────────
 
-        st.session_state["instrument_type"] = imported.data.instrument_type
-        st.session_state["symbols"] = list(imported.data.symbols)
-        st.session_state["full_history"] = imported.data.full_history
-        if not imported.data.full_history:
-            if imported.data.start_date:
-                st.session_state["start_date"] = dt.fromisoformat(
-                    str(imported.data.start_date)
-                ).date()
-            if imported.data.end_date:
-                st.session_state["end_date"] = dt.fromisoformat(str(imported.data.end_date)).date()
-        st.session_state["interval"] = imported.data.interval
+        st.session_state["instrument_type"] = exp.data.instrument_type
+        st.session_state["symbols"] = exp.data.symbols
+        st.session_state["full_history"] = exp.data.full_history
+        if not exp.data.full_history:
+            if exp.data.start_date:
+                st.session_state["start_date"] = dt.fromisoformat(str(exp.data.start_date)).date()
+            if exp.data.end_date:
+                st.session_state["end_date"] = dt.fromisoformat(str(exp.data.end_date)).date()
+        st.session_state["interval"] = exp.data.interval
 
         # ── Portfolio ────────────────────────────────────────────────────────
 
-        st.session_state["initial_cash"] = int(imported.portfolio.initial_cash)
-        st.session_state["base_currency"] = imported.portfolio.base_currency
-        st.session_state["positions"] = imported.portfolio.positions
+        st.session_state["initial_cash"] = exp.portfolio.initial_cash
+        st.session_state["base_currency"] = exp.portfolio.base_currency
+        st.session_state["starting_positions"] = exp.portfolio.starting_positions
 
         # ── Strategy ─────────────────────────────────────────────────────────
 
-        st.session_state["predefined_strategies"] = list(imported.strategy.predefined_strategies)
+        st.session_state["predefined_strategies"] = exp.strategy.predefined_strategies
         st.session_state["custom_strategies"] = [
             {"source": USER_CODE_OPTIONS[0], "code": s.code}
-            for s in imported.strategy.custom_strategies
+            for s in exp.strategy.custom_strategies
         ]
-        for i, s in enumerate(imported.strategy.custom_strategies):
+        for i, s in enumerate(exp.strategy.custom_strategies):
             st.session_state[f"strategy_name_{i}"] = s.name
 
         # ── Indicators ───────────────────────────────────────────────────────
 
-        st.session_state["builtin_indicators"] = list(imported.indicators.builtin_indicators)
+        st.session_state["builtin_indicators"] = exp.indicators.builtin_indicators
         st.session_state["custom_indicators"] = [
             {"source": USER_CODE_OPTIONS[0], "code": s.code}
-            for s in imported.indicators.custom_indicators
+            for s in exp.indicators.custom_indicators
         ]
-        for i, s in enumerate(imported.indicators.custom_indicators):
+        for i, s in enumerate(exp.indicators.custom_indicators):
             st.session_state[f"indicator_name_{i}"] = s.name
 
         # ── Exchange ─────────────────────────────────────────────────────────
 
-        ex = imported.exchange
+        ex = exp.exchange
         st.session_state["commission_type"] = ex.commission_type
         st.session_state["commission_pct"] = ex.commission_pct
         st.session_state["commission_fixed"] = ex.commission_fixed
         st.session_state["slippage"] = ex.slippage
-        st.session_state["allowed_order_types"] = list(ex.allowed_order_types)
+        st.session_state["allowed_order_types"] = ex.allowed_order_types
         st.session_state["partial_fills"] = ex.partial_fills
         st.session_state["allow_margin"] = ex.allow_margin
         st.session_state["max_leverage"] = ex.max_leverage
@@ -244,26 +235,24 @@ def _on_config_upload():
         st.session_state["margin_interest"] = ex.margin_interest
         st.session_state["allow_short_selling"] = ex.allow_short_selling
         st.session_state["borrow_rate"] = ex.borrow_rate
-        st.session_state["max_position_size"] = int(ex.max_position_size)
+        st.session_state["max_position_size"] = ex.max_position_size
         st.session_state["conversion_mode"] = ex.conversion_mode
         if ex.conversion_threshold is not None:
             st.session_state["conversion_threshold"] = ex.conversion_threshold
         if ex.conversion_period is not None:
             st.session_state["conversion_period"] = ex.conversion_period
         if ex.conversion_interval is not None:
-            st.session_state["conversion_interval"] = int(ex.conversion_interval)
+            st.session_state["conversion_interval"] = ex.conversion_interval
 
         # ── Engine ───────────────────────────────────────────────────────────
 
-        eng = imported.engine
-        st.session_state["warmup_period"] = int(eng.warmup_period)
+        eng = exp.engine
+        st.session_state["warmup_period"] = eng.warmup_period
         st.session_state["trade_on_close"] = eng.trade_on_close
         st.session_state["risk_free_rate"] = eng.risk_free_rate
         st.session_state["benchmark"] = eng.benchmark
         st.session_state["exclusive_orders"] = eng.exclusive_orders
-        st.session_state["random_seed"] = (
-            int(eng.random_seed) if eng.random_seed is not None else None
-        )
+        st.session_state["random_seed"] = eng.random_seed
         st.session_state["empty_bar_policy"] = eng.empty_bar_policy
 
         st.session_state["_import_success"] = f"Loaded configuration from `{upload.name}`."
@@ -277,6 +266,9 @@ def _on_config_upload():
 
 cfg = get_config()
 tz = _get_timezone(cfg.display.timezone)
+
+# Single source of truth for all default widget values.
+exp: ExperimentConfig = _default("config", ExperimentConfig())
 
 st.set_page_config(page_title="Backtide - Experiment", layout="centered")
 st.title("Experiment", text_alignment="center")
@@ -346,7 +338,7 @@ with tab1:
         help="Persist the current experiment configuration to disk.",
     )
 
-    tags = st.multiselect(
+    tags = st.multiselect(  # ty : ignore[no-matching-overload]
         label="Tags",
         key=(key := "tags"),
         options=_default(key, []),
@@ -412,7 +404,7 @@ with tab2:
         key=(key := "instrument_type"),
         required=True,
         options=InstrumentType.variants(),
-        default=_default(key, InstrumentType.get_default()),
+        default=_default(key, exp.data.instrument_type),
         format_func=lambda x: f"{x.icon()} {x}",
         on_change=lambda k=key: (_clear_state("symbols", "currency"), _persist(k)),
         help="Select the type of financial instrument you want to backtest.",
@@ -437,7 +429,7 @@ with tab2:
     col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
     symbol_d, currency_d = _get_instrument_type_description(instrument_type)
 
-    symbols = col1.multiselect(
+    symbols = col1.multiselect(  # ty : ignore[no-matching-overload]
         label="Symbols",
         key=(key := "symbols"),
         options=sorted(list(fi) + _default(key, [])),
@@ -476,7 +468,7 @@ with tab2:
         label="Use stored data",
         key=(key := "use_storage"),
         value=_default(key, fallback=False),
-        on_change=lambda k=key: (
+        on_change=lambda k=key: (  # ty: ignore[invalid-argument-type]
             _clear_state("symbols", "currency", "start_date", "end_date"),
             _persist(k),
         ),
@@ -490,7 +482,7 @@ with tab2:
     full_history = st.toggle(
         label="Use full available history",
         key=(key := "full_history"),
-        value=_default(key, fallback=True),
+        value=_default(key, fallback=exp.data.full_history),
         on_change=lambda k=key: _persist(k),
         help=(
             "Whether to use the maximum available history for all selected symbols. "
@@ -499,7 +491,7 @@ with tab2:
     )
 
     profiles = direct = []
-    interval = _default("interval", Interval.get_default())
+    interval = _default("interval", exp.data.interval)
 
     summary = None
     raise_missing_interval = None
@@ -579,7 +571,7 @@ with tab2:
         required=True,
         options=cfg.data.providers[instrument_type].intervals(),
         selection_mode="single",
-        default=_default(key, Interval.get_default()),
+        default=_default(key, exp.data.interval),
         on_change=lambda k=key: _persist(k),
         help=(
             "The frequency of the data points. Each interval is one tick of the simulation. "
@@ -629,7 +621,7 @@ with tab3:
         label="Initial cash",
         key="initial_cash",
         min_value=100,
-        value=_default("initial_cash", 10_000),
+        value=_default("initial_cash", exp.portfolio.initial_cash),
         step=1_000,
         placeholder="Insert the initial cash...",
         on_change=lambda: _persist("initial_cash"),
@@ -1015,7 +1007,7 @@ with tab6:
                 label="Commission type",
                 key=(key := "commission_type"),
                 options=variants,
-                index=variants.index(_default(key, CommissionType.get_default())),
+                index=variants.index(_default(key, exp.exchange.commission_type)),
                 horizontal=False,
                 on_change=lambda k=key: _persist(k),
                 help=(
@@ -1029,7 +1021,7 @@ with tab6:
         commission_pct_widget = lambda: st.number_input(
             label="Commission (% per trade)",
             key=(key := "commission_pct"),
-            value=_default(key, 0.1),
+            value=_default(key, exp.exchange.commission_pct),
             min_value=0.0,
             max_value=100.0,
             step=0.01,
@@ -1044,7 +1036,7 @@ with tab6:
         commission_fixed_widget = lambda: st.number_input(
             label=f"Commission ({base_currency} per trade)",
             key=(key := "commission_fixed"),
-            value=_default(key, 1.0),
+            value=_default(key, exp.exchange.commission_fixed),
             min_value=0.0,
             step=0.5,
             format="%.2f",
@@ -1069,7 +1061,7 @@ with tab6:
         slippage = st.number_input(
             label="Slippage (% of price per trade)",
             key=(key := "slippage"),
-            value=_default(key, 0.05),
+            value=_default(key, exp.exchange.slippage),
             min_value=0.0,
             max_value=100.0,
             step=0.01,
@@ -1088,7 +1080,7 @@ with tab6:
             label="Allowed order types",
             key=(key := "allowed_order_types"),
             options=OrderType.variants(),
-            default=_default(key, [OrderType.get_default()]),
+            default=_default(key, exp.exchange.allowed_order_types),
             on_change=lambda k=key: _persist(k),
             help=(
                 "Which order types the engine accepts during the simulation. "
@@ -1104,7 +1096,7 @@ with tab6:
         partial_fills = st.toggle(
             label="Partial fills",
             key=(key := "partial_fills"),
-            value=_default(key, fallback=False),
+            value=_default(key, fallback=exp.exchange.partial_fills),
             on_change=lambda k=key: _persist(k),
             help=(
                 "Simulate partial order fills based on available bar volume. When disabled, "
@@ -1119,7 +1111,7 @@ with tab6:
 
         enable_margin = col_toggle.toggle(
             label="Allow margin trading",
-            value=_default(key, fallback=True),
+            value=_default(key, fallback=exp.exchange.allow_margin),
             key=(key := "allow_margin"),
             on_change=lambda k=key: _persist(k),
             help=(
@@ -1134,7 +1126,7 @@ with tab6:
             max_leverage = col_input.number_input(
                 label="Max leverage",
                 key=(key := "max_leverage"),
-                value=_default(key, 1.0),
+                value=_default(key, exp.exchange.max_leverage),
                 min_value=1.0,
                 max_value=10.0,
                 step=0.5,
@@ -1152,7 +1144,7 @@ with tab6:
             initial_margin = col1.number_input(
                 label="Initial margin (%)",
                 key=(key := "initial_margin"),
-                value=_default(key, 50.0),
+                value=_default(key, exp.exchange.initial_margin),
                 min_value=0.0,
                 max_value=100.0,
                 step=5.0,
@@ -1168,7 +1160,7 @@ with tab6:
             maintenance_margin = col2.number_input(
                 label="Maintenance margin (%)",
                 key=(key := "maintenance_margin"),
-                value=_default(key, 25.0),
+                value=_default(key, exp.exchange.maintenance_margin),
                 min_value=0.0,
                 max_value=100.0,
                 step=5.0,
@@ -1183,7 +1175,7 @@ with tab6:
             margin_interest = st.number_input(
                 label="Margin interest rate (% annual)",
                 key=(key := "margin_interest"),
-                value=_default(key, 0.0),
+                value=_default(key, exp.exchange.margin_interest),
                 min_value=0.0,
                 max_value=100.0,
                 step=0.5,
@@ -1195,7 +1187,7 @@ with tab6:
                 ),
             )
         else:
-            max_leverage = 1.0
+            max_leverage = exp.exchange.max_leverage
 
     with st.container(border=True):
         st.markdown("**Short selling**")
@@ -1203,7 +1195,7 @@ with tab6:
         allow_short_selling = st.toggle(
             label="Allow short selling",
             key=(key := "allow_short_selling"),
-            value=_default(key, fallback=True),
+            value=_default(key, fallback=exp.exchange.allow_short_selling),
             on_change=lambda k=key: _persist(k),
             help=(
                 "Safety guardrail for short positions. When enabled (default), the strategy "
@@ -1217,7 +1209,7 @@ with tab6:
             borrow_rate = st.number_input(
                 label="Borrow rate (% annual)",
                 key=(key := "borrow_rate"),
-                value=_default(key, 0.0),
+                value=_default(key, exp.exchange.borrow_rate),
                 min_value=0.0,
                 max_value=100.0,
                 step=0.5,
@@ -1235,7 +1227,7 @@ with tab6:
         max_position_size = st.number_input(
             label="Max position size (% of portfolio)",
             key=(key := "max_position_size"),
-            value=_default(key, 100),
+            value=_default(key, exp.exchange.max_position_size),
             min_value=1,
             max_value=100,
             step=5,
@@ -1255,7 +1247,7 @@ with tab6:
             label="Foreign currency handling",
             key=(key := "conversion_mode"),
             options=variants,
-            index=variants.index(_default(key, CurrencyConversionMode.get_default())),
+            index=variants.index(_default(key, exp.exchange.conversion_mode)),
             format_func=lambda x: x.name,
             on_change=lambda k=key: _persist(k),
             help=(
@@ -1317,11 +1309,11 @@ with tab7:
 
         warmup_period = st.number_input(
             label="Warmup period (bars)",
-            key="warmup_period",
+            key=(key := "warmup_period"),
+            value=_default(key, exp.engine.warmup_period),
             min_value=0,
-            value=_default("warmup_period", 0),
             step=1,
-            on_change=lambda: _persist("warmup_period"),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Number of initial bars to skip before the strategy starts executing. "
                 "During the warmup window indicators are computed but no orders are placed. "
@@ -1331,9 +1323,9 @@ with tab7:
 
         trade_on_close = st.toggle(
             label="Trade on close",
-            key="trade_on_close",
-            value=_default("trade_on_close", fallback=False),
-            on_change=lambda: _persist("trade_on_close"),
+            key=(Key := "trade_on_close"),
+            value=_default(key, fallback=exp.engine.trade_on_close),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "When enabled, orders are filled at the current bar's close price. "
                 "When disabled (default), orders are filled at the next bar's open price, "
@@ -1346,13 +1338,13 @@ with tab7:
 
         risk_free_rate = st.number_input(
             label="Risk-free rate (%)",
-            key="risk_free_rate",
+            key=(key := "risk_free_rate"),
+            value=_default(key, exp.engine.risk_free_rate),
             min_value=0.0,
             max_value=100.0,
-            value=_default("risk_free_rate", 0.0),
             step=0.1,
             format="%.2f",
-            on_change=lambda: _persist("risk_free_rate"),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Annualized risk-free rate used for computing the Sharpe ratio and other "
                 "risk-adjusted performance metrics."
@@ -1364,7 +1356,7 @@ with tab7:
             key="benchmark",
             placeholder="e.g. SPY",
             max_chars=20,
-            on_change=lambda: _persist("benchmark"),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Optional benchmark ticker for relative performance comparison. Leave empty "
                 "to skip benchmark tracking."
@@ -1376,9 +1368,9 @@ with tab7:
 
         exclusive_orders = st.toggle(
             label="Exclusive orders",
-            key="exclusive_orders",
-            value=_default("exclusive_orders", fallback=False),
-            on_change=lambda: _persist("exclusive_orders"),
+            key=(key := "exclusive_orders"),
+            value=_default(key, fallback=exp.engine.exclusive_orders),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "When enabled, submitting a new order automatically cancels all pending "
                 "orders. Useful for strategies that should only have one active order at a time."
@@ -1387,12 +1379,12 @@ with tab7:
 
         random_seed = st.number_input(
             label="Random seed",
-            key="random_seed",
+            key=(key := "random_seed"),
+            value=_default(key),
             min_value=0,
-            value=_default("random_seed"),
             step=1,
             placeholder="Leave empty for non-deterministic",
-            on_change=lambda: _persist("random_seed"),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Fixed seed for the random number generator to ensure reproducible results. "
                 "Leave empty for non-deterministic execution."
@@ -1405,11 +1397,11 @@ with tab7:
         variants = EmptyBarPolicy.variants()
         empty_bar_policy = st.selectbox(
             label="Empty bar policy",
-            key="empty_bar_policy",
+            key=(key := "empty_bar_policy"),
             options=variants,
+            index=variants.index(_default(key, exp.engine.empty_bar_policy)),
             format_func=lambda x: x.name,
-            index=variants.index(_default("empty_bar_policy", EmptyBarPolicy.get_default())),
-            on_change=lambda: _persist("empty_bar_policy"),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "How to handle bars with no trading activity (e.g. market closures during "
                 "intraday backtests, holidays or illiquid periods).\n\n"

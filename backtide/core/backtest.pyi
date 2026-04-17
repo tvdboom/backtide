@@ -28,10 +28,10 @@ class CodeSnippet:
 
     Attributes
     ----------
-    name : str
+    name : str, default=""
         Human-readable label for the snippet.
 
-    code : str
+    code : str, default=""
         Python source code.
 
     See Also
@@ -180,22 +180,22 @@ class DataExpConfig:
 
     Attributes
     ----------
-    instrument_type : str | [InstrumentType]
+    instrument_type : str | [InstrumentType], default="stocks"
         The category of financial instrument.
 
-    symbols : list[str]
+    symbols : list[str], default=[]
         Ticker symbols included in the backtest.
 
-    full_history : bool
+    full_history : bool, default=True
         If `True`, use the maximum available history for every symbol.
 
-    start_date : str | None
+    start_date : str | None, default=None
         ISO-8601 start date. Ignored when `full_history` is `True`.
 
-    end_date : str | None
+    end_date : str | None, default=None
         ISO-8601 end date.
 
-    interval : str | [Interval]
+    interval : str | [Interval], default="1d"
         Bar interval.
 
     See Also
@@ -276,25 +276,25 @@ class EngineExpConfig:
 
     Attributes
     ----------
-    warmup_period : int
+    warmup_period : int, default=0
         Bars to skip before the strategy starts.
 
-    trade_on_close : bool
+    trade_on_close : bool, default=False
         Fill orders at the close price of the current bar.
 
-    risk_free_rate : float
+    risk_free_rate : float, default=0.0
         Annualised risk-free rate for metrics.
 
-    benchmark : str
+    benchmark : str, default=""
         Optional benchmark ticker symbol.
 
-    exclusive_orders : bool
+    exclusive_orders : bool, default=False
         Cancel pending orders when a new order is submitted.
 
-    random_seed : int | None
+    random_seed : int | None, default=None
         Fixed RNG seed for reproducibility.
 
-    empty_bar_policy : str | [EmptyBarPolicy]
+    empty_bar_policy : str | [EmptyBarPolicy], default="forward_fill"
         How to handle bars with no data.
 
     See Also
@@ -335,58 +335,58 @@ class ExchangeExpConfig:
 
     Attributes
     ----------
-    commission_type : str | [CommissionType]
+    commission_type : str | [CommissionType], default="percentage"
         Fee structure applied to every executed order.
 
-    commission_pct : float
+    commission_pct : float, default=0.1
         Percentage commission per trade.
 
-    commission_fixed : float
+    commission_fixed : float, default=0.0
         Fixed commission per trade.
 
-    slippage : float
+    slippage : float, default=0.05
         Simulated market-impact percentage.
 
-    allowed_order_types : list[str | [OrderType]]
+    allowed_order_types : list[str | [OrderType]], default=["market"]
         Which order types the engine accepts.
 
-    partial_fills : bool
+    partial_fills : bool, default=False
         Whether to simulate partial order fills.
 
-    allow_margin : bool
+    allow_margin : bool, default=True
         Whether margin trading is enabled.
 
-    max_leverage : float
+    max_leverage : float, default=1.0
         Maximum leverage ratio.
 
-    initial_margin : float
+    initial_margin : float, default=50.0
         Initial margin percentage.
 
-    maintenance_margin : float
+    maintenance_margin : float, default=25.0
         Maintenance margin percentage.
 
-    margin_interest : float
+    margin_interest : float, default=0.0
         Annual interest rate on borrowed funds.
 
-    allow_short_selling : bool
+    allow_short_selling : bool, default=True
         Whether short selling is permitted.
 
-    borrow_rate : float
+    borrow_rate : float, default=0.0
         Annual borrow cost for short positions.
 
-    max_position_size : int
+    max_position_size : int, default=100
         Max allocation to one position (% of portfolio).
 
-    conversion_mode : str | [CurrencyConversionMode]
+    conversion_mode : str | [CurrencyConversionMode], default="immediate"
         How foreign-currency proceeds are converted.
 
-    conversion_threshold : float | None
+    conversion_threshold : float | None, default=None
         Threshold for `HoldUntilThreshold` mode.
 
-    conversion_period : str | [ConversionPeriod] | None
+    conversion_period : str | [ConversionPeriod] | None, default=None
         Period for `EndOfPeriod` mode.
 
-    conversion_interval : int | None
+    conversion_interval : int | None, default=None
         Bar count for `CustomInterval` mode.
 
     See Also
@@ -505,13 +505,13 @@ class GeneralExpConfig:
 
     Attributes
     ----------
-    name : str
+    name : str, default=""
         A human-readable name to identify this experiment.
 
-    tags : list[str]
-        Descriptive tags for organising and filtering experiments.
+    tags : list[str], default=[]
+        Descriptive tags for organizing and filtering experiments.
 
-    description : str
+    description : str, default=""
         Free-text description of the experiment.
 
     See Also
@@ -548,10 +548,10 @@ class IndicatorExpConfig:
 
     Attributes
     ----------
-    builtin_indicators : list[str | [IndicatorType]]
+    builtin_indicators : list[str | [IndicatorType]], default=[]
         Built-in indicators to compute.
 
-    custom_indicators : list[[CodeSnippet]]
+    custom_indicators : list[[CodeSnippet]], default=[]
         User-defined indicator code snippets.
 
     See Also
@@ -693,13 +693,13 @@ class PortfolioExpConfig:
 
     Attributes
     ----------
-    initial_cash : float
+    initial_cash : int, default=10000
         Cash balance at the start of the simulation.
 
-    base_currency : str | [Currency]
+    base_currency : str | [Currency], default="USD"
         ISO 4217 code the portfolio is denominated in.
 
-    starting_positions : dict[str, int]
+    starting_positions : dict[str, int], default={}
         Pre-loaded positions `{symbol: quantity}`.
 
     See Also
@@ -715,7 +715,7 @@ class PortfolioExpConfig:
     """
 
     base_currency: str | Currency
-    initial_cash: float
+    initial_cash: int
     starting_positions: dict[str, int]
 
     def __eq__(self, value, /): ...
@@ -736,10 +736,10 @@ class StrategyExpConfig:
 
     Attributes
     ----------
-    predefined_strategies : list[str | [StrategyType]]
+    predefined_strategies : list[str | [StrategyType]], default=[]
         Built-in strategies to run.
 
-    custom_strategies : list[CodeSnippet]
+    custom_strategies : list[CodeSnippet], default=[]
         User-defined strategy code snippets.
 
     See Also

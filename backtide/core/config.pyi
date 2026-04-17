@@ -31,7 +31,8 @@ class Config:
         Settings that control how market data is fetched and stored.
 
     display : [DisplayConfig]
-        Settings that control how values are presented in the application's frontend.
+        Settings that control how values are presented in the application's
+        frontend.
 
     See Also
     --------

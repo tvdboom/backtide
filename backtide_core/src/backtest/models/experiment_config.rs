@@ -253,7 +253,7 @@ impl DataExpConfig {
 ///
 /// Attributes
 /// ----------
-/// initial_cash : float, default=10000.0
+/// initial_cash : int, default=10000
 ///     Cash balance at the start of the simulation.
 ///
 /// base_currency : str | [Currency], default="USD"
@@ -274,7 +274,7 @@ impl DataExpConfig {
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PortfolioExpConfig {
-    pub initial_cash: f64,
+    pub initial_cash: u64,
     pub base_currency: Currency,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub starting_positions: HashMap<String, i64>,
@@ -283,7 +283,7 @@ pub struct PortfolioExpConfig {
 impl Default for PortfolioExpConfig {
     fn default() -> Self {
         Self {
-            initial_cash: 10_000.0,
+            initial_cash: 10_000,
             base_currency: Currency::default(),
             starting_positions: HashMap::new(),
         }
@@ -297,12 +297,12 @@ impl PortfolioExpConfig {
 
     #[new]
     #[pyo3(signature = (
-        initial_cash: "float" = 10_000.0,
+        initial_cash: "float" = 10_000,
         base_currency: "str | Currency" = Currency::default(),
         starting_positions: "dict[str, int]" = HashMap::new(),
     ))]
     fn new(
-        initial_cash: f64,
+        initial_cash: u64,
         base_currency: Currency,
         starting_positions: HashMap<String, i64>,
     ) -> Self {

@@ -71,7 +71,7 @@ else:
 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
 symbol_d, currency_d = _get_instrument_type_description(instrument_type)
 
-symbols = col1.multiselect(
+symbols = col1.multiselect(  # ty: ignore[no-matching-overload]
     label="Symbols",
     key=(key := "symbols"),
     options=sorted(list(fi) + _default(key, [])),

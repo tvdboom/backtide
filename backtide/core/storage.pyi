@@ -72,7 +72,7 @@ def query_bars(
     *,
     limit=None,
 ) -> pd.DataFrame | pl.DataFrame:
-    """Return stored OHLCV bars as a dataframe, optionally filtered.
+    """Return stored OHLCV bars as a dataframe.
 
     Each row represents a single bar. The dataframe columns are:
     `symbol`, `interval`, `provider`, `open_ts`, `close_ts`,
@@ -82,7 +82,7 @@ def query_bars(
     Parameters
     ----------
     symbol : str | list[str] | None, default=None
-        Filter by symbol. Accepts a single symbol or a list. ``None`` returns all.
+        Filter by symbol. Accepts a single symbol or a list. `None` returns all.
 
     interval : str | Interval | list[str | Interval] | None, default=None
         Filter by bar interval. Accepts a single value or a list.
@@ -91,7 +91,7 @@ def query_bars(
         Filter by data provider. Accepts a single value or a list.
 
     limit : int | None, default=None
-        Maximum number of rows to return. ``None`` means no limit.
+        Maximum number of rows to return. `None` means no limit.
 
     Returns
     -------
@@ -137,13 +137,8 @@ def query_bars_summary() -> pd.DataFrame | pl.DataFrame:
 
     """
 
-def query_dividends(
-    symbol=None,
-    provider=None,
-    *,
-    limit=None,
-) -> pd.DataFrame | pl.DataFrame:
-    """Return stored dividend events as a dataframe, optionally filtered.
+def query_dividends(symbol=None, provider=None, *, limit=None) -> pd.DataFrame | pl.DataFrame:
+    """Return stored dividend events as a dataframe.
 
     Each row represents a single dividend payment. The DataFrame columns
     are: `symbol`, `provider`, `ex_date`, and `amount`.
