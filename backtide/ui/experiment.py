@@ -6,7 +6,7 @@ Description: Run a new backtest page.
 """
 
 import ast
-from datetime import datetime
+from datetime import datetime as dt, timedelta
 import json
 import logging
 import tomllib
@@ -16,6 +16,7 @@ from code_editor import code_editor
 import streamlit as st
 import yaml
 
+from backtide.storage import query_instruments
 from backtide.backtest import (
     CodeSnippet,
     CommissionType,
@@ -42,13 +43,10 @@ from backtide.ui.utils import (
     _clear_state,
     _default,
     _draw_cards,
-    _fmt_number,
     _get_instrument_type_description,
     _get_timezone,
     _list_instruments,
     _persist,
-    _query_bars_summary,
-    _storage_to_card_profiles,
     _to_upper_values,
 )
 from backtide.utils.constants import (
@@ -195,11 +193,11 @@ def _on_config_upload():
         st.session_state["full_history"] = imported.data.full_history
         if not imported.data.full_history:
             if imported.data.start_date:
-                st.session_state["start_date"] = datetime.fromisoformat(
+                st.session_state["start_date"] = dt.fromisoformat(
                     str(imported.data.start_date)
                 ).date()
             if imported.data.end_date:
-                st.session_state["end_date"] = datetime.fromisoformat(
+                st.session_state["end_date"] = dt.fromisoformat(
                     str(imported.data.end_date)
                 ).date()
         st.session_state["interval"] = imported.data.interval
@@ -420,143 +418,83 @@ with tab2:
         help="Select the type of financial instrument you want to backtest.",
     )
 
-    # ── Symbol selection ─────────────────────────────────────────────────────
-
-    _use_storage = st.session_state.get("use_storage", False)
-
-    summary_df = None
-    if _use_storage:
-        summary_df = _query_bars_summary()
-
-        # Metadata lookups (populated below when data exists)
-        name_lookup: dict[str, str] = {}
-        quote_lookup: dict[str, str] = {}
-
-        if summary_df.empty:
-            all_stored_symbols: list[str] = []
-            stored_symbols: list[str] = []
-        else:
-            stored = summary_df[summary_df["instrument_type"] == str(instrument_type).lower()]
-
-            # Build per-symbol metadata lookups (first row per symbol wins)
-            meta = stored.drop_duplicates("symbol").set_index("symbol")
-            name_lookup = meta["name"].to_dict()
-
-            all_stored_symbols = sorted(meta.index.tolist())
-
-            # Filter stored symbols by selected currency
-            if not st.session_state.get("_currency"):
-                st.session_state._currency = "All"
-
-            if (currency := st.session_state.get("_currency", "All")) != "All":
-                quote_lookup = meta["quote"].to_dict()
-                stored_symbols = [
-                    s
-                    for s in all_stored_symbols
-                    if quote_lookup.get(s) == currency or currency in s
-                ]
-            else:
-                stored_symbols = all_stored_symbols
-
-        col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
-
-        symbols = col1.multiselect(
-            label="Symbols",
-            key=(key := "symbols"),
-            options=stored_symbols,
-            format_func=lambda s: f"{s} - {name_lookup[s]}" if name_lookup.get(s) else s,
-            placeholder="Select one or more symbols...",
-            max_selections=MAX_INSTRUMENT_SELECTION,
-            on_change=lambda: _persist("symbols"),
-            help="Symbols that have data stored in the local database.",
-        )
-
-        if not stored_symbols:
-            st.warning(
-                "The database is empty. Head over to the **Download** page to "
-                "fetch some market data first.",
-                icon=":material/warning:",
-            )
-
-        # Build currency options from instrument metadata
-        quotes = sorted(set(q for q in quote_lookup.values() if q))
-        cur_options = ["All", *quotes] if quotes else ["All"]
-
+    if _default("use_storage", False):
+        provider = cfg.data.providers[instrument_type]
+        all_instruments = {x.symbol: x for x in query_instruments(instrument_type, provider)}
     else:
         all_instruments = _list_instruments(instrument_type)
 
-        # Filter instruments based on the selected currency
-        if not st.session_state.get("_currency"):
-            st.session_state._currency = "All"
+    # Filter instruments based on the selected currency
+    if (currency := _default("currency", "All")) != "All":
+        fi = {
+            k: v
+            for k, v in all_instruments.items()
+            if v.base == currency or str(v.quote) == currency
+        }
+    else:
+        fi = all_instruments
 
-        if (currency := st.session_state.get("_currency", "All")) != "All":
-            fi = {
-                k: v
-                for k, v in all_instruments.items()
-                if v.base == currency or str(v.quote) == currency
-            }
-        else:
-            fi = all_instruments
+    col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
+    symbol_d, currency_d = _get_instrument_type_description(instrument_type)
 
-        col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
-        symbol_d, currency_d = _get_instrument_type_description(instrument_type)
+    symbols = col1.multiselect(
+        label="Symbols",
+        key=(key := "symbols"),
+        options=sorted(list(fi) + _default(key, [])),
+        default=_default(key, []),
+        format_func=lambda s: (
+            f"{s} - {fi[s].name}" if s in fi and fi[s].instrument_type.is_equity else s
+        ),
+        placeholder="Select one or more symbols...",
+        max_selections=MAX_INSTRUMENT_SELECTION,
+        accept_new_options=not _default("use_storage", False),
+        on_change=lambda: (_to_upper_values("symbols"), _persist("symbols")),
+        help=symbol_d,
+    )
 
-        symbols = col1.multiselect(
-            label="Symbols",
-            key=(key := "symbols"),
-            options=sorted(list(fi) + _default(key, [])),
-            default=_default(key, []),
-            format_func=lambda s: (
-                f"{s} - {fi[s].name}" if s in fi and fi[s].instrument_type.is_equity else s
-            ),
-            placeholder="Select one or more symbols...",
-            max_selections=MAX_INSTRUMENT_SELECTION,
-            accept_new_options=True,
-            on_change=lambda: (_to_upper_values("symbols"), _persist("symbols")),
-            help=symbol_d,
-        )
-
-        # Symbols can become 'symbol - name' when changing currency -> extract the symbol
-        symbols = [s.split(" - ")[0] if isinstance(s, str) else s for s in symbols]
-
-        profiles = direct = None
-        interval = _default("interval", Interval.get_default())
-        try:
-            if symbols:
-                profiles = resolve_profiles(symbols, instrument_type, interval, verbose=False)
-                direct = profiles[: len(symbols)]  # Direct profiles (no legs)
-        except RuntimeError as ex:
-            st.error(ex, icon=":material/error:")
+    # Symbols can become 'symbol - name' when changing currency -> extract the symbol
+    symbols = [s.split(" - ")[0] if isinstance(s, str) else s for s in symbols]
 
     options = ["All", *sorted(dict.fromkeys(str(x.quote) for x in all_instruments.values()))]
     col2.selectbox(
         label="Currency",
         key=(key := "currency"),
         options=options,
-        index=options.index(_default(key)),
+        index=options.index(_default(key, "All")),
         placeholder="All",
         on_change=lambda k=key: _persist(k),
         help=currency_d,
     )
 
-    # ── Use stored data toggle (placed after the symbol selector) ────────────
+    profiles = direct = None
+    interval = _default("interval", Interval.get_default())
+    try:
+        if symbols:
+            profiles = resolve_profiles(symbols, instrument_type, interval, verbose=False)
+            direct = profiles[: len(symbols)]  # Direct profiles (no legs)
+    except RuntimeError as ex:
+        st.error(ex, icon=":material/error:")
+
+    if not all_instruments:
+        st.info(
+            "There database is empty. Head over to the **Download** page to fetch some market data.",
+            icon=":material/info:",
+        )
 
     use_storage = st.toggle(
         label="Use stored data",
-        key="use_storage",
-        value=_default("use_storage", fallback=False),
-        on_change=lambda: (
+        key=(key := "use_storage"),
+        value=_default(key, fallback=False),
+        on_change=lambda k=key: (
             _clear_state("symbols", "start_date", "end_date"),
-            _persist("use_storage"),
+            _persist(k),
         ),
         help=(
-            "When enabled, the backtest uses whatever data is already saved in the local "
-            "database for the selected symbols and interval. No new data is downloaded, and "
-            "the date range is determined entirely by what is available in storage."
+            "When enabled, the backtest only uses data currently saved in the local "
+            "database for the selected symbols and interval. No new data is downloaded. "
+            "The date range is determined entirely by what is available in storage."
         ),
     )
-
-    # ── History / date range ─────────────────────────────────────────────────
 
     full_history = st.toggle(
         label="Use full available history",
@@ -569,40 +507,29 @@ with tab2:
         ),
     )
 
-    if not full_history:
-        # Compute date range bounds from storage when applicable
-        if use_storage and summary_df is not None and not summary_df.empty and symbols:
-            sym_strs = [s if isinstance(s, str) else getattr(s, "symbol", str(s)) for s in symbols]
-            it_str = str(instrument_type).lower()
-            sym_rows = summary_df[
-                (summary_df["symbol"].astype(str).isin(sym_strs))
-                & (summary_df["instrument_type"].astype(str).str.lower() == it_str)
-            ]
-            if not sym_rows.empty:
-                storage_min = datetime.fromtimestamp(int(sym_rows["first_ts"].min()), tz=tz).date()
-                storage_max = min(
-                    datetime.fromtimestamp(int(sym_rows["last_ts"].max()), tz=tz).date(),
-                    datetime.now(tz=tz).date(),
-                )
-            else:
-                storage_min = datetime(2000, 1, 1, tzinfo=tz).date()
-                storage_max = datetime.now(tz=tz).date()
-            min_date = storage_min
-            max_date = storage_max
-            default_start = storage_min
-        else:
-            min_date = "2000-01-01"
-            max_date = datetime.now(tz=tz).date()
-            default_start = None
+    today = dt.now(tz=tz).date()
+    if direct:
+        earliest_ts = dt.fromtimestamp(min(min(p.earliest_ts.values()) for p in direct), tz=tz).date()
+        latest_ts = dt.fromtimestamp(max(max(p.latest_ts.values()) for p in direct), tz=tz).date()
 
+        # Correct latest_ts since some providers return closing bar at 00:00 (so tomorrow)
+        latest_ts = min(latest_ts, today)
+    else:
+        earliest_ts = dt(2000, 1, 1, tzinfo=tz).date()
+        latest_ts = today
+
+    if full_history:
+        start_ts = earliest_ts
+        end_ts = latest_ts
+    else:
         col1, col2 = st.columns(2)
 
-        start_date = col1.date_input(
+        start_ts = col1.date_input(
             label="Start date",
             key=(key := "start_date"),
-            value=_default(key, default_start),
-            min_value=min_date,
-            max_value=max_date,
+            value=_default(key, earliest_ts),
+            min_value=earliest_ts,
+            max_value=latest_ts if use_storage else "today",
             format=cfg.display.date_format,
             on_change=lambda k=key: _persist(k),
             help=(
@@ -611,21 +538,16 @@ with tab2:
             ),
         )
 
-        end_date = col2.date_input(
+        end_ts = col2.date_input(
             label="End date",
             key=(key := "end_date"),
-            value=_default(key, max_date if use_storage else "today"),
-            min_value=start_date,
-            max_value=max_date if use_storage else "today",
+            value=_default(key, latest_ts if use_storage else "today"),
+            min_value=start_ts + timedelta(days=1),
+            max_value=latest_ts if use_storage else "today",
             format=cfg.display.date_format,
             on_change=lambda k=key: _persist(k),
             help="Run backtest simulation up to this date.",
         )
-    else:
-        start_date = None
-        end_date = None
-
-    # ── Interval ─────────────────────────────────────────────────────────────
 
     interval = st.pills(
         label="Interval",
@@ -642,42 +564,26 @@ with tab2:
         ),
     )
 
-    # ── Storage cards ────────────────────────────────────────────────────────
+    if profiles:
+        st.divider()
 
-    if use_storage and symbols and summary_df is not None and not summary_df.empty:
-        storage_profiles = _storage_to_card_profiles(summary_df, symbols, instrument_type)
-        if storage_profiles:
-            with st.expander("Stored data details", icon=":material/database:", expanded=False):
-                html, n_bars = _draw_cards(
-                    storage_profiles,
-                    cfg=cfg,
-                    tz=tz,
-                    instrument_type=instrument_type,
-                    full_history=full_history,
-                    start_ts=start_date,
-                    end_ts=end_date,
-                )
-                st.html(_CARD_CSS + html)
-
-            col1, col2 = st.columns(2)
-            col1.metric(
-                ":material/candlestick_chart: Estimated bars",
-                _fmt_number(n_bars),
-                border=True,
+        with st.expander(
+                label="Backtest details",
+                key=(key := "details_expander"),
+                icon=":material/candlestick_chart:",
+                expanded=bool(_default(key)),
+                on_change=lambda k=key: _persist(k),
+        ):
+            html, n_bars = _draw_cards(
+                profiles,
+                cfg=cfg,
+                tz=tz,
+                instrument_type=instrument_type,
+                full_history=full_history,
+                start_ts=start_ts,
+                end_ts=end_ts,
             )
-
-            missing = [
-                (s if isinstance(s, str) else getattr(s, "symbol", str(s)))
-                for s in symbols
-                if (s if isinstance(s, str) else getattr(s, "symbol", str(s)))
-                not in {p.symbol for p in storage_profiles}
-            ]
-            if missing:
-                st.warning(
-                    f"No stored data found for: **{', '.join(missing)}**. "
-                    f"Download them first from the **Download** page.",
-                    icon=":material/warning:",
-                )
+            st.html(_CARD_CSS + html)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1066,22 +972,20 @@ with tab5:
 # ─────────────────────────────────────────────────────────────────────────────
 
 with tab6:
-    base_cur = st.session_state.get("base_currency", Currency.get_default())
-
     with st.container(border=True):
         st.markdown("**Commission**")
 
-        col_radio, col_inputs = st.columns([2, 3], vertical_alignment="top")
+        col1, col2 = st.columns([2, 3], vertical_alignment="top")
 
-        with col_radio:
+        with col1:
             variants = CommissionType.variants()
             commission_mode = st.radio(
                 label="Commission type",
-                key="commission_type",
+                key=(key := "commission_type"),
                 options=variants,
-                index=variants.index(_default("commission_type", CommissionType.get_default())),
+                index=variants.index(_default(key, CommissionType.get_default())),
                 horizontal=False,
-                on_change=lambda: _persist("commission_type"),
+                on_change=lambda k=key: _persist(k),
                 help=(
                     "How trading commissions are calculated. **Percentage** charges a fraction "
                     "of the trade notional value. **Fixed amount** charges a flat commission per "
@@ -1090,76 +994,55 @@ with tab6:
                 ),
             )
 
-        is_pct = commission_mode == CommissionType("Percentage")
-        is_fixed = commission_mode == CommissionType("Fixed")
+        commission_pct_widget = lambda: st.number_input(
+            label="Commission (% per trade)",
+            key=(key := "commission_pct"),
+            value=_default(key, 0.1),
+            min_value=0.0,
+            max_value=100.0,
+            step=0.01,
+            format="%.2f",
+            on_change=lambda k=key: _persist(k),
+            help=(
+                "Commission charged per executed order, applied as a percentage of "
+                "the trade's notional value."
+            ),
+        )
 
-        with col_inputs:
-            if is_pct:
-                commission_pct = st.number_input(
-                    label="Commission (% per trade)",
-                    key="commission_pct",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=_default("commission_pct", 0.1),
-                    step=0.01,
-                    format="%.2f",
-                    on_change=lambda: _persist("commission_pct"),
-                    help=(
-                        "Commission charged per executed order, applied as a percentage of "
-                        "the trade's notional value."
-                    ),
-                )
+        commission_fixed_widget = lambda: st.number_input(
+            label=f"Commission ({base_currency} per trade)",
+            key=(key := "commission_fixed"),
+            value=_default(key, 1.0),
+            min_value=0.0,
+            step=0.5,
+            format="%.2f",
+            on_change=lambda k=key: _persist(k),
+            help=f"Flat commission charged per executed order in {base_currency}.",
+        )
+
+        with col2:
+            if commission_mode == CommissionType.Percentage:
+                commission_pct = commission_pct_widget()
                 commission_fixed = 0.0
-            elif is_fixed:
-                commission_fixed = st.number_input(
-                    label=f"Commission ({base_cur} per trade)",
-                    key="commission_fixed",
-                    min_value=0.0,
-                    value=_default("commission_fixed", 1.0),
-                    step=0.5,
-                    format="%.2f",
-                    on_change=lambda: _persist("commission_fixed"),
-                    help=f"Flat commission charged per executed order in {base_cur}.",
-                )
+            elif commission_mode == CommissionType.Fixed:
+                commission_fixed = commission_fixed_widget()
                 commission_pct = 0.0
             else:
-                commission_pct = st.number_input(
-                    label="Commission (% per trade)",
-                    key="commission_pct",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=_default("commission_pct", 0.1),
-                    step=0.01,
-                    format="%.2f",
-                    on_change=lambda: _persist("commission_pct"),
-                    help="Percentage of the commission, applied to the trade's notional value.",
-                )
-                commission_fixed = st.number_input(
-                    label=f"Commission ({base_cur} per trade)",
-                    key="commission_fixed",
-                    min_value=0.0,
-                    value=_default("commission_fixed", 1.0),
-                    step=0.5,
-                    format="%.2f",
-                    on_change=lambda: _persist("commission_fixed"),
-                    help=(
-                        f"Fixed portion of the commission in {base_cur}, added on top of the "
-                        "percentage commission."
-                    ),
-                )
+                commission_pct = commission_pct_widget()
+                commission_fixed = commission_fixed_widget()
 
     with st.container(border=True):
         st.markdown("**Slippage**")
 
         slippage = st.number_input(
             label="Slippage (% of price per trade)",
-            key="slippage",
+            key=(key := "slippage"),
+            value=_default(key, 0.05),
             min_value=0.0,
             max_value=100.0,
-            value=_default("slippage", 0.05),
             step=0.01,
             format="%.2f",
-            on_change=lambda: _persist("slippage"),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Simulated market impact. Each fill price is moved adversely by this percentage "
                 "(buys filled higher, sells filled lower)."
@@ -1171,10 +1054,10 @@ with tab6:
 
         allowed_order_types = st.multiselect(
             label="Allowed order types",
-            key="allowed_order_types",
+            key=(key := "allowed_order_types"),
             options=OrderType.variants(),
-            default=_default("allowed_order_types", [OrderType.get_default()]),
-            on_change=lambda: _persist("allowed_order_types"),
+            default=_default(key, [OrderType.get_default()]),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Which order types the engine accepts during the simulation. "
                 "**Market** orders fill immediately at the current price. "
@@ -1188,9 +1071,9 @@ with tab6:
 
         partial_fills = st.toggle(
             label="Partial fills",
-            key="partial_fills",
-            value=_default("partial_fills", fallback=False),
-            on_change=lambda: _persist("partial_fills"),
+            key=(key := "partial_fills"),
+            value=_default(key, fallback=False),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Simulate partial order fills based on available bar volume. When disabled, "
                 "orders are filled entirely or not at all."
@@ -1204,9 +1087,9 @@ with tab6:
 
         enable_margin = col_toggle.toggle(
             label="Allow margin trading",
-            key="allow_margin",
-            value=_default("allow_margin", fallback=True),
-            on_change=lambda: _persist("allow_margin"),
+            value=_default(key, fallback=True),
+            key=(key := "allow_margin"),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Safety guardrail for margin usage. When enabled (default), the strategy "
                 "may use leverage if it chooses to — the actual decision is made in your "
@@ -1218,13 +1101,13 @@ with tab6:
         if enable_margin:
             max_leverage = col_input.number_input(
                 label="Max leverage",
-                key="max_leverage",
+                key=(key := "max_leverage"),
+                value=_default(key, 1.0),
                 min_value=1.0,
                 max_value=10.0,
-                value=_default("max_leverage", 1.0),
                 step=0.5,
                 format="%.1f",
-                on_change=lambda: _persist("max_leverage"),
+                on_change=lambda k=key: _persist(k),
                 help=(
                     "Maximum leverage ratio. A value of 2.0 means the strategy can borrow "
                     "up to 1x the portfolio value on top of its own capital. Exceeding this "
@@ -1232,17 +1115,17 @@ with tab6:
                 ),
             )
 
-            col_im, col_mm = st.columns(2)
+            col1, col2 = st.columns(2)
 
-            initial_margin = col_im.number_input(
+            initial_margin = col1.number_input(
                 label="Initial margin (%)",
-                key="initial_margin",
+                key=(key := "initial_margin"),
+                value=_default(key, 50.0),
                 min_value=0.0,
                 max_value=100.0,
-                value=_default("initial_margin", 50.0),
                 step=5.0,
                 format="%.1f",
-                on_change=lambda: _persist("initial_margin"),
+                on_change=lambda k=key: _persist(k),
                 help=(
                     "Minimum equity as a percentage of position value required when opening "
                     "a new leveraged position. For example, 50% means you must put up at "
@@ -1250,15 +1133,15 @@ with tab6:
                 ),
             )
 
-            maintenance_margin = col_mm.number_input(
+            maintenance_margin = col2.number_input(
                 label="Maintenance margin (%)",
-                key="maintenance_margin",
+                key=(key := "maintenance_margin"),
+                value=_default(key, 25.0),
                 min_value=0.0,
                 max_value=100.0,
-                value=_default("maintenance_margin", 25.0),
                 step=5.0,
                 format="%.1f",
-                on_change=lambda: _persist("maintenance_margin"),
+                on_change=lambda k=key: _persist(k),
                 help=(
                     "Minimum equity as a percentage of position value that must be maintained. "
                     "If equity drops below this threshold a margin call is triggered."
@@ -1267,13 +1150,13 @@ with tab6:
 
             margin_interest = st.number_input(
                 label="Margin interest rate (% annual)",
-                key="margin_interest",
+                key=(key := "margin_interest"),
+                value=_default(key, 0.0),
                 min_value=0.0,
                 max_value=100.0,
-                value=_default("margin_interest", 0.0),
                 step=0.5,
                 format="%.2f",
-                on_change=lambda: _persist("margin_interest"),
+                on_change=lambda k=key: _persist(k),
                 help=(
                     "Annualized interest rate charged on borrowed funds. Accrued daily and "
                     "deducted from the portfolio cash balance."
@@ -1287,9 +1170,9 @@ with tab6:
 
         allow_short_selling = st.toggle(
             label="Allow short selling",
-            key="allow_short_selling",
-            value=_default("allow_short_selling", fallback=True),
-            on_change=lambda: _persist("allow_short_selling"),
+            key=(key := "allow_short_selling"),
+            value=_default(key, fallback=True),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Safety guardrail for short positions. When enabled (default), the strategy "
                 "may open short positions if it chooses to - the actual decision is made in "
@@ -1301,13 +1184,13 @@ with tab6:
         if allow_short_selling:
             borrow_rate = st.number_input(
                 label="Borrow rate (% annual)",
-                key="borrow_rate",
+                key=(key := "borrow_rate"),
+                value=_default(key, 0.0),
                 min_value=0.0,
                 max_value=100.0,
-                value=_default("borrow_rate", 0.0),
                 step=0.5,
                 format="%.2f",
-                on_change=lambda: _persist("borrow_rate"),
+                on_change=lambda k=key: _persist(k),
                 help=(
                     "Annualized cost of borrowing shares for short positions. Accrued daily "
                     "and deducted from the portfolio cash balance."
@@ -1319,12 +1202,12 @@ with tab6:
 
         max_position_size = st.number_input(
             label="Max position size (% of portfolio)",
-            key="max_position_size",
+            key=(key := "max_position_size"),
+            value=_default(key, 100),
             min_value=1,
             max_value=100,
-            value=_default("max_position_size", 100),
             step=5,
-            on_change=lambda: _persist("max_position_size"),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Maximum allocation to a single position as a percentage of total "
                 "portfolio value. Applies to both long and short positions. Set to "
@@ -1338,13 +1221,11 @@ with tab6:
         variants = CurrencyConversionMode.variants()
         conversion_mode = st.selectbox(
             label="Foreign currency handling",
-            key="conversion_mode",
+            key=(key := "conversion_mode"),
             options=variants,
+            index=variants.index(_default(key, CurrencyConversionMode.get_default())),
             format_func=lambda x: x.name,
-            index=variants.index(
-                _default("conversion_mode", CurrencyConversionMode.get_default())
-            ),
-            on_change=lambda: _persist("conversion_mode"),
+            on_change=lambda k=key: _persist(k),
             help=(
                 "Determines how proceeds in a foreign currency are converted back to "
                 "the base currency. **Immediately** converts at the time of the trade. "
@@ -1355,43 +1236,41 @@ with tab6:
             ),
         )
 
-        if conversion_mode == CurrencyConversionMode("HoldUntilThreshold"):
+        if conversion_mode == CurrencyConversionMode.HoldUntilThreshold:
             conversion_threshold = st.number_input(
-                label=f"Conversion threshold ({base_cur})",
-                key="conversion_threshold",
+                label=f"Conversion threshold ({base_currency})",
+                key=(key := "conversion_threshold"),
+                value=_default(key, 1_000.0),
                 min_value=0.0,
-                value=_default("conversion_threshold", 1_000.0),
                 step=100.0,
                 format="%.2f",
-                on_change=lambda: _persist("conversion_threshold"),
+                on_change=lambda k=key: _persist(k),
                 help=(
-                    f"Foreign currency balances are converted to {base_cur} once their "
-                    f"equivalent value reaches this threshold."
+                    f"Foreign currency balances are converted to {base_currency} "
+                    "once their equivalent value reaches this threshold."
                 ),
             )
-        elif conversion_mode == CurrencyConversionMode("EndOfPeriod"):
+        elif conversion_mode == CurrencyConversionMode.EndOfPeriod:
             variants = ConversionPeriod.variants()
             conversion_period = st.selectbox(
                 label="Conversion period",
-                key="conversion_period",
+                key=(key := "conversion_period"),
                 options=variants,
-                index=variants.index(
-                    _default("conversion_period", ConversionPeriod.get_default())
-                ),
-                on_change=lambda: _persist("conversion_period"),
+                index=variants.index(_default(key, ConversionPeriod.get_default())),
+                on_change=lambda k=key: _persist(k),
                 help="How often foreign currency balances are converted to the base currency.",
             )
-        elif conversion_mode == CurrencyConversionMode("CustomInterval"):
+        elif conversion_mode == CurrencyConversionMode.CustomInterval:
             conversion_interval = st.number_input(
                 label="Conversion interval (bars)",
-                key="conversion_interval",
+                key=(key := "conversion_interval"),
+                value=_default(key, 5),
                 min_value=1,
-                value=_default("conversion_interval", 5),
                 step=1,
-                on_change=lambda: _persist("conversion_interval"),
+                on_change=lambda k=key: _persist(k),
                 help=(
-                    "Number of bars between automatic conversions of foreign currency "
-                    "balances to the base currency."
+                    "Number of bars between automatic conversions of "
+                    "foreign currency balances to the base currency."
                 ),
             )
 
@@ -1518,24 +1397,13 @@ if st.button(
     label="Run experiment",
     icon=":material/play_circle:",
     type="primary",
-    disabled=not (symbols and interval and (full_history or (start_date and end_date))),
+    disabled=not (profiles and start_ts and latest_ts),
     shortcut="Enter",
     width="stretch",
 ):
-    if end_date and end_date > datetime.now().date():
-        st.error("End date cannot be in the future.", icon=":material/error:")
-    elif start_date and end_date and start_date > end_date:
-        st.error("Start date must be equal or prior to end date.", icon=":material/error:")
-    else:
-        display_name = experiment_name or st.session_state.experiment_id
-        base_cur = st.session_state.get("base_currency", Currency.get_default())
-        source = "stored data" if use_storage else "full history"
-        date_range = f"{start_date} → {end_date}" if not full_history else source
-        with st.spinner(f'Running "{display_name}"...'):
-            # TODO: implement backtest execution logic
-            st.success(
-                f"Backtest **{display_name}** queued successfully — "
-                f"{len(symbols)} symbol(s), {date_range}, "
-                f"starting cash {base_cur} {starting_amount:,.2f}.",
-                icon=":material/check_circle:",
-            )
+    with st.spinner(f"Running experiment {experiment_name}..."):
+        # TODO: implement backtest execution logic
+        st.success(
+            f"Backtest **{experiment_name}** queued successfully.",
+            icon=":material/check_circle:",
+        )

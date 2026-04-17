@@ -110,6 +110,7 @@ class ConversionPeriod:
     Day: ClassVar[ConversionPeriod]
     Month: ClassVar[ConversionPeriod]
     Week: ClassVar[ConversionPeriod]
+    Year: ClassVar[ConversionPeriod]
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...

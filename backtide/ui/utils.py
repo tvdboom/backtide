@@ -32,31 +32,35 @@ from backtide.utils.constants import MAX_PRELOADED_INSTRUMENTS, MOMENT_TO_STRFTI
 from backtide.utils.utils import _to_list
 
 
-def _get_timezone(tz: str | None) -> ZoneInfo:
-    """Return the timezone from config or local."""
-    if tz:
-        return ZoneInfo(tz)
-    else:
-        return get_localzone()
-
-
 def _clear_state(*keys: str):
     """Remove `keys` from Streamlit's state (including shadow keys)."""
     for k in keys:
         st.session_state[k] = []
         st.session_state.pop(f"_{k}", None)
 
-
-def _persist(*keys: str):
-    """Copy widget values to shadow keys so they survive page navigation."""
-    for k in keys:
-        if k in st.session_state:
-            st.session_state[f"_{k}"] = st.session_state[k]
-
-
 def _default(key: str, fallback: Any = None) -> Any:
     """Return the persisted shadow value for *key*, or *fallback*."""
     return st.session_state.get(f"_{key}", fallback)
+
+
+def _fmt_number(n: float) -> str:
+    """Nicely format a number."""
+    if n > 10_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    elif n > 1_000_000:
+        return f"{n / 1_000_000:.2f}M"
+    elif n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    else:
+        return str(n)
+
+
+def _get_timezone(tz: str | None) -> ZoneInfo:
+    """Return the timezone from config or local."""
+    if tz:
+        return ZoneInfo(tz)
+    else:
+        return get_localzone()
 
 
 def _get_instrument_type_description(instrument_type: InstrumentType) -> tuple[str, str]:
@@ -88,18 +92,6 @@ def _get_instrument_type_description(instrument_type: InstrumentType) -> tuple[s
             currency_description = "Filter the preloaded symbols by their quote currency."
 
     return instrument_description, currency_description
-
-
-def _fmt_number(n: float) -> str:
-    """Nicely format a number."""
-    if n > 10_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    elif n > 1_000_000:
-        return f"{n / 1_000_000:.2f}M"
-    elif n >= 1_000:
-        return f"{n / 1_000:.1f}k"
-    else:
-        return str(n)
 
 
 def _get_logokit_url(
@@ -161,6 +153,13 @@ def _parse_date(ts: int, fmt: str, tz: ZoneInfo) -> str:
     """Format a Unix timestamp into the user's date format."""
     fmt = _moment_to_strftime(fmt)
     return dt.fromtimestamp(ts, tz=tz).strftime(fmt)
+
+
+def _persist(*keys: str):
+    """Copy widget values to shadow keys so they survive page navigation."""
+    for k in keys:
+        if k in st.session_state:
+            st.session_state[f"_{k}"] = st.session_state[k]
 
 
 def _to_pandas(df: Any) -> pd.DataFrame:

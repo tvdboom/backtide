@@ -7,6 +7,9 @@ use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use crate::data::models::exchange::Exchange;
+use crate::data::models::instrument::Instrument;
+use crate::data::models::instrument_type::InstrumentType;
 
 /// Build a DataFrame from a Python dict, using the configured backend.
 fn dict_to_dataframe<'py>(
@@ -327,7 +330,7 @@ pub fn delete_symbols(
 /// Return stored instrument metadata, optionally filtered.
 ///
 /// When called with no arguments, returns all instruments. When
-/// ``instrument_type``, ``provider``, and/or ``exchange`` are given, only
+/// `instrument_type`, `provider`, and/or `exchange` are given, only
 /// matching rows are returned.
 ///
 /// Parameters
@@ -370,10 +373,7 @@ pub fn query_instruments(
     provider: Option<Bound<'_, PyAny>>,
     exchange: Option<Bound<'_, PyAny>>,
     limit: Option<usize>,
-) -> PyResult<Vec<crate::data::models::instrument::Instrument>> {
-    use crate::data::models::exchange::Exchange;
-    use crate::data::models::instrument_type::InstrumentType;
-
+) -> PyResult<Vec<Instrument>> {
     let it = instrument_type.map(|v| v.extract::<InstrumentType>()).transpose()?;
     let prov = provider.map(|v| v.extract::<Provider>()).transpose()?;
 

@@ -121,15 +121,15 @@ full_history = st.toggle(
 )
 
 today = dt.now(tz=tz).date()
-if profiles and intervals and direct:
+if direct and intervals:
     earliest_ts = dt.fromtimestamp(min(min(p.earliest_ts.values()) for p in direct), tz=tz).date()
     latest_ts = dt.fromtimestamp(max(max(p.latest_ts.values()) for p in direct), tz=tz).date()
+
+    # Correct latest_ts since some providers return closing bar at 00:00 (so tomorrow)
+    latest_ts = min(latest_ts, today)
 else:
     earliest_ts = dt(2000, 1, 1, tzinfo=tz).date()
     latest_ts = today
-
-# Correct latest_ts since some providers return closing bar at 00:00 (so tomorrow)
-latest_ts = min(latest_ts, today)
 
 if full_history:
     start_ts = earliest_ts
@@ -244,45 +244,40 @@ if st.button(
     shortcut="Enter",
     width="stretch",
 ):
-    if latest_ts > dt.now(tz=tz).date():
-        st.error("End date cannot be in the future.", icon=":material/error:")
-    elif start_ts > latest_ts:
-        st.error("Start date must be equal or prior to end date.", icon=":material/error:")
-    else:
-        try:
-            # Convert date range to Unix timestamps for the download.
-            # When full_history is on, pass None to use the full provider range.
-            if full_history:
-                dl_start = dl_end = None
-            else:
-                dl_start = int(dt.combine(start_ts, dt.min.time(), tzinfo=tz).timestamp())
-                dl_end = int(dt.combine(end_ts, dt.min.time(), tzinfo=tz).timestamp())
-
-            with st.spinner("Downloading data..."):
-                result = download_bars(profiles, start=dl_start, end=dl_end, verbose=False)
-        except RuntimeError as ex:
-            st.error(f"Download error: {ex}", icon=":material/error:")
+    try:
+        # Convert date range to Unix timestamps for the download.
+        # When full_history is on, pass None to use the full provider range.
+        if full_history:
+            dl_start = dl_end = None
         else:
-            # Invalidate the storage cache so new bars become visible.
-            st.cache_data.clear()
+            dl_start = int(dt.combine(start_ts, dt.min.time(), tzinfo=tz).timestamp())
+            dl_end = int(dt.combine(end_ts, dt.min.time(), tzinfo=tz).timestamp())
 
-            for warn in result.warnings:
-                st.warning(warn, icon=":material/warning:")
+        with st.spinner("Downloading data..."):
+            result = download_bars(profiles, start=dl_start, end=dl_end, verbose=False)
+    except RuntimeError as ex:
+        st.error(f"Download error: {ex}", icon=":material/error:")
+    else:
+        # Invalidate the storage cache so new bars become visible.
+        st.cache_data.clear()
 
-            n_total = result.n_succeeded + result.n_failed
+        for warn in result.warnings:
+            st.warning(warn, icon=":material/warning:")
 
-            if result.n_failed and result.n_succeeded:
-                st.success(
-                    f"Successfully downloaded {result.n_succeeded} of {n_total} series.",
-                    icon=":material/check_circle:",
-                )
-            elif result.n_failed:
-                st.error(
-                    f"All {n_total} series had warnings during download.",
-                    icon=":material/error:",
-                )
-            else:
-                st.success(
-                    f"Successfully downloaded {result.n_succeeded} series.",
-                    icon=":material/check_circle:",
-                )
+        n_total = result.n_succeeded + result.n_failed
+
+        if result.n_failed and result.n_succeeded:
+            st.success(
+                f"Successfully downloaded {result.n_succeeded} of {n_total} series.",
+                icon=":material/check_circle:",
+            )
+        elif result.n_failed:
+            st.error(
+                f"All {n_total} series had warnings during download.",
+                icon=":material/error:",
+            )
+        else:
+            st.success(
+                f"Successfully downloaded {result.n_succeeded} series.",
+                icon=":material/check_circle:",
+            )

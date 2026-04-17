@@ -34,6 +34,7 @@ pub enum ConversionPeriod {
     Day,
     Week,
     Month,
+    Year,
 }
 
 #[pymethods]
@@ -49,13 +50,6 @@ impl ConversionPeriod {
     pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
         let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
-    }
-    pub fn __str__(&self) -> &'static str {
-        match self {
-            Self::Day => "Day",
-            Self::Week => "Week",
-            Self::Month => "Month",
-        }
     }
 
     /// Return the default variant.
