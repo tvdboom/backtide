@@ -29,6 +29,7 @@ from backtide.core.data import (
     list_instruments,
 )
 from backtide.core.storage import (
+    query_bars,
     query_bars_summary,
 )
 from backtide.utils.constants import MAX_PRELOADED_INSTRUMENTS, MOMENT_TO_STRFTIME
@@ -366,7 +367,7 @@ def _draw_cards(
     full_history: bool,
     start_ts: date,
     end_ts: date,
-    summary: pd.DataFrame | None = None,
+    estimate_rows: bool,
 ) -> tuple[str, int]:
     """Generate HTML code to draw the instrument cards.
 
@@ -377,6 +378,16 @@ def _draw_cards(
 
     get_flag = lambda code: f"https://flagcdn.com/80x60/{code.lower()}.png"
     parse_date = lambda date: date.strftime(_moment_to_strftime(cfg.display.date_format))
+
+    # Pre-fetch all bars from storage in one query when not estimating
+    if not estimate_rows:
+        all_bars = _to_pandas(
+            query_bars(
+                symbol=[p.symbol for p in profiles],
+                interval=next(iter(profiles[0].earliest_ts)),
+                provider=profiles[0].provider,
+            )
+        )
 
     total_rows = 0
     for profile in profiles:
@@ -393,7 +404,7 @@ def _draw_cards(
                 iv_start = max(start_ts, iv_start)
                 iv_end = min(end_ts, iv_end)
 
-            if summary is None:
+            if estimate_rows:
                 # Estimate rows for this interval
                 delta_minutes = max((iv_end - iv_start).total_seconds() / 60, 1)
                 delta_days = (iv_end - iv_start).days
@@ -416,12 +427,11 @@ def _draw_cards(
                     # Crypto markets open 24/7
                     rows = max(int(delta_minutes // interval.minutes()), 1)
             else:
-                # Extract the exact number of rows from the storage summary
-                rows = summary[summary["symbol"] == profile.symbol].iloc[0, 10]
-
-                from backtide.storage import query_bars
-
-                print(query_bars(profile.symbol, interval, profile.provider))
+                # Filter pre-fetched bars for this symbol/interval and count within range
+                bars = all_bars[all_bars["symbol"] == profile.symbol]
+                iv_start_ts = int(dt.combine(iv_start, dt.min.time(), tzinfo=tz).timestamp())
+                iv_end_ts = int(dt.combine(iv_end, dt.max.time(), tzinfo=tz).timestamp())
+                rows = ((bars["open_ts"] >= iv_start_ts) & (bars["open_ts"] <= iv_end_ts)).sum()
 
             total_rows += rows
 
@@ -433,8 +443,8 @@ def _draw_cards(
                 n_years -= 1
                 anniversary = iv_start.replace(year=iv_start.year + n_years)
 
-            # Remaining days after full years
-            remaining_days = (iv_end - anniversary).days
+            # Remaining days after full years (+1 since both start and end are inclusive)
+            remaining_days = (iv_end - anniversary).days + 1
 
             if n_years > 0:
                 n_days_str = f"{n_years}y {remaining_days}d"
@@ -449,7 +459,7 @@ def _draw_cards(
                     </span>
                     <span class="iv-range">{n_days_str}</span>
                     <span class="iv-rows">
-                        {"~" if summary is None else ""}{_fmt_number(rows)} bars
+                        {"~" if estimate_rows else ""}{_fmt_number(rows)} bars
                     </span>
                 </div>"""
 

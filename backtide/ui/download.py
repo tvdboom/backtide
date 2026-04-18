@@ -6,7 +6,6 @@ Description: Page to download new data.
 """
 
 from datetime import datetime as dt
-from datetime import timedelta
 
 import streamlit as st
 
@@ -155,7 +154,7 @@ else:
         label="End date",
         key=(key := "end_date"),
         value=_default(key, latest_ts),
-        min_value=start_ts + timedelta(days=1),
+        min_value=start_ts,
         max_value="today",
         format=cfg.display.date_format,
         on_change=lambda k=key: _persist(k),
@@ -196,6 +195,7 @@ if profiles and intervals:
             full_history=full_history,
             start_ts=start_ts,
             end_ts=end_ts,
+            estimate_rows=True,
         )
         st.html(_CARD_CSS + html)
 

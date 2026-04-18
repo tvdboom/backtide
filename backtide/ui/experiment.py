@@ -7,7 +7,6 @@ Description: Run a new backtest page.
 
 import ast
 from datetime import datetime as dt
-from datetime import timedelta
 import json
 import logging
 import tomllib
@@ -558,7 +557,7 @@ with tab2:
             label="End date",
             key=(key := "end_date"),
             value=_default(key, latest_ts if use_storage else "today"),
-            min_value=start_ts + timedelta(days=1),
+            min_value=start_ts,
             max_value=latest_ts if use_storage else "today",
             format=cfg.display.date_format,
             on_change=lambda k=key: _persist(k),
@@ -605,7 +604,7 @@ with tab2:
                 full_history=full_history,
                 start_ts=start_ts,
                 end_ts=end_ts,
-                summary=summary,
+                estimate_rows=False,
             )
             st.html(_CARD_CSS + html)
 
