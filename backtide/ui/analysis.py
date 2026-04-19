@@ -144,21 +144,21 @@ with tab1:
     st.plotly_chart(plot_candlestick(bars, display=None), width="stretch")
 
 with tab2:
-    st.caption("Price over time for selected symbols.")
+    col1, col2 = st.columns([10, 1])
+    col1.caption("Price over time for selected symbols.")
 
-    col1, col2 = st.columns([5.2, 1])
+    with col2.popover(":material/tune:", use_container_width=False):
+        price_col = st.radio(
+            label="**Price**",
+            key=(key := "price_col"),
+            options=PRICE_COLUMNS,
+            format_func=lambda c: PRICE_COLUMNS[c],
+            index=list(PRICE_COLUMNS).index("close"),
+            horizontal=False,
+            on_change=lambda k=key: _persist(k),
+        )
 
-    price_col = col2.radio(
-        label="Price",
-        key=(key := "price_col"),
-        options=PRICE_COLUMNS,
-        format_func=lambda c: PRICE_COLUMNS[c],
-        index=list(PRICE_COLUMNS).index("close"),
-        horizontal=False,
-        on_change=lambda k=key: _persist(k),
-    )
-
-    col1.plotly_chart(
+    st.plotly_chart(
         plot_price(bars, price_col=price_col, display=None),
         width="stretch",
     )

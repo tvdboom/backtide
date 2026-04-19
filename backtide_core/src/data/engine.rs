@@ -680,7 +680,6 @@ mod tests {
     use crate::engine::EngineCache;
     use crate::storage::traits::Storage;
     use async_trait::async_trait;
-    use std::path::PathBuf;
     use strum::IntoEnumIterator;
     use tempfile::TempDir;
 
@@ -773,13 +772,16 @@ mod tests {
             providers.insert(it, provider.clone());
         }
 
-        (Engine {
-            config,
-            rt,
-            providers,
-            db: Box::new(db),
-            cache: EngineCache::new(),
-        }, tmp)
+        (
+            Engine {
+                config,
+                rt,
+                providers,
+                db: Box::new(db),
+                cache: EngineCache::new(),
+            },
+            tmp,
+        )
     }
 
     // ── EngineCache ─────────────────────────────────────────────────────
@@ -791,14 +793,8 @@ mod tests {
         let key: Symbol = "AAPL".to_owned();
 
         rt.block_on(async {
-            cache
-                .instrument_cache
-                .insert(key.clone(), Arc::new(test_instrument()))
-                .await;
-            cache
-                .range_cache
-                .insert((key.clone(), Interval::OneDay), (100, 200))
-                .await;
+            cache.instrument_cache.insert(key.clone(), Arc::new(test_instrument())).await;
+            cache.range_cache.insert((key.clone(), Interval::OneDay), (100, 200)).await;
 
             let hit: Option<Arc<Instrument>> = cache.instrument_cache.get(&key).await;
             assert!(hit.is_some());
@@ -817,9 +813,8 @@ mod tests {
         let inst = test_instrument();
         let (engine, _tmp) = test_engine(MockProvider::new(inst.clone()));
 
-        let results = engine
-            .fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto)
-            .unwrap();
+        let results =
+            engine.fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto).unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].symbol, "TEST-USD");
@@ -831,14 +826,12 @@ mod tests {
         let (engine, _tmp) = test_engine(MockProvider::new(inst.clone()));
 
         // First call populates cache
-        engine
-            .fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto)
-            .unwrap();
+        engine.fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto).unwrap();
 
         // Verify cache hit
-        let cached = engine.rt.block_on(async {
-            engine.cache.instrument_cache.get(&"TEST-USD".to_owned()).await
-        });
+        let cached = engine
+            .rt
+            .block_on(async { engine.cache.instrument_cache.get(&"TEST-USD".to_owned()).await });
         assert!(cached.is_some());
     }
 
@@ -864,9 +857,7 @@ mod tests {
         let inst = test_instrument();
         let (engine, _tmp) = test_engine(MockProvider::new(inst));
 
-        let results = engine
-            .list_instruments(InstrumentType::Crypto, None, 10, false)
-            .unwrap();
+        let results = engine.list_instruments(InstrumentType::Crypto, None, 10, false).unwrap();
 
         assert_eq!(results.len(), 1);
     }
@@ -879,9 +870,7 @@ mod tests {
         let (engine, _tmp) = test_engine(MockProvider::new(inst));
 
         // Populate cache
-        engine
-            .fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto)
-            .unwrap();
+        engine.fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto).unwrap();
 
         engine.clear_cache();
 
@@ -889,9 +878,9 @@ mod tests {
             engine.cache.instrument_cache.run_pending_tasks().await;
         });
 
-        let cached = engine.rt.block_on(async {
-            engine.cache.instrument_cache.get(&"TEST-USD".to_owned()).await
-        });
+        let cached = engine
+            .rt
+            .block_on(async { engine.cache.instrument_cache.get(&"TEST-USD".to_owned()).await });
         assert!(cached.is_none());
     }
 }

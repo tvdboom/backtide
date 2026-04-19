@@ -503,8 +503,18 @@ mod tests {
     #[test]
     fn kline_try_from_valid() {
         let row = json!([
-            1609459200000i64, "29000.0", "29500.0", "28500.0", "29200.0",
-            "100.5", 1609545600000i64, "2900000.0", 1234, "50.0", "25.0", "0"
+            1609459200000i64,
+            "29000.0",
+            "29500.0",
+            "28500.0",
+            "29200.0",
+            "100.5",
+            1609545600000i64,
+            "2900000.0",
+            1234,
+            "50.0",
+            "25.0",
+            "0"
         ]);
         let kline = BinanceKline::try_from(row).unwrap();
         assert_eq!(kline.open_time, 1609459200);
@@ -563,4 +573,3 @@ mod tests {
         assert_eq!(inst.provider, Provider::Binance);
     }
 }
-

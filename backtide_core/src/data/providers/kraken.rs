@@ -554,7 +554,16 @@ mod tests {
 
     #[test]
     fn ohlc_try_from_valid() {
-        let row = json!([1609459200u64, "29000.0", "29500.0", "28500.0", "29200.0", "29100.0", "100.5", 1234]);
+        let row = json!([
+            1609459200u64,
+            "29000.0",
+            "29500.0",
+            "28500.0",
+            "29200.0",
+            "29100.0",
+            "100.5",
+            1234
+        ]);
         let ohlc = KrakenOHLC::try_from(row).unwrap();
         assert_eq!(ohlc.time, 1609459200);
         assert!((ohlc.open - 29000.0).abs() < f64::EPSILON);
@@ -637,4 +646,3 @@ mod tests {
         assert_eq!(inst.quote, "BTC");
     }
 }
-

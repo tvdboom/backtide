@@ -15,7 +15,6 @@ import plotly.graph_objects as go
 from backtide.core.config import get_config
 from backtide.ui.utils import _moment_to_strftime
 
-
 # Default font sizes
 TITLE_FONTSIZE: int = 20
 LABEL_FONTSIZE: int = 18

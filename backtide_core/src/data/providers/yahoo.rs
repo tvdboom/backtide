@@ -1140,4 +1140,3 @@ mod tests {
         assert_eq!(inst.provider, Provider::Yahoo);
     }
 }
-

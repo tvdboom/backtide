@@ -15,7 +15,6 @@ import plotly.graph_objects as go
 
 from backtide.plots.utils import PALETTE, _plot
 
-
 # Supported price columns and their display labels.
 PRICE_COLUMNS: dict[str, str] = {
     "open": "Open",

@@ -113,12 +113,8 @@ def plot_candlestick(
     x_start = x_end - pd.DateOffset(months=1)
 
     fig.update_layout(
-        xaxis=dict(
-            rangeslider_visible=rangeslider,
-            range=[x_start, x_end],
-            type="date",
-        ),
-        yaxis=dict(autorange=True, fixedrange=False),
+        xaxis={"rangeslider_visible": rangeslider, "range": [x_start, x_end], "type": "date"},
+        yaxis={"autorange": True, "fixedrange": False},
         uirevision="constant",
     )
 
