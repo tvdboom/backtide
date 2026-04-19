@@ -173,6 +173,7 @@ impl GeneralExpConfig {
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DataExpConfig {
     pub instrument_type: InstrumentType,
     pub symbols: Vec<String>,
@@ -1108,3 +1109,4 @@ impl ExperimentConfig {
         Self::from_inner(py, inner)
     }
 }
+

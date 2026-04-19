@@ -67,3 +67,4 @@ impl<'a, 'py> FromPyObject<'a, 'py> for LogLevel {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown log_level {s:?}.")))
     }
 }
+

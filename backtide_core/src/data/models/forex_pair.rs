@@ -221,3 +221,4 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ForexPair {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown forex pair {s:?}.")))
     }
 }
+

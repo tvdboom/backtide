@@ -64,3 +64,4 @@ impl<'a, 'py> FromPyObject<'a, 'py> for DataframeBackend {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown dataframe_backend {s:?}.")))
     }
 }
+

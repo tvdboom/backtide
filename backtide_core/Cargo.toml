@@ -34,6 +34,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports", "async_tokio"] }
 tempfile = "3.27.0"
+wiremock = "0.6"
 
 [[bench]]
 name = "storage_bench"

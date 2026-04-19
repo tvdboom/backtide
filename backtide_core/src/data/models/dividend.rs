@@ -9,3 +9,4 @@ pub struct Dividend {
     /// Dividend amount per share in the instrument's quote currency.
     pub amount: f64,
 }
+

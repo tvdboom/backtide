@@ -36,3 +36,4 @@ impl From<ConfigError> for PyErr {
         PyRuntimeError::new_err(e.to_string())
     }
 }
+

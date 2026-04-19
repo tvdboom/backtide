@@ -187,3 +187,4 @@ impl<'a, 'py> FromPyObject<'a, 'py> for StrategyType {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown strategy type {s:?}.")))
     }
 }
+
