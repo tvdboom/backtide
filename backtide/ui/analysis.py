@@ -48,9 +48,6 @@ def _ts_to_datetime(series: pd.Series, tz: ZoneInfo) -> pd.Series:
 cfg = get_config()
 tz = _get_timezone(cfg.display.timezone)
 
-# Collect all configured providers
-configured_providers = list({str(p) for p in cfg.data.providers.values()})
-
 st.set_page_config(page_title="Backtide - Analysis")
 
 st.title("Analysis", text_alignment="center")
@@ -58,42 +55,40 @@ st.title("Analysis", text_alignment="center")
 st.divider()
 
 # Load the storage summary to know what data is available
-summary_df = _to_pandas(_query_bars_summary())
+all_instruments = {x.symbol: x for x in query_instruments()}
 
-if summary_df.empty:
+if len(all_instruments) == 0:
     st.info(
         "The database is empty. Head over to the **Download** page to fetch some market data.",
         icon=":material/info:",
     )
     st.stop()
 
-# Filter summary to only configured providers
+# Filter instruments to only configured providers
 if "provider" in summary_df.columns:
-    summary_df = summary_df[summary_df["provider"].isin(configured_providers)]
+    all_instruments = {
+        k: v for k, v in all_instruments.items() if v.provider == cfg.data.providers[v.asset_type]
+    }
 
-if summary_df.empty:
+if len(all_instruments) == 0:
     st.info(
         "No data found for the currently configured providers.",
         icon=":material/info:",
     )
     st.stop()
 
-available_symbols = sorted(summary_df["symbol"].unique().tolist())
-
 # If there are symbols selected that are not in storage, remove them from selection
-if "symbols" in st.session_state:
-    default = [s for s in st.session_state.symbols if s in available_symbols]
-else:
-    default = None
+if default := _default("symbols"):
+    default = [s for s in default if s in all_instruments]
 
 ai = {x.symbol: x for x in query_instruments()}
 
 symbols = st.multiselect(
     label="Symbols",
     key=(key := "symbols"),
-    options=sorted(ai.keys()),
-    default=_default(key, []),
-    format_func=lambda s: f"{s} - {ai[s].name}" if ai[s].instrument_type.is_equity else s,
+    options=all_instruments,
+    default=default,
+    format_func=lambda s: f"{s} - {all_instruments[s].name}" if all_instruments[s].instrument_type.is_equity else s,
     placeholder="Select one or more symbols...",
     max_selections=MAX_INSTRUMENT_SELECTION,
     on_change=lambda: (_to_upper_values("symbols"), _persist("symbols")),
