@@ -120,7 +120,7 @@ impl IndicatorType {
     ///     The default variant.
     #[staticmethod]
     fn get_default(py: Python<'_>) -> Py<Self> {
-        Py::new(py, Self::SMA).unwrap()
+        Py::new(py, Self::default()).unwrap()
     }
 
     /// Return all variants.

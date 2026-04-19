@@ -28,6 +28,8 @@ from backtide.data import Currency, InstrumentProfile, InstrumentType
 from backtide.storage import query_instruments
 from backtide.ui.utils import (
     _CARD_CSS,
+    INDICATOR_PLACEHOLDER,
+    STRATEGY_PLACEHOLDER,
     _apply_config_to_state,
     _build_config_toml,
     _check_indicator_code,
@@ -44,10 +46,8 @@ from backtide.ui.utils import (
     _to_upper_values,
 )
 from backtide.utils.constants import (
-    INDICATOR_PLACEHOLDER,
     INVALID_FILENAME_CHARS,
     MAX_INSTRUMENT_SELECTION,
-    STRATEGY_PLACEHOLDER,
     TAG_PATTERN,
 )
 

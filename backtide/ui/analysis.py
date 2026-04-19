@@ -5,23 +5,23 @@ Description: Data analysis page for exploring stored market data.
 
 """
 
-from zoneinfo import ZoneInfo
-
 import pandas as pd
 import streamlit as st
 
 from backtide.core.config import get_config
-from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
+from backtide.core.data import Interval
 from backtide.core.storage import query_bars, query_instruments
 from backtide.plots.candlestick import plot_candlestick
+from backtide.plots.price import PRICE_COLUMNS, plot_price
 from backtide.ui.utils import (
-    _get_timezone,
-    _to_upper_values,
-    _persist,
     _default,
+    _get_timezone,
+    _persist,
     _to_pandas,
+    _to_upper_values,
 )
-
+from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
+from backtide.utils.utils import _ts_to_datetime
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility functions
@@ -29,14 +29,9 @@ from backtide.ui.utils import (
 
 
 @st.cache_data(show_spinner="Loading bars from database...", max_entries=10)
-def _load_bars(symbols: list[str], interval: str, provider: str | None = None) -> pd.DataFrame:
+def _load_bars(symbols: list[str], interval: str) -> pd.DataFrame:
     """Fetch bars for the selected symbols and interval."""
-    return _to_pandas(query_bars(symbol=symbols, interval=interval, provider=provider))
-
-
-def _ts_to_datetime(series: pd.Series, tz: ZoneInfo) -> pd.Series:
-    """Convert a Unix-timestamp column to timezone-aware datetimes."""
-    return pd.to_datetime(series, unit="s", utc=True).dt.tz_convert(tz)
+    return _to_pandas(query_bars(symbol=symbols, interval=interval))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -47,10 +42,6 @@ cfg = get_config()
 tz = _get_timezone(cfg.display.timezone)
 
 st.set_page_config(page_title="Backtide - Analysis")
-
-st.title("Analysis", text_alignment="center")
-
-st.divider()
 
 # Load all instruments from the database
 all_i = {x.symbol: x for x in query_instruments()}
@@ -63,14 +54,12 @@ if len(all_i) == 0:
     st.stop()
 
 # Filter instruments to only configured providers
-all_i = {
-    k: v for k, v in all_i.items() if v.provider == cfg.data.providers[v.instrument_type]
-}
+all_i = {k: v for k, v in all_i.items() if v.provider == cfg.data.providers[v.instrument_type]}
 
 if len(all_i) == 0:
-    st.info(
+    st.warning(
         "There is no data in the database for the currently configured providers.",
-        icon=":material/info:",
+        icon=":material/warning:",
     )
     st.stop()
 
@@ -78,7 +67,7 @@ if len(all_i) == 0:
 if default := _default("symbols"):
     default = [s for s in default if s in all_i]
 
-symbols = st.multiselect(
+symbols = st.multiselect(  # ty: ignore[no-matching-overload]
     label="Symbols",
     key=(key := "symbols"),
     options=all_i,
@@ -86,57 +75,60 @@ symbols = st.multiselect(
     format_func=lambda s: f"{s} - {all_i[s].name}" if all_i[s].instrument_type.is_equity else s,
     placeholder="Select one or more symbols...",
     max_selections=MAX_INSTRUMENT_SELECTION,
-    on_change=lambda: (_to_upper_values("symbols"), _persist("symbols")),
+    on_change=lambda k=key: (_to_upper_values("symbols"), _persist(k)),
     help="Select the symbols to analyze. Only symbols available in the database are shown.",
+)
+
+interval = st.pills(
+    label="Interval",
+    key=(key := "interval"),
+    required=True,
+    options=Interval.variants(),
+    selection_mode="single",
+    default=_default(key, Interval.get_default()),
+    on_change=lambda k=key: _persist(k),
+    help="Select an interval to analyze.",
 )
 
 if not symbols:
     st.warning("Select at least one symbol to begin the analysis.", icon=":material/warning:")
-else:
-    # Intervals available for all selected symbols (intersection)
-    available_intervals = Interval.variants()
+    st.stop()
 
-    if default := _default("interval"):
-        default = [s for s in default if s in available_intervals]
+bars = _load_bars(symbols, interval)
 
-    interval = st.pills(
-        label="Interval",
-        key=(key := "interval"),
-        options=available_intervals or Interval.variants(),
-        default=default,
-        selection_mode="single",
-        on_change=lambda k=key: _persist(k),
-        disabled=len(available_intervals) == 0,
-        help=(
-            "Select the interval to analyze. Only intervals available for all "
-            "selected symbols can be selected."
-        ),
+if bars.empty:
+    st.warning(
+        "No bars found for the selected symbols and interval.",
+        icon=":material/warning:",
+    )
+    st.stop()
+
+# Check if any of the selected symbols have no bars for the selected interval
+if missing := set(symbols) - set(bars["symbol"].unique()):
+    symbols = [s for s in symbols if s not in missing]
+    st.warning(
+        f"No bars found for the following symbols at the **{interval}** interval: "
+        f"{', '.join([f'**{m}**' for m in missing])}. They will be excluded from "
+        "the analysis.",
+        icon=":material/warning:",
     )
 
-    if not available_intervals:
-        st.warning(
-            "No common intervals available for the selected symbols.",
-            icon=":material/warning:",
-        )
-
-    bars = _load_bars([all_i[s] for s in symbols], interval)
-
-    if bars.empty:
-        st.info("No bars found for the selected symbols and interval.", icon=":material/info:")
-
-    # Add datetime column for convenience
-    bars["datetime"] = _ts_to_datetime(bars["open_ts"], tz)
-
+# Select only data from configured providers per symbol
+bars = bars[
+    bars.apply(
+        lambda r: r["provider"] == str(cfg.data.providers[all_i[r["symbol"]].instrument_type]),
+        axis=1,
+    )
+]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.divider()
-
-tab1, tab2 = st.tabs(
+tab1, tab2, tab3 = st.tabs(
     [
         ":material/candlestick_chart: Candlestick",
+        ":material/show_chart: Price",
         ":material/analytics: Distribution",
     ],
     key=(key := "plot_tabs"),
@@ -144,36 +136,34 @@ tab1, tab2 = st.tabs(
     on_change=lambda k=key: _persist(k),
 )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. Candlestick chart
-# ─────────────────────────────────────────────────────────────────────────────
+# Add datetime column for plotting
+bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
 
 with tab1:
     st.caption("OHLC candlestick chart showing price action over time.")
-
-    for symbol in symbols:
-        symbol_df = bars[bars["symbol"] == symbol].sort_values("datetime")
-
-        fig_candle = plot_candlestick(
-            symbol_df,
-            title=f"{symbol} ({interval})",
-            ylabel="Price",
-            showlegend=cs_showlegend,
-            rangeslider=cs_rangeslider,
-            template=cs_template,
-        )
-
-        st.plotly_chart(fig_candle, use_container_width=True)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. Price distribution boxplot
-# ─────────────────────────────────────────────────────────────────────────────
+    st.plotly_chart(plot_candlestick(bars, display=None), width="stretch")
 
 with tab2:
-    st.subheader("Price Distribution")
+    st.caption("Price over time for selected symbols.")
 
+    col1, col2 = st.columns([5.2, 1])
+
+    price_col = col2.radio(
+        label="Price",
+        key=(key := "price_col"),
+        options=PRICE_COLUMNS,
+        format_func=lambda c: PRICE_COLUMNS[c],
+        index=list(PRICE_COLUMNS).index("close"),
+        horizontal=False,
+        on_change=lambda k=key: _persist(k),
+    )
+
+    col1.plotly_chart(
+        plot_price(bars, price_col=price_col, display=None),
+        width="stretch",
+    )
+
+with tab3:
     st.caption(
         "Compare the distribution of prices across selected symbols. "
         "The boxplot shows median, quartiles, and outliers."

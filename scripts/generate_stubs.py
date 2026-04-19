@@ -272,7 +272,7 @@ def _get_descriptor_names(cls: type) -> set[str]:
 def _get_enum_variants(cls: type) -> list[str]:
     """Return sorted names of class-level attributes that are instances of *cls*.
 
-    PyO3 enum variants (``#[pyclass]`` with ``#[pyo3(enum)]``) are exposed as
+    PyO3 enum variants (`#[pyclass]` with `#[pyo3(enum)]`) are exposed as
     class attributes whose value is an instance of the enum class itself.
 
     """
@@ -580,7 +580,7 @@ def generate_init_stub() -> str:
     return "".join(lines)
 
 
-def main() -> None:
+def main():
     """Entry point: generate all stub files."""
     parser = argparse.ArgumentParser(description="Generate .pyi stubs for backtide.core")
     parser.add_argument(

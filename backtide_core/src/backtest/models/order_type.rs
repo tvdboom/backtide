@@ -110,7 +110,7 @@ impl OrderType {
     ///     The default variant.
     #[staticmethod]
     fn get_default(py: Python<'_>) -> Py<Self> {
-        Py::new(py, Self::Market).unwrap()
+        Py::new(py, Self::default()).unwrap()
     }
 
     /// Return all variants.

@@ -480,3 +480,161 @@ impl TryFrom<serde_json::Value> for KrakenOHLC {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+    use serde_json::json;
+
+    // ── normalize_ticker ────────────────────────────────────────────────
+
+    #[rstest]
+    #[case("XBT", "BTC")]
+    #[case("XDG", "DOGE")]
+    #[case("ETH", "ETH")]
+    #[case("USD", "USD")]
+    #[case("SOL", "SOL")]
+    fn normalize_ticker(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(Kraken::normalize_ticker(input), expected);
+    }
+
+    // ── check_instrument_type ───────────────────────────────────────────
+
+    #[rstest]
+    #[case(InstrumentType::Crypto, true)]
+    #[case(InstrumentType::Forex, true)]
+    #[case(InstrumentType::Stocks, false)]
+    #[case(InstrumentType::Etf, false)]
+    fn check_instrument_type(#[case] it: InstrumentType, #[case] ok: bool) {
+        assert_eq!(Kraken::check_instrument_type(it).is_ok(), ok);
+    }
+
+    // ── unwrap_response ─────────────────────────────────────────────────
+
+    #[test]
+    fn unwrap_response_ok() {
+        let resp = KrakenResponse {
+            error: vec![],
+            result: Some(42),
+        };
+        assert_eq!(Kraken::unwrap_response(resp, "TEST").unwrap(), 42);
+    }
+
+    #[test]
+    fn unwrap_response_unknown_pair() {
+        let resp: KrakenResponse<i32> = KrakenResponse {
+            error: vec!["EQuery:Unknown asset pair".to_owned()],
+            result: None,
+        };
+        let err = Kraken::unwrap_response(resp, "INVALID").unwrap_err();
+        assert!(matches!(err, DataError::SymbolNotFound(_)));
+    }
+
+    #[test]
+    fn unwrap_response_other_error() {
+        let resp: KrakenResponse<i32> = KrakenResponse {
+            error: vec!["EGeneral:Internal error".to_owned()],
+            result: None,
+        };
+        let err = Kraken::unwrap_response(resp, "TEST").unwrap_err();
+        assert!(err.to_string().contains("Internal error"));
+    }
+
+    #[test]
+    fn unwrap_response_no_result() {
+        let resp: KrakenResponse<i32> = KrakenResponse {
+            error: vec![],
+            result: None,
+        };
+        assert!(Kraken::unwrap_response(resp, "TEST").is_err());
+    }
+
+    // ── KrakenOHLC TryFrom<Value> ───────────────────────────────────────
+
+    #[test]
+    fn ohlc_try_from_valid() {
+        let row = json!([1609459200u64, "29000.0", "29500.0", "28500.0", "29200.0", "29100.0", "100.5", 1234]);
+        let ohlc = KrakenOHLC::try_from(row).unwrap();
+        assert_eq!(ohlc.time, 1609459200);
+        assert!((ohlc.open - 29000.0).abs() < f64::EPSILON);
+        assert!((ohlc.high - 29500.0).abs() < f64::EPSILON);
+        assert!((ohlc.low - 28500.0).abs() < f64::EPSILON);
+        assert!((ohlc.close - 29200.0).abs() < f64::EPSILON);
+        assert!((ohlc.volume - 100.5).abs() < f64::EPSILON);
+        assert_eq!(ohlc.count, Some(1234));
+    }
+
+    #[rstest]
+    #[case(json!({"foo": "bar"}))]
+    #[case(json!([1609459200u64]))]
+    fn ohlc_try_from_invalid(#[case] row: serde_json::Value) {
+        assert!(KrakenOHLC::try_from(row).is_err());
+    }
+
+    // ── KrakenOHLC -> Bar ───────────────────────────────────────────────
+
+    #[test]
+    fn bar_from_ohlc() {
+        let ohlc = KrakenOHLC {
+            time: 1000,
+            open: 10.0,
+            high: 12.0,
+            low: 9.0,
+            close: 11.0,
+            volume: 500.0,
+            count: Some(42),
+        };
+        let bar = Bar::from(ohlc);
+        assert_eq!(bar.open_ts, 1000);
+        assert_eq!(bar.close_ts, 1000);
+        assert_eq!(bar.adj_close, bar.close);
+        assert_eq!(bar.n_trades, Some(42));
+    }
+
+    // ── PairInfo -> Instrument ──────────────────────────────────────────
+
+    #[test]
+    fn instrument_from_pair_info_crypto() {
+        let info = PairInfo {
+            wsname: Some("XBT/USD".to_owned()),
+            altname: "XBTUSD".to_owned(),
+            base: "XXBT".to_owned(),
+            quote: "ZUSD".to_owned(),
+            status: "online".to_owned(),
+        };
+        let inst = Instrument::try_from(info).unwrap();
+        assert_eq!(inst.symbol, "BTC-USD");
+        assert_eq!(inst.base, Some("BTC".to_owned()));
+        assert_eq!(inst.quote, "USD");
+        assert_eq!(inst.provider, Provider::Kraken);
+    }
+
+    #[test]
+    fn instrument_from_pair_info_forex() {
+        let info = PairInfo {
+            wsname: Some("EUR/USD".to_owned()),
+            altname: "EURUSD".to_owned(),
+            base: "ZEUR".to_owned(),
+            quote: "ZUSD".to_owned(),
+            status: "online".to_owned(),
+        };
+        let inst = Instrument::try_from(info).unwrap();
+        assert_eq!(inst.instrument_type, InstrumentType::Forex);
+    }
+
+    #[test]
+    fn instrument_from_pair_info_no_wsname() {
+        let info = PairInfo {
+            wsname: None,
+            altname: "ETHBTC".to_owned(),
+            base: "ETH".to_owned(),
+            quote: "BTC".to_owned(),
+            status: "online".to_owned(),
+        };
+        let inst = Instrument::try_from(info).unwrap();
+        assert_eq!(inst.base, Some("ETH".to_owned()));
+        assert_eq!(inst.quote, "BTC");
+    }
+}
+

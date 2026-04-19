@@ -984,3 +984,160 @@ struct ChartDividend {
     /// Dividend amount per share.
     amount: f64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    // ── parse_instrument_type ───────────────────────────────────────────
+
+    #[rstest]
+    #[case("EQUITY", InstrumentType::Stocks)]
+    #[case("ETF", InstrumentType::Etf)]
+    #[case("CURRENCY", InstrumentType::Forex)]
+    #[case("CRYPTOCURRENCY", InstrumentType::Crypto)]
+    fn parse_instrument_type_ok(#[case] input: &str, #[case] expected: InstrumentType) {
+        assert_eq!(YahooFinance::parse_instrument_type(input).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("BOND")]
+    #[case("FUTURE")]
+    #[case("")]
+    fn parse_instrument_type_err(#[case] input: &str) {
+        assert!(YahooFinance::parse_instrument_type(input).is_err());
+    }
+
+    // ── parse_base_quote ────────────────────────────────────────────────
+
+    #[rstest]
+    #[case("AAPL", "USD", InstrumentType::Stocks, None, "USD")]
+    #[case("PBR-A", "BRL", InstrumentType::Stocks, None, "BRL")]
+    #[case("EURUSD=X", "USD", InstrumentType::Forex, Some("EUR"), "USD")]
+    #[case("JPY=X", "JPY", InstrumentType::Forex, Some("USD"), "JPY")]
+    #[case("BTC-USD", "USD", InstrumentType::Crypto, Some("BTC"), "USD")]
+    fn parse_base_quote_ok(
+        #[case] symbol: &str,
+        #[case] currency: &str,
+        #[case] it: InstrumentType,
+        #[case] expected_base: Option<&str>,
+        #[case] expected_quote: &str,
+    ) {
+        let (base, quote) = YahooFinance::parse_base_quote(symbol, currency, it).unwrap();
+        assert_eq!(base.as_deref(), expected_base);
+        assert_eq!(quote, expected_quote);
+    }
+
+    #[test]
+    fn parse_base_quote_forex_invalid_length() {
+        assert!(YahooFinance::parse_base_quote("AB=X", "X", InstrumentType::Forex).is_err());
+    }
+
+    // ── parse_canonical_symbol ──────────────────────────────────────────
+
+    #[rstest]
+    #[case("AAPL", InstrumentType::Stocks, "AAPL")]
+    #[case("USD-JPY", InstrumentType::Forex, "JPY=X")]
+    #[case("EUR-USD", InstrumentType::Forex, "EURUSD=X")]
+    #[case("BTC-USD", InstrumentType::Crypto, "BTC-USD")]
+    fn parse_canonical_symbol_ok(
+        #[case] input: &str,
+        #[case] it: InstrumentType,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(YahooFinance::parse_canonical_symbol(input, it).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("EURUSD", InstrumentType::Forex)]
+    #[case("USD-USD", InstrumentType::Forex)]
+    #[case("BTCUSD", InstrumentType::Crypto)]
+    fn parse_canonical_symbol_err(#[case] input: &str, #[case] it: InstrumentType) {
+        assert!(YahooFinance::parse_canonical_symbol(input, it).is_err());
+    }
+
+    // ── YahooQuote -> Instrument ────────────────────────────────────────
+
+    #[test]
+    fn instrument_from_quote_equity() {
+        let q = YahooQuote {
+            symbol: "AAPL".to_owned(),
+            short_name: Some("Apple Inc.".to_owned()),
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            quote_type: Some("EQUITY".to_owned()),
+            exchange: Some("NMS".to_owned()),
+        };
+        let inst = Instrument::try_from(q).unwrap();
+        assert_eq!(inst.symbol, "AAPL");
+        assert_eq!(inst.name, "Apple Inc.");
+        assert_eq!(inst.base, None);
+        assert_eq!(inst.quote, "USD");
+        assert_eq!(inst.instrument_type, InstrumentType::Stocks);
+        assert_eq!(inst.provider, Provider::Yahoo);
+    }
+
+    #[test]
+    fn instrument_from_quote_crypto() {
+        let q = YahooQuote {
+            symbol: "BTC-USD".to_owned(),
+            short_name: Some("Bitcoin USD".to_owned()),
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            quote_type: Some("CRYPTOCURRENCY".to_owned()),
+            exchange: Some("CCC".to_owned()),
+        };
+        let inst = Instrument::try_from(q).unwrap();
+        assert_eq!(inst.symbol, "BTC-USD");
+        assert_eq!(inst.base, Some("BTC".to_owned()));
+        assert_eq!(inst.quote, "USD");
+    }
+
+    #[test]
+    fn instrument_from_quote_no_currency() {
+        let q = YahooQuote {
+            symbol: "AAPL".to_owned(),
+            short_name: None,
+            long_name: None,
+            currency: None,
+            quote_type: Some("EQUITY".to_owned()),
+            exchange: Some("NMS".to_owned()),
+        };
+        assert!(Instrument::try_from(q).is_err());
+    }
+
+    #[test]
+    fn instrument_from_quote_no_quote_type() {
+        let q = YahooQuote {
+            symbol: "AAPL".to_owned(),
+            short_name: None,
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            quote_type: None,
+            exchange: Some("NMS".to_owned()),
+        };
+        assert!(Instrument::try_from(q).is_err());
+    }
+
+    // ── ChartMeta -> Instrument ─────────────────────────────────────────
+
+    #[test]
+    fn instrument_from_chart_meta() {
+        let m = ChartMeta {
+            symbol: "MSFT".to_owned(),
+            short_name: Some("Microsoft Corp".to_owned()),
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            instrument_type: Some("EQUITY".to_owned()),
+            exchange_name: Some("NMS".to_owned()),
+            first_trade_date: Some(511108200),
+            regular_market_time: Some(1700000000),
+        };
+        let inst = Instrument::try_from(m).unwrap();
+        assert_eq!(inst.symbol, "MSFT");
+        assert_eq!(inst.name, "Microsoft Corp");
+        assert_eq!(inst.provider, Provider::Yahoo);
+    }
+}
+

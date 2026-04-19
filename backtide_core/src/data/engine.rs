@@ -671,3 +671,227 @@ impl Engine {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::models::bar_download::BarDownload;
+    use crate::data::providers::traits::DataProvider;
+    use crate::engine::EngineCache;
+    use crate::storage::traits::Storage;
+    use async_trait::async_trait;
+    use std::path::PathBuf;
+    use strum::IntoEnumIterator;
+    use tempfile::TempDir;
+
+    /// A mock provider that returns configurable results.
+    struct MockProvider {
+        instrument: Instrument,
+        range: (u64, u64),
+        bars: Vec<crate::data::models::bar::Bar>,
+    }
+
+    impl MockProvider {
+        fn new(instrument: Instrument) -> Self {
+            Self {
+                instrument,
+                range: (1000, 2000),
+                bars: vec![],
+            }
+        }
+    }
+
+    #[async_trait]
+    impl DataProvider for MockProvider {
+        async fn fetch_instrument(
+            &self,
+            _symbol: &Symbol,
+            _instrument_type: InstrumentType,
+        ) -> DataResult<Instrument> {
+            Ok(self.instrument.clone())
+        }
+
+        async fn fetch_range(
+            &self,
+            _instrument: Instrument,
+            _interval: Interval,
+        ) -> DataResult<(u64, u64)> {
+            Ok(self.range)
+        }
+
+        async fn list_instruments(
+            &self,
+            _instrument_type: InstrumentType,
+            _exchanges: Option<Vec<Exchange>>,
+            _limit: usize,
+        ) -> DataResult<Vec<Instrument>> {
+            Ok(vec![self.instrument.clone()])
+        }
+
+        async fn download_bars(
+            &self,
+            _symbol: &str,
+            _instrument_type: InstrumentType,
+            _interval: Interval,
+            _start: u64,
+            _end: u64,
+        ) -> DataResult<BarDownload> {
+            Ok(BarDownload {
+                bars: self.bars.clone(),
+                dividends: vec![],
+            })
+        }
+    }
+
+    fn test_instrument() -> Instrument {
+        Instrument {
+            symbol: "TEST-USD".to_owned(),
+            name: "Test".to_owned(),
+            base: Some("TEST".to_owned()),
+            quote: "USD".to_owned(),
+            instrument_type: InstrumentType::Crypto,
+            exchange: "TEST".to_owned(),
+            provider: Provider::Binance,
+        }
+    }
+
+    fn test_engine(mock: MockProvider) -> (Engine, TempDir) {
+        let config = Box::leak(Box::new(crate::config::interface::Config {
+            general: Default::default(),
+            data: Default::default(),
+            display: Default::default(),
+        }));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let db = crate::storage::duckdb::DuckDb::new(&db_path).unwrap();
+        db.init().unwrap();
+
+        let provider: Arc<dyn DataProvider> = Arc::new(mock);
+        let mut providers = HashMap::new();
+        for it in InstrumentType::iter() {
+            providers.insert(it, provider.clone());
+        }
+
+        (Engine {
+            config,
+            rt,
+            providers,
+            db: Box::new(db),
+            cache: EngineCache::new(),
+        }, tmp)
+    }
+
+    // ── EngineCache ─────────────────────────────────────────────────────
+
+    #[test]
+    fn cache_clear_removes_entries() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        let key: Symbol = "AAPL".to_owned();
+
+        rt.block_on(async {
+            cache
+                .instrument_cache
+                .insert(key.clone(), Arc::new(test_instrument()))
+                .await;
+            cache
+                .range_cache
+                .insert((key.clone(), Interval::OneDay), (100, 200))
+                .await;
+
+            let hit: Option<Arc<Instrument>> = cache.instrument_cache.get(&key).await;
+            assert!(hit.is_some());
+            cache.clear();
+            cache.instrument_cache.run_pending_tasks().await;
+            cache.range_cache.run_pending_tasks().await;
+            let miss: Option<Arc<Instrument>> = cache.instrument_cache.get(&key).await;
+            assert!(miss.is_none());
+        });
+    }
+
+    // ── fetch_instruments ───────────────────────────────────────────────
+
+    #[test]
+    fn fetch_instruments_returns_results() {
+        let inst = test_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst.clone()));
+
+        let results = engine
+            .fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto)
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].symbol, "TEST-USD");
+    }
+
+    #[test]
+    fn fetch_instruments_caches_result() {
+        let inst = test_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst.clone()));
+
+        // First call populates cache
+        engine
+            .fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto)
+            .unwrap();
+
+        // Verify cache hit
+        let cached = engine.rt.block_on(async {
+            engine.cache.instrument_cache.get(&"TEST-USD".to_owned()).await
+        });
+        assert!(cached.is_some());
+    }
+
+    #[test]
+    fn fetch_instruments_multiple_symbols() {
+        let inst = test_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst));
+
+        let results = engine
+            .fetch_instruments(
+                vec!["TEST-USD".to_owned(), "OTHER-USD".to_owned()],
+                InstrumentType::Crypto,
+            )
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+    }
+
+    // ── list_instruments ────────────────────────────────────────────────
+
+    #[test]
+    fn list_instruments_returns_results() {
+        let inst = test_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst));
+
+        let results = engine
+            .list_instruments(InstrumentType::Crypto, None, 10, false)
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+    }
+
+    // ── clear_cache ─────────────────────────────────────────────────────
+
+    #[test]
+    fn clear_cache_works() {
+        let inst = test_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst));
+
+        // Populate cache
+        engine
+            .fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto)
+            .unwrap();
+
+        engine.clear_cache();
+
+        engine.rt.block_on(async {
+            engine.cache.instrument_cache.run_pending_tasks().await;
+        });
+
+        let cached = engine.rt.block_on(async {
+            engine.cache.instrument_cache.get(&"TEST-USD".to_owned()).await
+        });
+        assert!(cached.is_none());
+    }
+}

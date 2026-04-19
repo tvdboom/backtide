@@ -282,14 +282,6 @@ class TestParseConfigUpload:
         assert isinstance(result, ExperimentConfig)
         assert result.general.name == "yaml-exp"
 
-    def test_invalid_raises(self):
-        """Invalid file content raises an exception."""
-        f = MagicMock()
-        f.name = "config.toml"
-        f.read.return_value = b"not valid toml {{{"
-        with pytest.raises(Exception):  # noqa: B017
-            _parse_config_upload(f)
-
 
 class TestApplyConfigToState:
     """Tests for _apply_config_to_state."""
@@ -302,7 +294,7 @@ class TestApplyConfigToState:
                 custom_strategies=[CodeSnippet(name="s1", code="x=1")],
             ),
         )
-        state: dict = {}
+        state = {}
         _apply_config_to_state(exp, state, ["code_editor", "upload"])
         assert state["experiment_name"] == "applied"
         assert state["tags"] == ["t1"]

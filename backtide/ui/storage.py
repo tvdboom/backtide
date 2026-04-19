@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from backtide.core.config import get_config
-from backtide.core.data import InstrumentType
+from backtide.core.data import InstrumentType, Interval
 from backtide.core.storage import delete_symbols
 from backtide.ui.utils import (
     _fmt_number,
@@ -62,9 +62,8 @@ def _load_storage_df(date_fmt: str, tz: ZoneInfo, logokit_key: str | None) -> pd
 
 def _open_analysis(df: pd.DataFrame):
     """Navigate to the analysis page with pre-selected symbols and interval."""
-    print(df)
-    st.session_state["_symbols"] = df["Symbol"].tolist()
-    st.session_state["_intervals"] = df["Interval"].tolist()
+    st.session_state["_symbols"] = df["Symbol"].unique().tolist()
+    st.session_state["_interval"] = Interval(df["Interval"].mode()[0])
     st.switch_page("analysis.py")
 
 
@@ -77,7 +76,7 @@ def _confirm_delete(df: pd.DataFrame):
     )
 
     with st.container(height=200):
-        st.markdown("\n".join([f"* {g['Symbol']}  -  {g['Interval']}" for g in df]))
+        st.markdown("\n".join([f"* {r['Symbol']}  -  {r['Interval']}" for _, r in df.iterrows()]))
 
     col1, col2 = st.columns(2)
 
@@ -85,7 +84,9 @@ def _confirm_delete(df: pd.DataFrame):
         st.rerun()
 
     if col2.button("Delete", width="stretch", type="primary", icon=":material/delete:"):
-        delete_symbols([(r["Symbol"], r["Interval"], r["Provider"]) for _, r in df.iterrows()])
+        delete_symbols(
+            series=[(r["Symbol"], r["Interval"], r["Provider"]) for _, r in df.iterrows()]
+        )
         st.cache_data.clear()
         st.rerun()
 

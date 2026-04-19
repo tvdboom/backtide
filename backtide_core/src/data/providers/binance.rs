@@ -451,3 +451,116 @@ impl TryFrom<serde_json::Value> for BinanceKline {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+    use serde_json::json;
+
+    // ── parse_canonical_symbol ───────────────────────────────────────────
+
+    #[rstest]
+    #[case("BTC-USD", "BTCUSD")]
+    #[case("ETH-BTC", "ETHBTC")]
+    #[case("ETHBTC", "ETHBTC")]
+    fn parse_canonical_symbol(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(Binance::parse_canonical_symbol(input), expected);
+    }
+
+    // ── check_instrument_type ───────────────────────────────────────────
+
+    #[rstest]
+    #[case(InstrumentType::Crypto, true)]
+    #[case(InstrumentType::Stocks, false)]
+    #[case(InstrumentType::Forex, false)]
+    #[case(InstrumentType::Etf, false)]
+    fn check_instrument_type(#[case] it: InstrumentType, #[case] ok: bool) {
+        assert_eq!(Binance::check_instrument_type(it).is_ok(), ok);
+    }
+
+    // ── unwrap_response ─────────────────────────────────────────────────
+
+    #[test]
+    fn unwrap_response_ok() {
+        let resp = BinanceResponse::Ok(42);
+        assert_eq!(Binance::unwrap_response(resp).unwrap(), 42);
+    }
+
+    #[test]
+    fn unwrap_response_err() {
+        let resp: BinanceResponse<i32> = BinanceResponse::Err {
+            code: -1121,
+            msg: "Invalid symbol".to_owned(),
+        };
+        let err = Binance::unwrap_response(resp).unwrap_err();
+        assert!(err.to_string().contains("-1121"));
+        assert!(err.to_string().contains("Invalid symbol"));
+    }
+
+    // ── BinanceKline TryFrom<Value> ─────────────────────────────────────
+
+    #[test]
+    fn kline_try_from_valid() {
+        let row = json!([
+            1609459200000i64, "29000.0", "29500.0", "28500.0", "29200.0",
+            "100.5", 1609545600000i64, "2900000.0", 1234, "50.0", "25.0", "0"
+        ]);
+        let kline = BinanceKline::try_from(row).unwrap();
+        assert_eq!(kline.open_time, 1609459200);
+        assert_eq!(kline.close_time, 1609545600);
+        assert!((kline.open - 29000.0).abs() < f64::EPSILON);
+        assert!((kline.high - 29500.0).abs() < f64::EPSILON);
+        assert!((kline.low - 28500.0).abs() < f64::EPSILON);
+        assert!((kline.close - 29200.0).abs() < f64::EPSILON);
+        assert!((kline.volume - 100.5).abs() < f64::EPSILON);
+        assert_eq!(kline.n_trades, Some(1234));
+    }
+
+    #[rstest]
+    #[case(json!({"foo": "bar"}))]
+    #[case(json!([1609459200000i64]))]
+    fn kline_try_from_invalid(#[case] row: serde_json::Value) {
+        assert!(BinanceKline::try_from(row).is_err());
+    }
+
+    // ── BinanceKline -> Bar ─────────────────────────────────────────────
+
+    #[test]
+    fn bar_from_kline() {
+        let kline = BinanceKline {
+            open_time: 1000,
+            open: 10.0,
+            high: 12.0,
+            low: 9.0,
+            close: 11.0,
+            volume: 500.0,
+            close_time: 2000,
+            n_trades: Some(42),
+        };
+        let bar = Bar::from(kline);
+        assert_eq!(bar.open_ts, 1000);
+        assert_eq!(bar.close_ts, 2000);
+        assert_eq!(bar.adj_close, bar.close);
+        assert_eq!(bar.n_trades, Some(42));
+    }
+
+    // ── SymbolInfo -> Instrument ────────────────────────────────────────
+
+    #[test]
+    fn instrument_from_symbol_info() {
+        let info = SymbolInfo {
+            symbol: "BTCUSDT".to_owned(),
+            status: "TRADING".to_owned(),
+            base_asset: "BTC".to_owned(),
+            quote_asset: "USDT".to_owned(),
+        };
+        let inst = Instrument::try_from(info).unwrap();
+        assert_eq!(inst.symbol, "BTC-USDT");
+        assert_eq!(inst.base, Some("BTC".to_owned()));
+        assert_eq!(inst.quote, "USDT");
+        assert_eq!(inst.instrument_type, InstrumentType::Crypto);
+        assert_eq!(inst.provider, Provider::Binance);
+    }
+}
+

@@ -452,3 +452,121 @@ impl TryFrom<CoinbaseCandleRaw> for CoinbaseCandle {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    // ── interval_granularity ────────────────────────────────────────────
+
+    #[rstest]
+    #[case(Interval::OneMinute, "ONE_MINUTE")]
+    #[case(Interval::FiveMinutes, "FIVE_MINUTE")]
+    #[case(Interval::FifteenMinutes, "FIFTEEN_MINUTE")]
+    #[case(Interval::ThirtyMinutes, "THIRTY_MINUTE")]
+    #[case(Interval::OneHour, "ONE_HOUR")]
+    #[case(Interval::FourHours, "FOUR_HOUR")]
+    #[case(Interval::OneDay, "ONE_DAY")]
+    fn interval_granularity_supported(#[case] iv: Interval, #[case] expected: &str) {
+        assert_eq!(Coinbase::interval_granularity(iv).unwrap(), expected);
+    }
+
+    #[test]
+    fn interval_granularity_one_week_unsupported() {
+        assert!(Coinbase::interval_granularity(Interval::OneWeek).is_err());
+    }
+
+    // ── check_instrument_type ───────────────────────────────────────────
+
+    #[rstest]
+    #[case(InstrumentType::Crypto, true)]
+    #[case(InstrumentType::Stocks, false)]
+    #[case(InstrumentType::Forex, false)]
+    #[case(InstrumentType::Etf, false)]
+    fn check_instrument_type(#[case] it: InstrumentType, #[case] ok: bool) {
+        assert_eq!(Coinbase::check_instrument_type(it).is_ok(), ok);
+    }
+
+    // ── CoinbaseCandleRaw -> CoinbaseCandle ─────────────────────────────
+
+    #[test]
+    fn candle_try_from_valid() {
+        let raw = CoinbaseCandleRaw {
+            start: "1609459200".to_owned(),
+            open: "29000.0".to_owned(),
+            high: "29500.0".to_owned(),
+            low: "28500.0".to_owned(),
+            close: "29200.0".to_owned(),
+            volume: "100.5".to_owned(),
+        };
+        let candle = CoinbaseCandle::try_from(raw).unwrap();
+        assert_eq!(candle.start, 1609459200);
+        assert!((candle.open - 29000.0).abs() < f64::EPSILON);
+        assert!((candle.high - 29500.0).abs() < f64::EPSILON);
+        assert!((candle.low - 28500.0).abs() < f64::EPSILON);
+        assert!((candle.close - 29200.0).abs() < f64::EPSILON);
+        assert!((candle.volume - 100.5).abs() < f64::EPSILON);
+    }
+
+    #[rstest]
+    #[case("not_a_number", "1.0", "1.0", "1.0", "1.0", "1.0")]
+    #[case("1000", "bad", "1.0", "1.0", "1.0", "1.0")]
+    #[case("1000", "1.0", "1.0", "1.0", "1.0", "bad")]
+    fn candle_try_from_invalid(
+        #[case] start: &str,
+        #[case] open: &str,
+        #[case] high: &str,
+        #[case] low: &str,
+        #[case] close: &str,
+        #[case] volume: &str,
+    ) {
+        let raw = CoinbaseCandleRaw {
+            start: start.to_owned(),
+            open: open.to_owned(),
+            high: high.to_owned(),
+            low: low.to_owned(),
+            close: close.to_owned(),
+            volume: volume.to_owned(),
+        };
+        assert!(CoinbaseCandle::try_from(raw).is_err());
+    }
+
+    // ── CoinbaseCandle -> Bar ───────────────────────────────────────────
+
+    #[test]
+    fn bar_from_candle() {
+        let candle = CoinbaseCandle {
+            start: 1000,
+            open: 10.0,
+            high: 12.0,
+            low: 9.0,
+            close: 11.0,
+            volume: 500.0,
+        };
+        let bar = Bar::from(candle);
+        assert_eq!(bar.open_ts, 1000);
+        assert_eq!(bar.close_ts, 1000);
+        assert_eq!(bar.adj_close, bar.close);
+        assert_eq!(bar.n_trades, None);
+    }
+
+    // ── ProductInfo -> Instrument ───────────────────────────────────────
+
+    #[test]
+    fn instrument_from_product_info() {
+        let info = ProductInfo {
+            product_id: "BTC-USD".to_owned(),
+            base_currency_id: "BTC".to_owned(),
+            quote_currency_id: "USD".to_owned(),
+            status: Some("online".to_owned()),
+            new_at: None,
+        };
+        let inst = Instrument::try_from(info).unwrap();
+        assert_eq!(inst.symbol, "BTC-USD");
+        assert_eq!(inst.base, Some("BTC".to_owned()));
+        assert_eq!(inst.quote, "USD");
+        assert_eq!(inst.instrument_type, InstrumentType::Crypto);
+        assert_eq!(inst.provider, Provider::Coinbase);
+    }
+}

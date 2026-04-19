@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+from streamlit.runtime.state import SessionStateProxy
 from tzlocal import get_localzone
 import yaml
 
@@ -55,8 +56,82 @@ from backtide.utils.constants import (
 from backtide.utils.utils import _to_list
 
 
+def _apply_config_to_state(
+    exp: ExperimentConfig,
+    state: dict[str, Any] | SessionStateProxy,
+    user_code_options: list[str],
+):
+    """Write all fields of *exp* into the session *state* dict."""
+    state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", exp.general.name)
+    state["tags"] = exp.general.tags
+    state["description"] = exp.general.description
+
+    state["instrument_type"] = exp.data.instrument_type
+    state["symbols"] = exp.data.symbols
+    state["full_history"] = exp.data.full_history
+    if not exp.data.full_history:
+        if exp.data.start_date:
+            state["start_date"] = dt.fromisoformat(str(exp.data.start_date)).date()
+        if exp.data.end_date:
+            state["end_date"] = dt.fromisoformat(str(exp.data.end_date)).date()
+    state["interval"] = exp.data.interval
+
+    state["initial_cash"] = exp.portfolio.initial_cash
+    state["base_currency"] = exp.portfolio.base_currency
+    state["starting_positions"] = exp.portfolio.starting_positions
+
+    state["predefined_strategies"] = exp.strategy.predefined_strategies
+    state["custom_strategies"] = [
+        {"source": user_code_options[0], "code": s.code} for s in exp.strategy.custom_strategies
+    ]
+    for i, s in enumerate(exp.strategy.custom_strategies):
+        state[f"strategy_name_{i}"] = s.name
+
+    state["builtin_indicators"] = exp.indicators.builtin_indicators
+    state["custom_indicators"] = [
+        {"source": user_code_options[0], "code": s.code} for s in exp.indicators.custom_indicators
+    ]
+    for i, s in enumerate(exp.indicators.custom_indicators):
+        state[f"indicator_name_{i}"] = s.name
+
+    ex = exp.exchange
+    for key in (
+        "commission_type",
+        "commission_pct",
+        "commission_fixed",
+        "slippage",
+        "allowed_order_types",
+        "partial_fills",
+        "allow_margin",
+        "max_leverage",
+        "initial_margin",
+        "maintenance_margin",
+        "margin_interest",
+        "allow_short_selling",
+        "borrow_rate",
+        "max_position_size",
+        "conversion_mode",
+    ):
+        state[key] = getattr(ex, key)
+    for key in ("conversion_threshold", "conversion_period", "conversion_interval"):
+        if getattr(ex, key) is not None:
+            state[key] = getattr(ex, key)
+
+    eng = exp.engine
+    for key in (
+        "warmup_period",
+        "trade_on_close",
+        "risk_free_rate",
+        "benchmark",
+        "exclusive_orders",
+        "random_seed",
+        "empty_bar_policy",
+    ):
+        state[key] = getattr(eng, key)
+
+
 def _build_config_toml(
-    state: dict[str, Any],
+    state: dict[str, Any] | SessionStateProxy,
     experiment_name: str,
     defaults: ExperimentConfig,
 ) -> str:
@@ -65,12 +140,18 @@ def _build_config_toml(
     Parameters
     ----------
     state : dict
-        A dict-like mapping of widget keys to their current values
-        (typically ``st.session_state``).
+        The streamlit session state.
+
     experiment_name : str
         The resolved experiment name (or ID fallback).
+
     defaults : ExperimentConfig
         The default experiment config to fall back on for missing keys.
+
+    Returns
+    -------
+    str
+        The experiment config serialized as TOML.
 
     """
     cfg = ExperimentConfig(
@@ -156,103 +237,10 @@ def _build_config_toml(
     return cfg.to_toml()
 
 
-def _parse_config_upload(upload: Any) -> ExperimentConfig:
-    """Parse an uploaded config file into an ExperimentConfig.
-
-    Parameters
-    ----------
-    upload
-        A file-like object with a ``.name`` attribute indicating format.
-
-    """
-    if upload.name.endswith(".json"):
-        raw = json.load(upload)
-    elif upload.name.endswith(".toml"):
-        raw = tomllib.loads(upload.read().decode("utf-8"))
-    else:
-        raw = yaml.safe_load(upload)
-
-    return ExperimentConfig.from_dict(raw)
-
-
-def _apply_config_to_state(
-    exp: ExperimentConfig,
-    state: dict[str, Any],
-    user_code_options: list[str],
-) -> None:
-    """Write all fields of *exp* into the session *state* dict."""
-    state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", exp.general.name)
-    state["tags"] = exp.general.tags
-    state["description"] = exp.general.description
-
-    state["instrument_type"] = exp.data.instrument_type
-    state["symbols"] = exp.data.symbols
-    state["full_history"] = exp.data.full_history
-    if not exp.data.full_history:
-        if exp.data.start_date:
-            state["start_date"] = dt.fromisoformat(str(exp.data.start_date)).date()
-        if exp.data.end_date:
-            state["end_date"] = dt.fromisoformat(str(exp.data.end_date)).date()
-    state["interval"] = exp.data.interval
-
-    state["initial_cash"] = exp.portfolio.initial_cash
-    state["base_currency"] = exp.portfolio.base_currency
-    state["starting_positions"] = exp.portfolio.starting_positions
-
-    state["predefined_strategies"] = exp.strategy.predefined_strategies
-    state["custom_strategies"] = [
-        {"source": user_code_options[0], "code": s.code} for s in exp.strategy.custom_strategies
-    ]
-    for i, s in enumerate(exp.strategy.custom_strategies):
-        state[f"strategy_name_{i}"] = s.name
-
-    state["builtin_indicators"] = exp.indicators.builtin_indicators
-    state["custom_indicators"] = [
-        {"source": user_code_options[0], "code": s.code} for s in exp.indicators.custom_indicators
-    ]
-    for i, s in enumerate(exp.indicators.custom_indicators):
-        state[f"indicator_name_{i}"] = s.name
-
-    ex = exp.exchange
-    for key in (
-        "commission_type",
-        "commission_pct",
-        "commission_fixed",
-        "slippage",
-        "allowed_order_types",
-        "partial_fills",
-        "allow_margin",
-        "max_leverage",
-        "initial_margin",
-        "maintenance_margin",
-        "margin_interest",
-        "allow_short_selling",
-        "borrow_rate",
-        "max_position_size",
-        "conversion_mode",
-    ):
-        state[key] = getattr(ex, key)
-    for key in ("conversion_threshold", "conversion_period", "conversion_interval"):
-        if getattr(ex, key) is not None:
-            state[key] = getattr(ex, key)
-
-    eng = exp.engine
-    for key in (
-        "warmup_period",
-        "trade_on_close",
-        "risk_free_rate",
-        "benchmark",
-        "exclusive_orders",
-        "random_seed",
-        "empty_bar_policy",
-    ):
-        state[key] = getattr(eng, key)
-
-
 def _check_strategy_code(code: str) -> str | None:
-    """Validate that *code* defines ``strategy(data, state, indicators)``.
+    """Validate that *code* defines `strategy(data, state, indicators)`.
 
-    Returns ``None`` on success or an error message string on failure.
+    Returns `None` on success or an error message string on failure.
     """
     try:
         tree = ast.parse(code)
@@ -270,9 +258,9 @@ def _check_strategy_code(code: str) -> str | None:
 
 
 def _check_indicator_code(code: str) -> str | None:
-    """Validate that *code* defines ``indicator(data)``.
+    """Validate that *code* defines `indicator(data)`.
 
-    Returns ``None`` on success or an error message string on failure.
+    Returns `None` on success or an error message string on failure.
     """
     try:
         tree = ast.parse(code)
@@ -404,6 +392,25 @@ def _moment_to_strftime(fmt: str) -> str:
     return regex.sub(replace, fmt)
 
 
+def _parse_config_upload(upload: Any) -> ExperimentConfig:
+    """Parse an uploaded config file into an ExperimentConfig.
+
+    Parameters
+    ----------
+    upload
+        A file-like object with a `.name` attribute indicating format.
+
+    """
+    if upload.name.endswith(".json"):
+        raw = json.load(upload)
+    elif upload.name.endswith(".toml"):
+        raw = tomllib.loads(upload.read().decode("utf-8"))
+    else:
+        raw = yaml.safe_load(upload)
+
+    return ExperimentConfig.from_dict(raw)
+
+
 def _parse_date(ts: int, fmt: str, tz: ZoneInfo) -> str:
     """Format a Unix timestamp into the user's date format."""
     fmt = _moment_to_strftime(fmt)
@@ -417,18 +424,18 @@ def _persist(*keys: str):
             st.session_state[f"_{k}"] = st.session_state[k]
 
 
+@st.cache_data(show_spinner="Loading stored data...")
+def _query_bars_summary() -> pd.DataFrame:
+    """Load and cache the raw storage summary from the database."""
+    return _to_pandas(query_bars_summary())
+
+
 def _to_pandas(df: Any) -> pd.DataFrame:
     """Ensure a DataFrame is pandas, converting from polars if needed."""
     if hasattr(df, "to_pandas"):
         return df.to_pandas()
 
     return df
-
-
-@st.cache_data(show_spinner="Loading stored data...")
-def _query_bars_summary() -> pd.DataFrame:
-    """Load and cache the raw storage summary from the database."""
-    return _to_pandas(query_bars_summary())
 
 
 def _to_upper_values(key: str):
@@ -440,7 +447,66 @@ def _to_upper_values(key: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Instrument card rendering (shared by download & experiment pages)
+# Code block defaults
+# ─────────────────────────────────────────────────────────────────────────────
+
+STRATEGY_PLACEHOLDER = """\
+def strategy(data, state, indicators):
+    '''Function that decides the orders to place this tick.
+
+    Parameters
+    ---------
+    data : pd.DataFrame
+        Ticker data.
+
+    state : State
+        Current portfolio, etc...
+
+    indicators: dict[str, dict[str, float]] | None
+        Indicators calculated on the historical data. The first key is the
+        symbol and the second key is the name of the indicator. None if no
+        indicators were selected.
+
+    Returns
+    -------
+    list[Order]
+        Orders to place.
+
+    '''
+    orders = []
+
+    # ── Write your logic here ──────────────────────────
+
+    return orders
+"""
+
+
+INDICATOR_PLACEHOLDER = """\
+def indicator(data):
+    '''Compute a custom indicator value for the current bar.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Historical OHLCV data up to and including the current bar.
+
+    Returns
+    -------
+    dict[str, float]
+        A mapping of indicator name(s) to their computed value(s).
+        Example: {"my_signal": 0.75, "my_trend": 1.0}
+
+    '''
+    result = {}
+
+    # ── Write your logic here ──────────────────────────
+
+    return result
+"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Instrument card rendering
 # ─────────────────────────────────────────────────────────────────────────────
 
 _CARD_CSS = """

@@ -5,6 +5,7 @@ Description: Unit tests for the CLI commands.
 
 """
 
+from pathlib import Path
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
@@ -159,10 +160,15 @@ class TestMainBlock:
     def test_main_invoked(self):
         """The main() function is called when run as __main__."""
         result = subprocess.run(
-            [sys.executable, "backtide/cli.py", "--help"],
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parent.parent / "backtide" / "cli.py"),
+                "--help",
+            ],
             capture_output=True,
             text=True,
             timeout=10,
         )
+
         assert result.returncode == 0
         assert "CLI application" in result.stdout

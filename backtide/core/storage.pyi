@@ -146,13 +146,13 @@ def query_dividends(symbol=None, provider=None, *, limit=None) -> pd.DataFrame |
     Parameters
     ----------
     symbol : str | list[str] | None, default=None
-        Filter by symbol. Accepts a single symbol or a list. ``None`` returns all.
+        Filter by symbol. Accepts a single symbol or a list. `None` returns all.
 
     provider : str | Provider | list[str | Provider] | None, default=None
         Filter by data provider. Accepts a single value or a list.
 
     limit : int | None, default=None
-        Maximum number of rows to return. ``None`` means no limit.
+        Maximum number of rows to return. `None` means no limit.
 
     Returns
     -------
@@ -201,7 +201,7 @@ def query_instruments(
         Filter by exchange. Accepts a single exchange or a list.
 
     limit : int | None, default=None
-        Maximum number of instruments to return. ``None`` means no limit.
+        Maximum number of instruments to return. `None` means no limit.
 
     Returns
     -------
