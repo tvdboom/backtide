@@ -130,8 +130,9 @@ pub fn query_instruments(
 ///
 /// Parameters
 /// ----------
-/// symbol : str | list[str] | None, default=None
-///     Filter by symbol. Accepts a single symbol or a list. `None` returns all.
+/// symbol : str | Instrument | list[str | Instrument] | None, default=None
+///     Filter by symbol. When Instrument objects are passed, the provider is
+///     automatically inferred unless explicitly overridden. `None` returns all.
 ///
 /// interval : str | Interval | list[str | Interval] | None, default=None
 ///     Filter by bar interval. Accepts a single value or a list.
@@ -161,8 +162,45 @@ pub fn query_instruments(
 /// df = query_bars()
 /// print(df.head())
 /// ```
+/// Parse the `symbol` parameter which can be a string, Instrument, or list of either.
+/// Returns `(symbols, providers_from_instruments)`.
+fn parse_symbol_param(value: Bound<'_, PyAny>) -> PyResult<(Vec<String>, Option<Vec<Provider>>)> {
+    // Try single Instrument first
+    if let Ok(inst) = value.extract::<Instrument>() {
+        return Ok((vec![inst.symbol], Some(vec![inst.provider])));
+    }
+
+    // Try list (could be list of Instruments or list of strings)
+    if let Ok(seq) = value.extract::<Vec<Bound<'_, PyAny>>>() {
+        // Try extracting as Instruments first
+        let instruments: Result<Vec<Instrument>, _> =
+            seq.iter().map(|item| item.extract::<Instrument>()).collect();
+        if let Ok(instruments) = instruments {
+            let symbols = instruments.iter().map(|i| i.symbol.clone()).collect();
+            let providers: Vec<Provider> = instruments.iter().map(|i| i.provider).collect();
+            let unique_providers: Vec<Provider> = {
+                let mut v = providers;
+                v.sort_by_key(|p| format!("{p}"));
+                v.dedup();
+                v
+            };
+            return Ok((symbols, Some(unique_providers)));
+        }
+
+        // Fall back to strings
+        let symbols: Vec<String> = seq
+            .iter()
+            .map(|item| item.extract::<String>().map_err(Into::into))
+            .collect::<PyResult<Vec<_>>>()?;
+        return Ok((symbols, None));
+    }
+
+    // Single string
+    Ok((vec![value.extract::<String>()?], None))
+}
+
 #[pyfunction]
-#[pyo3(signature = (symbol: "str | list[str] | None"=None, interval: "str | Interval | list[str | Interval] | None"=None, provider: "str | Provider | list[str | Provider] | None"=None, *, limit: "int | None"=None))]
+#[pyo3(signature = (symbol: "str | Instrument | list[str | Instrument] | None"=None, interval: "str | Interval | list[str | Interval] | None"=None, provider: "str | Provider | list[str | Provider] | None"=None, *, limit: "int | None"=None))]
 pub fn query_bars(
     py: Python<'_>,
     symbol: Option<Bound<'_, PyAny>>,
@@ -170,9 +208,19 @@ pub fn query_bars(
     provider: Option<Bound<'_, PyAny>>,
     limit: Option<usize>,
 ) -> PyResult<Py<PyAny>> {
-    let symbols: Option<Vec<String>> = symbol.map(parse_one_or_many).transpose()?;
+    let (symbols, inferred_providers) = match symbol {
+        Some(val) => {
+            let (syms, provs) = parse_symbol_param(val)?;
+            (Some(syms), provs)
+        }
+        None => (None, None),
+    };
     let intervals: Option<Vec<Interval>> = interval.map(parse_one_or_many).transpose()?;
-    let providers: Option<Vec<Provider>> = provider.map(parse_one_or_many).transpose()?;
+    // Explicit provider takes precedence over inferred from instruments
+    let providers: Option<Vec<Provider>> = match provider {
+        Some(p) => Some(parse_one_or_many(p)?),
+        None => inferred_providers,
+    };
 
     let sym_refs: Option<Vec<&str>> =
         symbols.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());

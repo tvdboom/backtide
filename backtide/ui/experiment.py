@@ -99,7 +99,6 @@ tz = _get_timezone(cfg.display.timezone)
 exp: ExperimentConfig = _default("config", ExperimentConfig())
 
 st.set_page_config(page_title="Backtide - Experiment", layout="centered")
-st.title("Experiment", text_alignment="center")
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [

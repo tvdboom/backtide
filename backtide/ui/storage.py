@@ -60,14 +60,24 @@ def _load_storage_df(date_fmt: str, tz: ZoneInfo, logokit_key: str | None) -> pd
     return df
 
 
+def _open_analysis(df: pd.DataFrame):
+    """Navigate to the analysis page with pre-selected symbols and interval."""
+    print(df)
+    st.session_state["_symbols"] = df["Symbol"].tolist()
+    st.session_state["_intervals"] = df["Interval"].tolist()
+    st.switch_page("analysis.py")
+
+
 @st.dialog("Confirm deletion", width="medium")
-def _confirm_delete(series: list[pd.Series]):
+def _confirm_delete(df: pd.DataFrame):
     """Show a modal asking the user to confirm deletion of selected series."""
-    text = "\n".join([f"* {g['Symbol']}  -  {g['Interval']}" for g in series])
     st.warning(
-        f"You are about to **permanently delete** the following series:\n\n{text}",
+        "You are about to **permanently delete** the following series:",
         icon=":material/warning:",
     )
+
+    with st.container(height=200):
+        st.markdown("\n".join([f"* {g['Symbol']}  -  {g['Interval']}" for g in df]))
 
     col1, col2 = st.columns(2)
 
@@ -75,7 +85,7 @@ def _confirm_delete(series: list[pd.Series]):
         st.rerun()
 
     if col2.button("Delete", width="stretch", type="primary", icon=":material/delete:"):
-        delete_symbols(series=[(g["Symbol"], g["Interval"], g["Provider"]) for g in series])
+        delete_symbols([(r["Symbol"], r["Interval"], r["Provider"]) for _, r in df.iterrows()])
         st.cache_data.clear()
         st.rerun()
 
@@ -90,14 +100,9 @@ logokit_key = cfg.display.logokit_api_key
 
 st.set_page_config(page_title="Backtide - Storage")
 
-st.title("Storage", text_alignment="center")
+all_series = _load_storage_df(cfg.display.date_format, tz, logokit_key)
 
-st.divider()
-
-
-bars_df = _load_storage_df(cfg.display.date_format, tz, logokit_key)
-
-if bars_df.empty:
+if all_series.empty:
     st.info(
         "The database is empty. Head over to the **Download** page to fetch some market data.",
         icon=":material/info:",
@@ -115,33 +120,44 @@ column_config = {
 if logokit_key:
     column_config["Logo"] = st.column_config.ImageColumn(label="", width="small")
 
+columns = all_series.columns.drop(["Instrument type", "Provider"]).tolist()
+if not all_series["Instrument type"].isin(["stocks", "etf"]).any():
+    columns.remove("Name")
+
 event = st.dataframe(
-    bars_df,
+    all_series,
     height="stretch",
     column_config=column_config,
-    column_order=[c for c in bars_df.columns if c not in ("Instrument type", "Provider")],
-    hide_index=bars_df.index.name is None,
+    column_order=columns,
+    hide_index=all_series.index.name is None,
     selection_mode="multi-row",
     on_select="rerun",
 )
 
 indices = event.selection.rows if event and event.selection else None  # ty: ignore[unresolved-attribute]
-selected = bars_df.iloc[indices] if indices else bars_df
+selected_rows = all_series.iloc[indices] if indices else all_series
 
 with metrics_container:
     col1, col2, col3 = st.columns(3)
     col1.metric(
-        ":material/trending_up: Number of symbols",
-        selected["Symbol"].nunique(),
+        label=":material/trending_up: Number of symbols",
+        value=selected_rows["Symbol"].nunique(),
         border=True,
     )
-    col2.metric(":material/view_list: Number of series", _fmt_number(len(selected)), border=True)
+    col2.metric(
+        label=":material/view_list: Number of series",
+        value=_fmt_number(len(selected_rows)),
+        border=True,
+    )
     col3.metric(
-        ":material/candlestick_chart: Total bars",
-        _fmt_number(selected["Bars"].sum()),
+        label=":material/candlestick_chart: Total bars",
+        value=_fmt_number(selected_rows["Bars"].sum()),
         border=True,
     )
 
 if indices:
-    if st.button(f"Delete {len(indices)} series", type="primary", icon=":material/delete:"):
-        _confirm_delete([bars_df.iloc[i] for i in indices])
+    col1, col2, _ = st.columns([2, 2, 3.9])
+    if col1.button(f"Analyze {len(indices)} series", type="secondary", icon=":material/insights:"):
+        _open_analysis(selected_rows)
+    if col2.button(f"Delete {len(indices)} series", type="primary", icon=":material/delete:"):
+        _confirm_delete(selected_rows)

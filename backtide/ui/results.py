@@ -7,9 +7,6 @@ Description: Backtest results page.
 
 import streamlit as st
 
-st.title("Results")
-st.divider()
-
 with st.expander("📈 Mean Reversion v2 · BTCUSD · 1H — 28 Feb 2026", expanded=True):
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Total Return", "+42.8%", delta="+42.8%")
