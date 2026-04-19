@@ -319,3 +319,293 @@ where
 
     Ok(results)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_api_message_chart_error() {
+        let body = r#"{"chart":{"error":{"description":"No data found"}}}"#;
+        assert_eq!(HttpClient::extract_api_message(body), Some("No data found".to_owned()));
+    }
+
+    #[test]
+    fn test_extract_api_message_error_message() {
+        let body = r#"{"error":{"message":"Rate limit exceeded"}}"#;
+        assert_eq!(HttpClient::extract_api_message(body), Some("Rate limit exceeded".to_owned()));
+    }
+
+    #[test]
+    fn test_extract_api_message_top_level_message() {
+        let body = r#"{"message":"Not found"}"#;
+        assert_eq!(HttpClient::extract_api_message(body), Some("Not found".to_owned()));
+    }
+
+    #[test]
+    fn test_extract_api_message_error_string() {
+        let body = r#"{"error":"Something went wrong"}"#;
+        assert_eq!(HttpClient::extract_api_message(body), Some("Something went wrong".to_owned()));
+    }
+
+    #[test]
+    fn test_extract_api_message_invalid_json() {
+        assert_eq!(HttpClient::extract_api_message("not json"), None);
+    }
+
+    #[test]
+    fn test_extract_api_message_no_known_keys() {
+        let body = r#"{"status":"error","code":500}"#;
+        assert_eq!(HttpClient::extract_api_message(body), None);
+    }
+
+    #[test]
+    fn test_http_client_new() {
+        let client = HttpClient::new();
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_http_client_with_config() {
+        let config = HttpClientConfig {
+            max_concurrent_requests: 5,
+            connect_timeout: Duration::from_secs(5),
+            request_timeout: Duration::from_secs(15),
+            min_request_interval: Some(Duration::from_millis(200)),
+        };
+        let client = HttpClient::with_config(config);
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_http_client_default_config() {
+        let config = HttpClientConfig::default();
+        assert_eq!(config.max_concurrent_requests, 10);
+        assert_eq!(config.connect_timeout, Duration::from_secs(10));
+        assert_eq!(config.request_timeout, Duration::from_secs(30));
+        assert!(config.min_request_interval.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_paginate_single_page() {
+        let result = paginate(5, 10, |batch, offset| async move {
+            assert_eq!(offset, 0);
+            Ok::<_, String>((0..batch).collect::<Vec<usize>>())
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_paginate_multiple_pages() {
+        let result = paginate(5, 2, |batch, _offset| async move {
+            Ok::<_, String>((0..batch).collect::<Vec<usize>>())
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_paginate_short_page_stops() {
+        // Provider returns fewer items than requested → pagination stops
+        let result = paginate(100, 10, |_batch, _offset| async move {
+            Ok::<_, String>(vec![1, 2, 3]) // Only 3 items
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_paginate_error_propagates() {
+        let result: Result<Vec<usize>, String> =
+            paginate(10, 5, |_batch, _offset| async move { Err("fail".to_owned()) }).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_http_get_success() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let resp = client.get(&format!("{}/test", server.uri()), None).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.text().await.unwrap(), "ok");
+    }
+
+    #[tokio::test]
+    async fn test_http_get_with_params() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("q", "test"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("found"))
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let params = [("q", "test")];
+        let resp = client.get(&format!("{}/search", server.uri()), Some(&params)).await.unwrap();
+        assert_eq!(resp.text().await.unwrap(), "found");
+    }
+
+    #[tokio::test]
+    async fn test_http_post_success() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("created"))
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let body = serde_json::json!({"key": "value"});
+        let resp = client.post(&format!("{}/api", server.uri()), &[], &body).await.unwrap();
+        assert_eq!(resp.text().await.unwrap(), "created");
+    }
+
+    #[tokio::test]
+    async fn test_http_get_client_error_no_retry() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/notfound"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let result = client.get(&format!("{}/notfound", server.uri()), None).await;
+        assert!(result.is_err());
+        if let Err(HttpError::Status {
+            status,
+            ..
+        }) = result
+        {
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        } else {
+            panic!("Expected HttpError::Status");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_http_get_client_error_with_json_body() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/err"))
+            .respond_with(
+                ResponseTemplate::new(400)
+                    .set_body_string(r#"{"error":{"message":"Bad request data"}}"#),
+            )
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let result = client.get(&format!("{}/err", server.uri()), None).await;
+        if let Err(HttpError::Status {
+            body,
+            ..
+        }) = result
+        {
+            assert_eq!(body, "Bad request data");
+        } else {
+            panic!("Expected HttpError::Status with extracted message");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_http_json_decode() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(r#"{"name":"test","value":42}"#),
+            )
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let resp = client.get(&format!("{}/json", server.uri()), None).await.unwrap();
+        let data: serde_json::Value = HttpClient::json(resp).await.unwrap();
+        assert_eq!(data["name"], "test");
+        assert_eq!(data["value"], 42);
+    }
+
+    #[tokio::test]
+    async fn test_http_throttle() {
+        let config = HttpClientConfig {
+            max_concurrent_requests: 1,
+            connect_timeout: Duration::from_secs(5),
+            request_timeout: Duration::from_secs(10),
+            min_request_interval: Some(Duration::from_millis(50)),
+        };
+        let client = HttpClient::with_config(config).unwrap();
+
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/throttle"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let start = std::time::Instant::now();
+        client.get(&format!("{}/throttle", server.uri()), None).await.unwrap();
+        client.get(&format!("{}/throttle", server.uri()), None).await.unwrap();
+        let elapsed = start.elapsed();
+        // Second request should have been delayed by at least the min interval
+        assert!(elapsed >= Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn test_http_server_error_retries() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // Always return 500 — client should retry and eventually fail
+        Mock::given(method("GET"))
+            .and(path("/fail"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal error"))
+            .expect(5) // MAX_RETRIES
+            .mount(&server)
+            .await;
+
+        let config = HttpClientConfig {
+            max_concurrent_requests: 1,
+            connect_timeout: Duration::from_secs(5),
+            request_timeout: Duration::from_secs(10),
+            min_request_interval: None,
+        };
+        let client = HttpClient::with_config(config).unwrap();
+        let result = client.get(&format!("{}/fail", server.uri()), None).await;
+        assert!(result.is_err());
+    }
+}

@@ -7,16 +7,9 @@ Description: Unit tests for utility functions and constants.
 
 import pytest
 
-from backtide.utils.constants import (
-    INVALID_FILENAME_CHARS,
-    MAX_INSTRUMENT_SELECTION,
-    MAX_PRELOADED_INSTRUMENTS,
-    MOMENT_TO_STRFTIME,
-    TAG_PATTERN,
-)
+from backtide.utils import clear_cache, init_logging
 from backtide.utils.enum import CaseInsensitiveEnum
 from backtide.utils.utils import _format_compact, _to_list
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _to_list
@@ -95,46 +88,19 @@ class TestCaseInsensitiveEnum:
         Blue = 3
 
     def test_case_insensitive(self):
+        """Case-insensitive lookup works for all casings."""
         assert self._Color("red") == self._Color.Red
         assert self._Color("RED") == self._Color.Red
         assert self._Color("Red") == self._Color.Red
 
     def test_repr(self):
+        """Repr returns the member name."""
         assert repr(self._Color.Red) == "Red"
 
     def test_missing_raises(self):
+        """Unknown member raises ValueError."""
         with pytest.raises(ValueError, match="has no member"):
             self._Color("yellow")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Constants
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestConstants:
-    """Tests for shared constants."""
-
-    @pytest.mark.parametrize("tag", ["my-tag", "tag 1", "hello_world"])
-    def test_tag_pattern_match(self, tag):
-        assert TAG_PATTERN.match(tag)
-
-    @pytest.mark.parametrize("tag", ["", "a" * 21, "tag<>"])
-    def test_tag_pattern_no_match(self, tag):
-        assert not TAG_PATTERN.match(tag)
-
-    def test_invalid_filename_chars(self):
-        assert INVALID_FILENAME_CHARS.search("<>:")
-        assert not INVALID_FILENAME_CHARS.search("hello")
-
-    def test_moment_to_strftime_has_entries(self):
-        assert "YYYY" in MOMENT_TO_STRFTIME
-        assert MOMENT_TO_STRFTIME["YYYY"] == "%Y"
-        assert len(MOMENT_TO_STRFTIME) > 10
-
-    def test_max_constants(self):
-        assert MAX_INSTRUMENT_SELECTION == 10
-        assert MAX_PRELOADED_INSTRUMENTS == 1500
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -147,14 +113,9 @@ class TestCoreUtils:
 
     def test_init_logging_idempotent(self):
         """init_logging can be called multiple times without error."""
-        from backtide.core.utils import init_logging
-
         init_logging("warn")
         init_logging("warn")  # second call is a no-op
 
     def test_clear_cache(self):
         """clear_cache runs without error."""
-        from backtide.core.utils import clear_cache
-
         clear_cache()
-

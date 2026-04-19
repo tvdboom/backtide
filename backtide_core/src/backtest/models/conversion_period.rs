@@ -89,4 +89,3 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ConversionPeriod {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown conversion period {s:?}.")))
     }
 }
-

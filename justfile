@@ -22,9 +22,10 @@ stubs:
 check:
     python scripts/generate_stubs.py --check
 
-# Run the test suite
+# Run the test suite (Python + Cargo) with coverage ≥95%
 test *args:
-    uv run pytest {{args}}
+    uv run pytest -n=auto --cov=backtide --cov-fail-under=95 {{args}}
+    cargo llvm-cov --manifest-path backtide_core/Cargo.toml --fail-under-lines 95
 
 # Run pre-commit hooks on all files
 lint:

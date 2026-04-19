@@ -148,6 +148,11 @@ storage = st.Page(
     title="Storage",
     icon=":material/database:",
 )
+analysis = st.Page(
+    "analysis.py",
+    title="Analysis",
+    icon=":material/insights:",
+)
 
 st.sidebar.markdown(
     """
@@ -195,5 +200,5 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-pg = st.navigation({"Backtest": [run_test, results], "Data": [download, storage]})
+pg = st.navigation({"Backtest": [run_test, results], "Data": [download, storage, analysis]})
 pg.run()

@@ -22,7 +22,8 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.3.1",
-    "streamlit>=1.55.0",
+    "plotly>=6.1.0",
+    "streamlit>=1.56.0",
     "streamlit_code_editor>=0.1.22",
     "pandas>=2.3.3",
     "pyyaml>=6.0.3",
@@ -147,13 +148,18 @@ force-sort-within-sections = true
 "config.py" = ["F401"]  # Unused imports
 "data.py" = ["F401"]  # Unused imports
 "storage.py" = ["F401"]  # Unused imports
-"scripts/*.py" = [
+"generate_stubs.py" = [
     "INP001",  # Part of an implicit namespace package
-    "T201",  # CLI scripts use print for output
+    "T201",  # Use print statement
 ]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
+
+[tool.coverage.run]
+omit = [
+    "backtide/ui/app.py",  # Streamlit entry point (navigation wiring only)
+]
 
 [tool.coverage.report]
 exclude_also = [

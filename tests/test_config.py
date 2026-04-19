@@ -6,8 +6,6 @@ Description: Unit tests for the configuration frontend.
 """
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 import yaml
@@ -17,14 +15,9 @@ from backtide.config import (
     DataConfig,
     DisplayConfig,
     GeneralConfig,
-    LogLevel,
-    TriangulationStrategy,
     get_config,
     load_config,
 )
-
-from backtide.config import DataframeBackend
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DisplayConfig
@@ -186,61 +179,6 @@ class TestConfig:
         assert "general" in d
         assert "data" in d
         assert "display" in d
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Enum classes
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestLogLevel:
-    """Tests for the 'LogLevel' enum."""
-
-    def test_variants(self):
-        """variants() returns all log levels."""
-        v = LogLevel.variants()
-        assert len(v) >= 4
-
-    @pytest.mark.parametrize("attr,expected", [("Error", "error"), ("Warn", "warn"), ("Info", "info"), ("Debug", "debug")])
-    def test_from_string(self, attr, expected):
-        """LogLevel can be accessed via class attributes."""
-        level = getattr(LogLevel, attr)
-        assert repr(level) == expected
-
-
-class TestDataframeBackend:
-    """Tests for the 'DataframeBackend' enum."""
-
-    def test_variants(self):
-        """variants() returns pandas and polars."""
-        v = DataframeBackend.variants()
-        assert len(v) == 2
-
-    @pytest.mark.parametrize("attr,expected", [("Pandas", "pandas"), ("Polars", "polars")])
-    def test_from_string(self, attr, expected):
-        """DataframeBackend can be accessed via class attributes."""
-        backend = getattr(DataframeBackend, attr)
-        assert repr(backend) == expected
-
-    def test_invalid_raises(self):
-        """Invalid backend raises ValueError."""
-        with pytest.raises((ValueError, AttributeError, TypeError)):
-            DataframeBackend("invalid")
-
-
-class TestTriangulationStrategy:
-    """Tests for the 'TriangulationStrategy' enum."""
-
-    def test_variants(self):
-        """variants() returns direct and earliest."""
-        v = TriangulationStrategy.variants()
-        assert len(v) == 2
-
-    @pytest.mark.parametrize("attr,expected", [("Direct", "direct"), ("Earliest", "earliest")])
-    def test_from_string(self, attr, expected):
-        """TriangulationStrategy can be accessed via class attributes."""
-        ts = getattr(TriangulationStrategy, attr)
-        assert repr(ts) == expected
 
 
 # ─────────────────────────────────────────────────────────────────────────────

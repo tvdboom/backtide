@@ -149,4 +149,3 @@ impl<'a, 'py> FromPyObject<'a, 'py> for IndicatorType {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown indicator type {s:?}.")))
     }
 }
-

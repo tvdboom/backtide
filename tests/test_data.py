@@ -21,7 +21,6 @@ from backtide.data import (
     resolve_profiles,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # InstrumentType
 # ─────────────────────────────────────────────────────────────────────────────
@@ -89,12 +88,12 @@ class TestInterval:
         """Interval can be constructed from canonical string."""
         assert str(Interval(name)) == name
 
-    @pytest.mark.parametrize("name,expected", [("1m", True), ("1h", True), ("1d", False)])
+    @pytest.mark.parametrize(("name", "expected"), [("1m", True), ("1h", True), ("1d", False)])
     def test_is_intraday(self, name, expected):
         """is_intraday returns correct result."""
         assert Interval(name).is_intraday() == expected
 
-    @pytest.mark.parametrize("name,expected", [("1m", 1), ("1h", 60), ("1d", 1440)])
+    @pytest.mark.parametrize(("name", "expected"), [("1m", 1), ("1h", 60), ("1d", 1440)])
     def test_minutes(self, name, expected):
         """minutes() returns expected values."""
         assert Interval(name).minutes() == expected
@@ -113,7 +112,15 @@ class TestInterval:
 class TestProvider:
     """Tests for the 'Provider' enum."""
 
-    @pytest.mark.parametrize("attr,expected", [("Yahoo", "yahoo"), ("Binance", "binance"), ("Coinbase", "coinbase"), ("Kraken", "kraken")])
+    @pytest.mark.parametrize(
+        ("attr", "expected"),
+        [
+            ("Yahoo", "yahoo"),
+            ("Binance", "binance"),
+            ("Coinbase", "coinbase"),
+            ("Kraken", "kraken"),
+        ],
+    )
     def test_from_attr(self, attr, expected):
         """Provider can be accessed via class attributes."""
         assert repr(getattr(Provider, attr)) == expected

@@ -5,33 +5,21 @@ Description: Run a new backtest page.
 
 """
 
-import ast
 from datetime import datetime as dt
-import json
 import logging
-import tomllib
 import uuid
 
 from code_editor import code_editor
 import streamlit as st
-import yaml
 
 from backtide.backtest import (
-    CodeSnippet,
     CommissionType,
     ConversionPeriod,
     CurrencyConversionMode,
-    DataExpConfig,
     EmptyBarPolicy,
-    EngineExpConfig,
-    ExchangeExpConfig,
     ExperimentConfig,
-    GeneralExpConfig,
-    IndicatorExpConfig,
     IndicatorType,
     OrderType,
-    PortfolioExpConfig,
-    StrategyExpConfig,
     StrategyType,
 )
 from backtide.config import get_config
@@ -40,12 +28,17 @@ from backtide.data import Currency, InstrumentProfile, InstrumentType
 from backtide.storage import query_instruments
 from backtide.ui.utils import (
     _CARD_CSS,
+    _apply_config_to_state,
+    _build_config_toml,
+    _check_indicator_code,
+    _check_strategy_code,
     _clear_state,
     _default,
     _draw_cards,
     _get_instrument_type_description,
     _get_timezone,
     _list_instruments,
+    _parse_config_upload,
     _persist,
     _query_bars_summary,
     _to_upper_values,
@@ -73,187 +66,23 @@ USER_CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Uplo
 
 def _build_experiment_config() -> str:
     """Return the current experiment configuration in as a toml string."""
-    ss = st.session_state
-
-    cfg = ExperimentConfig(
-        general=GeneralExpConfig(
-            name=experiment_name or ss.experiment_id,
-            tags=ss.get("tags", exp.general.tags),
-            description=ss.get("description", exp.general.description),
-        ),
-        data=DataExpConfig(
-            instrument_type=ss.get("instrument_type", exp.data.instrument_type),
-            symbols=[
-                s.symbol if hasattr(s, "symbol") else str(s)
-                for s in ss.get("symbols", exp.data.symbols)
-            ],
-            full_history=ss.get("full_history", exp.data.full_history),
-            start_date=str(ss.get("start_date")) if ss.get("start_date") else None,
-            end_date=str(ss.get("end_date")) if ss.get("end_date") else None,
-            interval=ss.get("interval", exp.data.interval),
-        ),
-        portfolio=PortfolioExpConfig(
-            initial_cash=ss.get("initial_cash", exp.portfolio.initial_cash),
-            base_currency=ss.get("base_currency", exp.portfolio.base_currency),
-            starting_positions=ss.get("starting_positions", exp.portfolio.starting_positions),
-        ),
-        strategy=StrategyExpConfig(
-            predefined_strategies=ss.get("predefined_strategies", []),
-            custom_strategies=[
-                CodeSnippet(
-                    name=ss.get(f"strategy_name_{i}", f"Strategy {i + 1}"),
-                    code=e.get("code", ""),
-                )
-                for i, e in enumerate(ss.get("custom_strategies", []))
-            ],
-        ),
-        indicators=IndicatorExpConfig(
-            builtin_indicators=ss.get("builtin_indicators", []),
-            custom_indicators=[
-                CodeSnippet(
-                    name=ss.get(f"indicator_name_{i}", f"Indicator {i + 1}"),
-                    code=e.get("code", ""),
-                )
-                for i, e in enumerate(ss.get("custom_indicators", []))
-            ],
-        ),
-        exchange=ExchangeExpConfig(
-            commission_type=ss.get("commission_type", exp.exchange.commission_type),
-            commission_pct=ss.get("commission_pct", exp.exchange.commission_pct),
-            commission_fixed=ss.get("commission_fixed", exp.exchange.commission_fixed),
-            slippage=ss.get("slippage", exp.exchange.slippage),
-            allowed_order_types=ss.get("allowed_order_types", exp.exchange.allowed_order_types),
-            partial_fills=ss.get("partial_fills", exp.exchange.partial_fills),
-            allow_margin=ss.get("allow_margin", exp.exchange.allow_margin),
-            max_leverage=ss.get("max_leverage", exp.exchange.max_leverage),
-            initial_margin=ss.get("initial_margin", exp.exchange.initial_margin),
-            maintenance_margin=ss.get("maintenance_margin", exp.exchange.maintenance_margin),
-            margin_interest=ss.get("margin_interest", exp.exchange.margin_interest),
-            allow_short_selling=ss.get("allow_short_selling", exp.exchange.allow_short_selling),
-            borrow_rate=ss.get("borrow_rate", exp.exchange.borrow_rate),
-            max_position_size=ss.get("max_position_size", exp.exchange.max_position_size),
-            conversion_mode=ss.get("conversion_mode", exp.exchange.conversion_mode),
-            conversion_threshold=ss.get("conversion_threshold"),
-            conversion_period=ss.get("conversion_period"),
-            conversion_interval=ss.get("conversion_interval"),
-        ),
-        engine=EngineExpConfig(
-            warmup_period=ss.get("warmup_period", exp.engine.warmup_period),
-            trade_on_close=ss.get("trade_on_close", exp.engine.trade_on_close),
-            risk_free_rate=ss.get("risk_free_rate", exp.engine.risk_free_rate),
-            benchmark=ss.get("benchmark", exp.engine.benchmark),
-            exclusive_orders=ss.get("exclusive_orders", exp.engine.exclusive_orders),
-            random_seed=ss.get("random_seed"),
-            empty_bar_policy=ss.get("empty_bar_policy", exp.engine.empty_bar_policy),
-        ),
+    return _build_config_toml(
+        state=st.session_state,
+        experiment_name=experiment_name or st.session_state.experiment_id,
+        defaults=exp,
     )
-
-    return cfg.to_toml()
 
 
 def _on_config_upload():
-    """Set the experiment config based on an uploaded file.
-
-    Because callbacks execute before any widget is instantiated, we can
-    freely set session-state keys that are bound to widgets.
-
-    """
+    """Set the experiment config based on an uploaded file."""
     upload = st.session_state.get("config_upload")
 
     if upload is None:
-        # File was cleared by the user.
         return
 
     try:
-        if upload.name.endswith(".json"):
-            raw = json.load(upload)
-        elif upload.name.endswith(".toml"):
-            raw = tomllib.loads(upload.read().decode("utf-8"))
-        else:
-            raw = yaml.safe_load(upload)
-
-        exp = ExperimentConfig.from_dict(raw)
-
-        # ── General ──────────────────────────────────────────────────────────
-
-        st.session_state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", exp.general.name)
-        st.session_state["tags"] = exp.general.tags
-        st.session_state["description"] = exp.general.description
-
-        # ── Data ─────────────────────────────────────────────────────────────
-
-        st.session_state["instrument_type"] = exp.data.instrument_type
-        st.session_state["symbols"] = exp.data.symbols
-        st.session_state["full_history"] = exp.data.full_history
-        if not exp.data.full_history:
-            if exp.data.start_date:
-                st.session_state["start_date"] = dt.fromisoformat(str(exp.data.start_date)).date()
-            if exp.data.end_date:
-                st.session_state["end_date"] = dt.fromisoformat(str(exp.data.end_date)).date()
-        st.session_state["interval"] = exp.data.interval
-
-        # ── Portfolio ────────────────────────────────────────────────────────
-
-        st.session_state["initial_cash"] = exp.portfolio.initial_cash
-        st.session_state["base_currency"] = exp.portfolio.base_currency
-        st.session_state["starting_positions"] = exp.portfolio.starting_positions
-
-        # ── Strategy ─────────────────────────────────────────────────────────
-
-        st.session_state["predefined_strategies"] = exp.strategy.predefined_strategies
-        st.session_state["custom_strategies"] = [
-            {"source": USER_CODE_OPTIONS[0], "code": s.code}
-            for s in exp.strategy.custom_strategies
-        ]
-        for i, s in enumerate(exp.strategy.custom_strategies):
-            st.session_state[f"strategy_name_{i}"] = s.name
-
-        # ── Indicators ───────────────────────────────────────────────────────
-
-        st.session_state["builtin_indicators"] = exp.indicators.builtin_indicators
-        st.session_state["custom_indicators"] = [
-            {"source": USER_CODE_OPTIONS[0], "code": s.code}
-            for s in exp.indicators.custom_indicators
-        ]
-        for i, s in enumerate(exp.indicators.custom_indicators):
-            st.session_state[f"indicator_name_{i}"] = s.name
-
-        # ── Exchange ─────────────────────────────────────────────────────────
-
-        ex = exp.exchange
-        st.session_state["commission_type"] = ex.commission_type
-        st.session_state["commission_pct"] = ex.commission_pct
-        st.session_state["commission_fixed"] = ex.commission_fixed
-        st.session_state["slippage"] = ex.slippage
-        st.session_state["allowed_order_types"] = ex.allowed_order_types
-        st.session_state["partial_fills"] = ex.partial_fills
-        st.session_state["allow_margin"] = ex.allow_margin
-        st.session_state["max_leverage"] = ex.max_leverage
-        st.session_state["initial_margin"] = ex.initial_margin
-        st.session_state["maintenance_margin"] = ex.maintenance_margin
-        st.session_state["margin_interest"] = ex.margin_interest
-        st.session_state["allow_short_selling"] = ex.allow_short_selling
-        st.session_state["borrow_rate"] = ex.borrow_rate
-        st.session_state["max_position_size"] = ex.max_position_size
-        st.session_state["conversion_mode"] = ex.conversion_mode
-        if ex.conversion_threshold is not None:
-            st.session_state["conversion_threshold"] = ex.conversion_threshold
-        if ex.conversion_period is not None:
-            st.session_state["conversion_period"] = ex.conversion_period
-        if ex.conversion_interval is not None:
-            st.session_state["conversion_interval"] = ex.conversion_interval
-
-        # ── Engine ───────────────────────────────────────────────────────────
-
-        eng = exp.engine
-        st.session_state["warmup_period"] = eng.warmup_period
-        st.session_state["trade_on_close"] = eng.trade_on_close
-        st.session_state["risk_free_rate"] = eng.risk_free_rate
-        st.session_state["benchmark"] = eng.benchmark
-        st.session_state["exclusive_orders"] = eng.exclusive_orders
-        st.session_state["random_seed"] = eng.random_seed
-        st.session_state["empty_bar_policy"] = eng.empty_bar_policy
-
+        exp = _parse_config_upload(upload)
+        _apply_config_to_state(exp, st.session_state, USER_CODE_OPTIONS)
         st.session_state["_import_success"] = f"Loaded configuration from `{upload.name}`."
     except Exception as ex:  # noqa: BLE001
         st.session_state["_import_error"] = f"Failed to parse file: {ex}"
@@ -272,9 +101,6 @@ exp: ExperimentConfig = _default("config", ExperimentConfig())
 st.set_page_config(page_title="Backtide - Experiment", layout="centered")
 st.title("Experiment", text_alignment="center")
 
-if st.session_state.get("current_tab"):
-    st.session_state.tabs = st.session_state.current_tab
-
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
         ":material/dashboard: General",
@@ -285,8 +111,9 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         ":material/storefront: Exchange",
         ":material/build: Engine",
     ],
-    key="tabs",
-    on_change=lambda: st.session_state.update(current_tab=st.session_state.tabs),
+    key=(key := "experiment_tabs"),
+    default=_default(key),
+    on_change=lambda k=key: _persist(k),
 )
 
 
@@ -674,32 +501,6 @@ with tab3:
 # ─────────────────────────────────────────────────────────────────────────────
 
 with tab4:
-
-    def _check_strategy_code(code: str, idx: int) -> bool:
-        """Check whether the code contains the expected strategy function."""
-        try:
-            tree = ast.parse(code)
-
-            for node in tree.body:
-                if isinstance(node, ast.FunctionDef) and node.name == "strategy":
-                    if [a.arg for a in node.args.args] == ["data", "state", "indicators"]:
-                        return True
-                    else:
-                        st.error(
-                            f"**Strategy {idx + 1}:** Function `strategy` doesn't have "
-                            f"signature: `strategy(data, state, indicators)`.",
-                        )
-                        return False
-
-            st.error(
-                f"**Strategy {idx + 1}:** No function `strategy(data, state, indicators)` "
-                f"found in the code.",
-            )
-        except SyntaxError as ex:
-            st.error(f"**Strategy {idx + 1}:** Syntax error:\n\n{ex}")
-
-        return False
-
     st.markdown("**Predefined strategies**")
     st.caption(
         "Select one or more built-in strategies to include in the experiment. "
@@ -819,7 +620,8 @@ with tab4:
                     st.info("No file uploaded yet.", icon=":material/upload_file:")
 
             if code:
-                _check_strategy_code(code, i)
+                if err := _check_strategy_code(code):
+                    st.error(f"**Strategy {i + 1}:** {err}")
 
         st.session_state.custom_strategies[i] = {"name": name, "source": source, "code": code}
 
@@ -862,30 +664,6 @@ with tab5:
     )
 
     st.divider()
-
-    def _check_indicator_code(code: str, idx: int) -> bool:
-        """Check whether the code contains the expected indicator function."""
-        try:
-            tree = ast.parse(code)
-
-            for node in tree.body:
-                if isinstance(node, ast.FunctionDef) and node.name == "indicator":
-                    if [a.arg for a in node.args.args] == ["data"]:
-                        return True
-                    else:
-                        st.error(
-                            f"**Indicator {idx + 1}:** Function `indicator` doesn't have "
-                            f"signature: `indicator(data)`.",
-                        )
-                        return False
-
-            st.error(
-                f"**Indicator {idx + 1}:** No function `indicator(data)` found in the code.",
-            )
-        except SyntaxError as ex:
-            st.error(f"**Indicator {idx + 1}:** Syntax error:\n\n{ex}")
-
-        return False
 
     # Initialize session state for custom indicators
     if "custom_indicators" not in st.session_state:
@@ -975,7 +753,8 @@ with tab5:
                     st.info("No file uploaded yet.", icon=":material/upload_file:")
 
             if code:
-                _check_indicator_code(code, i)
+                if err := _check_indicator_code(code):
+                    st.error(f"**Indicator {i + 1}:** {err}")
 
         st.session_state.custom_indicators[i] = {"name": name, "source": source, "code": code}
 

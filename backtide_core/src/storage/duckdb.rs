@@ -583,3 +583,615 @@ impl Storage for DuckDb {
         Ok(total_deleted)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn make_db() -> (TempDir, DuckDb) {
+        let dir = TempDir::new().unwrap();
+        let db = DuckDb::new(&dir.path().to_path_buf()).unwrap();
+        db.init().unwrap();
+        (dir, db)
+    }
+
+    fn sample_bar(open_ts: u64) -> Bar {
+        Bar {
+            open_ts,
+            close_ts: open_ts + 86400,
+            open_ts_exchange: open_ts,
+            open: 100.0,
+            high: 110.0,
+            low: 90.0,
+            close: 105.0,
+            adj_close: 105.0,
+            volume: 1_000_000.0,
+            n_trades: Some(500),
+        }
+    }
+
+    fn sample_instrument(symbol: &str) -> Instrument {
+        Instrument {
+            symbol: symbol.to_owned(),
+            name: format!("{symbol} Inc."),
+            base: None,
+            quote: "USD".to_owned(),
+            instrument_type: InstrumentType::Stocks,
+            exchange: "XNAS".to_owned(),
+            provider: Provider::Yahoo,
+        }
+    }
+
+    // ── init ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_init_creates_tables() {
+        let (_dir, db) = make_db();
+        // init() already called in make_db; calling again is idempotent
+        db.init().unwrap();
+    }
+
+    // ── write_bars_bulk / query_bars ──────────────────────────────────────
+
+    #[test]
+    fn test_write_and_query_bars() {
+        let (_dir, db) = make_db();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000), sample_bar(1_086_400)],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+
+        let rows = db.query_bars(None, None, None, None).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].symbol, "AAPL");
+    }
+
+    #[test]
+    fn test_write_bars_empty_series_is_noop() {
+        let (_dir, db) = make_db();
+        db.write_bars_bulk(&[]).unwrap();
+        let rows = db.query_bars(None, None, None, None).unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_write_bars_empty_bars_in_series() {
+        let (_dir, db) = make_db();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+        let rows = db.query_bars(None, None, None, None).unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_query_bars_filter_by_symbol() {
+        let (_dir, db) = make_db();
+        let series = vec![
+            BarSeries {
+                symbol: "AAPL".to_owned(),
+                interval: Interval::OneDay,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(1_000_000)],
+            },
+            BarSeries {
+                symbol: "MSFT".to_owned(),
+                interval: Interval::OneDay,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(1_000_000)],
+            },
+        ];
+        db.write_bars_bulk(&series).unwrap();
+
+        let rows = db.query_bars(Some(&["AAPL"]), None, None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].symbol, "AAPL");
+    }
+
+    #[test]
+    fn test_query_bars_filter_by_interval() {
+        let (_dir, db) = make_db();
+        let series = vec![
+            BarSeries {
+                symbol: "AAPL".to_owned(),
+                interval: Interval::OneDay,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(1_000_000)],
+            },
+            BarSeries {
+                symbol: "AAPL".to_owned(),
+                interval: Interval::OneHour,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(2_000_000)],
+            },
+        ];
+        db.write_bars_bulk(&series).unwrap();
+
+        let rows = db.query_bars(None, Some(&[Interval::OneHour]), None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].interval, "1h");
+    }
+
+    #[test]
+    fn test_query_bars_filter_by_provider() {
+        let (_dir, db) = make_db();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+
+        let rows = db.query_bars(None, None, Some(&[Provider::Binance]), None).unwrap();
+        assert!(rows.is_empty());
+
+        let rows = db.query_bars(None, None, Some(&[Provider::Yahoo]), None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_query_bars_with_limit() {
+        let (_dir, db) = make_db();
+        let bars: Vec<Bar> = (0..10).map(|i| sample_bar(1_000_000 + i * 86400)).collect();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars,
+        }];
+        db.write_bars_bulk(&series).unwrap();
+
+        let rows = db.query_bars(None, None, None, Some(3)).unwrap();
+        assert_eq!(rows.len(), 3);
+    }
+
+    #[test]
+    fn test_write_bars_upsert_overwrites() {
+        let (_dir, db) = make_db();
+        let series1 = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }];
+        db.write_bars_bulk(&series1).unwrap();
+
+        // Write again with same ts — should replace
+        let mut bar = sample_bar(1_000_000);
+        bar.close = 999.0;
+        let series2 = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![bar],
+        }];
+        db.write_bars_bulk(&series2).unwrap();
+
+        let rows = db.query_bars(None, None, None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].bar.close, 999.0);
+    }
+
+    // ── query_bar_ranges ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_query_bar_ranges_empty() {
+        let (_dir, db) = make_db();
+        let ranges = db.query_bar_ranges().unwrap();
+        assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn test_query_bar_ranges() {
+        let (_dir, db) = make_db();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000), sample_bar(2_000_000)],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+
+        let ranges = db.query_bar_ranges().unwrap();
+        let key = ("AAPL".to_owned(), "1d".to_owned(), "yahoo".to_owned());
+        assert_eq!(ranges[&key], (1_000_000, 2_000_000));
+    }
+
+    // ── query_bars_summary ───────────────────────────────────────────────
+
+    #[test]
+    fn test_query_bars_summary_empty() {
+        let (_dir, db) = make_db();
+        let summaries = db.query_bars_summary().unwrap();
+        assert!(summaries.is_empty());
+    }
+
+    #[test]
+    fn test_query_bars_summary_with_data() {
+        let (_dir, db) = make_db();
+        db.write_instruments(&[sample_instrument("AAPL")]).unwrap();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000), sample_bar(2_000_000)],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+
+        let summaries = db.query_bars_summary().unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].symbol, "AAPL");
+        assert_eq!(summaries[0].n_rows, 2);
+        assert_eq!(summaries[0].first_ts, 1_000_000);
+        assert_eq!(summaries[0].last_ts, 2_000_000);
+        assert_eq!(summaries[0].sparkline.len(), 2);
+    }
+
+    // ── write_instruments / query_instruments ────────────────────────────
+
+    #[test]
+    fn test_write_and_query_instruments() {
+        let (_dir, db) = make_db();
+        db.write_instruments(&[sample_instrument("AAPL")]).unwrap();
+
+        let instruments = db.query_instruments(None, None, None, None).unwrap();
+        assert_eq!(instruments.len(), 1);
+        assert_eq!(instruments[0].symbol, "AAPL");
+        assert_eq!(instruments[0].name, "AAPL Inc.");
+    }
+
+    #[test]
+    fn test_write_instruments_empty_is_noop() {
+        let (_dir, db) = make_db();
+        db.write_instruments(&[]).unwrap();
+        let instruments = db.query_instruments(None, None, None, None).unwrap();
+        assert!(instruments.is_empty());
+    }
+
+    #[test]
+    fn test_write_instruments_upserts() {
+        let (_dir, db) = make_db();
+        let mut inst = sample_instrument("AAPL");
+        db.write_instruments(&[inst.clone()]).unwrap();
+
+        inst.name = "Apple Updated".to_owned();
+        db.write_instruments(&[inst]).unwrap();
+
+        let instruments = db.query_instruments(None, None, None, None).unwrap();
+        assert_eq!(instruments.len(), 1);
+        assert_eq!(instruments[0].name, "Apple Updated");
+    }
+
+    #[test]
+    fn test_query_instruments_filter_by_type() {
+        let (_dir, db) = make_db();
+        let mut crypto = sample_instrument("BTC-USD");
+        crypto.instrument_type = InstrumentType::Crypto;
+        db.write_instruments(&[sample_instrument("AAPL"), crypto]).unwrap();
+
+        let instruments =
+            db.query_instruments(Some(&[InstrumentType::Crypto]), None, None, None).unwrap();
+        assert_eq!(instruments.len(), 1);
+        assert_eq!(instruments[0].symbol, "BTC-USD");
+    }
+
+    #[test]
+    fn test_query_instruments_filter_by_provider() {
+        let (_dir, db) = make_db();
+        db.write_instruments(&[sample_instrument("AAPL")]).unwrap();
+
+        let instruments =
+            db.query_instruments(None, Some(&[Provider::Binance]), None, None).unwrap();
+        assert!(instruments.is_empty());
+    }
+
+    #[test]
+    fn test_query_instruments_with_limit() {
+        let (_dir, db) = make_db();
+        db.write_instruments(&[sample_instrument("AAPL"), sample_instrument("MSFT")]).unwrap();
+
+        let instruments = db.query_instruments(None, None, None, Some(1)).unwrap();
+        assert_eq!(instruments.len(), 1);
+    }
+
+    // ── write_dividends_bulk / query_dividends ───────────────────────────
+
+    #[test]
+    fn test_write_and_query_dividends() {
+        let (_dir, db) = make_db();
+        use crate::data::models::dividend::Dividend;
+        let series = vec![DividendSeries {
+            symbol: "AAPL".to_owned(),
+            provider: Provider::Yahoo,
+            dividends: vec![
+                Dividend {
+                    ex_date: 1_000_000,
+                    amount: 0.82,
+                },
+                Dividend {
+                    ex_date: 2_000_000,
+                    amount: 0.85,
+                },
+            ],
+        }];
+        db.write_dividends_bulk(&series).unwrap();
+
+        let rows = db.query_dividends(None, None, None).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].symbol, "AAPL");
+    }
+
+    #[test]
+    fn test_write_dividends_empty_series_is_noop() {
+        let (_dir, db) = make_db();
+        db.write_dividends_bulk(&[]).unwrap();
+        let rows = db.query_dividends(None, None, None).unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_write_dividends_empty_dividends_in_series() {
+        let (_dir, db) = make_db();
+        let series = vec![DividendSeries {
+            symbol: "AAPL".to_owned(),
+            provider: Provider::Yahoo,
+            dividends: vec![],
+        }];
+        db.write_dividends_bulk(&series).unwrap();
+        let rows = db.query_dividends(None, None, None).unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_query_dividends_filter_by_symbol() {
+        let (_dir, db) = make_db();
+        use crate::data::models::dividend::Dividend;
+        let series = vec![
+            DividendSeries {
+                symbol: "AAPL".to_owned(),
+                provider: Provider::Yahoo,
+                dividends: vec![Dividend {
+                    ex_date: 1_000_000,
+                    amount: 0.82,
+                }],
+            },
+            DividendSeries {
+                symbol: "MSFT".to_owned(),
+                provider: Provider::Yahoo,
+                dividends: vec![Dividend {
+                    ex_date: 1_000_000,
+                    amount: 1.50,
+                }],
+            },
+        ];
+        db.write_dividends_bulk(&series).unwrap();
+
+        let rows = db.query_dividends(Some(&["AAPL"]), None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].symbol, "AAPL");
+    }
+
+    #[test]
+    fn test_query_dividends_filter_by_provider() {
+        let (_dir, db) = make_db();
+        use crate::data::models::dividend::Dividend;
+        let series = vec![DividendSeries {
+            symbol: "AAPL".to_owned(),
+            provider: Provider::Yahoo,
+            dividends: vec![Dividend {
+                ex_date: 1_000_000,
+                amount: 0.82,
+            }],
+        }];
+        db.write_dividends_bulk(&series).unwrap();
+
+        let rows = db.query_dividends(None, Some(&[Provider::Binance]), None).unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_query_dividends_with_limit() {
+        let (_dir, db) = make_db();
+        use crate::data::models::dividend::Dividend;
+        let divs: Vec<Dividend> = (0..5)
+            .map(|i| Dividend {
+                ex_date: 1_000_000 + i * 86400,
+                amount: 0.5,
+            })
+            .collect();
+        let series = vec![DividendSeries {
+            symbol: "AAPL".to_owned(),
+            provider: Provider::Yahoo,
+            dividends: divs,
+        }];
+        db.write_dividends_bulk(&series).unwrap();
+
+        let rows = db.query_dividends(None, None, Some(2)).unwrap();
+        assert_eq!(rows.len(), 2);
+    }
+
+    // ── delete_symbols ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_delete_symbols_empty_is_noop() {
+        let (_dir, db) = make_db();
+        let deleted = db.delete_symbols(&[]).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn test_delete_symbols_by_symbol_only() {
+        let (_dir, db) = make_db();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+        db.write_instruments(&[sample_instrument("AAPL")]).unwrap();
+
+        let deleted = db.delete_symbols(&[("AAPL".to_owned(), None, None)]).unwrap();
+        assert_eq!(deleted, 1);
+
+        let rows = db.query_bars(None, None, None, None).unwrap();
+        assert!(rows.is_empty());
+        // Orphaned instrument should be cleaned up
+        let instruments = db.query_instruments(None, None, None, None).unwrap();
+        assert!(instruments.is_empty());
+    }
+
+    #[test]
+    fn test_delete_symbols_by_symbol_and_interval() {
+        let (_dir, db) = make_db();
+        let series = vec![
+            BarSeries {
+                symbol: "AAPL".to_owned(),
+                interval: Interval::OneDay,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(1_000_000)],
+            },
+            BarSeries {
+                symbol: "AAPL".to_owned(),
+                interval: Interval::OneHour,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(2_000_000)],
+            },
+        ];
+        db.write_bars_bulk(&series).unwrap();
+
+        let deleted =
+            db.delete_symbols(&[("AAPL".to_owned(), Some(Interval::OneDay), None)]).unwrap();
+        assert_eq!(deleted, 1);
+
+        let rows = db.query_bars(None, None, None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].interval, "1h");
+    }
+
+    #[test]
+    fn test_delete_symbols_by_symbol_and_provider() {
+        let (_dir, db) = make_db();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+
+        let deleted =
+            db.delete_symbols(&[("AAPL".to_owned(), None, Some(Provider::Yahoo))]).unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn test_delete_symbols_by_symbol_interval_provider() {
+        let (_dir, db) = make_db();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+
+        let deleted = db
+            .delete_symbols(&[("AAPL".to_owned(), Some(Interval::OneDay), Some(Provider::Yahoo))])
+            .unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn test_delete_symbols_cleans_orphaned_dividends() {
+        let (_dir, db) = make_db();
+        use crate::data::models::dividend::Dividend;
+
+        let bar_series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }];
+        db.write_bars_bulk(&bar_series).unwrap();
+
+        let div_series = vec![DividendSeries {
+            symbol: "AAPL".to_owned(),
+            provider: Provider::Yahoo,
+            dividends: vec![Dividend {
+                ex_date: 1_000_000,
+                amount: 0.82,
+            }],
+        }];
+        db.write_dividends_bulk(&div_series).unwrap();
+
+        db.delete_symbols(&[("AAPL".to_owned(), None, None)]).unwrap();
+
+        let divs = db.query_dividends(None, None, None).unwrap();
+        assert!(divs.is_empty());
+    }
+
+    // ── query_bars with empty filter arrays ──────────────────────────────
+
+    #[test]
+    fn test_query_bars_empty_symbol_filter() {
+        let (_dir, db) = make_db();
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+
+        // Empty slice means no filter applied
+        let empty: &[&str] = &[];
+        let rows = db.query_bars(Some(empty), None, None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    // ── n_trades None ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_bar_with_no_trades() {
+        let (_dir, db) = make_db();
+        let mut bar = sample_bar(1_000_000);
+        bar.n_trades = None;
+        let series = vec![BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![bar],
+        }];
+        db.write_bars_bulk(&series).unwrap();
+
+        let rows = db.query_bars(None, None, None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].bar.n_trades.is_none());
+    }
+
+    // ── query_instruments with exchange filter ───────────────────────────
+
+    #[test]
+    fn test_query_instruments_filter_by_exchange() {
+        let (_dir, db) = make_db();
+        let mut inst = sample_instrument("AAPL");
+        inst.exchange = "XNAS".to_owned();
+        db.write_instruments(&[inst]).unwrap();
+
+        let instruments = db.query_instruments(None, None, Some(&[Exchange::XNAS]), None).unwrap();
+        assert_eq!(instruments.len(), 1);
+
+        let instruments = db.query_instruments(None, None, Some(&[Exchange::XNYS]), None).unwrap();
+        assert!(instruments.is_empty());
+    }
+}

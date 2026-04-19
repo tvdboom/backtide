@@ -6,7 +6,6 @@ Description: Unit tests for the storage interface functions.
 """
 
 import pandas as pd
-import pytest
 
 from backtide.storage import (
     delete_symbols,
@@ -15,7 +14,6 @@ from backtide.storage import (
     query_dividends,
     query_instruments,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # query_bars
@@ -32,7 +30,7 @@ class TestQueryBars:
     def test_empty_database(self):
         """A fresh database returns an empty DataFrame."""
         result = query_bars()
-        assert result.empty
+        assert len(result) == 0
 
     def test_expected_columns(self):
         """The DataFrame has the expected column names even when empty."""
@@ -68,7 +66,7 @@ class TestQueryDividends:
 
     def test_empty_database(self):
         """A fresh database returns an empty DataFrame."""
-        assert query_dividends().empty
+        assert len(query_dividends()) == 0
 
     def test_expected_columns(self):
         """The DataFrame has the expected column names even when empty."""
@@ -90,7 +88,7 @@ class TestQueryBarsSummary:
 
     def test_empty_database(self):
         """A fresh database returns an empty DataFrame."""
-        assert query_bars_summary().empty
+        assert len(query_bars_summary()) == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

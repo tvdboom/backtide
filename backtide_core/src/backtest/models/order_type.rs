@@ -139,4 +139,3 @@ impl<'a, 'py> FromPyObject<'a, 'py> for OrderType {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown order type {s:?}.")))
     }
 }
-

@@ -64,4 +64,3 @@ impl Bar {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 }
-

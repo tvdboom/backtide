@@ -56,3 +56,90 @@ where
     providers.extend(explicit);
     Ok(providers)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_parse_config_toml() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("backtide.config.toml");
+        fs::write(&path, "[general]\nbase_currency = \"EUR\"\n").unwrap();
+        let cfg = parse_config(&path).unwrap();
+        assert_eq!(cfg.general.base_currency.to_string(), "EUR");
+    }
+
+    #[test]
+    fn test_parse_config_yaml() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("backtide.config.yaml");
+        fs::write(&path, "general:\n  base_currency: EUR\n").unwrap();
+        let cfg = parse_config(&path).unwrap();
+        assert_eq!(cfg.general.base_currency.to_string(), "EUR");
+    }
+
+    #[test]
+    fn test_parse_config_json() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("backtide.config.json");
+        fs::write(&path, r#"{"general":{"base_currency":"EUR"}}"#).unwrap();
+        let cfg = parse_config(&path).unwrap();
+        assert_eq!(cfg.general.base_currency.to_string(), "EUR");
+    }
+
+    #[test]
+    fn test_parse_config_unsupported_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("backtide.config.xml");
+        fs::write(&path, "<config/>").unwrap();
+        let result = parse_config(&path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_config_no_extension() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config");
+        fs::write(&path, "").unwrap();
+        let result = parse_config(&path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_config_nonexistent_file() {
+        let result = parse_config(Path::new("/nonexistent/path/config.toml"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fetch_config_defaults() {
+        // When no config file exists in CWD, defaults are returned.
+        // This is environment-dependent but should not panic.
+        let result = fetch_config();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_deserialize_providers_fills_defaults() {
+        let toml_str = r#"
+        [data.providers]
+        crypto = "kraken"
+        "#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        // Crypto should be overridden
+        assert_eq!(*cfg.data.providers.get(&InstrumentType::Crypto).unwrap(), Provider::Kraken);
+        // Others should have defaults
+        assert_eq!(*cfg.data.providers.get(&InstrumentType::Stocks).unwrap(), Provider::Yahoo);
+    }
+
+    #[test]
+    fn test_default_config() {
+        let cfg = Config::default();
+        assert_eq!(cfg.general.base_currency.to_string(), "USD");
+        assert_eq!(cfg.data.storage_path, PathBuf::from(".backtide"));
+        assert_eq!(cfg.display.port, 8501);
+    }
+}

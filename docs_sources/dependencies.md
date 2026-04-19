@@ -25,6 +25,7 @@ And operating systems:
 
 * **[click](https://click.palletsprojects.com/)** (>=8.3.1)
 * **[pandas](https://pandas.pydata.org/)** (>=2.3.3)
+* **[plotly](https://plotly.com/python/)** (>=6.1.0)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
 * **[streamlit](https://streamlit.io/)** (>=1.55.0)
 * **[streamlit-code-editor](https://github.com/bouzidanas/streamlit-code-editor)** (>=0.1.22)
