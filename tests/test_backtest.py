@@ -18,7 +18,6 @@ from backtide.backtest import (
     ExchangeExpConfig,
     ExperimentConfig,
     GeneralExpConfig,
-    IndicatorType,
     OrderType,
     PortfolioExpConfig,
     StrategyType,
@@ -206,7 +205,6 @@ class TestExperimentConfig:
         (CommissionType, "Percentage"),
         (CommissionType, "Fixed"),
         (CommissionType, "PercentagePlusFixed"),
-        (IndicatorType, "Sma"),
         (OrderType, "Market"),
         (StrategyType, "BuyAndHold"),
         (StrategyType, "SmaCrossover"),
@@ -232,7 +230,6 @@ def test_enum_class_attrs():
         ConversionPeriod,
         CurrencyConversionMode,
         EmptyBarPolicy,
-        IndicatorType,
         OrderType,
         StrategyType,
     ],
@@ -244,7 +241,7 @@ def test_enum_variants(cls):
 
 @pytest.mark.parametrize(
     "cls",
-    [CommissionType, EmptyBarPolicy, IndicatorType, OrderType, StrategyType],
+    [CommissionType, EmptyBarPolicy, OrderType, StrategyType],
 )
 def test_enum_get_default(cls):
     """Backtest enums with get_default return a value."""

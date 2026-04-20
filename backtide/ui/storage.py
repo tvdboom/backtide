@@ -101,6 +101,10 @@ logokit_key = cfg.display.logokit_api_key
 
 st.set_page_config(page_title="Backtide - Storage")
 
+st.subheader("Storage", text_alignment="center")
+st.write("")
+
+
 all_series = _load_storage_df(cfg.display.date_format, tz, logokit_key)
 
 if all_series.empty:

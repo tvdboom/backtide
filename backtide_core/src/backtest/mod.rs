@@ -1,20 +1,11 @@
+use crate::backtest::indicators::*;
 use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::conversion_period::ConversionPeriod;
 use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
-use crate::backtest::models::experiment_config::{
-    CodeSnippet, DataExpConfig, EngineExpConfig, ExchangeExpConfig, ExperimentConfig,
-    GeneralExpConfig, IndicatorExpConfig, PortfolioExpConfig, StrategyExpConfig,
-};
+use crate::backtest::models::experiment_config::*;
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::strategy_type::StrategyType;
-use crate::backtest::indicators::{
-    SimpleMovingAverage, ExponentialMovingAverage, WeightedMovingAverage,
-    RelativeStrengthIndex, MovingAverageConvergenceDivergence, BollingerBands,
-    AverageTrueRange, OnBalanceVolume, VolumeWeightedAveragePrice,
-    StochasticOscillator, CommodityChannelIndex, AverageDirectionalIndex,
-    list_indicators,
-};
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
@@ -55,7 +46,6 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<StochasticOscillator>()?;
     m.add_class::<CommodityChannelIndex>()?;
     m.add_class::<AverageDirectionalIndex>()?;
-    m.add_function(wrap_pyfunction!(list_indicators, &m)?)?;
 
     parent.add_submodule(&m)?;
 

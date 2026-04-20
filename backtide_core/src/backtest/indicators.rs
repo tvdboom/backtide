@@ -5,9 +5,19 @@ use crate::data::models::bar::Bar;
 
 /// Trait for all built-in indicators.
 pub trait Indicator {
-    fn acronym(&self) -> &'static str;
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
+    /// Short ticker-style acronym (e.g. `"SMA"`).
+    const ACRONYM: &'static str;
+
+    /// Human-readable name (e.g. `"Simple Moving Average"`).
+    const NAME: &'static str;
+
+    /// One-sentence explanation of what the indicator measures.
+    const DESCRIPTION: &'static str;
+
+    /// Compute the indicator values from a slice of [`Bar`].
+    ///
+    /// Returns one or more series (e.g. MACD returns two: the MACD line
+    /// and the signal line).
     fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>>;
 }
 
@@ -15,6 +25,30 @@ pub trait Indicator {
 // Helper functions
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Extract parallel `(open, high, low, close, volume)` arrays from a bar slice.
+fn extract_ohlcv_from_bars(bars: &[Bar]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+    let n = bars.len();
+    let (mut o, mut h, mut l, mut c, mut v) = (
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+    );
+    for b in bars {
+        o.push(b.open);
+        h.push(b.high);
+        l.push(b.low);
+        c.push(b.close);
+        v.push(b.volume);
+    }
+    (o, h, l, c, v)
+}
+
+/// Compute a simple rolling mean over `data` with the given `period`.
+///
+/// The first `period - 1` elements are [`f64::NAN`]. Uses an incremental
+/// sum for O(n) performance.
 fn rolling_mean(data: &[f64], period: usize) -> Vec<f64> {
     let n = data.len();
     let mut out = vec![f64::NAN; n];
@@ -30,6 +64,9 @@ fn rolling_mean(data: &[f64], period: usize) -> Vec<f64> {
     out
 }
 
+/// Compute an exponential weighted moving average with the given `span`.
+///
+/// Uses the standard smoothing factor `α = 2 / (span + 1)`.
 fn ewm(data: &[f64], span: usize) -> Vec<f64> {
     let n = data.len();
     let mut out = vec![f64::NAN; n];
@@ -49,6 +86,10 @@ fn ewm(data: &[f64], span: usize) -> Vec<f64> {
     out
 }
 
+/// Compute the sample rolling standard deviation over `data` with `period`.
+///
+/// Uses Bessel's correction (denominator `period - 1`). The first
+/// `period - 1` elements are [`f64::NAN`].
 fn rolling_std(data: &[f64], period: usize) -> Vec<f64> {
     let n = data.len();
     let mut out = vec![f64::NAN; n];
@@ -58,13 +99,16 @@ fn rolling_std(data: &[f64], period: usize) -> Vec<f64> {
     for i in (period - 1)..n {
         let window = &data[i + 1 - period..=i];
         let mean: f64 = window.iter().sum::<f64>() / period as f64;
-        let var: f64 =
-            window.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (period - 1) as f64;
+        let var: f64 = window.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (period - 1) as f64;
         out[i] = var.sqrt();
     }
     out
 }
 
+/// Compute the True Range for each bar.
+///
+/// TR = max(high − low, |high − prev_close|, |low − prev_close|).
+/// The first element uses `high[0] − low[0]` since there is no previous close.
 fn true_range(high: &[f64], low: &[f64], close: &[f64]) -> Vec<f64> {
     let n = high.len();
     let mut tr = vec![0.0; n];
@@ -79,6 +123,8 @@ fn true_range(high: &[f64], low: &[f64], close: &[f64]) -> Vec<f64> {
 }
 
 /// Extract `open`, `high`, `low`, `close`, `volume` arrays from a pandas DataFrame.
+///
+/// Falls back to a zero-filled volume array when the column is missing.
 fn extract_ohlcv(
     df: &Bound<'_, PyAny>,
 ) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> {
@@ -96,8 +142,10 @@ fn extract_ohlcv(
     ))
 }
 
-/// Convert indicator outputs to a numpy array (1D or 2D).
-fn to_np_array<'py>(py: Python<'py>, rows: Vec<Vec<f64>>) -> PyResult<Bound<'py, PyAny>> {
+/// Convert indicator output rows to a numpy array.
+///
+/// A single row is returned as a 1-D array; multiple rows become a 2-D array.
+fn to_np_array(py: Python, rows: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
     let np = py.import("numpy")?;
     if rows.len() == 1 {
         np.call_method1("array", (rows.into_iter().next().unwrap(),))
@@ -107,54 +155,70 @@ fn to_np_array<'py>(py: Python<'py>, rows: Vec<Vec<f64>>) -> PyResult<Bound<'py,
 }
 
 /// Shared pymethods macro for all indicator structs.
-/// The struct must already have `#[pymethods]` with `new` and `__reduce__`.
-/// This macro adds `acronym`, `name`, `description`, `calculate`, `__str__`, `__repr__`.
 ///
-/// Usage: Put this inside the existing `#[pymethods] impl` block as method definitions.
+/// The struct must already have a `#[pymethods]` block with `new` and `__reduce__`.
+/// This macro adds `acronym`, `name`, `description`, `calculate`, `__repr__`.
 macro_rules! indicator_pymethods {
     ($ty:ident) => {
         #[pymethods]
         impl $ty {
-        /// Short ticker-style acronym (e.g. ``"SMA"``).
-        #[getter]
-        fn acronym(&self) -> &'static str {
-            Indicator::acronym(self)
-        }
+            /// Short ticker-style acronym (e.g. `"SMA"`).
+            #[classattr]
+            fn acronym() -> &'static str {
+                <$ty as Indicator>::ACRONYM
+            }
 
-        /// Human-readable name (e.g. ``"Simple Moving Average"``).
-        #[getter]
-        fn name(&self) -> &'static str {
-            Indicator::name(self)
-        }
+            /// Human-readable name (e.g. `"Simple Moving Average"`).
+            #[classattr]
+            fn name() -> &'static str {
+                <$ty as Indicator>::NAME
+            }
 
-        /// One-sentence explanation of what the indicator measures.
-        #[getter]
-        fn description(&self) -> &'static str {
-            Indicator::description(self)
-        }
+            /// One-sentence explanation of what the indicator measures.
+            #[classmethod]
+            fn description(_cls: &Bound<'_, PyType>) -> &'static str {
+                <$ty as Indicator>::DESCRIPTION
+            }
 
-        /// Compute the indicator on a pandas DataFrame.
-        fn calculate<'py>(
-            &self,
-            py: Python<'py>,
-            df: &Bound<'py, PyAny>,
-        ) -> PyResult<Bound<'py, PyAny>> {
-            let (o, h, l, c, v) = extract_ohlcv(df)?;
-            let bars: Vec<Bar> = (0..c.len()).map(|i| Bar {
-                open_ts: 0, close_ts: 0, open_ts_exchange: 0,
-                open: o[i], high: h[i], low: l[i], close: c[i],
-                adj_close: c[i], volume: v[i], n_trades: None,
-            }).collect();
-            to_np_array(py, self.calculate_inner(&bars))
-        }
+            /// Compute the indicator on a pandas DataFrame.
+            ///
+            /// Parameters
+            /// ----------
+            /// df : DataFrame
+            ///     Must contain ``open``, ``high``, ``low``, ``close`` columns.
+            ///     ``volume`` is optional (defaults to zeros).
+            ///
+            /// Returns
+            /// -------
+            /// numpy.ndarray
+            ///     1-D array for single-output indicators, 2-D for multi-output.
+            fn calculate<'py>(
+                &self,
+                py: Python<'py>,
+                df: &Bound<'py, PyAny>,
+            ) -> PyResult<Bound<'py, PyAny>> {
+                let (o, h, l, c, v) = extract_ohlcv(df)?;
+                let bars: Vec<Bar> = (0..c.len())
+                    .map(|i| Bar {
+                        open_ts: 0,
+                        close_ts: 0,
+                        open_ts_exchange: 0,
+                        open: o[i],
+                        high: h[i],
+                        low: l[i],
+                        close: c[i],
+                        adj_close: c[i],
+                        volume: v[i],
+                        n_trades: None,
+                    })
+                    .collect();
+                to_np_array(py, self.calculate_inner(&bars))
+            }
 
-        fn __str__(&self) -> &'static str {
-            Indicator::acronym(self)
-        }
-
-        fn __repr__(&self) -> String {
-            format!("{}()", Indicator::acronym(self))
-        }
+            /// Return a debug representation.
+            fn __repr__(&self) -> String {
+                format!("{}()", <$ty as Indicator>::ACRONYM)
+            }
         }
     };
 }
@@ -164,140 +228,109 @@ macro_rules! indicator_pymethods {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Simple Moving Average indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct SimpleMovingAverage {
-    #[pyo3(get)]
+    /// Look-back window length.
     period: usize,
 }
 
 #[pymethods]
 impl SimpleMovingAverage {
+    /// Create a new [`SimpleMovingAverage`] with the given period.
     #[new]
     #[pyo3(signature = (period=14))]
     fn new(period: usize) -> Self {
-        Self { period }
+        Self {
+            period,
+        }
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize,)) {
         (py.get_type::<Self>(), (self.period,))
     }
 }
 
-
 impl Indicator for SimpleMovingAverage {
-    fn acronym(&self) -> &'static str {
-        "SMA"
-    }
+    const ACRONYM: &'static str = "SMA";
+    const NAME: &'static str = "Simple Moving Average";
+    const DESCRIPTION: &'static str = "Arithmetic mean of the last N closing prices, used to smooth short-term fluctuations and identify trends.";
 
-    fn name(&self) -> &'static str {
-        "Simple Moving Average"
-    }
-    fn description(&self) -> &'static str {
-        "Arithmetic mean of the last N closing prices, used to smooth short-term fluctuations and identify trends."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        _h: &[f64],
-        _l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
-        vec![rolling_mean(c, self.period)]
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
+        vec![rolling_mean(&c, self.period)]
     }
 }
 
-indicator_pymethods!(SimpleMovingAverage);
-
 /// Exponential Moving Average indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct ExponentialMovingAverage {
-    #[pyo3(get)]
+    /// Look-back window length.
     period: usize,
 }
 
 #[pymethods]
 impl ExponentialMovingAverage {
+    /// Create a new [`ExponentialMovingAverage`] with the given period.
     #[new]
     #[pyo3(signature = (period=14))]
     fn new(period: usize) -> Self {
-        Self { period }
+        Self {
+            period,
+        }
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize,)) {
         (py.get_type::<Self>(), (self.period,))
     }
 }
 
-
 impl Indicator for ExponentialMovingAverage {
-    fn acronym(&self) -> &'static str {
-        "EMA"
-    }
+    const ACRONYM: &'static str = "EMA";
+    const NAME: &'static str = "Exponential Moving Average";
+    const DESCRIPTION: &'static str = "Weighted moving average that gives more weight to recent prices, reacting faster to price changes than SMA.";
 
-    fn name(&self) -> &'static str {
-        "Exponential Moving Average"
-    }
-    fn description(&self) -> &'static str {
-        "Weighted moving average that gives more weight to recent prices, reacting faster to price changes than SMA."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        _h: &[f64],
-        _l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
-        vec![ewm(c, self.period)]
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
+        vec![ewm(&c, self.period)]
     }
 }
 
-indicator_pymethods!(ExponentialMovingAverage);
-
 /// Weighted Moving Average indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct WeightedMovingAverage {
-    #[pyo3(get)]
+    /// Look-back window length.
     period: usize,
 }
 
 #[pymethods]
 impl WeightedMovingAverage {
+    /// Create a new [`WeightedMovingAverage`] with the given period.
     #[new]
     #[pyo3(signature = (period=14))]
     fn new(period: usize) -> Self {
-        Self { period }
+        Self {
+            period,
+        }
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize,)) {
         (py.get_type::<Self>(), (self.period,))
     }
 }
 
-
 impl Indicator for WeightedMovingAverage {
-    fn acronym(&self) -> &'static str {
-        "WMA"
-    }
+    const ACRONYM: &'static str = "WMA";
+    const NAME: &'static str = "Weighted Moving Average";
+    const DESCRIPTION: &'static str = "Moving average where each price is multiplied by a linearly decreasing weight, emphasizing recent data.";
 
-    fn name(&self) -> &'static str {
-        "Weighted Moving Average"
-    }
-    fn description(&self) -> &'static str {
-        "Moving average where each price is multiplied by a linearly decreasing weight, emphasizing recent data."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        _h: &[f64],
-        _l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();
         let p = self.period;
         let mut out = vec![f64::NAN; n];
@@ -315,49 +348,38 @@ impl Indicator for WeightedMovingAverage {
     }
 }
 
-indicator_pymethods!(WeightedMovingAverage);
-
 /// Relative Strength Index indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct RelativeStrengthIndex {
-    #[pyo3(get)]
+    /// Look-back window length.
     period: usize,
 }
 
 #[pymethods]
 impl RelativeStrengthIndex {
+    /// Create a new [`RelativeStrengthIndex`] with the given period.
     #[new]
     #[pyo3(signature = (period=14))]
     fn new(period: usize) -> Self {
-        Self { period }
+        Self {
+            period,
+        }
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize,)) {
         (py.get_type::<Self>(), (self.period,))
     }
 }
 
-
 impl Indicator for RelativeStrengthIndex {
-    fn acronym(&self) -> &'static str {
-        "RSI"
-    }
+    const ACRONYM: &'static str = "RSI";
+    const NAME: &'static str = "Relative Strength Index";
+    const DESCRIPTION: &'static str = "Momentum oscillator (0\u{2013}100) measuring the speed and magnitude of recent price changes to identify overbought/oversold conditions.";
 
-    fn name(&self) -> &'static str {
-        "Relative Strength Index"
-    }
-    fn description(&self) -> &'static str {
-        "Momentum oscillator (0\u{2013}100) measuring the speed and magnitude of recent price changes to identify overbought/oversold conditions."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        _h: &[f64],
-        _l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();
         let p = self.period;
         let mut out = vec![f64::NAN; n];
@@ -389,22 +411,21 @@ impl Indicator for RelativeStrengthIndex {
     }
 }
 
-indicator_pymethods!(RelativeStrengthIndex);
-
 /// Moving Average Convergence Divergence indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct MovingAverageConvergenceDivergence {
-    #[pyo3(get)]
+    /// Fast EMA period.
     fast_period: usize,
-    #[pyo3(get)]
+    /// Slow EMA period.
     slow_period: usize,
-    #[pyo3(get)]
+    /// Signal line EMA period.
     signal_period: usize,
 }
 
 #[pymethods]
 impl MovingAverageConvergenceDivergence {
+    /// Create a new [`MovingAverageConvergenceDivergence`] indicator.
     #[new]
     #[pyo3(signature = (fast_period=12, slow_period=26, signal_period=9))]
     fn new(fast_period: usize, slow_period: usize, signal_period: usize) -> Self {
@@ -415,39 +436,21 @@ impl MovingAverageConvergenceDivergence {
         }
     }
 
-    fn __reduce__<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> (Bound<'py, PyType>, (usize, usize, usize)) {
-        (
-            py.get_type::<Self>(),
-            (self.fast_period, self.slow_period, self.signal_period),
-        )
+    /// Pickle support.
+    fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize, usize, usize)) {
+        (py.get_type::<Self>(), (self.fast_period, self.slow_period, self.signal_period))
     }
 }
 
-
 impl Indicator for MovingAverageConvergenceDivergence {
-    fn acronym(&self) -> &'static str {
-        "MACD"
-    }
+    const ACRONYM: &'static str = "MACD";
+    const NAME: &'static str = "Moving Avg. Convergence Divergence";
+    const DESCRIPTION: &'static str = "Trend-following momentum indicator showing the relationship between two exponential moving averages of closing prices.";
 
-    fn name(&self) -> &'static str {
-        "Moving Avg. Convergence Divergence"
-    }
-    fn description(&self) -> &'static str {
-        "Trend-following momentum indicator showing the relationship between two exponential moving averages of closing prices."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        _h: &[f64],
-        _l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
-        let fast = ewm(c, self.fast_period);
-        let slow = ewm(c, self.slow_period);
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
+        let fast = ewm(&c, self.fast_period);
+        let slow = ewm(&c, self.slow_period);
         let n = c.len();
         let mut macd_line = vec![f64::NAN; n];
         for i in 0..n {
@@ -460,53 +463,43 @@ impl Indicator for MovingAverageConvergenceDivergence {
     }
 }
 
-indicator_pymethods!(MovingAverageConvergenceDivergence);
-
 /// Bollinger Bands indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct BollingerBands {
-    #[pyo3(get)]
+    /// Look-back window length.
     period: usize,
-    #[pyo3(get)]
+    /// Number of standard deviations for the band width.
     std_dev: f64,
 }
 
 #[pymethods]
 impl BollingerBands {
+    /// Create a new [`BollingerBands`] indicator.
     #[new]
     #[pyo3(signature = (period=20, std_dev=2.0))]
     fn new(period: usize, std_dev: f64) -> Self {
-        Self { period, std_dev }
+        Self {
+            period,
+            std_dev,
+        }
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize, f64)) {
         (py.get_type::<Self>(), (self.period, self.std_dev))
     }
 }
 
-
 impl Indicator for BollingerBands {
-    fn acronym(&self) -> &'static str {
-        "BB"
-    }
+    const ACRONYM: &'static str = "BB";
+    const NAME: &'static str = "Bollinger Bands";
+    const DESCRIPTION: &'static str = "Volatility bands placed above and below a moving average, widening during high volatility and narrowing during low volatility.";
 
-    fn name(&self) -> &'static str {
-        "Bollinger Bands"
-    }
-    fn description(&self) -> &'static str {
-        "Volatility bands placed above and below a moving average, widening during high volatility and narrowing during low volatility."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        _h: &[f64],
-        _l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
-        let mid = rolling_mean(c, self.period);
-        let std = rolling_std(c, self.period);
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
+        let mid = rolling_mean(&c, self.period);
+        let std = rolling_std(&c, self.period);
         let n = c.len();
         let mut upper = vec![f64::NAN; n];
         let mut lower = vec![f64::NAN; n];
@@ -520,55 +513,43 @@ impl Indicator for BollingerBands {
     }
 }
 
-indicator_pymethods!(BollingerBands);
-
 /// Average True Range indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct AverageTrueRange {
-    #[pyo3(get)]
+    /// Look-back window length.
     period: usize,
 }
 
 #[pymethods]
 impl AverageTrueRange {
+    /// Create a new [`AverageTrueRange`] with the given period.
     #[new]
     #[pyo3(signature = (period=14))]
     fn new(period: usize) -> Self {
-        Self { period }
+        Self {
+            period,
+        }
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize,)) {
         (py.get_type::<Self>(), (self.period,))
     }
 }
 
-
 impl Indicator for AverageTrueRange {
-    fn acronym(&self) -> &'static str {
-        "ATR"
-    }
+    const ACRONYM: &'static str = "ATR";
+    const NAME: &'static str = "Average True Range";
+    const DESCRIPTION: &'static str = "Measures market volatility by calculating the average range between high and low prices over a period.";
 
-    fn name(&self) -> &'static str {
-        "Average True Range"
-    }
-    fn description(&self) -> &'static str {
-        "Measures market volatility by calculating the average range between high and low prices over a period."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        h: &[f64],
-        l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
-        let tr = true_range(h, l, c);
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
+        let tr = true_range(&h, &l, &c);
         vec![rolling_mean(&tr, self.period)]
     }
 }
-
-indicator_pymethods!(AverageTrueRange);
 
 /// On-Balance Volume indicator.
 #[pyclass(skip_from_py_object, module = "backtide.backtest")]
@@ -577,43 +558,31 @@ pub struct OnBalanceVolume;
 
 #[pymethods]
 impl OnBalanceVolume {
+    /// Create a new [`OnBalanceVolume`] indicator.
     #[new]
     fn new() -> Self {
         Self
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, ()) {
         (py.get_type::<Self>(), ())
     }
 }
 
-
 impl Indicator for OnBalanceVolume {
-    fn acronym(&self) -> &'static str {
-        "OBV"
-    }
+    const ACRONYM: &'static str = "OBV";
+    const NAME: &'static str = "On-Balance Volume";
+    const DESCRIPTION: &'static str = "Cumulative volume indicator that adds volume on up days and subtracts it on down days to confirm price trends.";
 
-    fn name(&self) -> &'static str {
-        "On-Balance Volume"
-    }
-    fn description(&self) -> &'static str {
-        "Cumulative volume indicator that adds volume on up days and subtracts it on down days to confirm price trends."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        _h: &[f64],
-        _l: &[f64],
-        c: &[f64],
-        v: &[f64],
-    ) -> Vec<Vec<f64>> {
-        let n = c.len();
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let n = bars.len();
         let mut obv = vec![0.0; n];
         for i in 1..n {
-            obv[i] = if c[i] > c[i - 1] {
-                obv[i - 1] + v[i]
-            } else if c[i] < c[i - 1] {
-                obv[i - 1] - v[i]
+            obv[i] = if bars[i].close > bars[i - 1].close {
+                obv[i - 1] + bars[i].volume
+            } else if bars[i].close < bars[i - 1].close {
+                obv[i - 1] - bars[i].volume
             } else {
                 obv[i - 1]
             };
@@ -622,8 +591,6 @@ impl Indicator for OnBalanceVolume {
     }
 }
 
-indicator_pymethods!(OnBalanceVolume);
-
 /// Volume-Weighted Average Price indicator.
 #[pyclass(skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
@@ -631,44 +598,33 @@ pub struct VolumeWeightedAveragePrice;
 
 #[pymethods]
 impl VolumeWeightedAveragePrice {
+    /// Create a new [`VolumeWeightedAveragePrice`] indicator.
     #[new]
     fn new() -> Self {
         Self
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, ()) {
         (py.get_type::<Self>(), ())
     }
 }
 
-
 impl Indicator for VolumeWeightedAveragePrice {
-    fn acronym(&self) -> &'static str {
-        "VWAP"
-    }
+    const ACRONYM: &'static str = "VWAP";
+    const NAME: &'static str = "Volume-Weighted Average Price";
+    const DESCRIPTION: &'static str =
+        "Average price weighted by volume, used as a benchmark for intraday trading quality.";
 
-    fn name(&self) -> &'static str {
-        "Volume-Weighted Average Price"
-    }
-    fn description(&self) -> &'static str {
-        "Average price weighted by volume, used as a benchmark for intraday trading quality."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        h: &[f64],
-        l: &[f64],
-        c: &[f64],
-        v: &[f64],
-    ) -> Vec<Vec<f64>> {
-        let n = c.len();
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let n = bars.len();
         let mut vwap = vec![f64::NAN; n];
         let mut cum_tp_vol = 0.0;
         let mut cum_vol = 0.0;
         for i in 0..n {
-            let tp = (h[i] + l[i] + c[i]) / 3.0;
-            cum_tp_vol += tp * v[i];
-            cum_vol += v[i];
+            let tp = (bars[i].high + bars[i].low + bars[i].close) / 3.0;
+            cum_tp_vol += tp * bars[i].volume;
+            cum_vol += bars[i].volume;
             vwap[i] = if cum_vol > 0.0 {
                 cum_tp_vol / cum_vol
             } else {
@@ -679,51 +635,42 @@ impl Indicator for VolumeWeightedAveragePrice {
     }
 }
 
-indicator_pymethods!(VolumeWeightedAveragePrice);
-
 /// Stochastic Oscillator indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct StochasticOscillator {
-    #[pyo3(get)]
+    /// %K look-back period.
     k_period: usize,
-    #[pyo3(get)]
+    /// %D smoothing period.
     d_period: usize,
 }
 
 #[pymethods]
 impl StochasticOscillator {
+    /// Create a new [`StochasticOscillator`] indicator.
     #[new]
     #[pyo3(signature = (k_period=14, d_period=3))]
     fn new(k_period: usize, d_period: usize) -> Self {
-        Self { k_period, d_period }
+        Self {
+            k_period,
+            d_period,
+        }
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize, usize)) {
         (py.get_type::<Self>(), (self.k_period, self.d_period))
     }
 }
 
-
 impl Indicator for StochasticOscillator {
-    fn acronym(&self) -> &'static str {
-        "STOCH"
-    }
+    const ACRONYM: &'static str = "STOCH";
+    const NAME: &'static str = "Stochastic Oscillator";
+    const DESCRIPTION: &'static str = "Compares a closing price to a range of prices over a period, generating overbought/oversold signals.";
 
-    fn name(&self) -> &'static str {
-        "Stochastic Oscillator"
-    }
-    fn description(&self) -> &'static str {
-        "Compares a closing price to a range of prices over a period, generating overbought/oversold signals."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        h: &[f64],
-        l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();
         let p = self.k_period;
         let mut k = vec![f64::NAN; n];
@@ -746,49 +693,39 @@ impl Indicator for StochasticOscillator {
     }
 }
 
-indicator_pymethods!(StochasticOscillator);
-
 /// Commodity Channel Index indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct CommodityChannelIndex {
-    #[pyo3(get)]
+    /// Look-back window length.
     period: usize,
 }
 
 #[pymethods]
 impl CommodityChannelIndex {
+    /// Create a new [`CommodityChannelIndex`] with the given period.
     #[new]
     #[pyo3(signature = (period=20))]
     fn new(period: usize) -> Self {
-        Self { period }
+        Self {
+            period,
+        }
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize,)) {
         (py.get_type::<Self>(), (self.period,))
     }
 }
 
-
 impl Indicator for CommodityChannelIndex {
-    fn acronym(&self) -> &'static str {
-        "CCI"
-    }
+    const ACRONYM: &'static str = "CCI";
+    const NAME: &'static str = "Commodity Channel Index";
+    const DESCRIPTION: &'static str = "Measures a price's deviation from its statistical mean, identifying cyclical trends in the data.";
 
-    fn name(&self) -> &'static str {
-        "Commodity Channel Index"
-    }
-    fn description(&self) -> &'static str {
-        "Measures a price's deviation from its statistical mean, identifying cyclical trends in the data."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        h: &[f64],
-        l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();
         let p = self.period;
         let tp: Vec<f64> = (0..n).map(|i| (h[i] + l[i] + c[i]) / 3.0).collect();
@@ -798,8 +735,7 @@ impl Indicator for CommodityChannelIndex {
             for i in (p - 1)..n {
                 let window = &tp[i + 1 - p..=i];
                 let mean = ma[i];
-                let md: f64 =
-                    window.iter().map(|x| (x - mean).abs()).sum::<f64>() / p as f64;
+                let md: f64 = window.iter().map(|x| (x - mean).abs()).sum::<f64>() / p as f64;
                 out[i] = if md > 0.0 {
                     (tp[i] - mean) / (0.015 * md)
                 } else {
@@ -811,48 +747,39 @@ impl Indicator for CommodityChannelIndex {
     }
 }
 
-indicator_pymethods!(CommodityChannelIndex);
-
 /// Average Directional Index indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct AverageDirectionalIndex {
-    #[pyo3(get)]
+    /// Look-back window length.
     period: usize,
 }
 
 #[pymethods]
 impl AverageDirectionalIndex {
+    /// Create a new [`AverageDirectionalIndex`] with the given period.
     #[new]
     #[pyo3(signature = (period=14))]
     fn new(period: usize) -> Self {
-        Self { period }
+        Self {
+            period,
+        }
     }
 
+    /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyType>, (usize,)) {
         (py.get_type::<Self>(), (self.period,))
     }
 }
 
-
 impl Indicator for AverageDirectionalIndex {
-    fn acronym(&self) -> &'static str {
-        "ADX"
-    }
-    fn name(&self) -> &'static str {
-        "Average Directional Index"
-    }
-    fn description(&self) -> &'static str {
-        "Quantifies trend strength (0\u{2013}100) regardless of direction, helping distinguish trending from ranging markets."
-    }
-    fn calculate_inner(
-        &self,
-        _o: &[f64],
-        h: &[f64],
-        l: &[f64],
-        c: &[f64],
-        _v: &[f64],
-    ) -> Vec<Vec<f64>> {
+    const ACRONYM: &'static str = "ADX";
+    const NAME: &'static str = "Average Directional Index";
+    const DESCRIPTION: &'static str = "Quantifies trend strength (0\u{2013}100) regardless of direction, helping distinguish trending from ranging markets.";
+
+    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+        let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
+        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();
         let p = self.period;
         if n < 2 {
@@ -864,7 +791,11 @@ impl Indicator for AverageDirectionalIndex {
         for i in 1..n {
             let up = h[i] - h[i - 1];
             let down = l[i - 1] - l[i];
-            plus_dm[i] = if up > down && up > 0.0 { up } else { 0.0 };
+            plus_dm[i] = if up > down && up > 0.0 {
+                up
+            } else {
+                0.0
+            };
             minus_dm[i] = if down > up && down > 0.0 {
                 down
             } else {
@@ -872,7 +803,7 @@ impl Indicator for AverageDirectionalIndex {
             };
         }
 
-        let tr = true_range(h, l, c);
+        let tr = true_range(&h, &l, &c);
         let atr = ewm(&tr, p);
         let smooth_plus = ewm(&plus_dm, p);
         let smooth_minus = ewm(&minus_dm, p);
@@ -896,28 +827,15 @@ impl Indicator for AverageDirectionalIndex {
     }
 }
 
+indicator_pymethods!(SimpleMovingAverage);
+indicator_pymethods!(ExponentialMovingAverage);
+indicator_pymethods!(WeightedMovingAverage);
+indicator_pymethods!(RelativeStrengthIndex);
+indicator_pymethods!(MovingAverageConvergenceDivergence);
+indicator_pymethods!(BollingerBands);
+indicator_pymethods!(AverageTrueRange);
+indicator_pymethods!(OnBalanceVolume);
+indicator_pymethods!(VolumeWeightedAveragePrice);
+indicator_pymethods!(StochasticOscillator);
+indicator_pymethods!(CommodityChannelIndex);
 indicator_pymethods!(AverageDirectionalIndex);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// List all predefined indicators (default params)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Return a list of all predefined indicator instances with default parameters.
-#[pyfunction]
-pub fn list_indicators(py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
-    Ok(vec![
-        Py::new(py, SimpleMovingAverage::new(14))?.into_any(),
-        Py::new(py, ExponentialMovingAverage::new(14))?.into_any(),
-        Py::new(py, WeightedMovingAverage::new(14))?.into_any(),
-        Py::new(py, RelativeStrengthIndex::new(14))?.into_any(),
-        Py::new(py, MovingAverageConvergenceDivergence::new(12, 26, 9))?.into_any(),
-        Py::new(py, BollingerBands::new(20, 2.0))?.into_any(),
-        Py::new(py, AverageTrueRange::new(14))?.into_any(),
-        Py::new(py, OnBalanceVolume::new())?.into_any(),
-        Py::new(py, VolumeWeightedAveragePrice::new())?.into_any(),
-        Py::new(py, StochasticOscillator::new(14, 3))?.into_any(),
-        Py::new(py, CommodityChannelIndex::new(20))?.into_any(),
-        Py::new(py, AverageDirectionalIndex::new(14))?.into_any(),
-    ])
-}
-

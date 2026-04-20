@@ -148,7 +148,6 @@ nav:
                 - ExperimentConfig: api/models/backtest/experimentconfig.md
                 - GeneralExpConfig: api/models/backtest/generalexpconfig.md
                 - IndicatorExpConfig: api/models/backtest/indicatorexpconfig.md
-                - IndicatorType: api/models/backtest/indicatortype.md
                 - OrderType: api/models/backtest/ordertype.md
                 - PortfolioExpConfig: api/models/backtest/portfolioexpconfig.md
                 - StrategyExpConfig: api/models/backtest/strategyexpconfig.md

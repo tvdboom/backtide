@@ -41,13 +41,14 @@ from backtide.data import Currency, InstrumentProfile, InstrumentType
 from backtide.storage import query_instruments
 from backtide.ui.utils import (
     _CARD_CSS,
+    _CODE_OPTIONS,
     _clear_state,
     _default,
     _draw_cards,
     _get_instrument_type_description,
     _get_timezone,
     _list_instruments,
-    _load_saved_indicators,
+    _load_stored_indicators,
     _persist,
     _query_bars_summary,
     _to_upper_values,
@@ -67,8 +68,6 @@ logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").set
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
-
-USER_CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
 
 STRATEGY_PLACEHOLDER = """\
 def strategy(data, state, indicators):
@@ -311,7 +310,7 @@ def _on_config_upload():
 
     try:
         exp = _parse_config_upload(upload)
-        _apply_config_to_state(exp, st.session_state, USER_CODE_OPTIONS)
+        _apply_config_to_state(exp, st.session_state, _CODE_OPTIONS)
         st.session_state["_import_success"] = f"Loaded configuration from `{upload.name}`."
     except Exception as ex:  # noqa: BLE001
         st.session_state["_import_error"] = f"Failed to parse file: {ex}"
@@ -328,6 +327,10 @@ tz = _get_timezone(cfg.display.timezone)
 exp: ExperimentConfig = _default("config", ExperimentConfig())
 
 st.set_page_config(page_title="Backtide - Experiment")
+
+st.subheader("Experiment", text_alignment="center")
+st.write("")
+
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
@@ -375,7 +378,7 @@ with tab1:
     if chars := INVALID_FILENAME_CHARS.findall(experiment_name):
         st.error(
             f"The following characters are not allowed in experiment names: "
-            f"**{' '.join(repr(c) for c in sorted(set(chars)))}** "
+            f"**{' '.join(sorted(set(chars)))}** "
         )
         experiment_name = None
 
@@ -797,17 +800,18 @@ with tab4:
                 label="Source",
                 key=(key := f"strategy_source_{i}"),
                 required=True,
-                options=USER_CODE_OPTIONS,
-                default=_default(key, USER_CODE_OPTIONS[0]),
+                options=_CODE_OPTIONS,
+                default=_default(key, _CODE_OPTIONS[0]),
                 label_visibility="collapsed",
                 on_change=lambda k=key: _persist(k),
             )
 
             code: str | None = None
-            if source == USER_CODE_OPTIONS[0]:
+            if source == _CODE_OPTIONS[0]:
                 resp = code_editor(
                     code=custom_strategy.get("code") or STRATEGY_PLACEHOLDER,
                     key=f"strategy_code_editor_{i}",
+                    response_mode="debounce",
                     buttons=[
                         {
                             "name": "Copy",
@@ -815,14 +819,6 @@ with tab4:
                             "hasText": True,
                             "commands": ["copyAll"],
                             "style": {"top": "0.46rem", "right": "0.4rem"},
-                        },
-                        {
-                            "name": "Save",
-                            "feather": "Save",
-                            "hasText": True,
-                            "commands": ["save-state", ["response", "saved"]],
-                            "response": "saved",
-                            "style": {"top": "2.25rem", "right": "0.4rem"},
                         },
                     ],
                 )
@@ -859,7 +855,7 @@ with tab4:
         type="secondary",
     ):
         st.session_state.custom_strategies.append(
-            {"name": "", "source": USER_CODE_OPTIONS[0], "code": ""}
+            {"name": "", "source": _CODE_OPTIONS[0], "code": ""}
         )
         st.rerun()
 
@@ -877,40 +873,36 @@ with tab5:
         "simulation begins, so they add no per-tick overhead.",
     )
 
-    _saved_indicators = _load_saved_indicators()
-    _saved_ind_names = [ind.name for ind in _saved_indicators]
+    saved_indicators = _load_stored_indicators(cfg)
 
-    if _saved_ind_names:
-        selected_saved_indicators = st.multiselect(
+    if saved_indicators:
+        selected_ind = st.multiselect(
             label="Saved indicators",
             key=(key := "experiment_indicators"),
-            options=_saved_ind_names,
+            options=saved_indicators,
             default=_default(key, []),
+            format_func=lambda x: x.name,
             placeholder="Select indicators...",
             on_change=lambda k=key: _persist(k),
-            help=(
-                "Choose from indicators defined on the Indicators page. "
-                "They will be computed on each bar and passed to your strategy."
-            ),
+            help="Choose which indicators to use in this experiment.",
         )
 
         # Show a summary of selected indicators
-        _saved_map = {ind.name: ind for ind in _saved_indicators}
-        for ind_name in selected_saved_indicators:
-            if ind_name in _saved_map:
-                ind = _saved_map[ind_name]
-                if ind.kind == "builtin":
-                    params_str = ", ".join(f"{k}={v}" for k, v in (ind.parameters or {}).items())
-                    detail = f"{ind.builtin_type}" + (f" ({params_str})" if params_str else "")
-                    st.caption(f":material/show_chart: **{ind_name}** · {detail}")
-                else:
-                    st.caption(f":material/code: **{ind_name}** · Custom")
+        for ind in selected_ind:
+            if ind.code:
+                label = f":material/code: **{ind.name}** · Custom"
+            else:
+                label = f":material/show_chart: **{ind.name}** · _{ind.builtin}_"
+                if ind.parameters:
+                    label += f" · {', '.join(f'{k}={v}' for k, v in ind.parameters.items())}"
+
+            st.caption(label)
 
         # Keep builtin_indicators in sync for config export
         st.session_state["builtin_indicators"] = [
-            ind.builtin_type
-            for ind in _saved_indicators
-            if ind.name in selected_saved_indicators and ind.kind == "builtin"
+            ind.builtin
+            for ind in saved_indicators
+            if ind.name in selected_ind and ind.kind == "builtin"
         ]
     else:
         st.info(
@@ -918,11 +910,7 @@ with tab5:
             icon=":material/info:",
         )
 
-        if st.button(
-            label="Go to Indicators",
-            icon=":material/show_chart:",
-            type="secondary",
-        ):
+        if st.button("Create a new indicator", icon=":material/show_chart:", type="secondary"):
             st.switch_page("indicators.py")
 
         st.session_state["builtin_indicators"] = []

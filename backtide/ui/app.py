@@ -6,8 +6,8 @@ Description: Entry point for the streamlit app.
 """
 
 import streamlit as st
-from backtide.utils.constants import DOCS_URL
 
+from backtide.utils.constants import DOCS_URL
 
 st.set_page_config(
     page_title="Backtide",
@@ -249,7 +249,9 @@ PAGES_URLS = {
     "Analysis": f"{DOCS_URL}/user_guide/data/analysis",
 }
 
-pg = st.navigation({"Backtest": [experiment, results, indicators], "Data": [download, storage, analysis]})
+pg = st.navigation(
+    {"Backtest": [experiment, results, indicators], "Data": [download, storage, analysis]}
+)
 
 # Inject the docs button for the current page at the top of the content area
 st.html(

@@ -6,6 +6,15 @@ Description: Backtest results page.
 """
 
 import streamlit as st
+from backtide.config import get_config
+
+cfg = get_config()
+
+st.set_page_config(page_title="Backtide - Results")
+
+st.subheader("Results", text_alignment="center")
+st.write("")
+
 
 with st.expander("📈 Mean Reversion v2 · BTCUSD · 1H — 28 Feb 2026", expanded=True):
     c1, c2, c3, c4, c5 = st.columns(5)

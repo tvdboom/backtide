@@ -39,6 +39,9 @@ tz = _get_timezone(cfg.display.timezone)
 
 st.set_page_config(page_title="Backtide - Download")
 
+st.subheader("Download", text_alignment="center")
+st.write("")
+
 instrument_type = st.segmented_control(  # ty: ignore[no-matching-overload]
     label="Instrument type",
     key=(key := "instrument_type"),

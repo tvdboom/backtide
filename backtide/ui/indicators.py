@@ -6,44 +6,110 @@ Description: Indicator management page.
 """
 
 import ast
+from dataclasses import asdict, dataclass
+import json
+from pathlib import Path
+from typing import Any
 
 from code_editor import code_editor
 import streamlit as st
-import cloudpickle as pickle
 
-from backtide.backtest import list_indicators
+from backtide.backtest import (
+    AverageDirectionalIndex,
+    AverageTrueRange,
+    BollingerBands,
+    CommodityChannelIndex,
+    ExponentialMovingAverage,
+    MovingAverageConvergenceDivergence,
+    OnBalanceVolume,
+    RelativeStrengthIndex,
+    SimpleMovingAverage,
+    StochasticOscillator,
+    VolumeWeightedAveragePrice,
+    WeightedMovingAverage,
+)
+from backtide.config import get_config
 from backtide.ui.utils import (
-    SavedIndicator,
-    _INDICATORS_DIR,
-    _load_saved_indicators,
+    _CODE_OPTIONS,
+    _default,
+    _load_stored_indicators,
+    _persist,
 )
 from backtide.utils.constants import INVALID_FILENAME_CHARS
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Load all predefined indicator classes from Rust (with default params).
-# Used to populate the selectbox and get param schemas.
-_PREDEFINED = list_indicators()
-_PREDEFINED_MAP = {ind.acronym: ind for ind in _PREDEFINED}
+# Predefined indicator objects
+PREDEFINED = [
+    ExponentialMovingAverage,
+    RelativeStrengthIndex,
+    SimpleMovingAverage,
+    WeightedMovingAverage,
+    RelativeStrengthIndex,
+    MovingAverageConvergenceDivergence,
+    BollingerBands,
+    AverageTrueRange,
+    OnBalanceVolume,
+    WeightedMovingAverage,
+    RelativeStrengthIndex,
+    MovingAverageConvergenceDivergence,
+    BollingerBands,
+    AverageTrueRange,
+    OnBalanceVolume,
+    VolumeWeightedAveragePrice,
+    StochasticOscillator,
+    CommodityChannelIndex,
+    AverageDirectionalIndex,
+]
 
 # Parameter schemas for built-in indicators.
-# {param_name: (label, default, min, max, step, help_text)}
 INDICATOR_PARAMS: dict[str, dict] = {
     "SMA": {"period": ("Period", 14, 2, 500, 1, "Number of bars for the moving average window.")},
-    "EMA": {"period": ("Period", 14, 2, 500, 1, "Number of bars for the exponential moving average window.")},
-    "WMA": {"period": ("Period", 14, 2, 500, 1, "Number of bars for the weighted moving average window.")},
+    "EMA": {
+        "period": (
+            "Period",
+            14,
+            2,
+            500,
+            1,
+            "Number of bars for the exponential moving average window.",
+        )
+    },
+    "WMA": {
+        "period": (
+            "Period",
+            14,
+            2,
+            500,
+            1,
+            "Number of bars for the weighted moving average window.",
+        )
+    },
     "RSI": {"period": ("Period", 14, 2, 500, 1, "Lookback period for the RSI calculation.")},
     "MACD": {
         "fast_period": ("Fast period", 12, 2, 500, 1, "Number of bars for the fast EMA."),
         "slow_period": ("Slow period", 26, 2, 500, 1, "Number of bars for the slow EMA."),
-        "signal_period": ("Signal period", 9, 2, 500, 1, "Number of bars for the signal line EMA."),
+        "signal_period": (
+            "Signal period",
+            9,
+            2,
+            500,
+            1,
+            "Number of bars for the signal line EMA.",
+        ),
     },
     "BB": {
         "period": ("Period", 20, 2, 500, 1, "Number of bars for the moving average."),
-        "std_dev": ("Std. deviations", 2.0, 0.1, 10.0, 0.1, "Number of standard deviations for the bands."),
+        "std_dev": (
+            "Std. deviations",
+            2.0,
+            0.1,
+            10.0,
+            0.1,
+            "Number of standard deviations for the bands.",
+        ),
     },
     "ATR": {"period": ("Period", 14, 2, 500, 1, "Lookback period for the Average True Range.")},
     "OBV": {},
@@ -80,21 +146,24 @@ def indicator(data):
 """
 
 
-def _save_indicator(ind: SavedIndicator) -> None:
-    """Persist an indicator definition to disk as pickle."""
-    _INDICATORS_DIR.mkdir(parents=True, exist_ok=True)
-    path = _INDICATORS_DIR / f"{ind.name}.pkl"
-    path.write_bytes(pickle.dumps(ind))
+@dataclass
+class SavedIndicator:
+    """A persisted indicator definition."""
+
+    name: str
+    builtin: str | None = None
+    parameters: dict[str, Any] | None = None
+    code: str | None = None
 
 
-def _delete_indicator(name: str) -> None:
-    """Remove a saved indicator definition from disk."""
-    path = _INDICATORS_DIR / f"{name}.pkl"
-    path.unlink(missing_ok=True)
+def _save_indicator(ind: SavedIndicator):
+    """Persist an indicator definition to disk as JSON."""
+    path = Path(cfg.data.storage_path) / "indicators" / f"{ind.name}.json"
+    path.write_text(json.dumps(asdict(ind), indent=4), encoding="utf-8")
 
 
 def _check_indicator_code(code: str) -> str | None:
-    """Validate that *code* defines `indicator(data)`."""
+    """Validate that `code` defines `indicator(data)`."""
     try:
         tree = ast.parse(code)
         for node in tree.body:
@@ -110,7 +179,7 @@ def _check_indicator_code(code: str) -> str | None:
 def _make_custom_compute_fn(code: str):
     """Create a callable wrapper from custom indicator code."""
     ns: dict = {}
-    exec(code, ns)  # noqa: S102
+    exec(code, ns)
     fn = ns.get("indicator")
     if not callable(fn):
         raise ValueError("Custom indicator code must define a callable named 'indicator'.")
@@ -133,22 +202,29 @@ def _make_custom_compute_fn(code: str):
 
 st.set_page_config(page_title="Backtide - Indicators")
 
-USER_CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
+cfg = get_config()
 
-saved = _load_saved_indicators()
+storage_path = Path(cfg.data.storage_path) / "indicators"
+storage_path.mkdir(parents=True, exist_ok=True)
 
-if saved:
-    for ind in saved:
+stored_indicators = _load_stored_indicators(cfg)
+stored_names = [ind.name for ind in stored_indicators]
+
+st.subheader("Indicators", text_alignment="center")
+st.write("")
+
+
+if stored_indicators:
+    for ind in stored_indicators:
         with st.container(border=True):
             col1, col2 = st.columns([5, 1], vertical_alignment="center")
 
-            if ind.kind == "builtin":
-                label = f":material/show_chart: **{ind.name}** · {ind.builtin_type}"
-                if ind.parameters:
-                    params_str = ", ".join(f"{k}={v}" for k, v in ind.parameters.items())
-                    label += f" ({params_str})"
-            else:
+            if ind.code:
                 label = f":material/code: **{ind.name}** · Custom"
+            else:
+                label = f":material/show_chart: **{ind.name}** · _{ind.builtin}_"
+                if ind.parameters:
+                    label += f" · {', '.join(f'{k}={v}' for k, v in ind.parameters.items())}"
 
             col1.markdown(label)
 
@@ -158,14 +234,11 @@ if saved:
                 icon=":material/delete:",
                 type="tertiary",
             ):
-                _delete_indicator(ind.name)
+                Path(storage_path, f"{ind.name}.json").unlink(missing_ok=True)
                 st.rerun()
 else:
     st.info("No saved indicators yet.", icon=":material/info:")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Add new indicator
-# ─────────────────────────────────────────────────────────────────────────────
 
 st.divider()
 
@@ -175,7 +248,7 @@ if col1.button(
     "Add built-in",
     icon=":material/show_chart:",
     type="secondary",
-    use_container_width=True,
+    width="stretch",
 ):
     st.session_state["_add_indicator_mode"] = "builtin"
 
@@ -183,43 +256,50 @@ if col2.button(
     "Add custom",
     icon=":material/code:",
     type="secondary",
-    use_container_width=True,
+    width="stretch",
 ):
     st.session_state["_add_indicator_mode"] = "custom"
 
-_mode = st.session_state.get("_add_indicator_mode")
-
-if _mode == "builtin":
+mode = st.session_state.get("_add_indicator_mode")
+if mode == "builtin":
     with st.container(border=True):
         col1, col2 = st.columns([3, 2])
 
-        ind_type_str = col1.selectbox(
+        def _on_builtin_type_change(k):
+            """Sync name to the newly selected indicator's name."""
+            _persist(k)
+
+            if new_ind := st.session_state.get(k):
+                st.session_state["new_builtin_name"] = new_ind.name
+                st.session_state["_new_builtin_name"] = new_ind.name
+
+        ind = col1.selectbox(
             label="Indicator",
-            key="new_builtin_type",
-            options=list(_PREDEFINED_MAP),
-            format_func=lambda s: f"{s} - {_PREDEFINED_MAP[s].name}",
+            key=(key := "new_builtin_type"),
+            options=PREDEFINED,
+            index=PREDEFINED.index(_default(key, PREDEFINED[0])),
+            format_func=lambda s: f"{s.acronym} - {s.name}",
+            on_change=lambda k=key: _on_builtin_type_change(k),
         )
 
-        default_name = str(ind_type_str)
         ind_name = col2.text_input(
             label="Name",
-            key="new_builtin_name",
-            value=default_name,
+            key=(key := "new_builtin_name"),
+            value=_default(key, ind.name),
             max_chars=40,
+            on_change=lambda k=key: _persist(k),
             help="A unique name for this indicator configuration.",
         )
 
-        # Parameter inputs
-        params_schema = INDICATOR_PARAMS.get(ind_type_str, {})
         params = {}
-        if params_schema:
+        if params_schema := INDICATOR_PARAMS.get(ind.acronym):
             cols = st.columns(len(params_schema))
-            for col, (param_key, (label, default, min_v, max_v, step, help_text)) in zip(
-                cols, params_schema.items()
+            for col, (param, (label, default, min_v, max_v, step, help_text)) in zip(
+                cols, params_schema.items(), strict=True
             ):
-                params[param_key] = col.number_input(
+                params[param] = col.number_input(
                     label=label,
-                    key=f"new_builtin_{param_key}",
+                    key=f"new_builtin_{param}",
                     value=default,
                     min_value=min_v,
                     max_value=max_v,
@@ -228,17 +308,20 @@ if _mode == "builtin":
                     help=help_text,
                 )
         else:
-            st.caption(f"{_PREDEFINED_MAP[ind_type_str].name} has no configurable parameters.")
+            st.caption(f"{ind.name} has no configurable parameters.")
 
-        st.caption(_PREDEFINED_MAP[ind_type_str].description)
+        st.caption(ind.description())
 
-        # Validate name
         name_error = None
         if not ind_name:
-            name_error = "Name is required."
-        elif INVALID_FILENAME_CHARS.findall(ind_name):
-            chars = INVALID_FILENAME_CHARS.findall(ind_name)
-            name_error = f"Invalid characters: {' '.join(repr(c) for c in sorted(set(chars)))}"
+            name_error = "Name cannot be empty."
+        elif chars := INVALID_FILENAME_CHARS.findall(ind_name):
+            name_error = (
+                f"The following characters are not allowed in indicator names: "
+                f"**{' '.join(sorted(set(chars)))}** "
+            )
+        elif ind_name in stored_names:
+            name_error = f"An indicator with name **{ind_name}** already exists."
 
         if name_error:
             st.error(name_error)
@@ -250,7 +333,7 @@ if _mode == "builtin":
             icon=":material/save:",
             type="primary",
             disabled=bool(name_error),
-            use_container_width=True,
+            width="stretch",
         ):
             cast_params = {}
             for k, v in params.items():
@@ -260,47 +343,48 @@ if _mode == "builtin":
                 else:
                     cast_params[k] = v
 
-            # Construct the indicator with user-chosen params
-            ind_cls = type(_PREDEFINED_MAP[ind_type_str])
-            compute_fn = ind_cls(**cast_params)
-            _save_indicator(SavedIndicator(
-                name=ind_name,
-                kind="builtin",
-                compute_fn=compute_fn,
-                builtin_type=ind_type_str,
-                parameters=cast_params,
-            ))
+            _save_indicator(
+                SavedIndicator(
+                    name=ind_name,
+                    builtin=ind.acronym,
+                    parameters=cast_params,
+                )
+            )
             st.session_state.pop("_add_indicator_mode", None)
             st.rerun()
 
-        if col2.button("Cancel", icon=":material/close:", use_container_width=True):
+        if col2.button("Cancel", icon=":material/close:", width="stretch"):
             st.session_state.pop("_add_indicator_mode", None)
             st.rerun()
 
-elif _mode == "custom":
+elif mode == "custom":
     with st.container(border=True):
         ind_name = st.text_input(
             label="Name",
-            key="new_custom_name",
+            key=(key := "new_ind_custom_name"),
+            value=_default(key, ""),
             max_chars=40,
             placeholder="My indicator",
+            on_change=lambda k=key: _persist(k),
             help="A unique name for this custom indicator.",
         )
 
         source = st.segmented_control(
             label="Source",
-            key="new_custom_source",
+            key=(key := "new_custom_source"),
             required=True,
-            options=USER_CODE_OPTIONS,
-            default=USER_CODE_OPTIONS[0],
+            options=_CODE_OPTIONS,
+            default=_default(key, _CODE_OPTIONS[0]),
             label_visibility="collapsed",
+            on_change=lambda k=key: _persist(k),
         )
 
         code: str | None = None
-        if source == USER_CODE_OPTIONS[0]:
+        if source == _CODE_OPTIONS[0]:
             resp = code_editor(
-                code=CODE_PLACEHOLDER,
-                key="new_custom_code_editor",
+                key=(key := "new_ind_custom_code_editor"),
+                code=_default(key, CODE_PLACEHOLDER),
+                response_mode="debounce",
                 buttons=[
                     {
                         "name": "Copy",
@@ -308,14 +392,6 @@ elif _mode == "custom":
                         "hasText": True,
                         "commands": ["copyAll"],
                         "style": {"top": "0.46rem", "right": "0.4rem"},
-                    },
-                    {
-                        "name": "Save",
-                        "feather": "Save",
-                        "hasText": True,
-                        "commands": ["save-state", ["response", "saved"]],
-                        "response": "saved",
-                        "style": {"top": "2.25rem", "right": "0.4rem"},
                     },
                 ],
             )
@@ -332,6 +408,7 @@ elif _mode == "custom":
                     "`indicator(data) -> dict[str, float]`."
                 ),
             )
+
             if indicator_file is not None:
                 code = indicator_file.read().decode("utf-8")
                 with st.expander("Preview uploaded file"):
@@ -345,10 +422,12 @@ elif _mode == "custom":
 
         name_error = None
         if not ind_name:
-            name_error = "Name is required."
+            name_error = "Name cannot be empty."
         elif INVALID_FILENAME_CHARS.findall(ind_name):
             chars = INVALID_FILENAME_CHARS.findall(ind_name)
             name_error = f"Invalid characters: {' '.join(repr(c) for c in sorted(set(chars)))}"
+        elif ind_name in stored_names:
+            name_error = f"An indicator with name **{ind_name}** already exists."
 
         if name_error:
             st.error(name_error)
@@ -360,18 +439,17 @@ elif _mode == "custom":
             icon=":material/save:",
             type="primary",
             disabled=bool(name_error) or not code,
-            use_container_width=True,
+            width="stretch",
         ):
-            compute_fn = _make_custom_compute_fn(code)
-            _save_indicator(SavedIndicator(
-                name=ind_name,
-                kind="custom",
-                compute_fn=compute_fn,
-                code=code,
-            ))
+            _save_indicator(
+                SavedIndicator(
+                    name=ind_name,
+                    code=code,
+                )
+            )
             st.session_state.pop("_add_indicator_mode", None)
             st.rerun()
 
-        if col2.button("Cancel", icon=":material/close:", use_container_width=True):
+        if col2.button("Cancel", icon=":material/close:", width="stretch"):
             st.session_state.pop("_add_indicator_mode", None)
             st.rerun()

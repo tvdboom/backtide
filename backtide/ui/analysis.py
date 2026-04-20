@@ -16,7 +16,7 @@ from backtide.plots.price import PRICE_COLUMNS, plot_price
 from backtide.ui.utils import (
     _default,
     _get_timezone,
-    _load_saved_indicators,
+    _load_stored_indicators,
     _persist,
     _to_pandas,
     _to_upper_values,
@@ -43,6 +43,9 @@ cfg = get_config()
 tz = _get_timezone(cfg.display.timezone)
 
 st.set_page_config(page_title="Backtide - Analysis")
+
+st.subheader("Analysis", text_alignment="center")
+st.write("")
 
 # Load all instruments from the database
 all_i = {x.symbol: x for x in query_instruments()}
@@ -191,7 +194,7 @@ with tab2:
     col1, col2 = st.columns([10, 1])
     col1.caption("Price over time for selected symbols.")
 
-    _saved_indicators = _load_saved_indicators()
+    _saved_indicators = _load_stored_indicators(cfg)
     _saved_names = [ind.name for ind in _saved_indicators]
     _saved_map = {ind.name: ind for ind in _saved_indicators}
 
@@ -221,8 +224,7 @@ with tab2:
             selected_inds = []
 
     overlay = [
-        {"name": n, "fn": _saved_map[n].compute}
-        for n in selected_inds if n in _saved_map
+        {"name": n, "fn": _saved_map[n].compute} for n in selected_inds if n in _saved_map
     ] or None
 
     st.plotly_chart(

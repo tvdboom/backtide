@@ -8,7 +8,6 @@ Description: Unit tests for the Streamlit UI pages and utility functions.
 from datetime import date
 import io
 import json
-import os
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
@@ -29,16 +28,11 @@ from backtide.backtest import (
 )
 from backtide.data import InstrumentType
 from backtide.ui.utils import (
-    _apply_config_to_state,
-    _build_config_toml,
-    _check_indicator_code,
-    _check_strategy_code,
     _fmt_number,
     _get_instrument_type_description,
     _get_logokit_url,
     _get_timezone,
     _moment_to_strftime,
-    _parse_config_upload,
     _parse_date,
     _to_pandas,
 )
@@ -156,63 +150,75 @@ class TestGetLogokitUrl:
 class TestCheckStrategyCode:
     """Tests for _check_strategy_code validation."""
 
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from backtide.ui.experiment import _check_strategy_code
+
+        self._check = _check_strategy_code
+
     def test_valid_code(self):
         """Valid strategy code returns None."""
         code = "def strategy(data, state, indicators):\n    return []"
-        assert _check_strategy_code(code) is None
+        assert self._check(code) is None
 
     def test_wrong_signature(self):
         """Wrong function signature returns error message."""
         code = "def strategy(data):\n    return []"
-        result = _check_strategy_code(code)
+        result = self._check(code)
         assert result is not None
         assert "signature" in result
 
     def test_missing_function(self):
         """Missing strategy function returns error message."""
         code = "def other_func(data):\n    return []"
-        result = _check_strategy_code(code)
+        result = self._check(code)
         assert result is not None
         assert "No function" in result
 
     def test_syntax_error(self):
         """Syntax error in code returns error message."""
         code = "def strategy(data, state, indicators\n    return []"
-        result = _check_strategy_code(code)
+        result = self._check(code)
         assert result is not None
         assert "Syntax error" in result
 
     def test_empty_code(self):
         """Empty code returns no-function error."""
-        assert _check_strategy_code("") is not None
+        assert self._check("") is not None
 
 
 class TestCheckIndicatorCode:
     """Tests for _check_indicator_code validation."""
 
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from backtide.ui.indicators import _check_indicator_code
+
+        self._check = _check_indicator_code
+
     def test_valid_code(self):
         """Valid indicator code returns None."""
         code = "def indicator(data):\n    return {}"
-        assert _check_indicator_code(code) is None
+        assert self._check(code) is None
 
     def test_wrong_signature(self):
         """Wrong function signature returns error message."""
         code = "def indicator(data, extra):\n    return {}"
-        result = _check_indicator_code(code)
+        result = self._check(code)
         assert result is not None
         assert "signature" in result
 
     def test_missing_function(self):
         """Missing indicator function returns error message."""
         code = "x = 1"
-        result = _check_indicator_code(code)
+        result = self._check(code)
         assert result is not None
         assert "No function" in result
 
     def test_syntax_error(self):
         """Syntax error returns error message."""
         code = "def indicator(data\n    return {}"
-        result = _check_indicator_code(code)
+        result = self._check(code)
         assert result is not None
         assert "Syntax error" in result
 
@@ -220,9 +226,15 @@ class TestCheckIndicatorCode:
 class TestBuildConfigToml:
     """Tests for _build_config_toml."""
 
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from backtide.ui.experiment import _build_config_toml
+
+        self._build = _build_config_toml
+
     def test_defaults(self):
         """Building with empty state and defaults produces valid TOML."""
-        result = _build_config_toml({}, "test-exp", ExperimentConfig())
+        result = self._build({}, "test-exp", ExperimentConfig())
         assert isinstance(result, str)
         assert "test-exp" in result
 
@@ -238,7 +250,7 @@ class TestBuildConfigToml:
             "custom_indicators": [{"code": "y = 2"}],
             "indicator_name_0": "My Indicator",
         }
-        result = _build_config_toml(state, "my-exp", ExperimentConfig())
+        result = self._build(state, "my-exp", ExperimentConfig())
         assert "my-exp" in result
         assert "AAPL" in result
         assert "MSFT" in result
@@ -246,7 +258,7 @@ class TestBuildConfigToml:
     def test_with_dates(self):
         """Start/end dates are included when present."""
         state = {"start_date": "2020-01-01", "end_date": "2023-12-31"}
-        result = _build_config_toml(state, "exp", ExperimentConfig())
+        result = self._build(state, "exp", ExperimentConfig())
         assert "2020-01-01" in result
         assert "2023-12-31" in result
 
@@ -254,13 +266,19 @@ class TestBuildConfigToml:
 class TestParseConfigUpload:
     """Tests for _parse_config_upload."""
 
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from backtide.ui.experiment import _parse_config_upload
+
+        self._parse = _parse_config_upload
+
     def test_toml(self):
         """Parse a TOML config upload."""
         content = b'[general]\nname = "test"\ntags = []\ndescription = ""\n'
         f = MagicMock()
         f.name = "config.toml"
         f.read.return_value = content
-        result = _parse_config_upload(f)
+        result = self._parse(f)
         assert isinstance(result, ExperimentConfig)
         assert result.general.name == "test"
 
@@ -269,7 +287,7 @@ class TestParseConfigUpload:
         data = {"general": {"name": "json-exp", "tags": [], "description": ""}}
         f = io.BytesIO(json.dumps(data).encode())
         f.name = "config.json"
-        result = _parse_config_upload(f)
+        result = self._parse(f)
         assert isinstance(result, ExperimentConfig)
         assert result.general.name == "json-exp"
 
@@ -278,13 +296,19 @@ class TestParseConfigUpload:
         content = b"general:\n  name: yaml-exp\n  tags: []\n  description: ''\n"
         f = io.BytesIO(content)
         f.name = "config.yaml"
-        result = _parse_config_upload(f)
+        result = self._parse(f)
         assert isinstance(result, ExperimentConfig)
         assert result.general.name == "yaml-exp"
 
 
 class TestApplyConfigToState:
     """Tests for _apply_config_to_state."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from backtide.ui.experiment import _apply_config_to_state
+
+        self._apply = _apply_config_to_state
 
     def test_applies_all_fields(self):
         """All config fields are written to state."""
@@ -295,7 +319,7 @@ class TestApplyConfigToState:
             ),
         )
         state = {}
-        _apply_config_to_state(exp, state, ["code_editor", "upload"])
+        self._apply(exp, state, ["code_editor", "upload"])
         assert state["experiment_name"] == "applied"
         assert state["tags"] == ["t1"]
         assert state["description"] == "d"
@@ -314,7 +338,7 @@ class TestApplyConfigToState:
             ),
         )
         state: dict = {}
-        _apply_config_to_state(exp, state, ["editor"])
+        self._apply(exp, state, ["editor"])
         assert state["full_history"] is False
         assert state["start_date"] == date(2020, 1, 15)
         assert state["end_date"] == date(2023, 6, 30)
@@ -323,21 +347,6 @@ class TestApplyConfigToState:
 # ─────────────────────────────────────────────────────────────────────────────
 # Streamlit page rendering tests
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def _app():
-    """Provide a working directory so the app finds its assets."""
-    original = os.getcwd()
-    root = original
-    while not os.path.isdir(os.path.join(root, "images")):
-        parent = os.path.dirname(root)
-        if parent == root:
-            break
-        root = parent
-    os.chdir(root)
-    yield
-    os.chdir(original)
 
 
 class TestResultsPage:
@@ -498,13 +507,12 @@ class TestExperimentPage:
 
     @pytest.mark.usefixtures("_app")
     def test_add_indicator_button(self):
-        """Clicking 'Add indicator' adds a custom indicator entry."""
+        """Clicking 'Add indicator' navigates to the indicators page."""
         at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
         at.run()
-        initial = len(at.text_input)
         at.button[1].click().run()
-        assert not at.exception
-        assert len(at.text_input) > initial
+        # switch_page raises in AppTest since indicators.py is not a registered page
+        assert any("indicators" in str(e.value).lower() for e in at.exception)
 
     @pytest.mark.usefixtures("_app")
     def test_description_text_area(self):

@@ -10,8 +10,8 @@ from backtide.core.backtest import (
     AverageTrueRange,
     BollingerBands,
     CodeSnippet,
-    CommodityChannelIndex,
     CommissionType,
+    CommodityChannelIndex,
     ConversionPeriod,
     CurrencyConversionMode,
     DataExpConfig,
@@ -33,5 +33,4 @@ from backtide.core.backtest import (
     StrategyType,
     VolumeWeightedAveragePrice,
     WeightedMovingAverage,
-    list_indicators,
 )

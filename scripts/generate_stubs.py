@@ -520,11 +520,14 @@ def generate_submodule_stub(submodule_name: str) -> str:
         lines.append(f"from typing import {', '.join(typing_imports)}\n")
         lines.append("\n")
 
-    # ── Third-party DataFrame imports ────────────────────────────────────
+    # ── Third-party imports ─────────────────────────────────────────────
 
+    needs_numpy = "numpy." in body
     needs_pandas = "pd.DataFrame" in body
     needs_polars = "pl.DataFrame" in body
-    if needs_pandas or needs_polars:
+    if needs_numpy or needs_pandas or needs_polars:
+        if needs_numpy:
+            lines.append("import numpy\n")
         if needs_pandas:
             lines.append("import pandas as pd\n")
         if needs_polars:

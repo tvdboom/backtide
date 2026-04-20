@@ -9,6 +9,9 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 default:
     @just --list
 
+sync:
+    uv sync --upgrade --all-extras --all-groups
+
 # Build the Rust extension and regenerate stubs
 build:
     uv pip install -e .

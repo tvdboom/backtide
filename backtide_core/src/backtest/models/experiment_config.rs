@@ -450,8 +450,8 @@ impl StrategyExpConfig {
 ///
 /// Attributes
 /// ----------
-/// builtin_indicators : list[str | [IndicatorType]], default=[]
-///     Built-in indicators to compute.
+/// builtin_indicators : list[str], default=[]
+///     Names of the indicators to compute.
 ///
 /// custom_indicators : list[[CodeSnippet]], default=[]
 ///     User-defined indicator code snippets.
@@ -520,10 +520,7 @@ impl IndicatorExpConfig {
 
     #[new]
     #[pyo3(signature = (builtin_indicators: "list[str]"=vec![], custom_indicators: "list[CodeSnippet]"=vec![]))]
-    fn new(
-        builtin_indicators: Vec<String>,
-        custom_indicators: Vec<Py<CodeSnippet>>,
-    ) -> Self {
+    fn new(builtin_indicators: Vec<String>, custom_indicators: Vec<Py<CodeSnippet>>) -> Self {
         Self {
             builtin_indicators,
             custom_indicators,

@@ -54,31 +54,41 @@ def _add_indicator_traces(
         upper = result[upper_keys[0]]
         lower = result[lower_keys[0]]
 
-        fig.add_trace(go.Scatter(
-            x=x, y=upper, mode="lines",
-            line={"width": 0},
-            name=f"{name} upper ({symbol})",
-            showlegend=False,
-        ))
-        fig.add_trace(go.Scatter(
-            x=x, y=lower, mode="lines",
-            line={"width": 0},
-            fill="tonexty",
-            fillcolor=_hex_to_rgba(color, 0.15),
-            name=f"{name} ({symbol})",
-            showlegend=True,
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=upper,
+                mode="lines",
+                line={"width": 0},
+                name=f"{name} upper ({symbol})",
+                showlegend=False,
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=lower,
+                mode="lines",
+                line={"width": 0},
+                fill="tonexty",
+                fillcolor=_hex_to_rgba(color, 0.15),
+                name=f"{name} ({symbol})",
+                showlegend=True,
+            )
+        )
     else:
         # Each key is a separate line
         dash_styles = ["dash", "dot", "dashdot", "longdash", "longdashdot"]
         for j, (key, values) in enumerate(result.items()):
-            fig.add_trace(go.Scatter(
-                x=x,
-                y=values,
-                mode="lines",
-                name=f"{name} {key} ({symbol})" if len(keys) > 1 else f"{name} ({symbol})",
-                line={"color": color, "width": 1, "dash": dash_styles[j % len(dash_styles)]},
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=values,
+                    mode="lines",
+                    name=f"{name} {key} ({symbol})" if len(keys) > 1 else f"{name} ({symbol})",
+                    line={"color": color, "width": 1, "dash": dash_styles[j % len(dash_styles)]},
+                )
+            )
 
 
 def plot_price(

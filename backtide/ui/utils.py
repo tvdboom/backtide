@@ -6,13 +6,12 @@ Description: Utility functions for the UI.
 """
 
 import base64
-from dataclasses import dataclass
 from datetime import date
 from datetime import datetime as dt
-import cloudpickle as pickle
+import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -40,8 +39,20 @@ from backtide.utils.constants import (
 )
 from backtide.utils.utils import _to_list
 
+if TYPE_CHECKING:
+    from backtide.ui.indicators import SavedIndicator
 
-USER_CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Utility constants
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Utility functions
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _clear_state(*keys: str):
@@ -146,6 +157,23 @@ def _list_instruments(
 ) -> dict[str, Instrument]:
     """Return available instruments for the given type."""
     return {x.symbol: x for x in list_instruments(instrument_type, limit=limit, verbose=False)}
+
+
+def _load_stored_indicators(cfg: Config) -> list[SavedIndicator]:
+    """Load and return the indicators from storage."""
+    from backtide.ui.indicators import SavedIndicator
+
+    path = Path(cfg.data.storage_path) / "indicators"
+
+    indicators = []
+    for f in path.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            indicators.append(SavedIndicator(**data))
+        except (json.JSONDecodeError, TypeError) as ex:
+            st.error(f"Failed to load indicator **{f}**. Exception: {ex}")
+
+    return sorted(indicators, key=lambda x: x.name)
 
 
 def _moment_to_strftime(fmt: str) -> str:
@@ -541,5 +569,3 @@ def _draw_cards(
             </div>"""
 
     return html, total_rows
-
-
