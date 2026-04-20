@@ -88,6 +88,9 @@ def _apply_config_to_state(
         state[f"strategy_name_{i}"] = s.name
 
     state["builtin_indicators"] = exp.indicators.builtin_indicators
+    state["configured_indicators"] = [
+        {"type": str(ind), "params": {}} for ind in exp.indicators.builtin_indicators
+    ]
     state["custom_indicators"] = [
         {"source": user_code_options[0], "code": s.code} for s in exp.indicators.custom_indicators
     ]

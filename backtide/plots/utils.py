@@ -168,6 +168,7 @@ def _plot(
         "font_size": TICK_FONTSIZE,
         "margin": {"l": 50, "b": 50, "r": 0, "t": 25 + title_space, "pad": 0},
         "xaxis_tickformat": _moment_to_strftime(get_config().display.date_format),
+        "yaxis_tickformat": "f",
     }
 
     if title_cfg:
@@ -178,6 +179,7 @@ def _plot(
         layout["xaxis_title"] = {"text": xlabel, "font_size": LABEL_FONTSIZE}
     if ylabel:
         layout["yaxis_title"] = {"text": ylabel, "font_size": LABEL_FONTSIZE}
+
     if xlim is not None:
         layout["xaxis_range"] = xlim
     if ylim is not None:

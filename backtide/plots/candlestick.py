@@ -102,18 +102,15 @@ def plot_candlestick(
             low=df["low"],
             close=df["close"],
             whiskerwidth=0.2,
+            name=df.get("symbol"),
             increasing={"line": {"color": inc}, "fillcolor": inc},
             decreasing={"line": {"color": dec}, "fillcolor": dec},
             showlegend=False,
         )
     )
 
-    # Default visible range: last month (user can zoom out to see all)
-    x_end = df["dt"].max()
-    x_start = x_end - pd.DateOffset(months=1)
-
     fig.update_layout(
-        xaxis={"rangeslider_visible": rangeslider, "range": [x_start, x_end], "type": "date"},
+        xaxis={"rangeslider_visible": rangeslider, "type": "date"},
         yaxis={"autorange": True, "fixedrange": False},
         uirevision="constant",
     )

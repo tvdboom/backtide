@@ -11,7 +11,7 @@ default:
 
 # Build the Rust extension and regenerate stubs
 build:
-    maturin develop -m backtide_core/Cargo.toml
+    uv pip install -e .
     @just stubs
 
 # Generate stub files from the compiled module

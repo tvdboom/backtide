@@ -648,19 +648,114 @@ with tab5:
         "simulation begins, so they add no per-tick overhead.",
     )
 
-    selected_indicators = st.multiselect(
-        label="Built-in indicators",
-        key=(key := "builtin_indicators"),
-        options=IndicatorType.variants(),
-        format_func=lambda i: f"{i} - {i.name}",
-        default=_default(key, []),
-        placeholder="Select indicators...",
-        on_change=lambda k=key: _persist(k),
-        help=(
-            "Choose zero or more predefined indicators to compute on each bar. They will "
-            "be available in your strategy function via the `indicators` argument."
-        ),
+    # ── Parameter schemas for built-in indicators ──────────────────────────
+
+    # Each entry maps an IndicatorType variant to a dict of
+    # {param_name: (label, default, min, max, step, help)}.
+    _INDICATOR_PARAMS: dict[str, dict] = {
+        "SMA": {"period": ("Period", 14, 2, 500, 1, "Number of bars for the moving average window.")},
+        "EMA": {"period": ("Period", 14, 2, 500, 1, "Number of bars for the exponential moving average window.")},
+        "WMA": {"period": ("Period", 14, 2, 500, 1, "Number of bars for the weighted moving average window.")},
+        "RSI": {"period": ("Period", 14, 2, 500, 1, "Lookback period for the RSI calculation.")},
+        "MACD": {
+            "fast_period": ("Fast period", 12, 2, 500, 1, "Number of bars for the fast EMA."),
+            "slow_period": ("Slow period", 26, 2, 500, 1, "Number of bars for the slow EMA."),
+            "signal_period": ("Signal period", 9, 2, 500, 1, "Number of bars for the signal line EMA."),
+        },
+        "BB": {
+            "period": ("Period", 20, 2, 500, 1, "Number of bars for the moving average."),
+            "std_dev": ("Std. deviations", 2.0, 0.1, 10.0, 0.1, "Number of standard deviations for the bands."),
+        },
+        "ATR": {"period": ("Period", 14, 2, 500, 1, "Lookback period for the Average True Range.")},
+        "OBV": {},
+        "VWAP": {},
+        "STOCH": {
+            "k_period": ("%K period", 14, 2, 500, 1, "Lookback period for the %K line."),
+            "d_period": ("%D period", 3, 2, 500, 1, "Smoothing period for the %D line."),
+        },
+        "CCI": {"period": ("Period", 20, 2, 500, 1, "Lookback period for the CCI calculation.")},
+        "ADX": {"period": ("Period", 14, 2, 500, 1, "Lookback period for the ADX calculation.")},
+    }
+
+    st.markdown("**Built-in indicators**")
+    st.caption(
+        "Add one or more built-in indicators with configurable parameters. "
+        "You can add the same indicator multiple times with different settings.",
     )
+
+    if "configured_indicators" not in st.session_state:
+        # Migrate from old flat list if present
+        old = _default("builtin_indicators", [])
+        st.session_state.configured_indicators = [
+            {"type": str(ind), "params": {}} for ind in old
+        ]
+
+    _all_indicator_names = [str(v) for v in IndicatorType.variants()]
+    _indicator_name_map = {str(v): v for v in IndicatorType.variants()}
+
+    for i, cfg_ind in enumerate(list(st.session_state.configured_indicators)):
+        with st.container(border=True):
+            col1, col2 = st.columns([5, 1], vertical_alignment="center")
+
+            ind_type_str = col1.selectbox(
+                label="Indicator",
+                key=f"builtin_ind_type_{i}",
+                options=_all_indicator_names,
+                index=_all_indicator_names.index(cfg_ind["type"]) if cfg_ind["type"] in _all_indicator_names else 0,
+                format_func=lambda s: f"{s} - {_indicator_name_map[s].name}",
+                label_visibility="collapsed",
+            )
+
+            if col2.button(
+                label="Remove",
+                key=f"remove_builtin_ind_{i}",
+                icon=":material/close:",
+                type="tertiary",
+            ):
+                st.session_state.configured_indicators.pop(i)
+                st.rerun()
+
+            # Show parameter inputs for this indicator type
+            params_schema = _INDICATOR_PARAMS.get(ind_type_str, {})
+            params = {}
+            if params_schema:
+                cols = st.columns(len(params_schema))
+                for col, (param_key, (label, default, min_v, max_v, step, help_text)) in zip(
+                    cols, params_schema.items()
+                ):
+                    stored = cfg_ind.get("params", {}).get(param_key, default)
+                    params[param_key] = col.number_input(
+                        label=label,
+                        key=f"builtin_ind_{i}_{param_key}",
+                        value=stored,
+                        min_value=min_v,
+                        max_value=max_v,
+                        step=step,
+                        format="%.1f" if isinstance(default, float) else None,
+                        help=help_text,
+                    )
+            else:
+                st.caption(f"{_indicator_name_map[ind_type_str].name} has no configurable parameters.")
+
+            st.caption(_indicator_name_map[ind_type_str].description())
+
+            st.session_state.configured_indicators[i] = {"type": ind_type_str, "params": params}
+
+    if st.button(
+        label="Add built-in indicator",
+        key="add_builtin_indicator",
+        icon=":material/add:",
+        type="secondary",
+    ):
+        st.session_state.configured_indicators.append(
+            {"type": _all_indicator_names[0], "params": {}}
+        )
+        st.rerun()
+
+    # Keep builtin_indicators in sync for config export
+    st.session_state["builtin_indicators"] = [
+        _indicator_name_map[c["type"]] for c in st.session_state.configured_indicators
+    ]
 
     st.divider()
 

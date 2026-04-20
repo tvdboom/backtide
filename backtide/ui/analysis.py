@@ -140,14 +140,57 @@ tab1, tab2, tab3 = st.tabs(
 bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
 
 with tab1:
-    st.caption("OHLC candlestick chart showing price action over time.")
-    st.plotly_chart(plot_candlestick(bars, display=None), width="stretch")
+    col1, col2 = st.columns([10, 1])
+    col1.caption("OHLC candlestick chart showing price action over time.")
+
+    # Compute available date range from bars
+    dates = bars["dt"].sort_values()
+    min_date = dates.iloc[0].date()
+    max_date = dates.iloc[-1].date()
+    default_start = dates.iloc[-min(90, len(dates.unique()))].date()
+
+    with col2.popover(":material/tune:"):
+        cs_date_range = st.date_input(
+            label="Date range",
+            key=(key := "cs_date_range"),
+            value=(_default(key, (default_start, max_date))),
+            min_value=min_date,
+            max_value=max_date,
+            format=cfg.display.date_format,
+            on_change=lambda k=key: _persist(k),
+            help="Select the visible date range for the candlestick chart.",
+        )
+
+        cs_rangeslider = st.toggle(
+            label="Range slider",
+            key=(key := "cs_rangeslider"),
+            value=_default(key, fallback=True),
+            on_change=lambda k=key: _persist(k),
+            help="Hide/show the range slider below the chart.",
+        )
+
+    # Only plot when both start and end are selected
+    if isinstance(cs_date_range, tuple) and len(cs_date_range) == 2:
+        _cs_start, _cs_end = cs_date_range
+    else:
+        _cs_start, _cs_end = default_start, max_date
+
+    _cs_bars = bars[(bars["dt"].dt.date >= _cs_start) & (bars["dt"].dt.date <= _cs_end)]
+
+    st.plotly_chart(
+        plot_candlestick(
+            _cs_bars,
+            rangeslider=cs_rangeslider,
+            display=None,
+        ),
+        width="stretch",
+    )
 
 with tab2:
     col1, col2 = st.columns([10, 1])
     col1.caption("Price over time for selected symbols.")
 
-    with col2.popover(":material/tune:", use_container_width=False):
+    with col2.popover(":material/tune:"):
         price_col = st.radio(
             label="**Price**",
             key=(key := "price_col"),
