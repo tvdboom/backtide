@@ -5,21 +5,34 @@ Description: Run a new backtest page.
 
 """
 
+import ast
 from datetime import datetime as dt
+import json
 import logging
+import tomllib
+from typing import Any
 import uuid
 
 from code_editor import code_editor
 import streamlit as st
+from streamlit.runtime.state import SessionStateProxy
+import yaml
 
 from backtide.backtest import (
+    CodeSnippet,
     CommissionType,
     ConversionPeriod,
     CurrencyConversionMode,
+    DataExpConfig,
     EmptyBarPolicy,
+    EngineExpConfig,
+    ExchangeExpConfig,
     ExperimentConfig,
-    IndicatorType,
+    GeneralExpConfig,
+    IndicatorExpConfig,
     OrderType,
+    PortfolioExpConfig,
+    StrategyExpConfig,
     StrategyType,
 )
 from backtide.config import get_config
@@ -28,19 +41,13 @@ from backtide.data import Currency, InstrumentProfile, InstrumentType
 from backtide.storage import query_instruments
 from backtide.ui.utils import (
     _CARD_CSS,
-    INDICATOR_PLACEHOLDER,
-    STRATEGY_PLACEHOLDER,
-    _apply_config_to_state,
-    _build_config_toml,
-    _check_indicator_code,
-    _check_strategy_code,
     _clear_state,
     _default,
     _draw_cards,
     _get_instrument_type_description,
     _get_timezone,
     _list_instruments,
-    _parse_config_upload,
+    _load_saved_indicators,
     _persist,
     _query_bars_summary,
     _to_upper_values,
@@ -62,6 +69,228 @@ logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").set
 # ─────────────────────────────────────────────────────────────────────────────
 
 USER_CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
+
+STRATEGY_PLACEHOLDER = """\
+def strategy(data, state, indicators):
+    '''Function that decides the orders to place this tick.
+
+    Parameters
+    ---------
+    data : pd.DataFrame
+        Ticker data.
+
+    state : State
+        Current portfolio, etc...
+
+    indicators: dict[str, dict[str, float]] | None
+        Indicators calculated on the historical data. The first key is the
+        symbol and the second key is the name of the indicator. None if no
+        indicators were selected.
+
+    Returns
+    -------
+    list[Order]
+        Orders to place.
+
+    '''
+    orders = []
+
+    # ── Write your logic here ──────────────────────────
+
+    return orders
+"""
+
+
+def _apply_config_to_state(
+    exp: ExperimentConfig,
+    state: dict[str, Any] | SessionStateProxy,
+    user_code_options: list[str],
+):
+    """Write all fields of *exp* into the session *state* dict."""
+    state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", exp.general.name)
+    state["tags"] = exp.general.tags
+    state["description"] = exp.general.description
+
+    state["instrument_type"] = exp.data.instrument_type
+    state["symbols"] = exp.data.symbols
+    state["full_history"] = exp.data.full_history
+    if not exp.data.full_history:
+        if exp.data.start_date:
+            state["start_date"] = dt.fromisoformat(str(exp.data.start_date)).date()
+        if exp.data.end_date:
+            state["end_date"] = dt.fromisoformat(str(exp.data.end_date)).date()
+    state["interval"] = exp.data.interval
+
+    state["initial_cash"] = exp.portfolio.initial_cash
+    state["base_currency"] = exp.portfolio.base_currency
+    state["starting_positions"] = exp.portfolio.starting_positions
+
+    state["predefined_strategies"] = exp.strategy.predefined_strategies
+    state["custom_strategies"] = [
+        {"source": user_code_options[0], "code": s.code} for s in exp.strategy.custom_strategies
+    ]
+    for i, s in enumerate(exp.strategy.custom_strategies):
+        state[f"strategy_name_{i}"] = s.name
+
+    state["builtin_indicators"] = exp.indicators.builtin_indicators
+    state["custom_indicators"] = [
+        {"source": user_code_options[0], "code": s.code} for s in exp.indicators.custom_indicators
+    ]
+    for i, s in enumerate(exp.indicators.custom_indicators):
+        state[f"indicator_name_{i}"] = s.name
+
+    ex = exp.exchange
+    for key in (
+        "commission_type",
+        "commission_pct",
+        "commission_fixed",
+        "slippage",
+        "allowed_order_types",
+        "partial_fills",
+        "allow_margin",
+        "max_leverage",
+        "initial_margin",
+        "maintenance_margin",
+        "margin_interest",
+        "allow_short_selling",
+        "borrow_rate",
+        "max_position_size",
+        "conversion_mode",
+    ):
+        state[key] = getattr(ex, key)
+    for key in ("conversion_threshold", "conversion_period", "conversion_interval"):
+        if getattr(ex, key) is not None:
+            state[key] = getattr(ex, key)
+
+    eng = exp.engine
+    for key in (
+        "warmup_period",
+        "trade_on_close",
+        "risk_free_rate",
+        "benchmark",
+        "exclusive_orders",
+        "random_seed",
+        "empty_bar_policy",
+    ):
+        state[key] = getattr(eng, key)
+
+
+def _build_config_toml(
+    state: dict[str, Any] | SessionStateProxy,
+    experiment_name: str,
+    defaults: ExperimentConfig,
+) -> str:
+    """Build an ExperimentConfig from widget state and return it as TOML."""
+    cfg = ExperimentConfig(
+        general=GeneralExpConfig(
+            name=experiment_name,
+            tags=state.get("tags", defaults.general.tags),
+            description=state.get("description", defaults.general.description),
+        ),
+        data=DataExpConfig(
+            instrument_type=state.get("instrument_type", defaults.data.instrument_type),
+            symbols=[
+                s.symbol if hasattr(s, "symbol") else str(s)
+                for s in state.get("symbols", defaults.data.symbols)
+            ],
+            full_history=state.get("full_history", defaults.data.full_history),
+            start_date=str(state.get("start_date")) if state.get("start_date") else None,
+            end_date=str(state.get("end_date")) if state.get("end_date") else None,
+            interval=state.get("interval", defaults.data.interval),
+        ),
+        portfolio=PortfolioExpConfig(
+            initial_cash=state.get("initial_cash", defaults.portfolio.initial_cash),
+            base_currency=state.get("base_currency", defaults.portfolio.base_currency),
+            starting_positions=state.get(
+                "starting_positions", defaults.portfolio.starting_positions
+            ),
+        ),
+        strategy=StrategyExpConfig(
+            predefined_strategies=state.get("predefined_strategies", []),
+            custom_strategies=[
+                CodeSnippet(
+                    name=state.get(f"strategy_name_{i}", f"Strategy {i + 1}"),
+                    code=e.get("code", ""),
+                )
+                for i, e in enumerate(state.get("custom_strategies", []))
+            ],
+        ),
+        indicators=IndicatorExpConfig(
+            builtin_indicators=state.get("builtin_indicators", []),
+            custom_indicators=[
+                CodeSnippet(
+                    name=state.get(f"indicator_name_{i}", f"Indicator {i + 1}"),
+                    code=e.get("code", ""),
+                )
+                for i, e in enumerate(state.get("custom_indicators", []))
+            ],
+        ),
+        exchange=ExchangeExpConfig(
+            commission_type=state.get("commission_type", defaults.exchange.commission_type),
+            commission_pct=state.get("commission_pct", defaults.exchange.commission_pct),
+            commission_fixed=state.get("commission_fixed", defaults.exchange.commission_fixed),
+            slippage=state.get("slippage", defaults.exchange.slippage),
+            allowed_order_types=state.get(
+                "allowed_order_types", defaults.exchange.allowed_order_types
+            ),
+            partial_fills=state.get("partial_fills", defaults.exchange.partial_fills),
+            allow_margin=state.get("allow_margin", defaults.exchange.allow_margin),
+            max_leverage=state.get("max_leverage", defaults.exchange.max_leverage),
+            initial_margin=state.get("initial_margin", defaults.exchange.initial_margin),
+            maintenance_margin=state.get(
+                "maintenance_margin", defaults.exchange.maintenance_margin
+            ),
+            margin_interest=state.get("margin_interest", defaults.exchange.margin_interest),
+            allow_short_selling=state.get(
+                "allow_short_selling", defaults.exchange.allow_short_selling
+            ),
+            borrow_rate=state.get("borrow_rate", defaults.exchange.borrow_rate),
+            max_position_size=state.get("max_position_size", defaults.exchange.max_position_size),
+            conversion_mode=state.get("conversion_mode", defaults.exchange.conversion_mode),
+            conversion_threshold=state.get("conversion_threshold"),
+            conversion_period=state.get("conversion_period"),
+            conversion_interval=state.get("conversion_interval"),
+        ),
+        engine=EngineExpConfig(
+            warmup_period=state.get("warmup_period", defaults.engine.warmup_period),
+            trade_on_close=state.get("trade_on_close", defaults.engine.trade_on_close),
+            risk_free_rate=state.get("risk_free_rate", defaults.engine.risk_free_rate),
+            benchmark=state.get("benchmark", defaults.engine.benchmark),
+            exclusive_orders=state.get("exclusive_orders", defaults.engine.exclusive_orders),
+            random_seed=state.get("random_seed"),
+            empty_bar_policy=state.get("empty_bar_policy", defaults.engine.empty_bar_policy),
+        ),
+    )
+    return cfg.to_toml()
+
+
+def _check_strategy_code(code: str) -> str | None:
+    """Validate that *code* defines `strategy(data, state, indicators)`."""
+    try:
+        tree = ast.parse(code)
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "strategy":
+                if [a.arg for a in node.args.args] == ["data", "state", "indicators"]:
+                    return None
+                return (
+                    "Function `strategy` doesn't have "
+                    "signature: `strategy(data, state, indicators)`."
+                )
+        return "No function `strategy(data, state, indicators)` found in the code."
+    except SyntaxError as ex:
+        return f"Syntax error:\n\n{ex}"
+
+
+def _parse_config_upload(upload: Any) -> ExperimentConfig:
+    """Parse an uploaded config file into an ExperimentConfig."""
+    if upload.name.endswith(".json"):
+        raw = json.load(upload)
+    elif upload.name.endswith(".toml"):
+        raw = tomllib.loads(upload.read().decode("utf-8"))
+    else:
+        raw = yaml.safe_load(upload)
+
+    return ExperimentConfig.from_dict(raw)
 
 
 def _build_experiment_config() -> str:
@@ -98,7 +327,7 @@ tz = _get_timezone(cfg.display.timezone)
 # Single source of truth for all default widget values.
 exp: ExperimentConfig = _default("config", ExperimentConfig())
 
-st.set_page_config(page_title="Backtide - Experiment", layout="centered")
+st.set_page_config(page_title="Backtide - Experiment")
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
@@ -648,219 +877,55 @@ with tab5:
         "simulation begins, so they add no per-tick overhead.",
     )
 
-    # ── Parameter schemas for built-in indicators ──────────────────────────
+    _saved_indicators = _load_saved_indicators()
+    _saved_ind_names = [ind.name for ind in _saved_indicators]
 
-    # Each entry maps an IndicatorType variant to a dict of
-    # {param_name: (label, default, min, max, step, help)}.
-    _INDICATOR_PARAMS: dict[str, dict] = {
-        "SMA": {"period": ("Period", 14, 2, 500, 1, "Number of bars for the moving average window.")},
-        "EMA": {"period": ("Period", 14, 2, 500, 1, "Number of bars for the exponential moving average window.")},
-        "WMA": {"period": ("Period", 14, 2, 500, 1, "Number of bars for the weighted moving average window.")},
-        "RSI": {"period": ("Period", 14, 2, 500, 1, "Lookback period for the RSI calculation.")},
-        "MACD": {
-            "fast_period": ("Fast period", 12, 2, 500, 1, "Number of bars for the fast EMA."),
-            "slow_period": ("Slow period", 26, 2, 500, 1, "Number of bars for the slow EMA."),
-            "signal_period": ("Signal period", 9, 2, 500, 1, "Number of bars for the signal line EMA."),
-        },
-        "BB": {
-            "period": ("Period", 20, 2, 500, 1, "Number of bars for the moving average."),
-            "std_dev": ("Std. deviations", 2.0, 0.1, 10.0, 0.1, "Number of standard deviations for the bands."),
-        },
-        "ATR": {"period": ("Period", 14, 2, 500, 1, "Lookback period for the Average True Range.")},
-        "OBV": {},
-        "VWAP": {},
-        "STOCH": {
-            "k_period": ("%K period", 14, 2, 500, 1, "Lookback period for the %K line."),
-            "d_period": ("%D period", 3, 2, 500, 1, "Smoothing period for the %D line."),
-        },
-        "CCI": {"period": ("Period", 20, 2, 500, 1, "Lookback period for the CCI calculation.")},
-        "ADX": {"period": ("Period", 14, 2, 500, 1, "Lookback period for the ADX calculation.")},
-    }
-
-    st.markdown("**Built-in indicators**")
-    st.caption(
-        "Add one or more built-in indicators with configurable parameters. "
-        "You can add the same indicator multiple times with different settings.",
-    )
-
-    if "configured_indicators" not in st.session_state:
-        # Migrate from old flat list if present
-        old = _default("builtin_indicators", [])
-        st.session_state.configured_indicators = [
-            {"type": str(ind), "params": {}} for ind in old
-        ]
-
-    _all_indicator_names = [str(v) for v in IndicatorType.variants()]
-    _indicator_name_map = {str(v): v for v in IndicatorType.variants()}
-
-    for i, cfg_ind in enumerate(list(st.session_state.configured_indicators)):
-        with st.container(border=True):
-            col1, col2 = st.columns([5, 1], vertical_alignment="center")
-
-            ind_type_str = col1.selectbox(
-                label="Indicator",
-                key=f"builtin_ind_type_{i}",
-                options=_all_indicator_names,
-                index=_all_indicator_names.index(cfg_ind["type"]) if cfg_ind["type"] in _all_indicator_names else 0,
-                format_func=lambda s: f"{s} - {_indicator_name_map[s].name}",
-                label_visibility="collapsed",
-            )
-
-            if col2.button(
-                label="Remove",
-                key=f"remove_builtin_ind_{i}",
-                icon=":material/close:",
-                type="tertiary",
-            ):
-                st.session_state.configured_indicators.pop(i)
-                st.rerun()
-
-            # Show parameter inputs for this indicator type
-            params_schema = _INDICATOR_PARAMS.get(ind_type_str, {})
-            params = {}
-            if params_schema:
-                cols = st.columns(len(params_schema))
-                for col, (param_key, (label, default, min_v, max_v, step, help_text)) in zip(
-                    cols, params_schema.items()
-                ):
-                    stored = cfg_ind.get("params", {}).get(param_key, default)
-                    params[param_key] = col.number_input(
-                        label=label,
-                        key=f"builtin_ind_{i}_{param_key}",
-                        value=stored,
-                        min_value=min_v,
-                        max_value=max_v,
-                        step=step,
-                        format="%.1f" if isinstance(default, float) else None,
-                        help=help_text,
-                    )
-            else:
-                st.caption(f"{_indicator_name_map[ind_type_str].name} has no configurable parameters.")
-
-            st.caption(_indicator_name_map[ind_type_str].description())
-
-            st.session_state.configured_indicators[i] = {"type": ind_type_str, "params": params}
-
-    if st.button(
-        label="Add built-in indicator",
-        key="add_builtin_indicator",
-        icon=":material/add:",
-        type="secondary",
-    ):
-        st.session_state.configured_indicators.append(
-            {"type": _all_indicator_names[0], "params": {}}
+    if _saved_ind_names:
+        selected_saved_indicators = st.multiselect(
+            label="Saved indicators",
+            key=(key := "experiment_indicators"),
+            options=_saved_ind_names,
+            default=_default(key, []),
+            placeholder="Select indicators...",
+            on_change=lambda k=key: _persist(k),
+            help=(
+                "Choose from indicators defined on the Indicators page. "
+                "They will be computed on each bar and passed to your strategy."
+            ),
         )
-        st.rerun()
 
-    # Keep builtin_indicators in sync for config export
-    st.session_state["builtin_indicators"] = [
-        _indicator_name_map[c["type"]] for c in st.session_state.configured_indicators
-    ]
-
-    st.divider()
-
-    # Initialize session state for custom indicators
-    if "custom_indicators" not in st.session_state:
-        st.session_state.custom_indicators = []
-
-    st.markdown("**Custom indicators**")
-    st.caption(
-        "Add custom indicator functions. The function's return values "
-        "are passed to your strategy together with the built-in indicators.",
-    )
-
-    for i, custom_indicator in enumerate(st.session_state.custom_indicators):
-        with st.container(border=True):
-            col1, col2 = st.columns([5, 1], vertical_alignment="center")
-
-            name = col1.text_input(
-                label="Indicator name",
-                key=(key := f"indicator_name_{i}"),
-                value=_default(key),
-                max_chars=40,
-                placeholder=f"Indicator {i + 1}",
-                label_visibility="collapsed",
-                on_change=lambda k=key: _persist(k),
-            )
-
-            if col2.button(
-                label="Remove",
-                key=f"remove_indicator_{i}",
-                icon=":material/close:",
-                type="tertiary",
-            ):
-                st.session_state.custom_indicators.pop(i)
-                st.rerun()
-
-            source = st.segmented_control(
-                label="Source",
-                key=(key := f"indicator_source_{i}"),
-                required=True,
-                options=USER_CODE_OPTIONS,
-                default=_default(key, USER_CODE_OPTIONS[0]),
-                label_visibility="collapsed",
-                on_change=lambda k=key: _persist(k),
-            )
-
-            code: str | None = None
-            if source == USER_CODE_OPTIONS[0]:
-                resp = code_editor(
-                    code=custom_indicator.get("code") or INDICATOR_PLACEHOLDER,
-                    key=f"indicator_code_editor_{i}",
-                    buttons=[
-                        {
-                            "name": "Copy",
-                            "feather": "Copy",
-                            "hasText": True,
-                            "commands": ["copyAll"],
-                            "style": {"top": "0.46rem", "right": "0.4rem"},
-                        },
-                        {
-                            "name": "Save",
-                            "feather": "Save",
-                            "hasText": True,
-                            "commands": ["save-state", ["response", "saved"]],
-                            "response": "saved",
-                            "style": {"top": "2.25rem", "right": "0.4rem"},
-                        },
-                    ],
-                )
-                code = resp["text"]
-            else:
-                indicator_file = st.file_uploader(
-                    label="Indicator file",
-                    key=f"indicator_file_{i}",
-                    type="py",
-                    accept_multiple_files=False,
-                    label_visibility="collapsed",
-                    help=(
-                        "Upload a Python file that defines a top-level function with signature: "
-                        "`indicator(data) -> dict[str, float]`."
-                    ),
-                )
-
-                if indicator_file is not None:
-                    code = indicator_file.read().decode("utf-8")
-                    with st.expander("Preview uploaded file"):
-                        st.code(code, language="python", line_numbers=True)
+        # Show a summary of selected indicators
+        _saved_map = {ind.name: ind for ind in _saved_indicators}
+        for ind_name in selected_saved_indicators:
+            if ind_name in _saved_map:
+                ind = _saved_map[ind_name]
+                if ind.kind == "builtin":
+                    params_str = ", ".join(f"{k}={v}" for k, v in (ind.parameters or {}).items())
+                    detail = f"{ind.builtin_type}" + (f" ({params_str})" if params_str else "")
+                    st.caption(f":material/show_chart: **{ind_name}** · {detail}")
                 else:
-                    st.info("No file uploaded yet.", icon=":material/upload_file:")
+                    st.caption(f":material/code: **{ind_name}** · Custom")
 
-            if code:
-                if err := _check_indicator_code(code):
-                    st.error(f"**Indicator {i + 1}:** {err}")
-
-        st.session_state.custom_indicators[i] = {"name": name, "source": source, "code": code}
-
-    if st.button(
-        label="Add indicator",
-        icon=":material/add:",
-        type="secondary",
-    ):
-        st.session_state.custom_indicators.append(
-            {"name": "", "source": USER_CODE_OPTIONS[0], "code": ""},
+        # Keep builtin_indicators in sync for config export
+        st.session_state["builtin_indicators"] = [
+            ind.builtin_type
+            for ind in _saved_indicators
+            if ind.name in selected_saved_indicators and ind.kind == "builtin"
+        ]
+    else:
+        st.info(
+            "No saved indicators yet. Create indicators on the **Indicators** page first.",
+            icon=":material/info:",
         )
-        st.rerun()
+
+        if st.button(
+            label="Go to Indicators",
+            icon=":material/show_chart:",
+            type="secondary",
+        ):
+            st.switch_page("indicators.py")
+
+        st.session_state["builtin_indicators"] = []
 
 
 # ─────────────────────────────────────────────────────────────────────────────

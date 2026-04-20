@@ -6,6 +6,8 @@ Description: Entry point for the streamlit app.
 """
 
 import streamlit as st
+from backtide.utils.constants import DOCS_URL
+
 
 st.set_page_config(
     page_title="Backtide",
@@ -120,44 +122,47 @@ st.markdown(
             stroke: currentColor;
             stroke-width: 2;
         }
+
+        /* Docs button: fixed top-right corner */
+        .docs-btn {
+            position: fixed;
+            top: 0.6rem;
+            right: 0.8rem;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.3rem 0.65rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.04);
+            color: inherit;
+            text-decoration: none;
+            font-size: 13px;
+            opacity: 0.55;
+            transition: opacity 0.2s, background 0.2s;
+        }
+        .docs-btn:hover {
+            opacity: 1;
+            background: rgba(255,255,255,0.08);
+        }
+        .docs-btn svg {
+            width: 15px;
+            height: 15px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+        }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.sidebar.image("images/logo transparent.png", width=120)
-
-# Define pages
-run_test = st.Page(
-    "experiment.py",
-    title="Experiment",
-    icon=":material/science:",
-)
-results = st.Page(
-    "results.py",
-    title="Results",
-    icon=":material/analytics:",
-)
-download = st.Page(
-    "download.py",
-    title="Download",
-    icon=":material/cloud_download:",
-)
-storage = st.Page(
-    "storage.py",
-    title="Storage",
-    icon=":material/database:",
-)
-analysis = st.Page(
-    "analysis.py",
-    title="Analysis",
-    icon=":material/insights:",
-)
 
 st.sidebar.markdown(
-    """
+    f"""
     <div class="sidebar-footer">
-        <a href="https://github.com/tvdboom/backtide" target="_blank" title="GitHub">
+        <a href="{DOCS_URL}" target="_blank" title="GitHub">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577
                 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7
@@ -200,5 +205,63 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-pg = st.navigation({"Backtest": [run_test, results], "Data": [download, storage, analysis]})
+st.sidebar.image("images/logo transparent.png", width=120)
+
+# Define pages
+experiment = st.Page(
+    "experiment.py",
+    title="Experiment",
+    icon=":material/science:",
+)
+results = st.Page(
+    "results.py",
+    title="Results",
+    icon=":material/analytics:",
+)
+download = st.Page(
+    "download.py",
+    title="Download",
+    icon=":material/cloud_download:",
+)
+storage = st.Page(
+    "storage.py",
+    title="Storage",
+    icon=":material/database:",
+)
+analysis = st.Page(
+    "analysis.py",
+    title="Analysis",
+    icon=":material/insights:",
+)
+indicators = st.Page(
+    "indicators.py",
+    title="Indicators",
+    icon=":material/show_chart:",
+)
+
+
+PAGES_URLS = {
+    "Experiment": f"{DOCS_URL}/user_guide/backtest/experiment/",
+    "Results": f"{DOCS_URL}/user_guide/backtest/results/",
+    "Indicators": f"{DOCS_URL}/user_guide/backtest/indicators/",
+    "Download": f"{DOCS_URL}/user_guide/data/",
+    "Storage": f"{DOCS_URL}/user_guide/storage/",
+    "Analysis": f"{DOCS_URL}/user_guide/data/analysis",
+}
+
+pg = st.navigation({"Backtest": [experiment, results, indicators], "Data": [download, storage, analysis]})
+
+# Inject the docs button for the current page at the top of the content area
+st.html(
+    f"""
+    <a class="docs-btn" href="{PAGES_URLS[pg.title]}" target="_blank" title="Documentation">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        Docs
+    </a>
+    """
+)
+
 pg.run()

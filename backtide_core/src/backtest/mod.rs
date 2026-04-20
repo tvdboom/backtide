@@ -6,12 +6,19 @@ use crate::backtest::models::experiment_config::{
     CodeSnippet, DataExpConfig, EngineExpConfig, ExchangeExpConfig, ExperimentConfig,
     GeneralExpConfig, IndicatorExpConfig, PortfolioExpConfig, StrategyExpConfig,
 };
-use crate::backtest::models::indicator_type::IndicatorType;
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::strategy_type::StrategyType;
+use crate::backtest::indicators::{
+    SimpleMovingAverage, ExponentialMovingAverage, WeightedMovingAverage,
+    RelativeStrengthIndex, MovingAverageConvergenceDivergence, BollingerBands,
+    AverageTrueRange, OnBalanceVolume, VolumeWeightedAveragePrice,
+    StochasticOscillator, CommodityChannelIndex, AverageDirectionalIndex,
+    list_indicators,
+};
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
+pub mod indicators;
 pub mod models;
 
 /// Register the Python interface for `backtide.core.backtest`.
@@ -22,7 +29,6 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ConversionPeriod>()?;
     m.add_class::<CurrencyConversionMode>()?;
     m.add_class::<EmptyBarPolicy>()?;
-    m.add_class::<IndicatorType>()?;
     m.add_class::<OrderType>()?;
     m.add_class::<StrategyType>()?;
 
@@ -35,6 +41,21 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<IndicatorExpConfig>()?;
     m.add_class::<PortfolioExpConfig>()?;
     m.add_class::<StrategyExpConfig>()?;
+
+    // Indicator structs
+    m.add_class::<SimpleMovingAverage>()?;
+    m.add_class::<ExponentialMovingAverage>()?;
+    m.add_class::<WeightedMovingAverage>()?;
+    m.add_class::<RelativeStrengthIndex>()?;
+    m.add_class::<MovingAverageConvergenceDivergence>()?;
+    m.add_class::<BollingerBands>()?;
+    m.add_class::<AverageTrueRange>()?;
+    m.add_class::<OnBalanceVolume>()?;
+    m.add_class::<VolumeWeightedAveragePrice>()?;
+    m.add_class::<StochasticOscillator>()?;
+    m.add_class::<CommodityChannelIndex>()?;
+    m.add_class::<AverageDirectionalIndex>()?;
+    m.add_function(wrap_pyfunction!(list_indicators, &m)?)?;
 
     parent.add_submodule(&m)?;
 

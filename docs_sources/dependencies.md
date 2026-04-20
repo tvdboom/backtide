@@ -24,6 +24,7 @@ And operating systems:
 ### Required
 
 * **[click](https://click.palletsprojects.com/)** (>=8.3.1)
+* **[cloudpickle](https://github.com/cloudpipe/cloudpickle)** (>=3.1.2)
 * **[pandas](https://pandas.pydata.org/)** (>=2.3.3)
 * **[plotly](https://plotly.com/python/)** (>=6.1.0)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)

@@ -7,7 +7,6 @@ use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::conversion_period::ConversionPeriod;
 use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
-use crate::backtest::models::indicator_type::IndicatorType;
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::strategy_type::StrategyType;
 use crate::data::models::currency::Currency;
@@ -470,14 +469,14 @@ impl StrategyExpConfig {
 #[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Debug, Default)]
 pub struct IndicatorExpConfig {
-    pub builtin_indicators: Vec<IndicatorType>,
+    pub builtin_indicators: Vec<String>,
     pub custom_indicators: Vec<Py<CodeSnippet>>,
 }
 
 /// Pure-Rust representation for serde.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct IndicatorExpConfigInner {
-    pub builtin_indicators: Vec<IndicatorType>,
+    pub builtin_indicators: Vec<String>,
     pub custom_indicators: Vec<CodeSnippet>,
 }
 
@@ -520,9 +519,9 @@ impl IndicatorExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (builtin_indicators: "list[str | IndicatorType]"=vec![], custom_indicators: "list[CodeSnippet]"=vec![]))]
+    #[pyo3(signature = (builtin_indicators: "list[str]"=vec![], custom_indicators: "list[CodeSnippet]"=vec![]))]
     fn new(
-        builtin_indicators: Vec<IndicatorType>,
+        builtin_indicators: Vec<String>,
         custom_indicators: Vec<Py<CodeSnippet>>,
     ) -> Self {
         Self {

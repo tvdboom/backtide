@@ -16,6 +16,7 @@ from backtide.plots.price import PRICE_COLUMNS, plot_price
 from backtide.ui.utils import (
     _default,
     _get_timezone,
+    _load_saved_indicators,
     _persist,
     _to_pandas,
     _to_upper_values,
@@ -190,6 +191,10 @@ with tab2:
     col1, col2 = st.columns([10, 1])
     col1.caption("Price over time for selected symbols.")
 
+    _saved_indicators = _load_saved_indicators()
+    _saved_names = [ind.name for ind in _saved_indicators]
+    _saved_map = {ind.name: ind for ind in _saved_indicators}
+
     with col2.popover(":material/tune:"):
         price_col = st.radio(
             label="**Price**",
@@ -201,8 +206,27 @@ with tab2:
             on_change=lambda k=key: _persist(k),
         )
 
+        if _saved_names:
+            selected_inds = st.multiselect(
+                label="**Indicators**",
+                key=(key := "price_indicators"),
+                options=_saved_names,
+                default=_default(key, []),
+                placeholder="Select indicators...",
+                on_change=lambda k=key: _persist(k),
+                help="Overlay saved indicators on the price chart.",
+            )
+        else:
+            st.caption("No saved indicators.")
+            selected_inds = []
+
+    overlay = [
+        {"name": n, "fn": _saved_map[n].compute}
+        for n in selected_inds if n in _saved_map
+    ] or None
+
     st.plotly_chart(
-        plot_price(bars, price_col=price_col, display=None),
+        plot_price(bars, price_col=price_col, indicators=overlay, display=None),
         width="stretch",
     )
 

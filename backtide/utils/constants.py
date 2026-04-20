@@ -7,6 +7,9 @@ Description: Constants shared by the package.
 
 import re
 
+# Link to the documentation page
+DOCS_URL = "https://tvdboom.github.io/backtide"
+
 # Regex pattern to which tags must comply
 TAG_PATTERN = re.compile(r"^[\s\w-]{1,20}$")
 
