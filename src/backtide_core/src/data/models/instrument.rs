@@ -88,7 +88,7 @@ impl Instrument {
         Bound<'py, PyAny>,
         (Symbol, String, Option<String>, String, InstrumentType, String, Provider),
     )> {
-        let cls = py.get_type::<Instrument>().into_any();
+        let cls = py.get_type::<Self>().into_any();
         Ok((
             cls,
             (

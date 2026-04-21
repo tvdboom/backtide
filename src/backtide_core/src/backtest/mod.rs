@@ -33,18 +33,18 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<StrategyExpConfig>()?;
 
     // Indicator structs
-    m.add_class::<SimpleMovingAverage>()?;
-    m.add_class::<ExponentialMovingAverage>()?;
-    m.add_class::<WeightedMovingAverage>()?;
-    m.add_class::<RelativeStrengthIndex>()?;
-    m.add_class::<MovingAverageConvergenceDivergence>()?;
-    m.add_class::<BollingerBands>()?;
-    m.add_class::<AverageTrueRange>()?;
-    m.add_class::<OnBalanceVolume>()?;
-    m.add_class::<VolumeWeightedAveragePrice>()?;
-    m.add_class::<StochasticOscillator>()?;
-    m.add_class::<CommodityChannelIndex>()?;
     m.add_class::<AverageDirectionalIndex>()?;
+    m.add_class::<AverageTrueRange>()?;
+    m.add_class::<BollingerBands>()?;
+    m.add_class::<CommodityChannelIndex>()?;
+    m.add_class::<ExponentialMovingAverage>()?;
+    m.add_class::<MovingAverageConvergenceDivergence>()?;
+    m.add_class::<OnBalanceVolume>()?;
+    m.add_class::<RelativeStrengthIndex>()?;
+    m.add_class::<SimpleMovingAverage>()?;
+    m.add_class::<StochasticOscillator>()?;
+    m.add_class::<VolumeWeightedAveragePrice>()?;
+    m.add_class::<WeightedMovingAverage>()?;
 
     parent.add_submodule(&m)?;
 

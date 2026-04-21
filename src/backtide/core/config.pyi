@@ -13,7 +13,7 @@ __all__ = [
     "set_config",
 ]
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from backtide.core.data import Currency, InstrumentType, Provider
 
@@ -65,9 +65,14 @@ class DataBackend:
     Controls which DataFrame library is used when storage functions return
     tabular data. Read more in the [user guide][configuration].
 
+    Attributes
+    ----------
+    class_name : str
+        Return the Python class name.
+
     """
 
-    class_name: Any
+    class_name: str
 
     Numpy: ClassVar[DataBackend]
     Pandas: ClassVar[DataBackend]

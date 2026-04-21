@@ -47,7 +47,7 @@ impl Provider {
     }
 
     pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
-        let cls = py.get_type::<Provider>().into_any();
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
     }
 

@@ -268,7 +268,7 @@ impl Currency {
 
     /// Make the class pickable (required by streamlit).
     pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
-        let cls = py.get_type::<Currency>().into_any();
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
     }
     fn __repr__(&self) -> String {

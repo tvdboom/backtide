@@ -6,10 +6,11 @@ Description: Utility functions to work with indicators.
 """
 
 import inspect
+import pickle
 from pathlib import Path
 
-import cloudpickle as pickle
-
+import cloudpickle
+import streamlit as st
 from backtide.indicators import BaseIndicator
 
 
@@ -44,8 +45,9 @@ def _save_indicator(
 ):
     """Pickle an indicator instance to disk under `name.pkl`."""
     storage_path.mkdir(parents=True, exist_ok=True)
+    serializer = pickle if _is_builtin_indicator(indicator) else cloudpickle
     with (storage_path / f"{name}.pkl").open("wb") as f:
-        pickle.dump(indicator, f)
+        serializer.dump(indicator, f)
 
     py_path = storage_path / f"{name}.py"
     if code is not None:
@@ -63,7 +65,7 @@ def _load_stored_indicators(cfg: Config) -> dict[str, Any]:
     for f in sorted(path.glob("*.pkl")):
         try:
             with f.open("rb") as fh:
-                indicators[f.stem] = pickle.load(fh)
+                indicators[f.stem] = cloudpickle.load(fh)
         except Exception as ex:  # noqa: BLE001
             st.error(f"Failed to load indicator **{f.stem}**. Exception: {ex}")
 

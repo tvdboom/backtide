@@ -38,6 +38,7 @@ from backtide.config import get_config
 from backtide.core.data import resolve_profiles
 from backtide.data import Currency, InstrumentProfile, InstrumentType
 from backtide.storage import query_instruments
+from backtide.indicators.utils import _load_stored_indicators
 from backtide.ui.utils import (
     _CARD_CSS,
     _CODE_OPTIONS,
@@ -47,7 +48,6 @@ from backtide.ui.utils import (
     _get_instrument_type_description,
     _get_timezone,
     _list_instruments,
-    _load_stored_indicators,
     _persist,
     _query_bars_summary,
     _to_upper_values,

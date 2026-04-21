@@ -4,6 +4,7 @@ __all__ = [
     "AverageDirectionalIndex",
     "AverageTrueRange",
     "BollingerBands",
+    "CodeSnippet",
     "CommissionType",
     "CommodityChannelIndex",
     "ConversionPeriod",
@@ -96,6 +97,39 @@ class BollingerBands:
     def compute(self, df) -> np.ndarray: ...
     def description(cls): ...
 
+class CodeSnippet:
+    """A named snippet of custom Python code (strategy or indicator).
+
+    Attributes
+    ----------
+    name : str, default=""
+        Human-readable label for the snippet.
+
+    code : str, default=""
+        Python source code.
+
+    See Also
+    --------
+    - backtide.backtest:ExperimentConfig
+    - backtide.backtest:IndicatorExpConfig
+    - backtide.backtest:StrategyExpConfig
+
+    """
+
+    code: str
+    name: str
+
+    def __eq__(self, value, /): ...
+    def __ge__(self, value, /): ...
+    def __getstate__(self, /): ...
+    def __gt__(self, value, /): ...
+    def __init__(self, /, *args, **kwargs): ...
+    def __le__(self, value, /): ...
+    def __lt__(self, value, /): ...
+    def __ne__(self, value, /): ...
+    def __new__(cls, *args, **kwargs): ...
+    def __repr__(self, /): ...
+    def __str__(self, /): ...
 
 class CommissionType:
     """How trading commissions are calculated.
@@ -632,7 +666,8 @@ class IndicatorExpConfig:
     Attributes
     ----------
     indicators : list[str], default=[]
-        Names of the indicators to use in this experiment.
+        Names of the indicators to use in this experiment. Each name must
+        match a stored indicator.
 
     See Also
     --------
@@ -652,7 +687,7 @@ class IndicatorExpConfig:
     def __ge__(self, value, /): ...
     def __getstate__(self, /): ...
     def __gt__(self, value, /): ...
-    def __init__(self, indicators: list[str] = ..., /, *args, **kwargs): ...
+    def __init__(self, /, *args, **kwargs): ...
     def __le__(self, value, /): ...
     def __lt__(self, value, /): ...
     def __ne__(self, value, /): ...
@@ -864,11 +899,12 @@ class StrategyExpConfig:
     predefined_strategies : list[str | [StrategyType]], default=[]
         Built-in strategies to run.
 
-    custom_strategies : list[tuple[str, str]], default=[]
-        User-defined strategy code as `(name, code)` tuples.
+    custom_strategies : list[CodeSnippet], default=[]
+        User-defined strategy code snippets.
 
     See Also
     --------
+    - backtide.backtest:CodeSnippet
     - backtide.backtest:DataExpConfig
     - backtide.backtest:EngineExpConfig
     - backtide.backtest:ExchangeExpConfig
@@ -879,7 +915,7 @@ class StrategyExpConfig:
 
     """
 
-    custom_strategies: list[tuple[str, str]]
+    custom_strategies: list[CodeSnippet]
     predefined_strategies: list[str | StrategyType]
 
     def __eq__(self, value, /): ...

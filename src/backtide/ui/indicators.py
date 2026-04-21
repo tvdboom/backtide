@@ -285,7 +285,7 @@ if mode == "builtin":
                 f"The following characters are not allowed in indicator names: "
                 f"**{' '.join(sorted(set(chars)))}** "
             )
-        elif ind_name in stored_names:
+        elif ind_name in stored_indicators.keys():
             name_error = f"An indicator with name **{ind_name}** already exists."
 
         if name_error:
@@ -391,7 +391,7 @@ elif mode == "custom":
         elif INVALID_FILENAME_CHARS.findall(ind_name):
             chars = INVALID_FILENAME_CHARS.findall(ind_name)
             name_error = f"Invalid characters: {' '.join(repr(c) for c in sorted(set(chars)))}"
-        elif ind_name in stored_names:
+        elif ind_name in stored_indicators.keys():
             name_error = f"An indicator with name **{ind_name}** already exists."
 
         if name_error:

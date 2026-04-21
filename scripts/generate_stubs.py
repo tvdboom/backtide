@@ -42,7 +42,7 @@ from types import ModuleType
 # ─────────────────────────────────────────────────────────────────────────────
 
 ROOT = Path(__file__).resolve().parent.parent
-STUB_DIR = ROOT / "backtide" / "core"
+STUB_DIR = ROOT / "src" / "backtide" / "core"
 
 # Submodules to generate stubs for.
 SUBMODULES = ["backtest", "config", "data", "storage", "utils"]
