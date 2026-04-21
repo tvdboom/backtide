@@ -2,7 +2,7 @@ use crate::data::models::interval::Interval;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use strum::{Display, EnumString, IntoEnumIterator};
+use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
 /// A supported market data provider.
 ///
@@ -20,6 +20,7 @@ use strum::{Display, EnumString, IntoEnumIterator};
     Hash,
     PartialEq,
     Display,
+    EnumIter,
     EnumString,
     SerializeDisplay,
     DeserializeFromStr,
@@ -62,6 +63,17 @@ impl Provider {
             Provider::Coinbase => Interval::iter().filter(|i| *i != Interval::OneWeek).collect(),
             _ => Interval::iter().collect(),
         }
+    }
+
+    /// Return all variants.
+    ///
+    /// Returns
+    /// -------
+    /// list[self]
+    ///     All variants of this type.
+    #[staticmethod]
+    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
+        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
     }
 }
 

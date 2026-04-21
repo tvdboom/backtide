@@ -33,7 +33,7 @@ def _load_storage_df(date_fmt: str, tz: ZoneInfo, logokit_key: str | None) -> pd
     df = pd.DataFrame(
         {
             "Symbol": raw["symbol"],
-            "Name": raw["name"].str.replace(r"\s+", " ", regex=True),
+            "Name": raw["name"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True),
             "Interval": raw["interval"],
             "Instrument type": raw["instrument_type"],
             "Provider": raw["provider"],

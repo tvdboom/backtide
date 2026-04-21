@@ -189,8 +189,11 @@ def _query_bars_summary() -> pd.DataFrame:
 
 def _to_pandas(data: Any) -> pd.DataFrame:
     """Ensure an object is converted to pandas."""
+    if isinstance(data, pd.DataFrame):
+        return data
+
     if hasattr(data, "to_pandas"):
-        data = data.to_pandas()
+        return data.to_pandas()
 
     return pd.DataFrame(data)
 

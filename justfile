@@ -40,4 +40,4 @@ tox:
 
 # Build and serve the docs locally
 docs:
-    uv run mkdocs serve
+    $env:PYTHONPATH="."; uv run mkdocs serve
