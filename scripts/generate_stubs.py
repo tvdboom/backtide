@@ -522,12 +522,13 @@ def generate_submodule_stub(submodule_name: str) -> str:
 
     # ── Third-party imports ─────────────────────────────────────────────
 
-    needs_numpy = "numpy." in body
-    needs_pandas = "pd.DataFrame" in body
-    needs_polars = "pl.DataFrame" in body
+    needs_numpy = "np." in body
+    needs_pandas = "pd." in body
+    needs_polars = "pl." in body
+
     if needs_numpy or needs_pandas or needs_polars:
         if needs_numpy:
-            lines.append("import numpy\n")
+            lines.append("import numpy as np\n")
         if needs_pandas:
             lines.append("import pandas as pd\n")
         if needs_polars:

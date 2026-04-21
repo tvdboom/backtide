@@ -8,12 +8,11 @@ Description: Utility functions for the UI.
 import base64
 from datetime import date
 from datetime import datetime as dt
-import json
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from zoneinfo import ZoneInfo
-
+import cloudpickle as pickle
 import pandas as pd
 import streamlit as st
 from tzlocal import get_localzone
@@ -38,9 +37,6 @@ from backtide.utils.constants import (
     MOMENT_TO_STRFTIME,
 )
 from backtide.utils.utils import _to_list
-
-if TYPE_CHECKING:
-    from backtide.ui.indicators import SavedIndicator
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,23 +153,6 @@ def _list_instruments(
 ) -> dict[str, Instrument]:
     """Return available instruments for the given type."""
     return {x.symbol: x for x in list_instruments(instrument_type, limit=limit, verbose=False)}
-
-
-def _load_stored_indicators(cfg: Config) -> list[SavedIndicator]:
-    """Load and return the indicators from storage."""
-    from backtide.ui.indicators import SavedIndicator
-
-    path = Path(cfg.data.storage_path) / "indicators"
-
-    indicators = []
-    for f in path.glob("*.json"):
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            indicators.append(SavedIndicator(**data))
-        except (json.JSONDecodeError, TypeError) as ex:
-            st.error(f"Failed to load indicator **{f}**. Exception: {ex}")
-
-    return sorted(indicators, key=lambda x: x.name)
 
 
 def _moment_to_strftime(fmt: str) -> str:

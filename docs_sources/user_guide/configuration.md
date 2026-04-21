@@ -38,7 +38,7 @@ If no file is found, the built-in defaults are used.
     crypto = "binance"
 
     [display]
-    dataframe_backend = "pandas"
+    data_backend = "pandas"
     date_format = "YYYY-MM-DD"
     time_format = "HH:MM"
     port = 8501
@@ -63,7 +63,7 @@ If no file is found, the built-in defaults are used.
             crypto: binance
 
     display:
-        dataframe_backend: pandas
+        data_backend: pandas
         date_format: "YYYY-MM-DD"
         time_format: "HH:MM"
         timezone: null
@@ -93,7 +93,7 @@ If no file is found, the built-in defaults are used.
             }
         },
         "display": {
-            "dataframe_backend": "pandas",
+            "data_backend": "pandas",
             "date_format": "YYYY-MM-DD",
             "time_format": "HH:MM",
             "timezone": null,

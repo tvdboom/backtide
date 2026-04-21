@@ -21,50 +21,6 @@ use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-// ────────────────────────────────────────────────────────────────────────────
-// CodeSnippet
-// ────────────────────────────────────────────────────────────────────────────
-
-/// A named snippet of custom Python code (strategy or indicator).
-///
-/// Attributes
-/// ----------
-/// name : str, default=""
-///     Human-readable label for the snippet.
-///
-/// code : str, default=""
-///     Python source code.
-///
-/// See Also
-/// --------
-/// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:IndicatorExpConfig
-/// - backtide.backtest:StrategyExpConfig
-#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct CodeSnippet {
-    pub name: String,
-    pub code: String,
-}
-
-#[pymethods]
-impl CodeSnippet {
-    #[classattr]
-    const __RUST_DATACLASS__: bool = true;
-
-    #[new]
-    #[pyo3(signature = (name: "str"="", code: "str"=""))]
-    fn new(name: &str, code: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-            code: code.to_owned(),
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("CodeSnippet(name={:?}, code={:?})", self.name, self.code)
-    }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // GeneralExpConfig
@@ -342,12 +298,11 @@ impl PortfolioExpConfig {
 /// predefined_strategies : list[str | [StrategyType]], default=[]
 ///     Built-in strategies to run.
 ///
-/// custom_strategies : list[CodeSnippet], default=[]
-///     User-defined strategy code snippets.
+/// custom_strategies : list[tuple[str, str]], default=[]
+///     User-defined strategy code as `(name, code)` tuples.
 ///
 /// See Also
 /// --------
-/// - backtide.backtest:CodeSnippet
 /// - backtide.backtest:DataExpConfig
 /// - backtide.backtest:EngineExpConfig
 /// - backtide.backtest:ExchangeExpConfig
@@ -355,51 +310,11 @@ impl PortfolioExpConfig {
 /// - backtide.backtest:GeneralExpConfig
 /// - backtide.backtest:IndicatorExpConfig
 /// - backtide.backtest:PortfolioExpConfig
-#[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
-#[derive(Debug, Default)]
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StrategyExpConfig {
     pub predefined_strategies: Vec<StrategyType>,
-    pub custom_strategies: Vec<Py<CodeSnippet>>,
-}
-
-/// Pure-Rust representation for serde.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct StrategyExpConfigInner {
-    pub predefined_strategies: Vec<StrategyType>,
-    pub custom_strategies: Vec<CodeSnippet>,
-}
-
-impl StrategyExpConfig {
-    pub fn from_inner(py: Python<'_>, inner: StrategyExpConfigInner) -> PyResult<Self> {
-        Ok(Self {
-            predefined_strategies: inner.predefined_strategies,
-            custom_strategies: inner
-                .custom_strategies
-                .into_iter()
-                .map(|s| Py::new(py, s))
-                .collect::<PyResult<Vec<_>>>()?,
-        })
-    }
-
-    pub fn to_inner(&self, py: Python<'_>) -> StrategyExpConfigInner {
-        StrategyExpConfigInner {
-            predefined_strategies: self.predefined_strategies.clone(),
-            custom_strategies: self
-                .custom_strategies
-                .iter()
-                .map(|s| s.borrow(py).clone())
-                .collect(),
-        }
-    }
-}
-
-impl Clone for StrategyExpConfig {
-    fn clone(&self) -> Self {
-        Python::attach(|py| Self {
-            predefined_strategies: self.predefined_strategies.clone(),
-            custom_strategies: self.custom_strategies.iter().map(|s| s.clone_ref(py)).collect(),
-        })
-    }
+    pub custom_strategies: Vec<(String, String)>,
 }
 
 #[pymethods]
@@ -408,10 +323,10 @@ impl StrategyExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (predefined_strategies: "list[str | StrategyType]"=vec![], custom_strategies: "list[CodeSnippet]"=vec![]))]
+    #[pyo3(signature = (predefined_strategies: "list[str | StrategyType]"=vec![], custom_strategies: "list[tuple[str, str]]"=vec![]))]
     fn new(
         predefined_strategies: Vec<StrategyType>,
-        custom_strategies: Vec<Py<CodeSnippet>>,
+        custom_strategies: Vec<(String, String)>,
     ) -> Self {
         Self {
             predefined_strategies,
@@ -423,14 +338,6 @@ impl StrategyExpConfig {
         format!("StrategyExpConfig(predefined={:?})", self.predefined_strategies,)
     }
 
-    fn __richcmp__(&self, py: Python<'_>, other: PyRef<Self>, op: CompareOp) -> bool {
-        match op {
-            CompareOp::Eq => self.to_inner(py) == other.to_inner(py),
-            CompareOp::Ne => self.to_inner(py) != other.to_inner(py),
-            _ => false,
-        }
-    }
-
     /// Convert to a dictionary.
     ///
     /// Returns
@@ -438,7 +345,7 @@ impl StrategyExpConfig {
     /// dict
     ///     Self as dict.
     pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        Ok(pythonize(py, &self.to_inner(py))?.unbind())
+        Ok(pythonize(py, self)?.unbind())
     }
 }
 
@@ -448,17 +355,17 @@ impl StrategyExpConfig {
 
 /// Indicator settings for an experiment.
 ///
+/// Indicators are stored by name. Each name refers to a pickled indicator
+/// object saved in the local indicators directory.
+///
 /// Attributes
 /// ----------
-/// builtin_indicators : list[str], default=[]
-///     Names of the indicators to compute.
-///
-/// custom_indicators : list[[CodeSnippet]], default=[]
-///     User-defined indicator code snippets.
+/// indicators : list[str], default=[]
+///     Names of the indicators to use in this experiment. Each name must
+///     match a stored indicator.
 ///
 /// See Also
 /// --------
-/// - backtide.backtest:CodeSnippet
 /// - backtide.backtest:DataExpConfig
 /// - backtide.backtest:EngineExpConfig
 /// - backtide.backtest:ExchangeExpConfig
@@ -466,51 +373,11 @@ impl StrategyExpConfig {
 /// - backtide.backtest:GeneralExpConfig
 /// - backtide.backtest:PortfolioExpConfig
 /// - backtide.backtest:StrategyExpConfig
-#[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
-#[derive(Debug, Default)]
-pub struct IndicatorExpConfig {
-    pub builtin_indicators: Vec<String>,
-    pub custom_indicators: Vec<Py<CodeSnippet>>,
-}
-
-/// Pure-Rust representation for serde.
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct IndicatorExpConfigInner {
-    pub builtin_indicators: Vec<String>,
-    pub custom_indicators: Vec<CodeSnippet>,
-}
-
-impl IndicatorExpConfig {
-    pub fn from_inner(py: Python<'_>, inner: IndicatorExpConfigInner) -> PyResult<Self> {
-        Ok(Self {
-            builtin_indicators: inner.builtin_indicators,
-            custom_indicators: inner
-                .custom_indicators
-                .into_iter()
-                .map(|s| Py::new(py, s))
-                .collect::<PyResult<Vec<_>>>()?,
-        })
-    }
-
-    pub fn to_inner(&self, py: Python<'_>) -> IndicatorExpConfigInner {
-        IndicatorExpConfigInner {
-            builtin_indicators: self.builtin_indicators.clone(),
-            custom_indicators: self
-                .custom_indicators
-                .iter()
-                .map(|s| s.borrow(py).clone())
-                .collect(),
-        }
-    }
-}
-
-impl Clone for IndicatorExpConfig {
-    fn clone(&self) -> Self {
-        Python::attach(|py| Self {
-            builtin_indicators: self.builtin_indicators.clone(),
-            custom_indicators: self.custom_indicators.iter().map(|s| s.clone_ref(py)).collect(),
-        })
-    }
+pub struct IndicatorExpConfig {
+    #[serde(default)]
+    pub indicators: Vec<String>,
 }
 
 #[pymethods]
@@ -519,24 +386,13 @@ impl IndicatorExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (builtin_indicators: "list[str]"=vec![], custom_indicators: "list[CodeSnippet]"=vec![]))]
-    fn new(builtin_indicators: Vec<String>, custom_indicators: Vec<Py<CodeSnippet>>) -> Self {
-        Self {
-            builtin_indicators,
-            custom_indicators,
-        }
+    #[pyo3(signature = (indicators: "list[str]"=vec![]))]
+    fn new(indicators: Vec<String>) -> Self {
+        Self { indicators }
     }
 
     fn __repr__(&self) -> String {
-        format!("IndicatorExpConfig(builtin={:?})", self.builtin_indicators,)
-    }
-
-    fn __richcmp__(&self, py: Python<'_>, other: PyRef<Self>, op: CompareOp) -> bool {
-        match op {
-            CompareOp::Eq => self.to_inner(py) == other.to_inner(py),
-            CompareOp::Ne => self.to_inner(py) != other.to_inner(py),
-            _ => false,
-        }
+        format!("IndicatorExpConfig(indicators={:?})", self.indicators)
     }
 
     /// Convert to a dictionary.
@@ -546,7 +402,7 @@ impl IndicatorExpConfig {
     /// dict
     ///     Self as dict.
     pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        Ok(pythonize(py, &self.to_inner(py))?.unbind())
+        Ok(pythonize(py, self)?.unbind())
     }
 }
 
@@ -884,8 +740,8 @@ pub struct ExperimentConfigInner {
     pub general: GeneralExpConfig,
     pub data: DataExpConfig,
     pub portfolio: PortfolioExpConfig,
-    pub strategy: StrategyExpConfigInner,
-    pub indicators: IndicatorExpConfigInner,
+    pub strategy: StrategyExpConfig,
+    pub indicators: IndicatorExpConfig,
     pub exchange: ExchangeExpConfig,
     pub engine: EngineExpConfig,
 }
@@ -932,55 +788,39 @@ pub struct ExperimentConfigInner {
 /// - backtide.backtest:PortfolioExpConfig
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ExperimentConfig {
     pub general: GeneralExpConfig,
     pub data: DataExpConfig,
     pub portfolio: PortfolioExpConfig,
-    pub strategy: Py<StrategyExpConfig>,
-    pub indicators: Py<IndicatorExpConfig>,
+    pub strategy: StrategyExpConfig,
+    pub indicators: IndicatorExpConfig,
     pub exchange: ExchangeExpConfig,
     pub engine: EngineExpConfig,
 }
 
-impl Clone for ExperimentConfig {
-    fn clone(&self) -> Self {
-        Python::attach(|py| Self {
-            general: self.general.clone(),
-            data: self.data.clone(),
-            portfolio: self.portfolio.clone(),
-            strategy: self.strategy.clone_ref(py),
-            indicators: self.indicators.clone_ref(py),
-            exchange: self.exchange.clone(),
-            engine: self.engine.clone(),
-        })
-    }
-}
-
 impl ExperimentConfig {
     /// Convert from the inner (serde-friendly) representation.
-    pub fn from_inner(py: Python<'_>, inner: ExperimentConfigInner) -> PyResult<Self> {
-        let strategy = StrategyExpConfig::from_inner(py, inner.strategy)?;
-        let indicators = IndicatorExpConfig::from_inner(py, inner.indicators)?;
+    pub fn from_inner(_py: Python<'_>, inner: ExperimentConfigInner) -> PyResult<Self> {
         Ok(Self {
             general: inner.general,
             data: inner.data,
             portfolio: inner.portfolio,
-            strategy: Py::new(py, strategy)?,
-            indicators: Py::new(py, indicators)?,
+            strategy: inner.strategy,
+            indicators: inner.indicators,
             exchange: inner.exchange,
             engine: inner.engine,
         })
     }
 
     /// Convert to the inner (serde-friendly) representation.
-    pub fn to_inner(&self, py: Python<'_>) -> ExperimentConfigInner {
+    pub fn to_inner(&self, _py: Python<'_>) -> ExperimentConfigInner {
         ExperimentConfigInner {
             general: self.general.clone(),
             data: self.data.clone(),
             portfolio: self.portfolio.clone(),
-            strategy: self.strategy.borrow(py).to_inner(py),
-            indicators: self.indicators.borrow(py).to_inner(py),
+            strategy: self.strategy.clone(),
+            indicators: self.indicators.clone(),
             exchange: self.exchange.clone(),
             engine: self.engine.clone(),
         }
@@ -997,26 +837,22 @@ impl ExperimentConfig {
         general: "GeneralExpConfig" = GeneralExpConfig::default(),
         data: "DataExpConfig" = DataExpConfig::default(),
         portfolio: "PortfolioExpConfig" = PortfolioExpConfig::default(),
-        strategy: "StrategyExpConfig | None" = None,
-        indicators: "IndicatorExpConfig | None" = None,
+        strategy: "StrategyExpConfig" = StrategyExpConfig::default(),
+        indicators: "IndicatorExpConfig" = IndicatorExpConfig::default(),
         exchange: "ExchangeExpConfig" = ExchangeExpConfig::default(),
         engine: "EngineExpConfig" = EngineExpConfig::default(),
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        py: Python<'_>,
         general: GeneralExpConfig,
         data: DataExpConfig,
         portfolio: PortfolioExpConfig,
-        strategy: Option<Py<StrategyExpConfig>>,
-        indicators: Option<Py<IndicatorExpConfig>>,
+        strategy: StrategyExpConfig,
+        indicators: IndicatorExpConfig,
         exchange: ExchangeExpConfig,
         engine: EngineExpConfig,
-    ) -> PyResult<Self> {
-        let strategy = strategy.map_or_else(|| Py::new(py, StrategyExpConfig::default()), Ok)?;
-        let indicators =
-            indicators.map_or_else(|| Py::new(py, IndicatorExpConfig::default()), Ok)?;
-        Ok(Self {
+    ) -> Self {
+        Self {
             general,
             data,
             portfolio,
@@ -1024,7 +860,7 @@ impl ExperimentConfig {
             indicators,
             exchange,
             engine,
-        })
+        }
     }
 
     fn __repr__(&self) -> String {

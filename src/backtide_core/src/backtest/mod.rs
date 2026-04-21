@@ -23,7 +23,6 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OrderType>()?;
     m.add_class::<StrategyType>()?;
 
-    m.add_class::<CodeSnippet>()?;
     m.add_class::<DataExpConfig>()?;
     m.add_class::<EngineExpConfig>()?;
     m.add_class::<ExchangeExpConfig>()?;

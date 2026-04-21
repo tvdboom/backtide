@@ -19,7 +19,6 @@ from streamlit.runtime.state import SessionStateProxy
 import yaml
 
 from backtide.backtest import (
-    CodeSnippet,
     CommissionType,
     ConversionPeriod,
     CurrencyConversionMode,
@@ -131,12 +130,8 @@ def _apply_config_to_state(
     for i, s in enumerate(exp.strategy.custom_strategies):
         state[f"strategy_name_{i}"] = s.name
 
-    state["builtin_indicators"] = exp.indicators.builtin_indicators
-    state["custom_indicators"] = [
-        {"source": user_code_options[0], "code": s.code} for s in exp.indicators.custom_indicators
-    ]
-    for i, s in enumerate(exp.indicators.custom_indicators):
-        state[f"indicator_name_{i}"] = s.name
+    # Map imported config indicator names to those available in storage.
+    state["experiment_indicators"] = exp.indicators.indicators
 
     ex = exp.exchange
     for key in (
@@ -174,6 +169,15 @@ def _apply_config_to_state(
         state[key] = getattr(eng, key)
 
 
+def _build_indicator_config(
+    state: dict[str, Any] | SessionStateProxy,
+) -> IndicatorExpConfig:
+    """Build an IndicatorExpConfig from the selected indicator names."""
+    selected = state.get("experiment_indicators", [])
+    # selected is a list of indicator names (strings)
+    return IndicatorExpConfig(indicators=list(selected))
+
+
 def _build_config_toml(
     state: dict[str, Any] | SessionStateProxy,
     experiment_name: str,
@@ -207,23 +211,14 @@ def _build_config_toml(
         strategy=StrategyExpConfig(
             predefined_strategies=state.get("predefined_strategies", []),
             custom_strategies=[
-                CodeSnippet(
-                    name=state.get(f"strategy_name_{i}", f"Strategy {i + 1}"),
-                    code=e.get("code", ""),
+                (
+                    state.get(f"strategy_name_{i}", f"Strategy {i + 1}"),
+                    e.get("code", ""),
                 )
                 for i, e in enumerate(state.get("custom_strategies", []))
             ],
         ),
-        indicators=IndicatorExpConfig(
-            builtin_indicators=state.get("builtin_indicators", []),
-            custom_indicators=[
-                CodeSnippet(
-                    name=state.get(f"indicator_name_{i}", f"Indicator {i + 1}"),
-                    code=e.get("code", ""),
-                )
-                for i, e in enumerate(state.get("custom_indicators", []))
-            ],
-        ),
+        indicators=_build_indicator_config(state),
         exchange=ExchangeExpConfig(
             commission_type=state.get("commission_type", defaults.exchange.commission_type),
             commission_pct=state.get("commission_pct", defaults.exchange.commission_pct),
@@ -876,34 +871,24 @@ with tab5:
     saved_indicators = _load_stored_indicators(cfg)
 
     if saved_indicators:
+        from backtide.ui.indicators import _get_indicator_label
+
+        indicator_names = list(saved_indicators.keys())
+
         selected_ind = st.multiselect(
             label="Saved indicators",
             key=(key := "experiment_indicators"),
-            options=saved_indicators,
+            options=indicator_names,
             default=_default(key, []),
-            format_func=lambda x: x.name,
             placeholder="Select indicators...",
             on_change=lambda k=key: _persist(k),
             help="Choose which indicators to use in this experiment.",
         )
 
         # Show a summary of selected indicators
-        for ind in selected_ind:
-            if ind.code:
-                label = f":material/code: **{ind.name}** · Custom"
-            else:
-                label = f":material/show_chart: **{ind.name}** · _{ind.builtin}_"
-                if ind.parameters:
-                    label += f" · {', '.join(f'{k}={v}' for k, v in ind.parameters.items())}"
-
-            st.caption(label)
-
-        # Keep builtin_indicators in sync for config export
-        st.session_state["builtin_indicators"] = [
-            ind.builtin
-            for ind in saved_indicators
-            if ind.name in selected_ind and ind.kind == "builtin"
-        ]
+        for name in selected_ind:
+            if name in saved_indicators:
+                st.caption(_get_indicator_label(saved_indicators[name]))
     else:
         st.info(
             "No saved indicators yet. Create indicators on the **Indicators** page first.",
@@ -912,8 +897,6 @@ with tab5:
 
         if st.button("Create a new indicator", icon=":material/show_chart:", type="secondary"):
             st.switch_page("indicators.py")
-
-        st.session_state["builtin_indicators"] = []
 
 
 # ─────────────────────────────────────────────────────────────────────────────

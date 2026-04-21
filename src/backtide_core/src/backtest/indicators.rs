@@ -18,7 +18,7 @@ pub trait Indicator {
     ///
     /// Returns one or more series (e.g. MACD returns two: the MACD line
     /// and the signal line).
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>>;
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -26,23 +26,15 @@ pub trait Indicator {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Extract parallel `(open, high, low, close, volume)` arrays from a bar slice.
+#[allow(clippy::type_complexity)]
 fn extract_ohlcv_from_bars(bars: &[Bar]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
-    let n = bars.len();
-    let (mut o, mut h, mut l, mut c, mut v) = (
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-    );
-    for b in bars {
-        o.push(b.open);
-        h.push(b.high);
-        l.push(b.low);
-        c.push(b.close);
-        v.push(b.volume);
-    }
-    (o, h, l, c, v)
+    (
+        bars.iter().map(|b| b.open).collect(),
+        bars.iter().map(|b| b.high).collect(),
+        bars.iter().map(|b| b.low).collect(),
+        bars.iter().map(|b| b.close).collect(),
+        bars.iter().map(|b| b.volume).collect(),
+    )
 }
 
 /// Compute a simple rolling mean over `data` with the given `period`.
@@ -190,9 +182,9 @@ macro_rules! indicator_pymethods {
             ///
             /// Returns
             /// -------
-            /// numpy.ndarray
+            /// np.ndarray
             ///     1-D array for single-output indicators, 2-D for multi-output.
-            fn calculate<'py>(
+            fn compute<'py>(
                 &self,
                 py: Python<'py>,
                 df: &Bound<'py, PyAny>,
@@ -212,7 +204,7 @@ macro_rules! indicator_pymethods {
                         n_trades: None,
                     })
                     .collect();
-                to_np_array(py, self.calculate_inner(&bars))
+                to_np_array(py, self.compute_inner(&bars))
             }
 
             /// Return a debug representation.
@@ -257,7 +249,7 @@ impl Indicator for SimpleMovingAverage {
     const NAME: &'static str = "Simple Moving Average";
     const DESCRIPTION: &'static str = "Arithmetic mean of the last N closing prices, used to smooth short-term fluctuations and identify trends.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         vec![rolling_mean(&c, self.period)]
     }
@@ -293,7 +285,7 @@ impl Indicator for ExponentialMovingAverage {
     const NAME: &'static str = "Exponential Moving Average";
     const DESCRIPTION: &'static str = "Weighted moving average that gives more weight to recent prices, reacting faster to price changes than SMA.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         vec![ewm(&c, self.period)]
     }
@@ -329,7 +321,7 @@ impl Indicator for WeightedMovingAverage {
     const NAME: &'static str = "Weighted Moving Average";
     const DESCRIPTION: &'static str = "Moving average where each price is multiplied by a linearly decreasing weight, emphasizing recent data.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();
         let p = self.period;
@@ -378,7 +370,7 @@ impl Indicator for RelativeStrengthIndex {
     const NAME: &'static str = "Relative Strength Index";
     const DESCRIPTION: &'static str = "Momentum oscillator (0\u{2013}100) measuring the speed and magnitude of recent price changes to identify overbought/oversold conditions.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();
         let p = self.period;
@@ -447,7 +439,7 @@ impl Indicator for MovingAverageConvergenceDivergence {
     const NAME: &'static str = "Moving Avg. Convergence Divergence";
     const DESCRIPTION: &'static str = "Trend-following momentum indicator showing the relationship between two exponential moving averages of closing prices.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let fast = ewm(&c, self.fast_period);
         let slow = ewm(&c, self.slow_period);
@@ -496,7 +488,7 @@ impl Indicator for BollingerBands {
     const NAME: &'static str = "Bollinger Bands";
     const DESCRIPTION: &'static str = "Volatility bands placed above and below a moving average, widening during high volatility and narrowing during low volatility.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let mid = rolling_mean(&c, self.period);
         let std = rolling_std(&c, self.period);
@@ -543,7 +535,7 @@ impl Indicator for AverageTrueRange {
     const NAME: &'static str = "Average True Range";
     const DESCRIPTION: &'static str = "Measures market volatility by calculating the average range between high and low prices over a period.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let tr = true_range(&h, &l, &c);
@@ -575,7 +567,7 @@ impl Indicator for OnBalanceVolume {
     const NAME: &'static str = "On-Balance Volume";
     const DESCRIPTION: &'static str = "Cumulative volume indicator that adds volume on up days and subtracts it on down days to confirm price trends.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let n = bars.len();
         let mut obv = vec![0.0; n];
         for i in 1..n {
@@ -616,7 +608,7 @@ impl Indicator for VolumeWeightedAveragePrice {
     const DESCRIPTION: &'static str =
         "Average price weighted by volume, used as a benchmark for intraday trading quality.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let n = bars.len();
         let mut vwap = vec![f64::NAN; n];
         let mut cum_tp_vol = 0.0;
@@ -668,7 +660,7 @@ impl Indicator for StochasticOscillator {
     const NAME: &'static str = "Stochastic Oscillator";
     const DESCRIPTION: &'static str = "Compares a closing price to a range of prices over a period, generating overbought/oversold signals.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();
@@ -723,7 +715,7 @@ impl Indicator for CommodityChannelIndex {
     const NAME: &'static str = "Commodity Channel Index";
     const DESCRIPTION: &'static str = "Measures a price's deviation from its statistical mean, identifying cyclical trends in the data.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();
@@ -777,7 +769,7 @@ impl Indicator for AverageDirectionalIndex {
     const NAME: &'static str = "Average Directional Index";
     const DESCRIPTION: &'static str = "Quantifies trend strength (0\u{2013}100) regardless of direction, helping distinguish trending from ranging markets.";
 
-    fn calculate_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
+    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let n = c.len();

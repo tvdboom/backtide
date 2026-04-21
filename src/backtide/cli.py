@@ -5,6 +5,8 @@ Description: Entry point for the CLI application.
 
 """
 
+from pathlib import Path
+
 import click
 from streamlit.web.bootstrap import run
 
@@ -60,7 +62,7 @@ def launch(address: str, port: str, log_level: str):
     click.echo("🚀  Launching app...")
 
     run(
-        main_script_path="backtide/ui/app.py",
+        main_script_path=str(Path(__file__).resolve().parent / "ui" / "app.py"),
         is_hello=False,
         args=[],
         flag_options={

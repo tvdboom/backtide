@@ -33,7 +33,7 @@ def _load_storage_df(date_fmt: str, tz: ZoneInfo, logokit_key: str | None) -> pd
     df = pd.DataFrame(
         {
             "Symbol": raw["symbol"],
-            "Name": raw["name"],
+            "Name": raw["name"].str.replace(r"\s+", " ", regex=True),
             "Interval": raw["interval"],
             "Instrument type": raw["instrument_type"],
             "Provider": raw["provider"],
@@ -71,7 +71,7 @@ def _open_analysis(df: pd.DataFrame):
 def _confirm_delete(df: pd.DataFrame):
     """Show a modal asking the user to confirm deletion of selected series."""
     st.warning(
-        "You are about to **permanently delete** the following series:",
+        "You are about to **permanently delete** the following series.",
         icon=":material/warning:",
     )
 
@@ -118,6 +118,7 @@ metrics_container = st.container()
 
 column_config = {
     "Symbol": st.column_config.TextColumn(pinned=True),
+    "Name": st.column_config.TextColumn(width="medium"),
     "Bars": st.column_config.NumberColumn(format="%d"),
     "Price": st.column_config.LineChartColumn(help="Closing price for the last 365 intervals."),
 }
@@ -145,7 +146,7 @@ selected_rows = all_series.iloc[indices] if indices else all_series
 with metrics_container:
     col1, col2, col3 = st.columns(3)
     col1.metric(
-        label=":material/trending_up: Number of symbols",
+        label=":material/numbers: Number of symbols",
         value=selected_rows["Symbol"].nunique(),
         border=True,
     )
@@ -162,7 +163,13 @@ with metrics_container:
 
 if indices:
     col1, col2, _ = st.columns([2, 2, 3.9])
-    if col1.button(f"Analyze {len(indices)} series", type="secondary", icon=":material/insights:"):
+
+    if col1.button(
+        label=f"Analyze {len(indices)} series",
+        icon=":material/assessment:",
+        type="secondary",
+    ):
         _open_analysis(selected_rows)
-    if col2.button(f"Delete {len(indices)} series", type="primary", icon=":material/delete:"):
+
+    if col2.button(f"Delete {len(indices)} series", icon=":material/delete:", type="primary"):
         _confirm_delete(selected_rows)

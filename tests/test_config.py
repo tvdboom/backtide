@@ -40,7 +40,7 @@ class TestDisplayConfig:
 
     def test_repr(self):
         """__repr__ contains display configuration values."""
-        assert str(DisplayConfig()).startswith('DisplayConfig(dataframe_backend="pandas"')
+        assert str(DisplayConfig()).startswith('DisplayConfig(data_backend="pandas"')
 
     def test_datetime_format(self):
         """datetime_format concatenates date and time formats."""

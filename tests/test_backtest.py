@@ -8,7 +8,6 @@ Description: Unit tests for the backtest module.
 import pytest
 
 from backtide.backtest import (
-    CodeSnippet,
     CommissionType,
     ConversionPeriod,
     CurrencyConversionMode,
@@ -22,36 +21,6 @@ from backtide.backtest import (
     PortfolioExpConfig,
     StrategyType,
 )
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CodeSnippet
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestCodeSnippet:
-    """Tests for the CodeSnippet model."""
-
-    def test_defaults(self):
-        """Test default values."""
-        cs = CodeSnippet()
-        assert cs.name == ""
-        assert cs.code == ""
-
-    def test_custom(self):
-        """Test custom values."""
-        cs = CodeSnippet(name="my_strategy", code="return True")
-        assert cs.name == "my_strategy"
-        assert cs.code == "return True"
-
-    def test_repr(self):
-        """Test repr output."""
-        assert "CodeSnippet" in repr(CodeSnippet())
-
-    def test_equality(self):
-        """Test equality comparison."""
-        assert CodeSnippet() == CodeSnippet()
-        assert CodeSnippet(name="a") != CodeSnippet(name="b")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sub-configs

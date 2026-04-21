@@ -7,8 +7,8 @@ Description: Module containing configuration re-exports.
 
 from backtide.core.config import (
     Config,
+    DataBackend,
     DataConfig,
-    DataframeBackend,
     DisplayConfig,
     GeneralConfig,
     LogLevel,

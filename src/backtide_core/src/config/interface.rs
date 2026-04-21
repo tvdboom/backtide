@@ -13,7 +13,7 @@
 //! | `[display]` | UI / Streamlit app                                   |
 
 use crate::config::errors::{ConfigError, ConfigResult};
-use crate::config::models::dataframe_backend::DataframeBackend;
+use crate::config::models::data_backend::DataBackend;
 use crate::config::models::log_level::LogLevel;
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
 use crate::config::utils::{fetch_config, parse_config};
@@ -395,7 +395,7 @@ impl DataConfig {
 ///
 /// Attributes
 /// ----------
-/// dataframe_backend : str | [DataframeBackend], default="pandas"
+/// data_backend : str | [DataBackend], default="pandas"
 ///     Which dataframe library to use when providing data to the frontend (i.e.,
 ///     the return of storage functions or parameters in the strategy function).
 ///     Choose from: "pandas", "polars".
@@ -434,7 +434,7 @@ impl DataConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DisplayConfig {
-    pub dataframe_backend: DataframeBackend,
+    pub data_backend: DataBackend,
     pub date_format: String,
     pub time_format: String,
     pub timezone: Option<String>,
@@ -446,7 +446,7 @@ pub struct DisplayConfig {
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
-            dataframe_backend: DataframeBackend::default(),
+            data_backend: DataBackend::default(),
             date_format: "YYYY-MM-DD".to_owned(),
             time_format: "HH:MM".to_owned(),
             timezone: None,
@@ -464,7 +464,7 @@ impl DisplayConfig {
 
     #[new]
     #[pyo3(signature = (
-        dataframe_backend: "str | DataframeBackend" = DataframeBackend::default(),
+        data_backend: "str | DataBackend" = DataBackend::default(),
         date_format: "str"="YYYY-MM-DD",
         time_format: "str"="HH:MM",
         timezone: "str | None"=None,
@@ -473,7 +473,7 @@ impl DisplayConfig {
         port: "int"=8501
     ))]
     fn new(
-        dataframe_backend: DataframeBackend,
+        data_backend: DataBackend,
         date_format: &str,
         time_format: &str,
         timezone: Option<&str>,
@@ -482,7 +482,7 @@ impl DisplayConfig {
         port: u16,
     ) -> Self {
         Self {
-            dataframe_backend,
+            data_backend,
             date_format: date_format.to_owned(),
             time_format: time_format.to_owned(),
             timezone: timezone.map(|s| s.to_owned()),
@@ -494,8 +494,8 @@ impl DisplayConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "DisplayConfig(dataframe_backend={:?}, date_format={:?}, time_format={:?}, timezone={:?}, logokit_api_key={:?}, address={:?}, port={:?})",
-            self.dataframe_backend.to_string().to_lowercase(),
+            "DisplayConfig(data_backend={:?}, date_format={:?}, time_format={:?}, timezone={:?}, logokit_api_key={:?}, address={:?}, port={:?})",
+            self.data_backend.to_string().to_lowercase(),
             self.date_format,
             self.time_format,
             self.timezone,

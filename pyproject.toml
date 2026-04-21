@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
-keywords = ["Trading", "Backtesting", "Financail markets", "Stocks", "ETF", "Forex", "Cryptocurrencies"]
+keywords = ["Trading", "Backtesting", "Financial markets", "Stocks", "ETF", "Forex", "Crypto"]
 classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.3.1",
+    "cloudpickle>=3.1.2",
     "plotly>=6.1.0",
     "streamlit>=1.56.0",
     "streamlit_code_editor>=0.1.22",
@@ -76,9 +77,9 @@ docs = [
 backtide = "backtide.cli:main"
 
 [tool.maturin]
-python-source = "."
+python-source = "src"
 module-name = "backtide.core"
-manifest-path = "backtide_core/Cargo.toml"
+manifest-path = "src/backtide_core/Cargo.toml"
 
 [tool.ruff]
 cache-dir = ".cache/ruff"

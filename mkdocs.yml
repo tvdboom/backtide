@@ -137,7 +137,6 @@ nav:
             - delete_symbols: api/storage/delete_symbols.md
         - models:
             - backtest:
-                - CodeSnippet: api/models/backtest/codesnippet.md
                 - CommissionType: api/models/backtest/commissiontype.md
                 - ConversionPeriod: api/models/backtest/conversionperiod.md
                 - CurrencyConversionMode: api/models/backtest/currencyconversionmode.md
@@ -155,7 +154,7 @@ nav:
             - config:
                 - Config: api/models/config/config.md
                 - DataConfig: api/models/config/dataconfig.md
-                - DataframeBackend: api/models/config/dataframebackend.md
+                - DataBackend: api/models/config/DataBackend.md
                 - DisplayConfig: api/models/config/displayconfig.md
                 - GeneralConfig: api/models/config/generalconfig.md
                 - LogLevel: api/models/config/loglevel.md

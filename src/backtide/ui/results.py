@@ -6,6 +6,7 @@ Description: Backtest results page.
 """
 
 import streamlit as st
+
 from backtide.config import get_config
 
 cfg = get_config()

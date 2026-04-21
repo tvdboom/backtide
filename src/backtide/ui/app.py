@@ -216,7 +216,7 @@ experiment = st.Page(
 results = st.Page(
     "results.py",
     title="Results",
-    icon=":material/analytics:",
+    icon=":material/fact_check:",
 )
 download = st.Page(
     "download.py",
@@ -231,7 +231,7 @@ storage = st.Page(
 analysis = st.Page(
     "analysis.py",
     title="Analysis",
-    icon=":material/insights:",
+    icon=":material/assessment:",
 )
 indicators = st.Page(
     "indicators.py",
@@ -263,7 +263,7 @@ st.html(
         </svg>
         Docs
     </a>
-    """
+    """,
 )
 
 pg.run()

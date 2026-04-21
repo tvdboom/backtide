@@ -17,7 +17,6 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from backtide.backtest import (
-    CodeSnippet,
     CommissionType,
     CurrencyConversionMode,
     DataExpConfig,
@@ -315,7 +314,7 @@ class TestApplyConfigToState:
         exp = ExperimentConfig(
             general=GeneralExpConfig(name="applied", tags=["t1"], description="d"),
             strategy=StrategyExpConfig(
-                custom_strategies=[CodeSnippet(name="s1", code="x=1")],
+                custom_strategies=[("s1", "x=1")],
             ),
         )
         state = {}
