@@ -16,22 +16,18 @@ from backtide.core.config import get_config
 from backtide.ui.utils import _moment_to_strftime
 
 # Default font sizes
-TITLE_FONTSIZE: int = 20
-LABEL_FONTSIZE: int = 18
+TITLE_FONTSIZE: int = 22
+LABEL_FONTSIZE: int = 20
 TICK_FONTSIZE: int = 14
 
-# Backtide default color palette (blue-centric)
+# Backtide default color palette (blue → teal gradient)
 PALETTE: list[str] = [
-    "#1565C0",  # Blue 800
-    "#42A5F5",  # Blue 400
-    "#0D47A1",  # Blue 900
-    "#90CAF9",  # Blue 200
-    "#1E88E5",  # Blue 600
-    "#64B5F6",  # Blue 300
-    "#0277BD",  # Light Blue 800
-    "#4FC3F7",  # Light Blue 300
-    "#01579B",  # Light Blue 900
-    "#81D4FA",  # Light Blue 200
+    "rgb(13, 71, 161)",  # Blue 900
+    "rgb(2, 136, 209)",  # Light Blue 600
+    "rgb(0, 172, 193)",  # Cyan 600
+    "rgb(0, 137, 123)",  # Teal 600
+    "rgb(56, 142, 60)",  # Green 700
+    "rgb(129, 199, 132)",  # Green 300
 ]
 
 
@@ -48,6 +44,7 @@ def _plot(
     template: str = "plotly_dark",
     filename: str | Path | None = None,
     display: bool | None = True,
+    **kwargs,
 ) -> go.Figure | None:
     """Apply consistent layout to a Plotly figure and optionally display/save it.
 
@@ -106,6 +103,9 @@ def _plot(
         - False: do not show or return.
         - None: return the figure without showing.
 
+    **kwargs
+        Additional keyword arguments for plotly's layout.
+
     Returns
     -------
     go.Figure or None
@@ -131,7 +131,7 @@ def _plot(
     else:
         title_cfg = None
 
-    _position_map: dict[str, dict[str, Any]] = {
+    position_map: dict[str, dict[str, Any]] = {
         "upper left": {"x": 0.01, "y": 0.99, "xanchor": "left", "yanchor": "top"},
         "lower left": {"x": 0.01, "y": 0.01, "xanchor": "left", "yanchor": "bottom"},
         "upper right": {"x": 0.99, "y": 0.99, "xanchor": "right", "yanchor": "top"},
@@ -145,13 +145,13 @@ def _plot(
 
     default_legend = {
         "traceorder": "grouped",
-        "groupclick": "toggleitem",
+        "groupclick": kwargs.get("groupclick", "toggleitem"),
         "font_size": LABEL_FONTSIZE,
-        "bgcolor": "rgba(0, 0, 0, 0)",
+        "bgcolor": "rgba(255, 255, 255, 0.5)",
     }
 
     if isinstance(legend, str):
-        legend_cfg = default_legend | _position_map.get(legend, {})
+        legend_cfg = default_legend | position_map.get(legend, {})
     elif isinstance(legend, dict):
         legend_cfg = default_legend | legend
     else:

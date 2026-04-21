@@ -118,6 +118,7 @@ nav:
         - Nomenclature: user_guide/nomenclature.md
         - Data: user_guide/data.md
         - Storage: user_guide/storage.md
+        - Plots: user_guide/plots.md
         - Configuration: user_guide/configuration.md
     - API:
         - config:

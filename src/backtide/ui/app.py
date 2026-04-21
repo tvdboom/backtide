@@ -253,6 +253,7 @@ pg = st.navigation(
     {"Backtest": [experiment, results, indicators], "Data": [download, storage, analysis]}
 )
 
+# todo: fix!
 # Inject the docs button for the current page at the top of the content area
 st.html(
     f"""

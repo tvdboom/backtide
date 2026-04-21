@@ -1,6 +1,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 
+use crate::config::interface::Config;
+use crate::config::models::data_backend::DataBackend;
 use crate::data::models::bar::Bar;
 
 /// Trait for all built-in indicators.
@@ -117,6 +119,7 @@ fn true_range(high: &[f64], low: &[f64], close: &[f64]) -> Vec<f64> {
 /// Extract `open`, `high`, `low`, `close`, `volume` arrays from a pandas DataFrame.
 ///
 /// Falls back to a zero-filled volume array when the column is missing.
+#[allow(clippy::type_complexity)]
 fn extract_ohlcv(
     df: &Bound<'_, PyAny>,
 ) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> {
@@ -134,15 +137,45 @@ fn extract_ohlcv(
     ))
 }
 
-/// Convert indicator output rows to a numpy array.
+/// Convert indicator output series into the configured data backend format.
 ///
-/// A single row is returned as a 1-D array; multiple rows become a 2-D array.
-fn to_np_array(py: Python, rows: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
+/// Each inner `Vec<f64>` is one output series (e.g. upper band, lower band).
+/// The result is shaped as (n_points, n_series) — i.e. rows × columns.
+/// Single-series indicators return a 1-D array / single-column frame.
+fn to_backend_type(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
+    let backend = Config::get().map(|c| c.display.data_backend).unwrap_or(DataBackend::Pandas);
+
     let np = py.import("numpy")?;
-    if rows.len() == 1 {
-        np.call_method1("array", (rows.into_iter().next().unwrap(),))
+
+    if series.len() == 1 {
+        // Single series → 1-D
+        let arr = np.call_method1("array", (series.into_iter().next().unwrap(),))?;
+        match backend {
+            DataBackend::Numpy => Ok(arr),
+            DataBackend::Pandas => {
+                let pd = py.import("pandas")?;
+                pd.call_method1("Series", (&arr,))
+            },
+            DataBackend::Polars => {
+                let pl = py.import("polars")?;
+                pl.call_method1("Series", (&arr,))
+            },
+        }
     } else {
-        np.call_method1("array", (rows,))
+        // Multiple series → transpose to (n_points, n_series)
+        let arr_2d = np.call_method1("array", (series,))?;
+        let arr_t = arr_2d.getattr("T")?;
+        match backend {
+            DataBackend::Numpy => Ok(arr_t),
+            DataBackend::Pandas => {
+                let pd = py.import("pandas")?;
+                pd.call_method1("DataFrame", (&arr_t,))
+            },
+            DataBackend::Polars => {
+                let pl = py.import("polars")?;
+                pl.call_method1("from_numpy", (&arr_t,))
+            },
+        }
     }
 }
 
@@ -172,24 +205,24 @@ macro_rules! indicator_pymethods {
                 <$ty as Indicator>::DESCRIPTION
             }
 
-            /// Compute the indicator on a pandas DataFrame.
+            /// Compute the indicator on a DataFrame.
             ///
             /// Parameters
             /// ----------
-            /// df : DataFrame
-            ///     Must contain ``open``, ``high``, ``low``, ``close`` columns.
-            ///     ``volume`` is optional (defaults to zeros).
+            /// data : np.ndarray | Series | DataFrame
+            ///     Historical OHLCV data.
             ///
             /// Returns
             /// -------
-            /// np.ndarray
-            ///     1-D array for single-output indicators, 2-D for multi-output.
+            /// np.ndarray | pd.Series | pl.Series |  pd.DataFrame | pl.DataFrame
+            ///     The computed values. For multi-output indicators (e.g., upper
+            ///     and lower bounds), return a 2d structure.
             fn compute<'py>(
                 &self,
                 py: Python<'py>,
-                df: &Bound<'py, PyAny>,
+                data: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
-                let (o, h, l, c, v) = extract_ohlcv(df)?;
+                let (o, h, l, c, v) = extract_ohlcv(data)?;
                 let bars: Vec<Bar> = (0..c.len())
                     .map(|i| Bar {
                         open_ts: 0,
@@ -204,7 +237,7 @@ macro_rules! indicator_pymethods {
                         n_trades: None,
                     })
                     .collect();
-                to_np_array(py, self.compute_inner(&bars))
+                to_backend_type(py, self.compute_inner(&bars))
             }
 
             /// Return a debug representation.
@@ -220,7 +253,7 @@ macro_rules! indicator_pymethods {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Average Directional Index indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct AverageDirectionalIndex {
     /// Look-back window length.
@@ -240,7 +273,7 @@ impl AverageDirectionalIndex {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.backtest")?.getattr("AverageDirectionalIndex")?;
+        let cls = py.import("backtide.indicators")?.getattr("AverageDirectionalIndex")?;
         Ok((cls, (self.period,)))
     }
 }
@@ -301,7 +334,7 @@ impl Indicator for AverageDirectionalIndex {
 }
 
 /// Average True Range indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct AverageTrueRange {
     /// Look-back window length.
@@ -321,7 +354,7 @@ impl AverageTrueRange {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.backtest")?.getattr("AverageTrueRange")?;
+        let cls = py.import("backtide.indicators")?.getattr("AverageTrueRange")?;
         Ok((cls, (self.period,)))
     }
 }
@@ -340,7 +373,7 @@ impl Indicator for AverageTrueRange {
 }
 
 /// Bollinger Bands indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct BollingerBands {
     /// Look-back window length.
@@ -363,7 +396,7 @@ impl BollingerBands {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize, f64))> {
-        let cls = py.import("backtide.backtest")?.getattr("BollingerBands")?;
+        let cls = py.import("backtide.indicators")?.getattr("BollingerBands")?;
         Ok((cls, (self.period, self.std_dev)))
     }
 }
@@ -391,7 +424,7 @@ impl Indicator for BollingerBands {
 }
 
 /// Commodity Channel Index indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct CommodityChannelIndex {
     /// Look-back window length.
@@ -411,7 +444,7 @@ impl CommodityChannelIndex {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.backtest")?.getattr("CommodityChannelIndex")?;
+        let cls = py.import("backtide.indicators")?.getattr("CommodityChannelIndex")?;
         Ok((cls, (self.period,)))
     }
 }
@@ -446,7 +479,7 @@ impl Indicator for CommodityChannelIndex {
 }
 
 /// Exponential Moving Average indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct ExponentialMovingAverage {
     /// Look-back window length.
@@ -466,7 +499,7 @@ impl ExponentialMovingAverage {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.backtest")?.getattr("ExponentialMovingAverage")?;
+        let cls = py.import("backtide.indicators")?.getattr("ExponentialMovingAverage")?;
         Ok((cls, (self.period,)))
     }
 }
@@ -483,7 +516,7 @@ impl Indicator for ExponentialMovingAverage {
 }
 
 /// Moving Average Convergence Divergence indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct MovingAverageConvergenceDivergence {
     /// Fast EMA period.
@@ -508,8 +541,12 @@ impl MovingAverageConvergenceDivergence {
     }
 
     /// Pickle support.
-    fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize, usize, usize))> {
-        let cls = py.import("backtide.backtest")?.getattr("MovingAverageConvergenceDivergence")?;
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (usize, usize, usize))> {
+        let cls =
+            py.import("backtide.indicators")?.getattr("MovingAverageConvergenceDivergence")?;
         Ok((cls, (self.fast_period, self.slow_period, self.signal_period)))
     }
 }
@@ -536,7 +573,7 @@ impl Indicator for MovingAverageConvergenceDivergence {
 }
 
 /// On-Balance Volume indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct OnBalanceVolume;
 
@@ -550,7 +587,7 @@ impl OnBalanceVolume {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, ())> {
-        let cls = py.import("backtide.backtest")?.getattr("OnBalanceVolume")?;
+        let cls = py.import("backtide.indicators")?.getattr("OnBalanceVolume")?;
         Ok((cls, ()))
     }
 }
@@ -577,7 +614,7 @@ impl Indicator for OnBalanceVolume {
 }
 
 /// Relative Strength Index indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct RelativeStrengthIndex {
     /// Look-back window length.
@@ -597,7 +634,7 @@ impl RelativeStrengthIndex {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.backtest")?.getattr("RelativeStrengthIndex")?;
+        let cls = py.import("backtide.indicators")?.getattr("RelativeStrengthIndex")?;
         Ok((cls, (self.period,)))
     }
 }
@@ -641,7 +678,7 @@ impl Indicator for RelativeStrengthIndex {
 }
 
 /// Simple Moving Average indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct SimpleMovingAverage {
     /// Look-back window length.
@@ -661,7 +698,7 @@ impl SimpleMovingAverage {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.backtest")?.getattr("SimpleMovingAverage")?;
+        let cls = py.import("backtide.indicators")?.getattr("SimpleMovingAverage")?;
         Ok((cls, (self.period,)))
     }
 }
@@ -678,7 +715,7 @@ impl Indicator for SimpleMovingAverage {
 }
 
 /// Stochastic Oscillator indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct StochasticOscillator {
     /// %K look-back period.
@@ -701,7 +738,7 @@ impl StochasticOscillator {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize, usize))> {
-        let cls = py.import("backtide.backtest")?.getattr("StochasticOscillator")?;
+        let cls = py.import("backtide.indicators")?.getattr("StochasticOscillator")?;
         Ok((cls, (self.k_period, self.d_period)))
     }
 }
@@ -737,7 +774,7 @@ impl Indicator for StochasticOscillator {
 }
 
 /// Volume-Weighted Average Price indicator.
-#[pyclass(skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct VolumeWeightedAveragePrice;
 
@@ -751,7 +788,7 @@ impl VolumeWeightedAveragePrice {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, ())> {
-        let cls = py.import("backtide.backtest")?.getattr("VolumeWeightedAveragePrice")?;
+        let cls = py.import("backtide.indicators")?.getattr("VolumeWeightedAveragePrice")?;
         Ok((cls, ()))
     }
 }
@@ -782,7 +819,7 @@ impl Indicator for VolumeWeightedAveragePrice {
 }
 
 /// Weighted Moving Average indicator.
-#[pyclass(skip_from_py_object, get_all, module = "backtide.backtest")]
+#[pyclass(skip_from_py_object, get_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct WeightedMovingAverage {
     /// Look-back window length.
@@ -802,7 +839,7 @@ impl WeightedMovingAverage {
 
     /// Pickle support.
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.backtest")?.getattr("WeightedMovingAverage")?;
+        let cls = py.import("backtide.indicators")?.getattr("WeightedMovingAverage")?;
         Ok((cls, (self.period,)))
     }
 }

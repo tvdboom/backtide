@@ -9,15 +9,14 @@ from pathlib import Path
 
 from code_editor import code_editor
 import streamlit as st
-import inspect
-import cloudpickle as pickle
+
 from backtide.config import get_config
 from backtide.indicators import BUILTIN_INDICATORS
 from backtide.indicators.utils import (
     _build_custom_indicator,
+    _check_indicator_code,
     _get_indicator_label,
     _is_builtin_indicator,
-    _check_indicator_code,
     _load_stored_indicators,
     _save_indicator,
 )
@@ -27,7 +26,6 @@ from backtide.ui.utils import (
     _persist,
 )
 from backtide.utils.constants import INVALID_FILENAME_CHARS
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
@@ -97,7 +95,7 @@ from backtide.indicators import BaseIndicator
 
 
 class MyIndicator(BaseIndicator):
-    def compute(self, data: {t}) -> {t}:
+    def compute(self, data):
         """Compute the indicator values.
 
         Parameters
@@ -112,14 +110,16 @@ class MyIndicator(BaseIndicator):
             and lower bounds), return a 2d structure.
 
         """
-        # ── Write your logic here ──────────────────────────
+        # ── Write your logic here ────────────────────────
 
-        
+
 
         # ───────────────────────────────────────────────────
 
         return result
-'''
+
+
+MyIndicator()'''
 )
 
 
@@ -137,11 +137,11 @@ storage_path.mkdir(parents=True, exist_ok=True)
 st.subheader("Indicators", text_alignment="center")
 st.write("")
 
-if stored_indicators := _load_stored_indicators(cfg):
-    for name, ind in stored_indicators.items():
+if stored_ind := _load_stored_indicators(cfg):
+    for name, ind in stored_ind.items():
         with st.container(border=True):
             col1, col2 = st.columns([5, 1], vertical_alignment="center")
-            col1.markdown(_get_indicator_label(ind))
+            col1.markdown(_get_indicator_label(name, ind))
 
             if col2.button(
                 label="Delete",
@@ -150,13 +150,10 @@ if stored_indicators := _load_stored_indicators(cfg):
                 type="tertiary",
             ):
                 Path(storage_path, f"{name}.pkl").unlink(missing_ok=True)
-                Path(storage_path, f"{name}.py").unlink(missing_ok=True)
                 st.rerun()
 
             # Show source code expander for custom indicators
             if not _is_builtin_indicator(ind):
-                source = pickle.loads(storage_path / f"{name}.pkl")
-
                 with st.expander(
                     label="Source code",
                     key=(exp_key := f"source_code_{name}"),
@@ -165,7 +162,7 @@ if stored_indicators := _load_stored_indicators(cfg):
                     on_change=lambda k=exp_key: _persist(k),
                 ):
                     resp = code_editor(
-                        code=inspect.getsource(type(ind)),
+                        code=(source := getattr(ind, "_source_code", "")),
                         key=f"edit_ind_code_{name}",
                         response_mode="debounce",
                         buttons=[
@@ -182,7 +179,7 @@ if stored_indicators := _load_stored_indicators(cfg):
                     edited_code = resp["text"]
 
                     if edited_code and edited_code != source:
-                        if err := _check_indicator_code(edited_code):
+                        if err := _check_indicator_code(edited_code, cfg):
                             st.error(err)
                         else:
                             if st.button(
@@ -192,17 +189,12 @@ if stored_indicators := _load_stored_indicators(cfg):
                                 type="primary",
                             ):
                                 try:
-                                    new_instance = _build_custom_indicator(edited_code, name)
-                                    _save_indicator(
-                                        new_instance,
-                                        name,
-                                        storage_path,
-                                        code=edited_code,
-                                    )
+                                    new_instance = _build_custom_indicator(edited_code)
+                                    _save_indicator(new_instance, name, cfg)
                                     st.session_state[f"_{exp_key}"] = False
                                     st.rerun()
                                 except Exception as ex:  # noqa: BLE001
-                                    st.error(f"Failed to rebuild indicator: {ex}")
+                                    st.error(f"Failed to rebuild indicator. {ex}")
 else:
     st.info("There are no saved indicators.", icon=":material/info:")
 
@@ -285,7 +277,7 @@ if mode == "builtin":
                 f"The following characters are not allowed in indicator names: "
                 f"**{' '.join(sorted(set(chars)))}** "
             )
-        elif ind_name in stored_indicators.keys():
+        elif ind_name in stored_ind.keys():
             name_error = f"An indicator with name **{ind_name}** already exists."
 
         if name_error:
@@ -301,15 +293,15 @@ if mode == "builtin":
             width="stretch",
         ):
             cast_params = {}
-            for k, v in params.items():
-                schema = params_schema.get(k)
-                if schema and isinstance(schema[1], int):
-                    cast_params[k] = int(v)
-                else:
-                    cast_params[k] = v
+            if params_schema:
+                for k, v in params.items():
+                    schema = params_schema.get(k)
+                    if schema and isinstance(schema[1], int):
+                        cast_params[k] = int(v)
+                    else:
+                        cast_params[k] = v
 
-            instance = ind(**cast_params) if cast_params else ind()
-            _save_indicator(instance, ind_name, storage_path)
+            _save_indicator(ind(**cast_params), ind_name, cfg)
             st.session_state.pop("_add_indicator_mode", None)
             st.rerun()
 
@@ -322,7 +314,7 @@ elif mode == "custom":
         ind_name = st.text_input(
             label="Name",
             key=(key := "new_ind_custom_name"),
-            value=_default(key, f"Indicator {len(stored_indicators) + 1}"),
+            value=_default(key, "MyIndicator"),
             max_chars=40,
             placeholder="Add a name...",
             on_change=lambda k=key: _persist(k),
@@ -342,7 +334,7 @@ elif mode == "custom":
         code: str | None = None
         if source == _CODE_OPTIONS[0]:
             resp = code_editor(
-                key=(key := "new_ind_custom_code_editor"),
+                key=(key := "ind_custom_code_editor"),
                 code=_default(key, code_placeholder(cfg.display.data_backend.class_name)),
                 response_mode="debounce",
                 buttons=[
@@ -355,6 +347,8 @@ elif mode == "custom":
                     },
                 ],
             )
+
+            st.session_state[f"_{key}"] = resp["text"]
             code = resp["text"]
         else:
             st.caption(
@@ -368,10 +362,6 @@ elif mode == "custom":
                 type="py",
                 accept_multiple_files=False,
                 label_visibility="collapsed",
-                help=(
-                    "Upload a Python file that defines a class inheriting from BaseIndicator "
-                    "with a `compute(self, data)` method."
-                ),
             )
 
             if indicator_file is not None:
@@ -382,7 +372,7 @@ elif mode == "custom":
                 st.info("No file uploaded yet.", icon=":material/upload_file:")
 
         if code:
-            if err := _check_indicator_code(code):
+            if err := _check_indicator_code(code, cfg):
                 st.error(err)
 
         name_error = None
@@ -391,7 +381,7 @@ elif mode == "custom":
         elif INVALID_FILENAME_CHARS.findall(ind_name):
             chars = INVALID_FILENAME_CHARS.findall(ind_name)
             name_error = f"Invalid characters: {' '.join(repr(c) for c in sorted(set(chars)))}"
-        elif ind_name in stored_indicators.keys():
+        elif ind_name in stored_ind.keys():
             name_error = f"An indicator with name **{ind_name}** already exists."
 
         if name_error:
@@ -407,12 +397,12 @@ elif mode == "custom":
             width="stretch",
         ):
             try:
-                instance = _build_custom_indicator(code, ind_name)
-                _save_indicator(instance, ind_name, storage_path, code=code)
+                instance = _build_custom_indicator(code)  # ty: ignore[invalid-argument-type]
+                _save_indicator(instance, ind_name, cfg)
                 st.session_state.pop("_add_indicator_mode", None)
                 st.rerun()
             except Exception as ex:  # noqa: BLE001
-                st.error(f"Failed to build indicator: {ex}")
+                st.error(f"Failed to build indicator. {ex}")
 
         if col2.button("Cancel", icon=":material/close:", width="stretch"):
             st.session_state.pop("_add_indicator_mode", None)

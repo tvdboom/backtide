@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 from typing import Any
 from zoneinfo import ZoneInfo
-import cloudpickle as pickle
+
 import pandas as pd
 import streamlit as st
 from tzlocal import get_localzone
@@ -37,7 +37,6 @@ from backtide.utils.constants import (
     MOMENT_TO_STRFTIME,
 )
 from backtide.utils.utils import _to_list
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility constants
@@ -188,12 +187,12 @@ def _query_bars_summary() -> pd.DataFrame:
     return _to_pandas(query_bars_summary())
 
 
-def _to_pandas(df: Any) -> pd.DataFrame:
-    """Ensure a DataFrame is pandas, converting from polars if needed."""
-    if hasattr(df, "to_pandas"):
-        return df.to_pandas()
+def _to_pandas(data: Any) -> pd.DataFrame:
+    """Ensure an object is converted to pandas."""
+    if hasattr(data, "to_pandas"):
+        data = data.to_pandas()
 
-    return df
+    return pd.DataFrame(data)
 
 
 def _to_upper_values(key: str):

@@ -11,12 +11,12 @@ import streamlit as st
 from backtide.core.config import get_config
 from backtide.core.data import Interval
 from backtide.core.storage import query_bars, query_instruments
+from backtide.indicators.utils import _load_stored_indicators
 from backtide.plots.candlestick import plot_candlestick
 from backtide.plots.price import PRICE_COLUMNS, plot_price
 from backtide.ui.utils import (
     _default,
     _get_timezone,
-    _load_stored_indicators,
     _persist,
     _to_pandas,
     _to_upper_values,
@@ -131,8 +131,8 @@ bars = bars[
 
 tab1, tab2, tab3 = st.tabs(
     [
-        ":material/candlestick_chart: Candlestick",
         ":material/show_chart: Price",
+        ":material/candlestick_chart: Candlestick",
         ":material/analytics: Distribution",
     ],
     key=(key := "plot_tabs"),
@@ -144,6 +144,46 @@ tab1, tab2, tab3 = st.tabs(
 bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
 
 with tab1:
+    col1, col2 = st.columns([10, 1])
+    col1.caption("Price over time for selected symbols.")
+
+    stored_ind = _load_stored_indicators(cfg)
+
+    with col2.popover(":material/tune:"):
+        price_col = st.radio(
+            label="Price",
+            key=(key := "price_col"),
+            options=PRICE_COLUMNS,
+            format_func=lambda c: PRICE_COLUMNS[c],
+            index=list(PRICE_COLUMNS).index("adj_close"),
+            horizontal=False,
+            on_change=lambda k=key: _persist(k),
+        )
+
+        if stored_ind:
+            selected_ind = st.multiselect(
+                label="Indicators",
+                key=(key := "price_indicators"),
+                options=stored_ind,
+                default=_default(key, []),
+                placeholder="Select indicators...",
+                on_change=lambda k=key: _persist(k),
+                help="Overlay indicators on the price chart.",
+            )
+        else:
+            selected_ind = []
+
+    st.plotly_chart(
+        plot_price(
+            data=bars,
+            price_col=price_col,
+            indicators={n: stored_ind[n] for n in selected_ind},
+            display=None,
+        ),
+        width="stretch",
+    )
+
+with tab2:
     col1, col2 = st.columns([10, 1])
     col1.caption("OHLC candlestick chart showing price action over time.")
 
@@ -187,48 +227,6 @@ with tab1:
             rangeslider=cs_rangeslider,
             display=None,
         ),
-        width="stretch",
-    )
-
-with tab2:
-    col1, col2 = st.columns([10, 1])
-    col1.caption("Price over time for selected symbols.")
-
-    _saved_indicators = _load_stored_indicators(cfg)
-    _saved_names = [ind.name for ind in _saved_indicators]
-    _saved_map = {ind.name: ind for ind in _saved_indicators}
-
-    with col2.popover(":material/tune:"):
-        price_col = st.radio(
-            label="**Price**",
-            key=(key := "price_col"),
-            options=PRICE_COLUMNS,
-            format_func=lambda c: PRICE_COLUMNS[c],
-            index=list(PRICE_COLUMNS).index("close"),
-            horizontal=False,
-            on_change=lambda k=key: _persist(k),
-        )
-
-        if _saved_names:
-            selected_inds = st.multiselect(
-                label="**Indicators**",
-                key=(key := "price_indicators"),
-                options=_saved_names,
-                default=_default(key, []),
-                placeholder="Select indicators...",
-                on_change=lambda k=key: _persist(k),
-                help="Overlay saved indicators on the price chart.",
-            )
-        else:
-            st.caption("No saved indicators.")
-            selected_inds = []
-
-    overlay = [
-        {"name": n, "fn": _saved_map[n].compute} for n in selected_inds if n in _saved_map
-    ] or None
-
-    st.plotly_chart(
-        plot_price(bars, price_col=price_col, indicators=overlay, display=None),
         width="stretch",
     )
 

@@ -191,33 +191,51 @@ class TestCheckIndicatorCode:
 
     @pytest.fixture(autouse=True)
     def _import(self):
-        from backtide.ui.indicators import _check_indicator_code
+        from backtide.indicators.utils import _check_indicator_code
 
         self._check = _check_indicator_code
 
     def test_valid_code(self):
-        """Valid indicator code returns None."""
-        code = "def indicator(data):\n    return {}"
-        assert self._check(code) is None
+        """Valid indicator code with compute(self, data) returns None."""
+        code = (
+            "from backtide.indicators import BaseIndicator\n"
+            "class MyInd(BaseIndicator):\n"
+            "    def compute(self, data):\n"
+            "        return data['close']\n"
+            "MyInd()\n"
+        )
+        from backtide.config import get_config
+
+        assert self._check(code, get_config()) is None
 
     def test_wrong_signature(self):
-        """Wrong function signature returns error message."""
-        code = "def indicator(data, extra):\n    return {}"
-        result = self._check(code)
-        assert result is not None
-        assert "signature" in result
+        """Wrong compute signature returns error message."""
+        code = (
+            "from backtide.indicators import BaseIndicator\n"
+            "class MyInd(BaseIndicator):\n"
+            "    def compute(self, data, extra):\n"
+            "        return data\n"
+            "MyInd()\n"
+        )
+        from backtide.config import get_config
 
-    def test_missing_function(self):
-        """Missing indicator function returns error message."""
-        code = "x = 1"
-        result = self._check(code)
+        result = self._check(code, get_config())
         assert result is not None
-        assert "No function" in result
+
+    def test_missing_class(self):
+        """Missing BaseIndicator subclass returns error message."""
+        code = "x = 1"
+        from backtide.config import get_config
+
+        result = self._check(code, get_config())
+        assert result is not None
 
     def test_syntax_error(self):
         """Syntax error returns error message."""
-        code = "def indicator(data\n    return {}"
-        result = self._check(code)
+        code = "class MyInd(BaseIndicator\n    pass"
+        from backtide.config import get_config
+
+        result = self._check(code, get_config())
         assert result is not None
         assert "Syntax error" in result
 
@@ -318,11 +336,10 @@ class TestApplyConfigToState:
             ),
         )
         state = {}
-        self._apply(exp, state, ["code_editor", "upload"])
+        self._apply(exp, state)
         assert state["experiment_name"] == "applied"
         assert state["tags"] == ["t1"]
         assert state["description"] == "d"
-        assert state["strategy_name_0"] == "s1"
         assert len(state["custom_strategies"]) == 1
         assert state["warmup_period"] == 0
         assert "commission_type" in state
@@ -337,7 +354,7 @@ class TestApplyConfigToState:
             ),
         )
         state: dict = {}
-        self._apply(exp, state, ["editor"])
+        self._apply(exp, state)
         assert state["full_history"] is False
         assert state["start_date"] == date(2020, 1, 15)
         assert state["end_date"] == date(2023, 6, 30)
@@ -354,7 +371,7 @@ class TestResultsPage:
     @pytest.mark.usefixtures("_app")
     def test_results_renders(self):
         """Smoke test: results page renders without error."""
-        at = AppTest.from_file("backtide/ui/results.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/results.py", default_timeout=30)
         at.run()
         assert not at.exception
 
@@ -365,7 +382,7 @@ class TestAnalysisPage:
     @pytest.mark.usefixtures("_app")
     def test_analysis_renders(self):
         """Smoke test: analysis page renders without error."""
-        at = AppTest.from_file("backtide/ui/analysis.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/analysis.py", default_timeout=30)
         at.run()
         assert not at.exception
 
@@ -376,7 +393,7 @@ class TestStoragePage:
     @pytest.mark.usefixtures("_app")
     def test_storage_renders(self):
         """Smoke test: storage page renders without error."""
-        at = AppTest.from_file("backtide/ui/storage.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/storage.py", default_timeout=30)
         at.run()
         assert not at.exception
 
@@ -387,7 +404,7 @@ class TestDownloadPage:
     @pytest.mark.usefixtures("_app")
     def test_download_renders(self):
         """Smoke test: download page renders without error."""
-        at = AppTest.from_file("backtide/ui/download.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/download.py", default_timeout=30)
         at.run()
         assert not at.exception
 
@@ -398,14 +415,14 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_experiment_renders(self):
         """Smoke test: experiment page renders without error."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         assert not at.exception
 
     @pytest.mark.usefixtures("_app")
     def test_invalid_experiment_name(self):
         """Invalid filename characters in experiment name show an error."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.text_input(key="experiment_name").set_value("test<>name").run()
         assert any("not allowed" in e.value for e in at.error)
@@ -413,7 +430,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_toggle_full_history_off(self):
         """Disabling full_history shows date pickers."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.toggle(key="full_history").set_value(False).run()
         assert not at.exception
@@ -422,7 +439,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_toggle_margin_off(self):
         """Disabling margin hides leverage/margin fields."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.toggle(key="allow_margin").set_value(False).run()
         assert not at.exception
@@ -432,7 +449,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_toggle_short_selling_off(self):
         """Disabling short selling hides borrow rate."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.toggle(key="allow_short_selling").set_value(False).run()
         assert not at.exception
@@ -442,7 +459,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_commission_fixed(self):
         """Switching commission type to Fixed shows fixed input."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.radio(key="commission_type").set_value(CommissionType("Fixed")).run()
         assert not at.exception
@@ -452,7 +469,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_commission_percentage_plus_fixed(self):
         """Switching to PercentagePlusFixed shows both commission inputs."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.radio(key="commission_type").set_value(CommissionType("PercentagePlusFixed")).run()
         assert not at.exception
@@ -463,7 +480,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_conversion_hold_until_threshold(self):
         """HoldUntilThreshold mode shows threshold input."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.selectbox(key="conversion_mode").set_value(
             CurrencyConversionMode("HoldUntilThreshold")
@@ -475,7 +492,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_conversion_end_of_period(self):
         """EndOfPeriod mode shows period selectbox."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.selectbox(key="conversion_mode").set_value(CurrencyConversionMode("EndOfPeriod")).run()
         assert not at.exception
@@ -485,7 +502,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_conversion_custom_interval(self):
         """CustomInterval mode shows interval number input."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.selectbox(key="conversion_mode").set_value(
             CurrencyConversionMode("CustomInterval")
@@ -497,7 +514,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_add_strategy_button(self):
         """Clicking 'Add strategy' adds a custom strategy entry."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         initial = len(at.text_input)
         at.button[0].click().run()
@@ -507,7 +524,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_add_indicator_button(self):
         """Clicking 'Add indicator' navigates to the indicators page."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.button[1].click().run()
         # switch_page raises in AppTest since indicators.py is not a registered page
@@ -516,7 +533,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_description_text_area(self):
         """Setting description text area works."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.text_area[0].set_value("My test description").run()
         assert not at.exception
@@ -524,7 +541,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_number_input_initial_cash(self):
         """Changing initial cash value works."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.number_input(key="initial_cash").set_value(50000).run()
         assert not at.exception
@@ -532,7 +549,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_toggle_trade_on_close(self):
         """Toggling trade_on_close works."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.toggle(key="trade_on_close").set_value(True).run()
         assert not at.exception
@@ -540,7 +557,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_config_upload_success(self):
         """Config import success message is shown."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.session_state["_import_success"] = "Loaded config."
         at.run()
@@ -549,7 +566,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_config_upload_error(self):
         """Config import error message is shown."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.session_state["_import_error"] = "Failed to parse."
         at.run()
@@ -558,7 +575,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_invalid_tag(self):
         """Invalid tags show an error."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.session_state["tags"] = ["bad<>tag"]
         at.run()
@@ -567,7 +584,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_predefined_strategy_selected(self):
         """Selecting predefined strategies shows descriptions."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.multiselect(key="predefined_strategies").set_value([StrategyType("BuyAndHold")]).run()
         assert not at.exception
@@ -576,7 +593,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_current_tab_restored(self):
         """Setting current_tab restores tab selection."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.session_state["current_tab"] = 1
         at.run()
         assert not at.exception
@@ -584,7 +601,7 @@ class TestExperimentPage:
     @pytest.mark.usefixtures("_app")
     def test_use_storage_toggle(self):
         """Toggling use_storage works."""
-        at = AppTest.from_file("backtide/ui/experiment.py", default_timeout=30)
+        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
         at.toggle(key="use_storage").set_value(True).run()
         assert not at.exception

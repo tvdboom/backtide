@@ -96,7 +96,6 @@ class BollingerBands:
     def compute(self, df) -> np.ndarray: ...
     def description(cls): ...
 
-
 class CommissionType:
     """How trading commissions are calculated.
 

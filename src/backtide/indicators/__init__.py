@@ -5,7 +5,6 @@ Description: Indicator functionalities for backtide.
 
 """
 
-from backtide.indicators.base import BaseIndicator
 from backtide.core.backtest import (
     AverageDirectionalIndex,
     AverageTrueRange,
@@ -20,7 +19,7 @@ from backtide.core.backtest import (
     VolumeWeightedAveragePrice,
     WeightedMovingAverage,
 )
-
+from backtide.indicators.base import BaseIndicator
 
 # List all built-in indicators
 BUILTIN_INDICATORS = [

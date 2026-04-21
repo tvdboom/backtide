@@ -21,7 +21,6 @@ use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // GeneralExpConfig
 // ────────────────────────────────────────────────────────────────────────────
@@ -388,7 +387,9 @@ impl IndicatorExpConfig {
     #[new]
     #[pyo3(signature = (indicators: "list[str]"=vec![]))]
     fn new(indicators: Vec<String>) -> Self {
-        Self { indicators }
+        Self {
+            indicators,
+        }
     }
 
     fn __repr__(&self) -> String {

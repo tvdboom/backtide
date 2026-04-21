@@ -6,12 +6,45 @@ Description: Utility functions.
 """
 
 from collections.abc import Iterable
-from typing import Any, TypeVar, overload
+import importlib
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 
+from backtide.config import DataBackend
+
+if TYPE_CHECKING:
+    import polars as pl
+
+
 T = TypeVar("T")
+
+
+def _check_dependency(name: str, pypi_name: str | None = None) -> ModuleType:
+    """Check an optional dependency.
+
+    Raise an error if the package is not installed.
+
+    Parameters
+    ----------
+    name: str
+        Name of the package to check.
+
+    pypi_name: str or None, default=None
+        Name of the package on PyPI. If None, assumes it's the same as `name`.
+
+    """
+    try:
+        return importlib.import_module(name)
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(
+            f"Unable to import the {name} package. Install it using pip install "
+            f"{pypi_name or name.replace('_', '-')} or install all of backtide's "
+            f"optional dependencies with pip install backtide[full]."
+        ) from None
 
 
 def _format_compact(n: float) -> str:
@@ -38,6 +71,28 @@ def _format_compact(n: float) -> str:
         return f"{n / 1_000:.1f}k"
     else:
         return f"{n:.0f}"
+
+
+def _make_dummy_bars(backend: DataBackend, n: int = 5) -> np.ndarray | pd.DataFrame | pl.DataFrame:
+    """Create a dummy OHLCV dataset matching the configured backend."""
+    rng = np.random.default_rng(42)
+
+    c = 100.0 + np.cumsum(rng.standard_normal(n))
+    o = c + rng.uniform(-1.0, 1.0, n)
+    h = c + rng.uniform(0.5, 2.0, n)
+    l = c - rng.uniform(0.5, 2.0, n)  # noqa: E741
+    v = rng.uniform(1_000, 10_000, n)
+
+    match backend:
+        case DataBackend.Numpy:
+            result = np.column_stack([o, h, l, c, v])
+        case DataBackend.Pandas:
+            result = pd.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume": v})
+        case DataBackend.Polars:
+            pl = _check_dependency("polars")
+            result = pl.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume": v})
+
+    return result
 
 
 @overload

@@ -8,8 +8,7 @@ Description: Abstract base class for indicators.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
-
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import numpy as np
@@ -36,6 +35,8 @@ class BaseIndicator(ABC):
     ```
 
     """
+
+    acronym: str | None = None
 
     @abstractmethod
     def compute(self, data: np.ndarray | pd.DataFrame | pl.DataFrame) -> Any:

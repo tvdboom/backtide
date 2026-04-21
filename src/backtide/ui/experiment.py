@@ -37,8 +37,8 @@ from backtide.backtest import (
 from backtide.config import get_config
 from backtide.core.data import resolve_profiles
 from backtide.data import Currency, InstrumentProfile, InstrumentType
+from backtide.indicators.utils import _get_indicator_label, _load_stored_indicators
 from backtide.storage import query_instruments
-from backtide.indicators.utils import _load_stored_indicators
 from backtide.ui.utils import (
     _CARD_CSS,
     _CODE_OPTIONS,
@@ -102,7 +102,6 @@ def strategy(data, state, indicators):
 def _apply_config_to_state(
     exp: ExperimentConfig,
     state: dict[str, Any] | SessionStateProxy,
-    user_code_options: list[str],
 ):
     """Write all fields of *exp* into the session *state* dict."""
     state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", exp.general.name)
@@ -124,14 +123,8 @@ def _apply_config_to_state(
     state["starting_positions"] = exp.portfolio.starting_positions
 
     state["predefined_strategies"] = exp.strategy.predefined_strategies
-    state["custom_strategies"] = [
-        {"source": user_code_options[0], "code": s.code} for s in exp.strategy.custom_strategies
-    ]
-    for i, s in enumerate(exp.strategy.custom_strategies):
-        state[f"strategy_name_{i}"] = s.name
-
-    # Map imported config indicator names to those available in storage.
-    state["experiment_indicators"] = exp.indicators.indicators
+    state["custom_strategies"] = exp.strategy.custom_strategies
+    state["indicators"] = exp.indicators.indicators
 
     ex = exp.exchange
     for key in (
@@ -173,7 +166,7 @@ def _build_indicator_config(
     state: dict[str, Any] | SessionStateProxy,
 ) -> IndicatorExpConfig:
     """Build an IndicatorExpConfig from the selected indicator names."""
-    selected = state.get("experiment_indicators", [])
+    selected = state.get("indicators", [])
     # selected is a list of indicator names (strings)
     return IndicatorExpConfig(indicators=list(selected))
 
@@ -208,16 +201,7 @@ def _build_config_toml(
                 "starting_positions", defaults.portfolio.starting_positions
             ),
         ),
-        strategy=StrategyExpConfig(
-            predefined_strategies=state.get("predefined_strategies", []),
-            custom_strategies=[
-                (
-                    state.get(f"strategy_name_{i}", f"Strategy {i + 1}"),
-                    e.get("code", ""),
-                )
-                for i, e in enumerate(state.get("custom_strategies", []))
-            ],
-        ),
+        strategy=StrategyExpConfig(),
         indicators=_build_indicator_config(state),
         exchange=ExchangeExpConfig(
             commission_type=state.get("commission_type", defaults.exchange.commission_type),
@@ -305,7 +289,7 @@ def _on_config_upload():
 
     try:
         exp = _parse_config_upload(upload)
-        _apply_config_to_state(exp, st.session_state, _CODE_OPTIONS)
+        _apply_config_to_state(exp, st.session_state)
         st.session_state["_import_success"] = f"Loaded configuration from `{upload.name}`."
     except Exception as ex:  # noqa: BLE001
         st.session_state["_import_error"] = f"Failed to parse file: {ex}"
@@ -868,17 +852,11 @@ with tab5:
         "simulation begins, so they add no per-tick overhead.",
     )
 
-    saved_indicators = _load_stored_indicators(cfg)
-
-    if saved_indicators:
-        from backtide.ui.indicators import _get_indicator_label
-
-        indicator_names = list(saved_indicators.keys())
-
+    if stored_ind := _load_stored_indicators(cfg):
         selected_ind = st.multiselect(
             label="Saved indicators",
-            key=(key := "experiment_indicators"),
-            options=indicator_names,
+            key=(key := "indicators"),
+            options=stored_ind,
             default=_default(key, []),
             placeholder="Select indicators...",
             on_change=lambda k=key: _persist(k),
@@ -887,8 +865,7 @@ with tab5:
 
         # Show a summary of selected indicators
         for name in selected_ind:
-            if name in saved_indicators:
-                st.caption(_get_indicator_label(saved_indicators[name]))
+            st.caption(_get_indicator_label(name, stored_ind[name]))
     else:
         st.info(
             "No saved indicators yet. Create indicators on the **Indicators** page first.",

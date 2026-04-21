@@ -182,14 +182,14 @@ impl PyConfig {
 ///
 /// Attributes
 /// ----------
-/// base_currency : str | [Currency], default="USD"
+/// base_currency : [Currency], default="USD"
 ///     ISO 4217 currency code that all prices are normalized to.
 ///
-/// triangulation_strategy : str | [TriangulationStrategy], default="direct"
+/// triangulation_strategy : [TriangulationStrategy], default="direct"
 ///     With which approach to convert currencies to `base_currency`. Read more
 ///     in the [user guide][currency-conversion].
 ///
-/// triangulation_fiat : str | [Currency], default="USD"
+/// triangulation_fiat : [Currency], default="USD"
 ///     The fiat currency used as an intermediate between a fiat currency and
 ///     `base_currency`. This method is chosen when no direct conversion path exists
 ///     or when this method has longer history and `triangulation_strategy="earliest"`
@@ -213,7 +213,7 @@ impl PyConfig {
 ///     the engine treats `triangulation_crypto`/`triangulation_crypto_pegged`
 ///     as the crossing pair at parity 1:1.
 ///
-/// log_level : str, default="warn"
+/// log_level : [LogLevel], default="warn"
 ///     Minimum tracing log level. Choose from: "error", "warn", "info", "debug".
 ///
 /// See Also
@@ -395,10 +395,10 @@ impl DataConfig {
 ///
 /// Attributes
 /// ----------
-/// data_backend : str | [DataBackend], default="pandas"
+/// data_backend : [DataBackend], default="pandas"
 ///     Which dataframe library to use when providing data to the frontend (i.e.,
 ///     the return of storage functions or parameters in the strategy function).
-///     Choose from: "pandas", "polars".
+///     Choose from: "numpy", "pandas", "polars".
 ///
 /// date_format : str, default="YYYY-MM-DD"
 ///     Format in which to display dates in [momentjs] style. Valid formats include

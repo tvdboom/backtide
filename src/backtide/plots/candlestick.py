@@ -19,11 +19,11 @@ from backtide.plots.utils import (
 
 
 def plot_candlestick(
-    df: pd.DataFrame,
+    data: pd.DataFrame,
     *,
     rangeslider: bool = True,
     title: str | dict[str, Any] | None = None,
-    legend: str | dict[str, Any] | None = "upper right",
+    legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] | None = None,
     filename: str | Path | None = None,
     display: bool | None = True,
@@ -38,41 +38,47 @@ def plot_candlestick(
 
     Parameters
     ----------
-    df : pd.DataFrame
+    data : pd.DataFrame
         Input data containing columns `open`, `high`, `low`, `close`
         and `dt` with the datetime.
 
     rangeslider : bool, default=True
         Whether to show the range slider below the chart.
 
-    title : str, dict or None, default=None
+    title: str, dict or None, default=None
         Title for the plot.
 
         - If None, no title is shown.
         - If str, text for the title.
-        - If dict, custom title configuration.
+        - If dict, [title configuration][parameters].
 
-    legend : str, dict or None, default="upper right"
-        Legend for the plot.
+    legend: str, dict or None, default="upper left"
+        Legend for the plot. See the [user guide][parameters] for an extended
+        description of the choices.
 
-        - If None: no legend is shown.
-        - If str: named position (e.g., `"lower left"`).
-        - If dict: legend configuration.
+        - If None: No legend is shown.
+        - If str: Position to display the legend.
+        - If dict: Legend configuration.
 
-    figsize : tuple[int, int] or None, default=None
-        Figure size in pixels as `(width, height)`. If None, defaults to
-        `(900, 600)`.
+    figsize: tuple, default=(900, 600)
+        Figure's size in pixels, format as (x, y).
 
-    filename : str, Path or None, default=None
-        Save the plot to this path. If None, the plot is not saved.
+    filename: str, Path or None, default=None
+        Save the plot using this name. The type of the file depends on the
+        provided name (`.html`, `.png`, `.pdf`, etc...). If `filename` has no
+        file type, the plot is saved as `.html`. If `None`, the plot isn't saved.
 
-    display : bool or None, default=True
-        Whether to render the plot. If None, return the figure.
+    display: bool or None, default=True
+        Whether to render the plot. If `None`, it returns the figure.
 
     Returns
     -------
     go.Figure or None
         The Plotly figure object. Only returned if `display=None`.
+
+    See Also
+    --------
+    - backtide.plots:plot_price
 
     Examples
     --------
@@ -86,8 +92,6 @@ def plot_candlestick(
     ```
 
     """
-    df = df.sort_values("dt")
-
     fig = go.Figure()
 
     # Default candlestick colors
@@ -96,13 +100,13 @@ def plot_candlestick(
 
     fig.add_trace(
         go.Candlestick(
-            x=df["dt"],
-            open=df["open"],
-            high=df["high"],
-            low=df["low"],
-            close=df["close"],
+            x=data["dt"],
+            open=data["open"],
+            high=data["high"],
+            low=data["low"],
+            close=data["close"],
             whiskerwidth=0.2,
-            name=df.get("symbol"),
+            name=data["symbol"].iloc[0],
             increasing={"line": {"color": inc}, "fillcolor": inc},
             decreasing={"line": {"color": dec}, "fillcolor": dec},
             showlegend=False,

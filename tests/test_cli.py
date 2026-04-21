@@ -162,7 +162,7 @@ class TestMainBlock:
         result = subprocess.run(
             [
                 sys.executable,
-                str(Path(__file__).resolve().parent.parent / "backtide" / "cli.py"),
+                str(Path(__file__).resolve().parent.parent / "src" / "backtide" / "cli.py"),
                 "--help",
             ],
             capture_output=True,

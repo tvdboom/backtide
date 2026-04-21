@@ -5,59 +5,88 @@ Description: Utility functions to work with indicators.
 
 """
 
+import ast
 import inspect
-import pickle
 from pathlib import Path
+from typing import Any
 
 import cloudpickle
 import streamlit as st
+
+from backtide.config import Config
 from backtide.indicators import BaseIndicator
+from backtide.utils.utils import _make_dummy_bars
 
 
-def _check_indicator_code(code: str) -> str | None:
-    """Validate that `code` defines a class with `compute(self, data)`."""
-    import ast
+def _build_custom_indicator(code: str) -> BaseIndicator:
+    """Execute code and return the last expression."""
+    tree = ast.parse(code)
 
+    if not tree.body or not isinstance(tree.body[-1], ast.Expr):
+        raise ValueError("The last statement must be an instantiation of the indicator")
+
+    # Exec everything except the last statement, eval the last
+    ns = {}
+    exec(compile(tree, "<indicator>", "exec"), ns)
+    instance = eval(compile(ast.Expression(body=tree.body[-1].value), "<indicator>", "eval"), ns)
+
+    if not isinstance(instance, BaseIndicator):
+        raise TypeError(f"Expected a subclass of BaseIndicator, got {type(instance).__name__}.")
+
+    # Can't reliably recover source code from an unpickled object
+    # so we add the source code to the instance
+    instance._source_code = code
+
+    return instance
+
+
+def _check_indicator_code(code: str, cfg: Config) -> str | None:
+    """Validate that `code` defines a class with `compute(self, data)` and test it."""
     try:
-        tree = ast.parse(code)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                for item in node.body:
-                    if isinstance(item, ast.FunctionDef) and item.name == "compute":
-                        args = [a.arg for a in item.args.args]
-                        if args == ["self", "data"]:
-                            return None
-                        return (
-                            f"Method `compute` in class `{node.name}` must have "
-                            f"signature `compute(self, data)`."
-                        )
-        return "No class with a `compute(self, data)` method found in the code."
+        ast.parse(code)
     except SyntaxError as ex:
         return f"Syntax error:\n\n{ex}"
 
+    try:
+        instance = _build_custom_indicator(code)
+    except Exception as ex:  # noqa: BLE001
+        return f"Failed to instantiate indicator: {ex}"
 
-def _save_indicator(
-    indicator: BaseIndicator,
-    name: str,
-    storage_path: Path,
-    *,
-    code: str | None = None,
-):
-    """Pickle an indicator instance to disk under `name.pkl`."""
-    storage_path.mkdir(parents=True, exist_ok=True)
-    serializer = pickle if _is_builtin_indicator(indicator) else cloudpickle
-    with (storage_path / f"{name}.pkl").open("wb") as f:
-        serializer.dump(indicator, f)
+    dummy = _make_dummy_bars(cfg.display.data_backend)
+    try:
+        result = instance.compute(dummy)
+    except Exception as ex:  # noqa: BLE001
+        return f"{ex.__class__.__name__}: {ex}"
 
-    py_path = storage_path / f"{name}.py"
-    if code is not None:
-        py_path.write_text(code, encoding="utf-8")
+    if result is None:
+        return "Indicator `compute` returned `None`. It must return a result."
+
+    return None
+
+
+def _get_indicator_label(name: str, ind: BaseIndicator) -> str:
+    """Build a UI label for an indicator."""
+    cls = type(ind)
+    if _is_builtin_indicator(ind):
+        label = f":material/show_chart: **{name}** · _{cls.acronym}_"
+
+        # Show parameters for builtin indicators
+        _, args = ind.__reduce__()
+        sig = inspect.signature(cls)
+        if params := dict(zip(sig.parameters, args, strict=True)):
+            label += f" · {', '.join(f'{k}={v}' for k, v in params.items())}"
+
+        return label
     else:
-        # Remove stale source file if saving a builtin
-        py_path.unlink(missing_ok=True)
+        return f":material/show_chart: **{name}** · _Custom_"
 
 
-def _load_stored_indicators(cfg: Config) -> dict[str, Any]:
+def _is_builtin_indicator(ind: Any) -> bool:
+    """Return True if the indicator is a built-in (Rust-defined) indicator."""
+    return getattr(type(ind), "__module__", "").startswith("backtide.")
+
+
+def _load_stored_indicators(cfg: Config) -> dict[str, BaseIndicator]:
     """Load and return the indicator objects from storage."""
     path = Path(cfg.data.storage_path) / "indicators"
 
@@ -72,39 +101,9 @@ def _load_stored_indicators(cfg: Config) -> dict[str, Any]:
     return indicators
 
 
-def _get_indicator_label(ind: BaseIndicator) -> str:
-    """Build a UI label for an indicator."""
-    cls = type(ind)
-    if _is_builtin_indicator(ind):
-        label = f":material/show_chart: **{cls.name}** · _{cls.acronym}_"
+def _save_indicator(ind: BaseIndicator, name: str, cfg: Config):
+    """Pickle an indicator instance to disk."""
+    path = Path(cfg.data.storage_path) / "indicators"
 
-        # Show parameters for builtin indicators
-        _, args = ind.__reduce__()
-        sig = inspect.signature(cls)
-        if params := {n: v for n, v in zip(sig.parameters, args, strict=True)}:
-            label += f" · {', '.join(f'{k}={v}' for k, v in params.items())}"
-
-        return label
-    else:
-        return f":material/code: **{cls.__name__}** · Custom"
-
-
-def _is_builtin_indicator(ind: Any) -> bool:
-    """Return True if the indicator is a built-in (Rust-defined) indicator."""
-    return getattr(type(ind), "__module__", "").startswith("backtide.")
-
-
-def _build_custom_indicator(code: str) -> BaseIndicator:
-    """Execute code and instantiate the first BaseIndicator subclass found."""
-    ns: dict = {}
-    exec(code, ns)
-
-    for obj in ns.values():
-        if (
-            isinstance(obj, type)
-            and issubclass(obj, BaseIndicator)
-            and obj is not BaseIndicator
-        ):
-            return obj()
-
-    raise ValueError("The code must define a BaseIndicator subclass.")
+    with (path / f"{name}.pkl").open("wb") as f:
+        cloudpickle.dump(ind, f)

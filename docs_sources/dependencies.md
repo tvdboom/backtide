@@ -25,6 +25,7 @@ And operating systems:
 
 * **[click](https://click.palletsprojects.com/)** (>=8.3.1)
 * **[cloudpickle](https://github.com/cloudpipe/cloudpickle)** (>=3.1.2)
+* **[numpy](https://numpy.org/)** (>=2.0.0)
 * **[pandas](https://pandas.pydata.org/)** (>=2.3.3)
 * **[plotly](https://plotly.com/python/)** (>=6.1.0)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
@@ -34,6 +35,9 @@ And operating systems:
 
 
 ### Optional
+
+Some utilities or configuration options require the installation of additional
+libraries. You can install all the optional dependencies using `pip install backtide[full]`.
 
 * **[polars](https://github.com/pola-rs/polars)** (>=1.0)
 
