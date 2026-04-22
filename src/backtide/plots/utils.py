@@ -125,7 +125,8 @@ def _plot(
         "groupclick": kwargs.get("groupclick", "toggleitem"),
         "font_size": cfg.plots.label_fontsize,
         "grouptitlefont_size": cfg.plots.label_fontsize,
-        "bgcolor": "rgba(255, 255, 255, 0.5)",
+        "grouptitlefont_color": "rgb(0, 0, 0)",
+        "bgcolor": "rgba(255, 255, 255, 0.2)",
     }
 
     if isinstance(legend, str):

@@ -5,7 +5,6 @@ Description: Unit tests for the CLI commands.
 
 """
 
-from pathlib import Path
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch

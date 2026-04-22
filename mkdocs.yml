@@ -133,7 +133,11 @@ nav:
             - resolve_profiles: api/data/resolve_profiles.md
         - plots:
             - plot_candlestick: api/plots/plot_candlestick.md
+            - plot_correlation: api/plots/plot_correlation.md
+            - plot_drawdown: api/plots/plot_drawdown.md
             - plot_price: api/plots/plot_price.md
+            - plot_returns: api/plots/plot_returns.md
+            - plot_volume: api/plots/plot_volume.md
         - storage:
             - query_bars: api/storage/query_bars.md
             - query_bars_summary: api/storage/query_bars_summary.md

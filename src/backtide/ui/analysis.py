@@ -13,7 +13,11 @@ from backtide.core.data import Interval
 from backtide.core.storage import query_bars, query_instruments
 from backtide.indicators.utils import _load_stored_indicators
 from backtide.plots.candlestick import plot_candlestick
+from backtide.plots.correlation import plot_correlation
+from backtide.plots.drawdown import plot_drawdown
 from backtide.plots.price import PRICE_COLUMNS, plot_price
+from backtide.plots.returns import plot_returns
+from backtide.plots.volume import plot_volume
 from backtide.ui.utils import (
     _default,
     _get_timezone,
@@ -128,11 +132,14 @@ bars = bars[
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         ":material/show_chart: Price",
         ":material/candlestick_chart: Candlestick",
-        ":material/analytics: Distribution",
+        ":material/bar_chart: Volume",
+        ":material/stacked_line_chart: Returns",
+        ":material/trending_down: Drawdown",
+        ":material/grid_on: Correlation",
     ],
     key=(key := "plot_tabs"),
     default=_default(key),
@@ -142,6 +149,16 @@ tab1, tab2, tab3 = st.tabs(
 # Add datetime column for plotting
 bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
 
+price_col_radio = lambda key: st.radio(
+    label="Price",
+    key=key,
+    options=PRICE_COLUMNS,
+    index=list(PRICE_COLUMNS).index("adj_close" if (x := _default("price_col")) is None else x),
+    format_func=lambda c: PRICE_COLUMNS[c],
+    horizontal=False,
+    on_change=lambda k=key: st.session_state.update(_price_col=st.session_state[k]),
+)
+
 with tab1:
     col1, col2 = st.columns([10, 1])
     col1.caption("Price over time for selected symbols.")
@@ -149,15 +166,7 @@ with tab1:
     stored_ind = _load_stored_indicators(cfg)
 
     with col2.popover(":material/tune:"):
-        price_col = st.radio(
-            label="Price",
-            key=(key := "price_col"),
-            options=PRICE_COLUMNS,
-            format_func=lambda c: PRICE_COLUMNS[c],
-            index=list(PRICE_COLUMNS).index("adj_close"),
-            horizontal=False,
-            on_change=lambda k=key: _persist(k),
-        )
+        price_col = price_col_radio("price_col_price")
 
         if stored_ind:
             selected_ind = st.multiselect(
@@ -230,7 +239,53 @@ with tab2:
     )
 
 with tab3:
-    st.caption(
-        "Compare the distribution of prices across selected symbols. "
-        "The boxplot shows median, quartiles, and outliers."
+    st.caption("Trading volume over time for selected symbols.")
+
+    st.plotly_chart(
+        plot_volume(data=bars, display=None),
+        width="stretch",
     )
+
+with tab4:
+    col1, col2 = st.columns([10, 1])
+    col1.caption("Distribution of period-over-period percentage returns.")
+
+    with col2.popover(":material/tune:"):
+        price_col = price_col_radio("price_col_dist")
+
+    st.plotly_chart(
+        plot_returns(data=bars, price_col=price_col, display=None),
+        width="stretch",
+    )
+
+with tab5:
+    col1, col2 = st.columns([10, 1])
+    col1.caption("Percentage drawdown from the running peak over time.")
+
+    with col2.popover(":material/tune:"):
+        price_col = price_col_radio("price_col_drawdown")
+
+    st.plotly_chart(
+        plot_drawdown(data=bars, price_col=price_col, display=None),
+        width="stretch",
+    )
+
+with tab6:
+    col1, col2 = st.columns([10, 1])
+    col1.caption(
+        "Pairwise correlation of returns across selected symbols. Select at least two symbols."
+    )
+
+    with col2.popover(":material/tune:"):
+        price_col = price_col_radio("price_col_corr")
+
+    if len(symbols) < 2:
+        st.info(
+            "Select at least two symbols to compute correlation.",
+            icon=":material/info:",
+        )
+    else:
+        st.plotly_chart(
+            plot_correlation(data=bars, price_col=price_col, display=None),
+            width="stretch",
+        )

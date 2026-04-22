@@ -127,7 +127,7 @@ def _to_pandas(data: Any) -> pd.DataFrame:
         return data
 
     if hasattr(data, "to_pandas"):
-        return data.to_pandas()
+        data = data.to_pandas()
 
     return pd.DataFrame(data)
 
