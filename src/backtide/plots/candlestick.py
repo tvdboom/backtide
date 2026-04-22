@@ -28,7 +28,7 @@ def plot_candlestick(
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
-    """Create a candlestick chart using Plotly.
+    """Create a candlestick chart.
 
     Visualizes OHLC (Open-High-Low-Close) price data over time as
     candlestick bars — the standard chart type used in financial
@@ -45,14 +45,14 @@ def plot_candlestick(
     rangeslider : bool, default=True
         Whether to show the range slider below the chart.
 
-    title: str, dict or None, default=None
+    title : str | dict | None, default=None
         Title for the plot.
 
         - If None, no title is shown.
         - If str, text for the title.
         - If dict, [title configuration][parameters].
 
-    legend: str, dict or None, default="upper left"
+    legend : str | dict | None, default="upper left"
         Legend for the plot. See the [user guide][parameters] for an extended
         description of the choices.
 
@@ -60,20 +60,20 @@ def plot_candlestick(
         - If str: Position to display the legend.
         - If dict: Legend configuration.
 
-    figsize: tuple, default=(900, 600)
+    figsize : tuple[int, int] | None, default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
-    filename: str, Path or None, default=None
+    filename : str | Path | None, default=None
         Save the plot using this name. The type of the file depends on the
         provided name (`.html`, `.png`, `.pdf`, etc...). If `filename` has no
         file type, the plot is saved as `.html`. If `None`, the plot isn't saved.
 
-    display: bool or None, default=True
+    display : bool | None, default=True
         Whether to render the plot. If `None`, it returns the figure.
 
     Returns
     -------
-    go.Figure or None
+    go.Figure | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also

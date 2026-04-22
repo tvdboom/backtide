@@ -18,11 +18,10 @@ from backtide.ui.utils import (
     _default,
     _get_timezone,
     _persist,
-    _to_pandas,
     _to_upper_values,
 )
 from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
-from backtide.utils.utils import _ts_to_datetime
+from backtide.utils.utils import _to_pandas, _ts_to_datetime
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility functions

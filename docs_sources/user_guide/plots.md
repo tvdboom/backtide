@@ -42,13 +42,27 @@ Apart from the plot-specific parameters, all plots have five parameters in commo
 
 ## Aesthetics
 
-The plot's aesthetics can be customized using the plot attributes prior
-to calling the plotting method, e.g., `#!python atom.title_fontsize = 30`.
-The default values are:
+The plot's aesthetics are controlled through the `[plots]` section of the
+[configuration][configuration]. The default values are:
 
-* **palette:** ["rgb(0, 98, 98)", "rgb(56, 166, 165)", "rgb(115, 175, 72)",
-  "rgb(237, 173, 8)", "rgb(225, 124, 5)", "rgb(204, 80, 62)", "rgb(148, 52, 110)",
-  "rgb(111, 64, 112)", "rgb(102, 102, 102)"]
-* **title_fontsize:** 24
-* **label_fontsize:** 16
-* **tick_fontsize:** 12
+* **template:** `"plotly"` — Plotly template for figure styling.
+* **palette:** Blue-to-teal gradient. Colors cycle when there are more
+  traces than entries.
+
+    `["rgb(13, 71, 161)", "rgb(2, 136, 209)", "rgb(0, 172, 193)",`
+    `"rgb(0, 137, 123)", "rgb(56, 142, 60)", "rgb(129, 199, 132)"]`
+
+* **title_fontsize:** `22` — Font size (px) for plot titles.
+* **label_fontsize:** `20` — Font size (px) for axis labels and legends.
+* **tick_fontsize:** `14` — Font size (px) for axis tick labels.
+
+To change these values, set them in your configuration file or programmatically:
+
+```python
+from backtide.config import get_config, set_config
+
+cfg = get_config()
+cfg.plots.template = "plotly_dark"
+cfg.plots.title_fontsize = 28
+set_config(cfg)
+```

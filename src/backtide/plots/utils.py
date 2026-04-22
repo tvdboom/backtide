@@ -15,20 +15,7 @@ import plotly.graph_objects as go
 from backtide.core.config import get_config
 from backtide.ui.utils import _moment_to_strftime
 
-# Default font sizes
-TITLE_FONTSIZE: int = 22
-LABEL_FONTSIZE: int = 20
-TICK_FONTSIZE: int = 14
-
-# Backtide default color palette (blue → teal gradient)
-PALETTE: list[str] = [
-    "rgb(13, 71, 161)",  # Blue 900
-    "rgb(2, 136, 209)",  # Light Blue 600
-    "rgb(0, 172, 193)",  # Cyan 600
-    "rgb(0, 137, 123)",  # Teal 600
-    "rgb(56, 142, 60)",  # Green 700
-    "rgb(129, 199, 132)",  # Green 300
-]
+cfg = get_config()
 
 
 def _plot(
@@ -41,7 +28,6 @@ def _plot(
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper right",
     figsize: tuple[int, int] | None = None,
-    template: str = "plotly_dark",
     filename: str | Path | None = None,
     display: bool | None = True,
     **kwargs,
@@ -56,26 +42,26 @@ def _plot(
     fig : go.Figure
         The Plotly figure to style.
 
-    xlabel : str or None, default=None
+    xlabel : str | None, default=None
         Label for the x-axis.
 
-    ylabel : str or None, default=None
+    ylabel : str | None, default=None
         Label for the y-axis.
 
-    xlim : tuple[int, int] or None, default=None
+    xlim : tuple[int, int] | None, default=None
         Limits for the x-axis as `(min, max)`.
 
-    ylim : tuple[int, int] or None, default=None
+    ylim : tuple[int, int] | None, default=None
         Limits for the y-axis as `(min, max)`.
 
-    title: str, dict or None, default=None
+    title : str | dict | None, default=None
         Title for the plot.
 
         - If None, no title is shown.
         - If str, text for the title.
         - If dict, [title configuration][parameters].
 
-    legend: str, dict or None, default="upper left"
+    legend : str | dict | None, default="upper left"
         Legend for the plot. See the [user guide][parameters] for an extended
         description of the choices.
 
@@ -83,15 +69,15 @@ def _plot(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize: tuple, default=(900, 600)
+    figsize : tuple[int, int] | None, default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
-    filename: str, Path or None, default=None
+    filename : str | Path | None, default=None
         Save the plot using this name. The type of the file depends on the
         provided name (`.html`, `.png`, `.pdf`, etc...). If `filename` has no
         file type, the plot is saved as `.html`. If `None`, the plot isn't saved.
 
-    display: bool or None, default=True
+    display : bool | None, default=True
         Whether to render the plot. If `None`, it returns the figure.
 
     **kwargs
@@ -99,7 +85,7 @@ def _plot(
 
     Returns
     -------
-    go.Figure or None
+    go.Figure | None
         The figure object. Only returned when `display=None`.
 
     """
@@ -112,7 +98,7 @@ def _plot(
         "xanchor": "center",
         "yanchor": "top",
         "xref": "paper",
-        "font_size": TITLE_FONTSIZE,
+        "font_size": cfg.plots.title_fontsize,
     }
 
     if isinstance(title, dict):
@@ -137,7 +123,8 @@ def _plot(
     default_legend = {
         "traceorder": "grouped",
         "groupclick": kwargs.get("groupclick", "toggleitem"),
-        "font_size": LABEL_FONTSIZE,
+        "font_size": cfg.plots.label_fontsize,
+        "grouptitlefont_size": cfg.plots.label_fontsize,
         "bgcolor": "rgba(255, 255, 255, 0.5)",
     }
 
@@ -148,15 +135,15 @@ def _plot(
     else:
         legend_cfg = None
 
-    title_space = TITLE_FONTSIZE if (title_cfg and title_cfg.get("text")) else 10
+    title_space = cfg.plots.title_fontsize if (title_cfg and title_cfg.get("text")) else 10
 
-    layout: dict[str, Any] = {
-        "template": kwargs.get("template"),
+    layout = {
+        "template": kwargs.get("template", cfg.plots.template),
         "width": width,
         "height": height,
         "showlegend": legend is not None,
-        "hoverlabel": {"font_size": LABEL_FONTSIZE},
-        "font_size": TICK_FONTSIZE,
+        "hoverlabel": {"font_size": cfg.plots.label_fontsize},
+        "font_size": cfg.plots.tick_fontsize,
         "margin": {"l": 50, "b": 50, "r": 0, "t": 25 + title_space, "pad": 0},
         "xaxis_tickformat": _moment_to_strftime(get_config().display.date_format),
         "yaxis_tickformat": "f",
@@ -167,9 +154,13 @@ def _plot(
     if legend_cfg:
         layout["legend"] = legend_cfg
     if xlabel:
-        layout["xaxis_title"] = {"text": xlabel, "font_size": LABEL_FONTSIZE}
+        layout["xaxis_title"] = {"text": xlabel, "font_size": cfg.plots.label_fontsize}
     if ylabel:
-        layout["yaxis_title"] = {"text": ylabel, "font_size": LABEL_FONTSIZE, "standoff": 20}
+        layout["yaxis_title"] = {
+            "text": ylabel,
+            "font_size": cfg.plots.label_fontsize,
+            "standoff": 20,
+        }
 
     if xlim is not None:
         layout["xaxis_range"] = xlim

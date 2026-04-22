@@ -6,14 +6,16 @@ Description: Module containing the automatic example rendering.
 """
 
 import ast
-import re
+from base64 import b64encode
 from code import InteractiveInterpreter
 from io import StringIO
 import os
+import re
 import shutil
 import sys
 import tempfile
 from uuid import uuid4
+
 from markdown import Markdown
 from pandas.io.formats.style import Styler
 from pymdownx.superfences import SuperFencesException
@@ -89,7 +91,7 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
 
         """
         if files := [os.path.join(DIR_EXAMPLES, f) for f in os.listdir(DIR_EXAMPLES)]:
-            return os.path.basename(max(files, key=os.path.getmtime))
+            return os.path.basename(str(max(files, key=os.path.getmtime)))
         else:
             return None
 
@@ -116,13 +118,14 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
             # Inject filename parameter to plot call to save the figure
             if re.search(r"plot_\w+\(", line):
                 f, arguments = block[0].split("(", 1)
+                inject = f"filename='{DIR_EXAMPLES}{uuid4()}', figsize=(830, 600), display=None"
                 if arguments.startswith(")"):
                     # There are no other arguments
-                    block[0] = f'{f}(filename="{DIR_EXAMPLES}{uuid4()}")'
+                    block[0] = f"{f}({inject})"
                 else:
                     # Attach filename after other arguments
                     args, close = arguments.rsplit(")", 1)
-                    block[0] = f'{f}({args}, filename="{DIR_EXAMPLES}{uuid4()}"){close}'
+                    block[0] = f"{f}({args}, {inject}){close}"
 
             if not line.endswith("# norun"):
                 # First check for syntax errors
@@ -145,7 +148,9 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
                 finally:
                     if text := sys.stdout.getvalue():
                         # Omit plot's output
-                        if not text.startswith(("{'application/pdf'", "<pandas.io.formats")):
+                        if not text.startswith(
+                            ("{'application/pdf'", "<pandas.io.formats", "Figure({")
+                        ):
                             output[-1].append(f"\n{text[:-1]}")  # Remove last newline
 
                     sys.stdout = sys.__stdout__
@@ -172,7 +177,8 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
                                 img = b64encode(mpl_f.read()).decode("utf-8")
 
                             figures.append(
-                                f"<img src='data:image/png;base64,{img}' alt='{f}' draggable='false'>"
+                                f"<img src='data:image/png;base64,{img}' "
+                                f"alt='{f}' draggable='false'>"
                             )
 
         elif i > end_line:

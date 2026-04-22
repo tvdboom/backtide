@@ -147,6 +147,7 @@ force-sort-within-sections = true
 "config.py" = ["F401"]  # Unused imports
 "data.py" = ["F401"]  # Unused imports
 "storage.py" = ["F401"]  # Unused imports
+"price.py" = ["E501"]  # Line too long
 "generate_stubs.py" = [
     "INP001",  # Part of an implicit namespace package
     "T201",  # Use print statement

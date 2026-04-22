@@ -42,6 +42,20 @@ If no file is found, the built-in defaults are used.
     date_format = "YYYY-MM-DD"
     time_format = "HH:MM"
     port = 8501
+
+    [plots]
+    template = "plotly"
+    palette = [
+        "rgb(13, 71, 161)",
+        "rgb(2, 136, 209)",
+        "rgb(0, 172, 193)",
+        "rgb(0, 137, 123)",
+        "rgb(56, 142, 60)",
+        "rgb(129, 199, 132)",
+    ]
+    title_fontsize = 22
+    label_fontsize = 20
+    tick_fontsize = 14
     ```
 
 === "YAML"
@@ -70,6 +84,19 @@ If no file is found, the built-in defaults are used.
         logokit_api_key: null
         address: null
         port: 8501
+
+    plots:
+        template: plotly
+        palette:
+            - "rgb(13, 71, 161)"
+            - "rgb(2, 136, 209)"
+            - "rgb(0, 172, 193)"
+            - "rgb(0, 137, 123)"
+            - "rgb(56, 142, 60)"
+            - "rgb(129, 199, 132)"
+        title_fontsize: 22
+        label_fontsize: 20
+        tick_fontsize: 14
     ```
 
 === "JSON"
@@ -100,6 +127,20 @@ If no file is found, the built-in defaults are used.
             "logokit_api_key": null,
             "address": null,
             "port": 8501
+        },
+        "plots": {
+            "template": "plotly",
+            "palette": [
+                "rgb(13, 71, 161)",
+                "rgb(2, 136, 209)",
+                "rgb(0, 172, 193)",
+                "rgb(0, 137, 123)",
+                "rgb(56, 142, 60)",
+                "rgb(129, 199, 132)"
+            ],
+            "title_fontsize": 22,
+            "label_fontsize": 20,
+            "tick_fontsize": 14
         }
     }
     ```

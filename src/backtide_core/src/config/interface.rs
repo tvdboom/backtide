@@ -11,6 +11,7 @@
 //! | `[general]` | Portfolio-wide settings                              |
 //! | `[data]`    | Data fetching and storage settings                   |
 //! | `[display]` | UI / Streamlit app                                   |
+//! | `[plots]`   | Plot appearance settings                             |
 
 use crate::config::errors::{ConfigError, ConfigResult};
 use crate::config::models::dataframe_library::DataFrameLibrary;
@@ -50,6 +51,9 @@ pub struct Config {
 
     /// Settings that control how values are presented in the frontend.
     pub display: DisplayConfig,
+
+    /// Settings that control plot appearance.
+    pub plots: PlotsConfig,
 }
 
 impl Config {
@@ -87,6 +91,9 @@ impl Config {
 ///     Settings that control how values are presented in the application's
 ///     frontend.
 ///
+/// plots : [PlotsConfig]
+///     Settings that control the appearance of plots.
+///
 /// See Also
 /// --------
 /// - backtide.config:get_config
@@ -98,6 +105,7 @@ pub struct PyConfig {
     pub general: Py<GeneralConfig>,
     pub data: Py<DataConfig>,
     pub display: Py<DisplayConfig>,
+    pub plots: Py<PlotsConfig>,
 }
 
 impl PyConfig {
@@ -106,6 +114,7 @@ impl PyConfig {
             general: Py::new(py, cfg.general)?,
             data: Py::new(py, cfg.data)?,
             display: Py::new(py, cfg.display)?,
+            plots: Py::new(py, cfg.plots)?,
         })
     }
 
@@ -114,6 +123,7 @@ impl PyConfig {
             general: self.general.borrow(py).clone(),
             data: self.data.borrow(py).clone(),
             display: self.display.borrow(py).clone(),
+            plots: self.plots.borrow(py).clone(),
         }
     }
 }
@@ -124,6 +134,7 @@ impl Clone for PyConfig {
             general: self.general.clone_ref(py),
             data: self.data.clone_ref(py),
             display: self.display.clone_ref(py),
+            plots: self.plots.clone_ref(py),
         })
     }
 }
@@ -134,12 +145,13 @@ impl PyConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (general: "GeneralConfig | None"=None, data: "DataConfig | None"=None, display: "DisplayConfig | None"=None))]
+    #[pyo3(signature = (general: "GeneralConfig | None"=None, data: "DataConfig | None"=None, display: "DisplayConfig | None"=None, plots: "PlotsConfig | None"=None))]
     fn new(
         py: Python<'_>,
         general: Option<Py<GeneralConfig>>,
         data: Option<Py<DataConfig>>,
         display: Option<Py<DisplayConfig>>,
+        plots: Option<Py<PlotsConfig>>,
     ) -> PyResult<Self> {
         let default = Self::from_rust(py, Config::default())?;
 
@@ -147,15 +159,17 @@ impl PyConfig {
             general: general.unwrap_or(default.general),
             data: data.unwrap_or(default.data),
             display: display.unwrap_or(default.display),
+            plots: plots.unwrap_or(default.plots),
         })
     }
 
     fn __repr__(&self, py: Python<'_>) -> String {
         format!(
-            "Config(general={}, data={}, display={})",
+            "Config(general={}, data={}, display={}, plots={})",
             self.general.borrow(py).__repr__(),
             self.data.borrow(py).__repr__(),
             self.display.borrow(py).__repr__(),
+            self.plots.borrow(py).__repr__(),
         )
     }
 
@@ -353,7 +367,11 @@ impl DataConfig {
 
     #[new]
     #[pyo3(signature = (storage_path: "str"=".backtide", providers: "dict[str | InstrumentType, str | Provider] | None"=None, dataframe_library: "str | DataFrameLibrary"=DataFrameLibrary::default()))]
-    fn new(storage_path: &str, providers: Option<Bound<'_, PyAny>>, dataframe_library: DataFrameLibrary) -> PyResult<Self> {
+    fn new(
+        storage_path: &str,
+        providers: Option<Bound<'_, PyAny>>,
+        dataframe_library: DataFrameLibrary,
+    ) -> PyResult<Self> {
         let mut resolved = DataConfig::default().providers;
         if let Some(obj) = providers {
             let dict = obj.cast::<pyo3::types::PyDict>()?;
@@ -515,6 +533,116 @@ impl DisplayConfig {
     ///     Datetime format.
     pub fn datetime_format(&self) -> String {
         format!("{} {}", self.date_format, self.time_format)
+    }
+
+    /// Convert the configuration object to a dictionary.
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Self as dict.
+    pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
+        pythonize(py, &self).unwrap().unbind()
+    }
+}
+
+/// Configuration for plot appearance.
+///
+/// The plot parameters control the visual styling of all charts produced
+/// by backtide. Read more in the [user guide][configuration].
+///
+/// Attributes
+/// ----------
+/// template : str, default="plotly"
+///     Plotly template used for figure styling. Common choices are `"plotly"`,
+///     `"plotly_dark"`, `"plotly_white"`, `"ggplot2"`, `"seaborn"`.
+///
+/// palette : list[str]
+///     Ordered list of RGB color strings used for data traces. Colors cycle
+///     when more traces than colors exist.
+///
+/// title_fontsize : int, default=22
+///     Font size in pixels for plot titles.
+///
+/// label_fontsize : int, default=20
+///     Font size in pixels for axis labels and legend entries.
+///
+/// tick_fontsize : int, default=14
+///     Font size in pixels for axis tick labels.
+///
+/// See Also
+/// --------
+/// - backtide.config:get_config
+/// - backtide.config:load_config
+/// - backtide.config:set_config
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.config")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlotsConfig {
+    pub template: String,
+    pub palette: Vec<String>,
+    pub title_fontsize: u16,
+    pub label_fontsize: u16,
+    pub tick_fontsize: u16,
+}
+
+impl Default for PlotsConfig {
+    fn default() -> Self {
+        Self {
+            template: "plotly".to_owned(),
+            palette: vec![
+                "rgb(13, 71, 161)".to_owned(),   // Blue 900
+                "rgb(2, 136, 209)".to_owned(),   // Light Blue 600
+                "rgb(0, 172, 193)".to_owned(),   // Cyan 600
+                "rgb(0, 137, 123)".to_owned(),   // Teal 600
+                "rgb(56, 142, 60)".to_owned(),   // Green 700
+                "rgb(129, 199, 132)".to_owned(), // Green 300
+            ],
+            title_fontsize: 22,
+            label_fontsize: 20,
+            tick_fontsize: 14,
+        }
+    }
+}
+
+#[pymethods]
+impl PlotsConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (
+        template: "str"="plotly",
+        palette: "list[str] | None"=None,
+        title_fontsize: "int"=22,
+        label_fontsize: "int"=20,
+        tick_fontsize: "int"=14
+    ))]
+    fn new(
+        template: &str,
+        palette: Option<Vec<String>>,
+        title_fontsize: u16,
+        label_fontsize: u16,
+        tick_fontsize: u16,
+    ) -> Self {
+        Self {
+            template: template.to_owned(),
+            palette: palette.unwrap_or_else(|| PlotsConfig::default().palette),
+            title_fontsize,
+            label_fontsize,
+            tick_fontsize,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PlotsConfig(template={:?}, palette=[{:?}], title_fontsize={}, label_fontsize={}, tick_fontsize={})",
+            self.template,
+            self.palette.iter().map(|c| format!("{c:?}")).collect::<Vec<String>>().join(", "),
+            self.title_fontsize,
+            self.label_fontsize,
+            self.tick_fontsize,
+        )
     }
 
     /// Convert the configuration object to a dictionary.

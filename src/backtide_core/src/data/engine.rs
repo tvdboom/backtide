@@ -675,13 +675,16 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::interface::Config;
     use crate::data::models::bar_download::BarDownload;
     use crate::data::providers::traits::DataProvider;
     use crate::engine::EngineCache;
+    use crate::storage::duckdb::DuckDb;
     use crate::storage::traits::Storage;
     use async_trait::async_trait;
     use strum::IntoEnumIterator;
     use tempfile::TempDir;
+    use tokio::runtime::Runtime;
 
     /// A mock provider that returns configurable results.
     struct MockProvider {
@@ -755,15 +758,14 @@ mod tests {
     }
 
     fn test_engine(mock: MockProvider) -> (Engine, TempDir) {
-        let config = Box::leak(Box::new(crate::config::interface::Config {
-            general: Default::default(),
-            data: Default::default(),
-            display: Default::default(),
-        }));
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let config = Box::leak(Box::new(Config::default()));
+
+        let rt = Runtime::new().unwrap();
+
         let tmp = TempDir::new().unwrap();
         let db_path = tmp.path().join("test.db");
-        let db = crate::storage::duckdb::DuckDb::new(&db_path).unwrap();
+
+        let db = DuckDb::new(&db_path).unwrap();
         db.init().unwrap();
 
         let provider: Arc<dyn DataProvider> = Arc::new(mock);
@@ -788,7 +790,7 @@ mod tests {
 
     #[test]
     fn cache_clear_removes_entries() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::new().unwrap();
         let cache = EngineCache::new();
         let key: Symbol = "AAPL".to_owned();
 

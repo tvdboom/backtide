@@ -21,6 +21,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<DataConfig>()?;
     m.add_class::<DisplayConfig>()?;
     m.add_class::<GeneralConfig>()?;
+    m.add_class::<PlotsConfig>()?;
 
     m.add_function(wrap_pyfunction!(get_config, &m)?)?;
     m.add_function(wrap_pyfunction!(load_config, &m)?)?;

@@ -7,6 +7,7 @@ __all__ = [
     "DisplayConfig",
     "GeneralConfig",
     "LogLevel",
+    "PlotsConfig",
     "TriangulationStrategy",
     "get_config",
     "load_config",
@@ -34,6 +35,9 @@ class Config:
         Settings that control how values are presented in the application's
         frontend.
 
+    plots : [PlotsConfig]
+        Settings that control the appearance of plots.
+
     See Also
     --------
     - backtide.config:get_config
@@ -45,6 +49,7 @@ class Config:
     data: DataConfig
     display: DisplayConfig
     general: GeneralConfig
+    plots: PlotsConfig
 
     def __eq__(self, value, /): ...
     def __ge__(self, value, /): ...
@@ -76,9 +81,9 @@ class DataConfig:
         "crypto": "binance"}`.
 
     dataframe_library : [DataFrameLibrary], default="pandas"
-        Which DataFrame library to use for tabular data exchanged with user
-        code (e.g., strategy function parameters, storage query results,
-        indicator inputs/outputs). Choose from: "pandas", "polars", "numpy".
+        Which library to use for tabular data exchanged with user code (e.g.,
+        storage query results, indicator inputs/outputs). Choose from: "numpy",
+        "pandas", "polars".
 
     See Also
     --------
@@ -108,8 +113,9 @@ class DataConfig:
 class DataFrameLibrary:
     """DataFrame library used for returning tabular data.
 
-    Controls which DataFrame library is used when storage functions return
-    tabular data. Read more in the [user guide][configuration].
+    Which library to use for tabular data exchanged with user code (e.g.,
+    storage query results, indicator inputs/outputs). Read more in the
+    [user guide][configuration].
 
     Attributes
     ----------
@@ -298,6 +304,58 @@ class LogLevel:
     def __str__(self, /): ...
     @staticmethod
     def variants() -> list[LogLevel]: ...
+
+class PlotsConfig:
+    """Configuration for plot appearance.
+
+    The plot parameters control the visual styling of all charts produced
+    by backtide. Read more in the [user guide][configuration].
+
+    Attributes
+    ----------
+    template : str, default="plotly"
+        Plotly template used for figure styling. Common choices are `"plotly"`,
+        `"plotly_dark"`, `"plotly_white"`, `"ggplot2"`, `"seaborn"`.
+
+    palette : list[str]
+        Ordered list of RGB color strings used for data traces. Colors cycle
+        when more traces than colors exist.
+
+    title_fontsize : int, default=22
+        Font size in pixels for plot titles.
+
+    label_fontsize : int, default=20
+        Font size in pixels for axis labels and legend entries.
+
+    tick_fontsize : int, default=14
+        Font size in pixels for axis tick labels.
+
+    See Also
+    --------
+    - backtide.config:get_config
+    - backtide.config:load_config
+    - backtide.config:set_config
+
+    """
+
+    label_fontsize: int
+    palette: list[str]
+    template: str
+    tick_fontsize: int
+    title_fontsize: int
+
+    def __eq__(self, value, /): ...
+    def __ge__(self, value, /): ...
+    def __getstate__(self, /): ...
+    def __gt__(self, value, /): ...
+    def __init__(self, /, *args, **kwargs): ...
+    def __le__(self, value, /): ...
+    def __lt__(self, value, /): ...
+    def __ne__(self, value, /): ...
+    def __new__(cls, *args, **kwargs): ...
+    def __repr__(self, /): ...
+    def __str__(self, /): ...
+    def to_dict(self) -> dict: ...
 
 class TriangulationStrategy:
     """Strategy with which to triangulate currencies.

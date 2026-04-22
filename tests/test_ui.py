@@ -33,8 +33,8 @@ from backtide.ui.utils import (
     _get_timezone,
     _moment_to_strftime,
     _parse_date,
-    _to_pandas,
 )
+from backtide.utils.utils import _to_pandas
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UI utility functions

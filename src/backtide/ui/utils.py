@@ -36,7 +36,7 @@ from backtide.utils.constants import (
     MAX_PRELOADED_INSTRUMENTS,
     MOMENT_TO_STRFTIME,
 )
-from backtide.utils.utils import _to_list
+from backtide.utils.utils import _to_list, _to_pandas
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility constants
@@ -185,17 +185,6 @@ def _persist(*keys: str):
 def _query_bars_summary() -> pd.DataFrame:
     """Load and cache the raw storage summary from the database."""
     return _to_pandas(query_bars_summary())
-
-
-def _to_pandas(data: Any) -> pd.DataFrame:
-    """Ensure an object is converted to pandas."""
-    if isinstance(data, pd.DataFrame):
-        return data
-
-    if hasattr(data, "to_pandas"):
-        return data.to_pandas()
-
-    return pd.DataFrame(data)
 
 
 def _to_upper_values(key: str):

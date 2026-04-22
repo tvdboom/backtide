@@ -162,6 +162,7 @@ nav:
                 - DisplayConfig: api/models/config/displayconfig.md
                 - GeneralConfig: api/models/config/generalconfig.md
                 - LogLevel: api/models/config/loglevel.md
+                - PlotsConfig: api/models/config/plotsconfig.md
                 - TriangulationStrategy: api/models/config/triangulationstrategy.md
             - data:
                 - Bar: api/models/data/bar.md

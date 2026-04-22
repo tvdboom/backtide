@@ -81,4 +81,3 @@ impl<'a, 'py> FromPyObject<'a, 'py> for DataFrameLibrary {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown dataframe_library {s:?}.")))
     }
 }
-

@@ -437,7 +437,7 @@ class AutoDocs:
                     body = re.search(pattern, match, re.S | re.M).group()
 
                     header = header.replace("*", r"\*")  # Use literal * for args/kwargs
-                    text = f"<div class='param' markdown='block'>{self.parse_body(body)}</div>"
+                    text = f"<div class='param' markdown>{self.parse_body(body)}</div>"
 
                     # Only parameters and attributes have names (returns and yields don't)
                     if name in ("Parameters", "Attributes"):

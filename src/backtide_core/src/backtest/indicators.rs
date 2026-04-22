@@ -143,7 +143,8 @@ fn extract_ohlcv(
 /// The result is shaped as (n_points, n_series) — i.e. rows × columns.
 /// Single-series indicators return a 1-D array / single-column frame.
 fn to_backend_type(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
-    let backend = Config::get().map(|c| c.data.dataframe_library).unwrap_or(DataFrameLibrary::Pandas);
+    let backend =
+        Config::get().map(|c| c.data.dataframe_library).unwrap_or(DataFrameLibrary::Pandas);
 
     let np = py.import("numpy")?;
 

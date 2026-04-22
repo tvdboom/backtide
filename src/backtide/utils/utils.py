@@ -33,7 +33,7 @@ def _check_dependency(name: str, pypi_name: str | None = None) -> ModuleType:
     name: str
         Name of the package to check.
 
-    pypi_name: str or None, default=None
+    pypi_name : str | None, default=None
         Name of the package on PyPI. If None, assumes it's the same as `name`.
 
     """
@@ -73,7 +73,9 @@ def _format_compact(n: float) -> str:
         return f"{n:.0f}"
 
 
-def _make_dummy_bars(backend: DataFrameLibrary, n: int = 5) -> np.ndarray | pd.DataFrame | pl.DataFrame:
+def _make_dummy_bars(
+    backend: DataFrameLibrary, n: int = 5
+) -> np.ndarray | pd.DataFrame | pl.DataFrame:
     """Create a dummy OHLCV dataset matching the configured backend."""
     rng = np.random.default_rng(42)
 
@@ -117,6 +119,17 @@ def _to_list(item: Any) -> Any:
         return list(item)
     else:
         return [item]
+
+
+def _to_pandas(data: Any) -> pd.DataFrame:
+    """Ensure an object is converted to a pandas dataframe."""
+    if isinstance(data, pd.DataFrame):
+        return data
+
+    if hasattr(data, "to_pandas"):
+        return data.to_pandas()
+
+    return pd.DataFrame(data)
 
 
 def _ts_to_datetime(series: pd.Series, tz: ZoneInfo) -> pd.Series:
