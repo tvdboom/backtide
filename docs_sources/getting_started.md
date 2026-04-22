@@ -51,3 +51,46 @@ on PyPI.
 
 
 ## Usage
+
+There are three ways to use backtide:
+
+<br>
+
+**Via the application**
+
+Backtide ships with an interactive [Streamlit](https://streamlit.io/) application. Launch it from
+the terminal with:
+
+    backtide launch
+
+The app provides a graphical interface for configuring experiments, visualizing
+results and managing stored data. Read more in the [user guide][application].
+
+<br>
+
+**Via the CLI**
+
+The `backtide` command-line interface lets you download data, run backtests and
+manage storage directly from the terminal.
+
+    backtide download AAPL MSFT --interval 1d
+    backtide run experiment.toml
+
+Run `backtide --help` to see all available commands.
+
+<br>
+
+**Via Python**
+
+Import backtide in any Python script or notebook for full programmatic control.
+
+```pycon
+from backtide.data import resolve_profiles, download_bars
+from backtide.storage import query_bars
+
+profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", "1d")
+result = download_bars(profiles)
+
+data = query_bars("AAPL")
+print(data.head())
+```

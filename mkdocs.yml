@@ -116,6 +116,7 @@ nav:
     - Getting started: getting_started.md
     - User guide:
         - Nomenclature: user_guide/nomenclature.md
+        - Application: user_guide/application.md
         - Data: user_guide/data.md
         - Storage: user_guide/storage.md
         - Plots: user_guide/plots.md

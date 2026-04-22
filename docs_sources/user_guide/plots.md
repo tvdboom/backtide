@@ -42,16 +42,13 @@ Apart from the plot-specific parameters, all plots have five parameters in commo
 
 ## Aesthetics
 
-The plot's aesthetics are controlled through the `[plots]` section of the
+The plot's aesthetics are controlled through the `plots` section of the
 [configuration][configuration]. The default values are:
 
 * **template:** `"plotly"` — Plotly template for figure styling.
 * **palette:** Blue-to-teal gradient. Colors cycle when there are more
-  traces than entries.
-
-    `["rgb(13, 71, 161)", "rgb(2, 136, 209)", "rgb(0, 172, 193)",`
-    `"rgb(0, 137, 123)", "rgb(56, 142, 60)", "rgb(129, 199, 132)"]`
-
+  traces than entries. `["rgb(13, 71, 161)", "rgb(2, 136, 209)", "rgb(0,
+  172, 193)", "rgb(0, 137, 123)", "rgb(56, 142, 60)", "rgb(129, 199, 132)"]`
 * **title_fontsize:** `22` — Font size (px) for plot titles.
 * **label_fontsize:** `20` — Font size (px) for axis labels and legends.
 * **tick_fontsize:** `14` — Font size (px) for axis tick labels.

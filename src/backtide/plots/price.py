@@ -189,6 +189,7 @@ def plot_price(
 
     return _plot(
         fig,
+        groupclick="togglegroup",
         title=title,
         legend=legend,
         xlabel="Date",

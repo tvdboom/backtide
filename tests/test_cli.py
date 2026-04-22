@@ -160,11 +160,7 @@ class TestMainBlock:
     def test_main_invoked(self):
         """The main() function is called when run as __main__."""
         result = subprocess.run(
-            [
-                sys.executable,
-                str(Path(__file__).resolve().parent.parent / "src" / "backtide" / "cli.py"),
-                "--help",
-            ],
+            [sys.executable, "-m", "backtide.cli", "--help"],
             capture_output=True,
             text=True,
             timeout=10,
