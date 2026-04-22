@@ -6,13 +6,14 @@ Description: Module containing the automatic example rendering.
 """
 
 import ast
+import re
 from code import InteractiveInterpreter
 from io import StringIO
 import os
 import shutil
 import sys
 import tempfile
-
+from uuid import uuid4
 from markdown import Markdown
 from pandas.io.formats.style import Styler
 from pymdownx.superfences import SuperFencesException
@@ -78,6 +79,20 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
         else:
             return f"... {code}"
 
+    def get_latest_file() -> str | None:
+        """Get the most recent file from the plots directory.
+
+        Returns
+        -------
+        str or None
+            Name of the file. Returns None if the dir is empty.
+
+        """
+        if files := [os.path.join(DIR_EXAMPLES, f) for f in os.listdir(DIR_EXAMPLES)]:
+            return os.path.basename(max(files, key=os.path.getmtime))
+        else:
+            return None
+
     global cached_last_value
 
     ipy = InteractiveInterpreter()
@@ -97,6 +112,17 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
 
             if not line.endswith("# hide"):
                 output[-1].extend([draw(code.removesuffix("# norun")) for code in block])
+
+            # Inject filename parameter to plot call to save the figure
+            if re.search(r"plot_\w+\(", line):
+                f, arguments = block[0].split("(", 1)
+                if arguments.startswith(")"):
+                    # There are no other arguments
+                    block[0] = f'{f}(filename="{DIR_EXAMPLES}{uuid4()}")'
+                else:
+                    # Attach filename after other arguments
+                    args, close = arguments.rsplit(")", 1)
+                    block[0] = f'{f}({args}, filename="{DIR_EXAMPLES}{uuid4()}"){close}'
 
             if not line.endswith("# norun"):
                 # First check for syntax errors
@@ -132,6 +158,22 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
                         output.append([])  # Add new code block
 
                     figures.append(value._repr_html_())
+
+                if re.search(r"plot_\w+\(", line):
+                    if end_line < len(lines):
+                        output.append([])  # Add new code block
+
+                    if latest_file := get_latest_file():
+                        if latest_file.endswith(".html"):
+                            with open(f"{DIR_EXAMPLES}{latest_file}", encoding="utf-8") as pio_f:
+                                figures.append(pio_f.read())
+                        else:
+                            with open(f"{DIR_EXAMPLES}{latest_file}", mode="rb") as mpl_f:
+                                img = b64encode(mpl_f.read()).decode("utf-8")
+
+                            figures.append(
+                                f"<img src='data:image/png;base64,{img}' alt='{f}' draggable='false'>"
+                            )
 
         elif i > end_line:
             output[-1].append(draw(line))

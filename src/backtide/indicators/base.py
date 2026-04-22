@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 class BaseIndicator(ABC):
     """Abstract base class for all indicators.
 
-    Subclass this to create a custom indicator.
+    Subclass it to create a custom indicator.
 
     Examples
     --------
@@ -27,7 +27,7 @@ class BaseIndicator(ABC):
     from backtide.indicators import BaseIndicator
 
     class MyMomentum(BaseIndicator):
-        def __init__(self, period: int = 10):
+        def __init__(self, period = 10):
             self.period = period
 
         def compute(self, data):
@@ -45,7 +45,8 @@ class BaseIndicator(ABC):
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data.
+            Historical OHLCV data. The type depends on the [`dataframe_library `][dataconfig]
+            configuration.
 
         Returns
         -------

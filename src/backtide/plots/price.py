@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 
 from backtide.indicators import BaseIndicator
 from backtide.plots.utils import PALETTE, _plot
+from backtide.utils.utils import _to_list
 from backtide.ui.utils import _to_pandas
 
 # Supported price columns and their display labels.
@@ -34,7 +35,7 @@ def plot_price(
     indicators: dict[str, BaseIndicator] | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
-    figsize: tuple[int, int] | None = None,
+    figsize: tuple[int, int] | None = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -52,9 +53,9 @@ def plot_price(
         Column name to plot on the y-axis. Must be one of `open`, `high`, `low`,
         `close` or `adj_close`.
 
-    indicators : dict[str, [BaseIndicator]] or None, default=None
-        Indicators to overlay on the price chart. Each dict must map a name to
-        a `BaseIndicator` instance.
+    indicators : [BaseIndicator] | Sequence[[BaseIndicator]] | dict[str, [BaseIndicator]] or None, default=None
+        Indicators to overlay on the price chart. If dict, it must map a name
+        (used in the legend) to an indicator instance.
 
     title: str, dict or None, default=None
         Title for the plot.
@@ -67,9 +68,9 @@ def plot_price(
         Legend for the plot. See the [user guide][parameters] for an extended
         description of the choices.
 
-        - If None: No legend is shown.
-        - If str: Position to display the legend.
-        - If dict: Legend configuration.
+        * If None: No legend is shown.
+        * If str: Position to display the legend.
+        * If dict: Legend configuration.
 
     figsize: tuple, default=(900, 600)
         Figure's size in pixels, format as (x, y).
@@ -94,12 +95,25 @@ def plot_price(
     Examples
     --------
     ```pycon
+    import pandas as pd
+
     from backtide.storage import query_bars
     from backtide.plots import plot_price
+    from backtide.indicators import BollingerBands, SimpleMovingAverage
 
-    df = query_bars("AAPL", "1d")
+    df = query_bars(["AAPL", "MSFT"], "1d")
     df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
-    fig = plot_price(df, display=None)
+
+    # Compare the price of two symbols
+    plot_price(df)
+
+    # Add a line indicator to the price chart
+    aapl = df[df["symbol"] == "AAPL"]]
+    plot_price(aapl, indicators=SimpleMovingAverage())
+
+    # Add a band indicator to the price chart
+    plot_price(aapl, indicators={"Bollinger Bands": BollingerBands()})
+
     ```
 
     """
@@ -121,6 +135,9 @@ def plot_price(
         )
 
         if indicators:
+            if not isinstance(indicators, dict):
+                indicators = {x.__class__.__name__: x for x in _to_list(indicators)}
+
             for name, ind in indicators.items():
                 values = _to_pandas(ind.compute(subset))
 

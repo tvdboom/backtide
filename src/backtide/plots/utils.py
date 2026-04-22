@@ -34,12 +34,12 @@ PALETTE: list[str] = [
 def _plot(
     fig: go.Figure,
     *,
-    title: str | dict[str, Any] | None = None,
-    legend: str | dict[str, Any] | None = "upper right",
     xlabel: str | None = None,
     ylabel: str | None = None,
-    xlim: list[Any] | tuple[Any, Any] | None = None,
-    ylim: list[Any] | tuple[Any, Any] | None = None,
+    xlim: tuple[int, int] | None = None,
+    ylim: tuple[int, int] | None = None,
+    title: str | dict[str, Any] | None = None,
+    legend: str | dict[str, Any] | None = "upper right",
     figsize: tuple[int, int] | None = None,
     template: str = "plotly_dark",
     filename: str | Path | None = None,
@@ -56,52 +56,43 @@ def _plot(
     fig : go.Figure
         The Plotly figure to style.
 
-    title : str, dict or None, default=None
-        Title for the plot.
-
-        - If None, no title is shown.
-        - If str, text for the title.
-        - If dict, custom title configuration forwarded to
-          `fig.update_layout(title=...)`.
-
-    legend : str, dict or None, default="upper right"
-        Legend for the plot.
-
-        - If None: no legend is shown.
-        - If str: named position (e.g., `"upper right"`, `"lower left"`).
-        - If dict: legend configuration forwarded to
-          `fig.update_layout(legend=...)`.
-
     xlabel : str or None, default=None
         Label for the x-axis.
 
     ylabel : str or None, default=None
         Label for the y-axis.
 
-    xlim : tuple or None, default=None
+    xlim : tuple[int, int] or None, default=None
         Limits for the x-axis as `(min, max)`.
 
-    ylim : tuple or None, default=None
+    ylim : tuple[int, int] or None, default=None
         Limits for the y-axis as `(min, max)`.
 
-    figsize : tuple[int, int] or None, default=None
-        Figure size in pixels as `(width, height)`. If None, defaults to
-        `(900, 600)`.
+    title: str, dict or None, default=None
+        Title for the plot.
 
-    template : str, default="plotly_dark"
-        Plotly template name for figure styling.
+        - If None, no title is shown.
+        - If str, text for the title.
+        - If dict, [title configuration][parameters].
 
-    filename : str, Path or None, default=None
-        Save the plot to this path. The file type is inferred from the suffix
-        (`.html`, `.png`, `.pdf`...). If the path has no suffix, the plot is
-        saved as `.html`. If None, the plot isn't saved.
+    legend: str, dict or None, default="upper left"
+        Legend for the plot. See the [user guide][parameters] for an extended
+        description of the choices.
 
-    display : bool or None, default=True
-        Whether to render the plot.
+        * If None: No legend is shown.
+        * If str: Position to display the legend.
+        * If dict: Legend configuration.
 
-        - True: show the plot.
-        - False: do not show or return.
-        - None: return the figure without showing.
+    figsize: tuple, default=(900, 600)
+        Figure's size in pixels, format as (x, y).
+
+    filename: str, Path or None, default=None
+        Save the plot using this name. The type of the file depends on the
+        provided name (`.html`, `.png`, `.pdf`, etc...). If `filename` has no
+        file type, the plot is saved as `.html`. If `None`, the plot isn't saved.
+
+    display: bool or None, default=True
+        Whether to render the plot. If `None`, it returns the figure.
 
     **kwargs
         Additional keyword arguments for plotly's layout.
@@ -160,7 +151,7 @@ def _plot(
     title_space = TITLE_FONTSIZE if (title_cfg and title_cfg.get("text")) else 10
 
     layout: dict[str, Any] = {
-        "template": template,
+        "template": kwargs.get("template"),
         "width": width,
         "height": height,
         "showlegend": legend is not None,
@@ -178,7 +169,7 @@ def _plot(
     if xlabel:
         layout["xaxis_title"] = {"text": xlabel, "font_size": LABEL_FONTSIZE}
     if ylabel:
-        layout["yaxis_title"] = {"text": ylabel, "font_size": LABEL_FONTSIZE}
+        layout["yaxis_title"] = {"text": ylabel, "font_size": LABEL_FONTSIZE, "standoff": 20}
 
     if xlim is not None:
         layout["xaxis_range"] = xlim

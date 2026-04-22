@@ -3,10 +3,11 @@ use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
-/// DataFrame backend used for returning tabular data.
+/// DataFrame library used for returning tabular data.
 ///
-/// Controls which DataFrame library is used when storage functions return
-/// tabular data. Read more in the [user guide][configuration].
+/// Which library to use for tabular data exchanged with user code (e.g.,
+/// storage query results, indicator inputs/outputs). Read more in the
+/// [user guide][configuration].
 ///
 /// Attributes
 /// ----------
@@ -28,7 +29,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
     DeserializeFromStr,
 )]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
-pub enum DataBackend {
+pub enum DataFrameLibrary {
     Numpy,
     #[default]
     Pandas,
@@ -36,7 +37,7 @@ pub enum DataBackend {
 }
 
 #[pymethods]
-impl DataBackend {
+impl DataFrameLibrary {
     #[classattr]
     const __RUST_ENUM__: bool = true;
 
@@ -48,9 +49,9 @@ impl DataBackend {
     #[getter]
     fn class_name(&self) -> &str {
         match self {
-            DataBackend::Numpy => "np.ndarray",
-            DataBackend::Pandas => "pd.DataFrame",
-            DataBackend::Polars => "pl.DataFrame",
+            DataFrameLibrary::Numpy => "np.ndarray",
+            DataFrameLibrary::Pandas => "pd.DataFrame",
+            DataFrameLibrary::Polars => "pl.DataFrame",
         }
     }
 
@@ -66,17 +67,18 @@ impl DataBackend {
     }
 }
 
-impl<'a, 'py> FromPyObject<'a, 'py> for DataBackend {
+impl<'a, 'py> FromPyObject<'a, 'py> for DataFrameLibrary {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         // First try a direct downcast
-        if let Ok(bound) = obj.cast::<DataBackend>() {
+        if let Ok(bound) = obj.cast::<DataFrameLibrary>() {
             return Ok(*bound.borrow());
         }
 
         // Else parse from string
         let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown data_backend {s:?}.")))
+        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown dataframe_library {s:?}.")))
     }
 }
+

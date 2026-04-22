@@ -834,6 +834,8 @@ class Provider:
     def __repr__(self, /): ...
     def __str__(self, /): ...
     def intervals(self) -> list[Interval]: ...
+    @staticmethod
+    def variants() -> list[Provider]: ...
 
 def download_bars(profiles, start=None, end=None, *, verbose=True) -> DownloadResult:
     """Download OHLCV data for the instruments described in a list of profiles.
@@ -844,7 +846,7 @@ def download_bars(profiles, start=None, end=None, *, verbose=True) -> DownloadRe
     Parameters
     ----------
     profiles : list[[InstrumentProfile]]
-        Resolved instrument profiles (from [`resolve_profiles`]).
+        Resolved instrument profiles (run [`resolve_profiles`] first).
 
     start : int or None, default=None
         Optional start of the download window (Unix timestamp, inclusive). When

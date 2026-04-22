@@ -2,8 +2,8 @@
 
 __all__ = [
     "Config",
-    "DataBackend",
     "DataConfig",
+    "DataFrameLibrary",
     "DisplayConfig",
     "GeneralConfig",
     "LogLevel",
@@ -59,41 +59,6 @@ class Config:
     def __str__(self, /): ...
     def to_dict(self) -> dict: ...
 
-class DataBackend:
-    """DataFrame backend used for returning tabular data.
-
-    Controls which DataFrame library is used when storage functions return
-    tabular data. Read more in the [user guide][configuration].
-
-    Attributes
-    ----------
-    class_name : str
-        Return the Python class name.
-
-    """
-
-    class_name: str
-
-    Numpy: ClassVar[DataBackend]
-    Pandas: ClassVar[DataBackend]
-    Polars: ClassVar[DataBackend]
-
-    def __eq__(self, value, /): ...
-    def __ge__(self, value, /): ...
-    def __getstate__(self, /): ...
-    def __gt__(self, value, /): ...
-    def __hash__(self, /): ...
-    def __init__(self, /, *args, **kwargs): ...
-    def __int__(self, /): ...
-    def __le__(self, value, /): ...
-    def __lt__(self, value, /): ...
-    def __ne__(self, value, /): ...
-    def __new__(cls, *args, **kwargs): ...
-    def __repr__(self, /): ...
-    def __str__(self, /): ...
-    @staticmethod
-    def variants() -> list[DataBackend]: ...
-
 class DataConfig:
     """Configuration for data parameters.
 
@@ -110,6 +75,11 @@ class DataConfig:
         it defaults to: `{"stocks": "yahoo", "etf": "yahoo", "forex": "yahoo",
         "crypto": "binance"}`.
 
+    dataframe_library : [DataFrameLibrary], default="pandas"
+        Which DataFrame library to use for tabular data exchanged with user
+        code (e.g., strategy function parameters, storage query results,
+        indicator inputs/outputs). Choose from: "pandas", "polars", "numpy".
+
     See Also
     --------
     - backtide.config:get_config
@@ -118,6 +88,7 @@ class DataConfig:
 
     """
 
+    dataframe_library: DataFrameLibrary
     providers: dict[InstrumentType, Provider]
     storage_path: str
 
@@ -134,6 +105,41 @@ class DataConfig:
     def __str__(self, /): ...
     def to_dict(self) -> dict: ...
 
+class DataFrameLibrary:
+    """DataFrame library used for returning tabular data.
+
+    Controls which DataFrame library is used when storage functions return
+    tabular data. Read more in the [user guide][configuration].
+
+    Attributes
+    ----------
+    class_name : str
+        Return the Python class name.
+
+    """
+
+    class_name: str
+
+    Numpy: ClassVar[DataFrameLibrary]
+    Pandas: ClassVar[DataFrameLibrary]
+    Polars: ClassVar[DataFrameLibrary]
+
+    def __eq__(self, value, /): ...
+    def __ge__(self, value, /): ...
+    def __getstate__(self, /): ...
+    def __gt__(self, value, /): ...
+    def __hash__(self, /): ...
+    def __init__(self, /, *args, **kwargs): ...
+    def __int__(self, /): ...
+    def __le__(self, value, /): ...
+    def __lt__(self, value, /): ...
+    def __ne__(self, value, /): ...
+    def __new__(cls, *args, **kwargs): ...
+    def __repr__(self, /): ...
+    def __str__(self, /): ...
+    @staticmethod
+    def variants() -> list[DataFrameLibrary]: ...
+
 class DisplayConfig:
     """Configuration for display parameters.
 
@@ -142,11 +148,6 @@ class DisplayConfig:
 
     Attributes
     ----------
-    data_backend : [DataBackend], default="pandas"
-        Which dataframe library to use when providing data to the frontend (i.e.,
-        the return of storage functions or parameters in the strategy function).
-        Choose from: "numpy", "pandas", "polars".
-
     date_format : str, default="YYYY-MM-DD"
         Format in which to display dates in [momentjs] style. Valid formats include
         `YYYY/MM/DD`, `DD/MM/YYYY`, or `MM/DD/YYYY` and can also use a period (.) or
@@ -181,7 +182,6 @@ class DisplayConfig:
     """
 
     address: str | None
-    data_backend: DataBackend
     date_format: str
     logokit_api_key: str | None
     port: int

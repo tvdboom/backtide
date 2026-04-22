@@ -22,6 +22,7 @@ target/
 # Static Documentation
 site/
 docs/
+docs_sources/img/
 
 # System-specific temporary and index files
 .DS_Store

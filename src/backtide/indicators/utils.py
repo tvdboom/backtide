@@ -52,7 +52,7 @@ def _check_indicator_code(code: str, cfg: Config) -> str | None:
     except Exception as ex:  # noqa: BLE001
         return f"Failed to instantiate indicator: {ex}"
 
-    dummy = _make_dummy_bars(cfg.display.data_backend)
+    dummy = _make_dummy_bars(cfg.data.dataframe_library)
     try:
         result = instance.compute(dummy)
     except Exception as ex:  # noqa: BLE001

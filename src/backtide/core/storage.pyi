@@ -213,14 +213,14 @@ def query_instruments(
     ```pycon
     from backtide.storage import query_instruments
 
-    # All instruments
-    all_instruments = query_instruments()
+    all_instruments = query_instruments(limit=5)
+    print(all_instruments)
 
-    # Filtered
-    stocks = query_instruments("stocks", "yahoo", limit=100)
+    stocks = query_instruments("stocks", "yahoo", limit=5)
+    print(stocks)
 
-    # Filtered by exchange
-    nyse = query_instruments("stocks", exchange="XNYS")
+    nyse = query_instruments("stocks", exchange="XNYS", limit=5)
+    print(nyse)
     ```
 
     """

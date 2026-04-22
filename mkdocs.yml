@@ -130,6 +130,9 @@ nav:
             - fetch_instruments: api/data/fetch_instruments.md
             - list_instruments: api/data/list_instruments.md
             - resolve_profiles: api/data/resolve_profiles.md
+        - plots:
+            - plot_candlestick: api/plots/plot_candlestick.md
+            - plot_price: api/plots/plot_price.md
         - storage:
             - query_bars: api/storage/query_bars.md
             - query_bars_summary: api/storage/query_bars_summary.md
@@ -155,7 +158,7 @@ nav:
             - config:
                 - Config: api/models/config/config.md
                 - DataConfig: api/models/config/dataconfig.md
-                - DataBackend: api/models/config/DataBackend.md
+                - DataFrameLibrary: api/models/config/DataFrameLibrary.md
                 - DisplayConfig: api/models/config/displayconfig.md
                 - GeneralConfig: api/models/config/generalconfig.md
                 - LogLevel: api/models/config/loglevel.md
@@ -171,6 +174,8 @@ nav:
                 - InstrumentType: api/models/data/instrumenttype.md
                 - Interval: api/models/data/interval.md
                 - Provider: api/models/data/provider.md
+            - indicators:
+                - BaseIndicator: api/models/indicators/baseindicator.md
         - utils:
             - clear_cache: api/utils/clear_cache.md
             - init_logging: api/utils/init_logging.md

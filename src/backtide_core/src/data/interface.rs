@@ -224,7 +224,7 @@ pub fn list_instruments(
 /// Parameters
 /// ----------
 /// profiles : list[[InstrumentProfile]]
-///     Resolved instrument profiles (from [`resolve_profiles`]).
+///     Resolved instrument profiles (run [`resolve_profiles`] first).
 ///
 /// start : int or None, default=None
 ///     Optional start of the download window (Unix timestamp, inclusive). When

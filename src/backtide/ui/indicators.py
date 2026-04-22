@@ -335,7 +335,7 @@ elif mode == "custom":
         if source == _CODE_OPTIONS[0]:
             resp = code_editor(
                 key=(key := "ind_custom_code_editor"),
-                code=_default(key, code_placeholder(cfg.display.data_backend.class_name)),
+                code=_default(key, code_placeholder(cfg.data.dataframe_library.class_name)),
                 response_mode="debounce",
                 buttons=[
                     {
@@ -353,7 +353,7 @@ elif mode == "custom":
         else:
             st.caption(
                 "The uploaded file must contain a class that inherits from `BaseIndicator` "
-                f"with a `compute(self, data: {cfg.display.data_backend.class_name})` method."
+                f"with a `compute(self, data: {cfg.data.dataframe_library.class_name})` method."
             )
 
             indicator_file = st.file_uploader(

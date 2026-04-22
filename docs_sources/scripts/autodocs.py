@@ -437,7 +437,7 @@ class AutoDocs:
                     body = re.search(pattern, match, re.S | re.M).group()
 
                     header = header.replace("*", r"\*")  # Use literal * for args/kwargs
-                    text = f"<div class='param' markdown>{self.parse_body(body)}</div>"
+                    text = f"<div class='param' markdown='block'>{self.parse_body(body)}</div>"
 
                     # Only parameters and attributes have names (returns and yields don't)
                     if name in ("Parameters", "Attributes"):
@@ -450,7 +450,7 @@ class AutoDocs:
 
             if content:
                 table += f"<tr markdown><td class='td_title'><strong>{name}</strong></td>"
-                table += f"<td class='td_params' markdown>{content}</td></tr>"
+                table += f"<td class='td_params' markdown='block'>{content}</td></tr>"
 
         if table:
             table = f"<table markdown class='table_params'>{table}</table>"
@@ -727,14 +727,14 @@ def custom_autorefs(markdown: str, autodocs: AutoDocs | None = None) -> str:
             link = match.group(2)
 
             text = match.group()
-            if not link:
+            if not link and anchor != "source":
                 # Only adapt when has form [anchor] (no second square brackets pair)
                 link = re.sub(r"[.'`]", "", anchor).replace(" ", "-").lower()
                 text = f"[{anchor}][{link}]"
             if link in CUSTOM_URLS:
                 # Replace keyword with custom url
                 text = f"[{anchor}]({CUSTOM_URLS[link]})"
-            if "self" in link and autodocs:
+            if link and "self" in link and autodocs:
                 link = link.replace("self", autodocs.obj.__name__.lower())
                 text = f"[{anchor}][{link}]"
 

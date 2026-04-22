@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from backtide.config import DataBackend
+from backtide.config import DataFrameLibrary
 
 if TYPE_CHECKING:
     import polars as pl
@@ -73,7 +73,7 @@ def _format_compact(n: float) -> str:
         return f"{n:.0f}"
 
 
-def _make_dummy_bars(backend: DataBackend, n: int = 5) -> np.ndarray | pd.DataFrame | pl.DataFrame:
+def _make_dummy_bars(backend: DataFrameLibrary, n: int = 5) -> np.ndarray | pd.DataFrame | pl.DataFrame:
     """Create a dummy OHLCV dataset matching the configured backend."""
     rng = np.random.default_rng(42)
 
@@ -84,11 +84,11 @@ def _make_dummy_bars(backend: DataBackend, n: int = 5) -> np.ndarray | pd.DataFr
     v = rng.uniform(1_000, 10_000, n)
 
     match backend:
-        case DataBackend.Numpy:
+        case DataFrameLibrary.Numpy:
             result = np.column_stack([o, h, l, c, v])
-        case DataBackend.Pandas:
+        case DataFrameLibrary.Pandas:
             result = pd.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume": v})
-        case DataBackend.Polars:
+        case DataFrameLibrary.Polars:
             pl = _check_dependency("polars")
             result = pl.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume": v})
 

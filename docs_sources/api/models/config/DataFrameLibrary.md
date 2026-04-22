@@ -1,7 +1,7 @@
-# DataBackend
+# DataFrameLibrary
 ------------------
 
-:: backtide.config:DataBackend
+:: backtide.config:DataFrameLibrary
     :: signature
     :: head
     :: table:

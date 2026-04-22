@@ -1,7 +1,7 @@
 //! Python interface for the storage module.
 
 use crate::config::interface::Config;
-use crate::config::models::data_backend::DataBackend;
+use crate::config::models::dataframe_library::DataFrameLibrary;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_type::InstrumentType;
@@ -20,18 +20,18 @@ fn dict_to_dataframe<'py>(
     py: Python<'py>,
     data: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    match Config::get()?.display.data_backend {
-        DataBackend::Numpy => {
+    match Config::get()?.data.dataframe_library {
+        DataFrameLibrary::Numpy => {
             let np = py.import("numpy")?;
             let values: Vec<Bound<'py, PyAny>> = data.values().iter().collect();
             let values_list = PyList::new(py, &values)?;
             np.call_method1("column_stack", (values_list,))
         },
-        DataBackend::Pandas => {
+        DataFrameLibrary::Pandas => {
             let pd = py.import("pandas")?;
             pd.call_method1("DataFrame", (data,))
         },
-        DataBackend::Polars => {
+        DataFrameLibrary::Polars => {
             let pl = py.import("polars")?;
             pl.call_method1("from_dict", (data,))
         },
@@ -102,14 +102,14 @@ macro_rules! to_df {
 /// ```pycon
 /// from backtide.storage import query_instruments
 ///
-/// # All instruments
-/// all_instruments = query_instruments()
+/// all_instruments = query_instruments(limit=5)
+/// print(all_instruments)
 ///
-/// # Filtered
-/// stocks = query_instruments("stocks", "yahoo", limit=100)
+/// stocks = query_instruments("stocks", "yahoo", limit=5)
+/// print(stocks)
 ///
-/// # Filtered by exchange
-/// nyse = query_instruments("stocks", exchange="XNYS")
+/// nyse = query_instruments("stocks", exchange="XNYS", limit=5)
+/// print(nyse)
 /// ```
 #[pyfunction]
 #[pyo3(signature = (instrument_type: "str | InstrumentType | list[str | InstrumentType] | None"=None, provider: "str | Provider | list[str | Provider] | None"=None, exchange: "str | Exchange | list[str | Exchange] | None"=None, *, limit: "int | None"=None))]

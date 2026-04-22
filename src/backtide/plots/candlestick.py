@@ -24,7 +24,7 @@ def plot_candlestick(
     rangeslider: bool = True,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
-    figsize: tuple[int, int] | None = None,
+    figsize: tuple[int, int] | None = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -83,12 +83,18 @@ def plot_candlestick(
     Examples
     --------
     ```pycon
+    import pandas as pd
+
     from backtide.storage import query_bars
     from backtide.plots import plot_candlestick
 
     df = query_bars("AAPL", "1d")
+
+    # Show only the last 30 days
+    df = df.sort_values("open_ts").iloc[-30:]
+
     df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
-    fig = plot_candlestick(df, title="AAPL Daily", display=None)
+    plot_candlestick(df, title="AAPL Daily")
     ```
 
     """

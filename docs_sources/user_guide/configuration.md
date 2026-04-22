@@ -30,6 +30,7 @@ If no file is found, the built-in defaults are used.
 
     [data]
     storage_path = ".backtide"
+    dataframe_library = "pandas"
 
     [data.providers]
     stocks = "yahoo"
@@ -38,7 +39,6 @@ If no file is found, the built-in defaults are used.
     crypto = "binance"
 
     [display]
-    data_backend = "pandas"
     date_format = "YYYY-MM-DD"
     time_format = "HH:MM"
     port = 8501
@@ -56,6 +56,7 @@ If no file is found, the built-in defaults are used.
 
     data:
         storage_path: .backtide
+        dataframe_library: pandas
         providers:
             stocks: yahoo
             etf: yahoo
@@ -63,7 +64,6 @@ If no file is found, the built-in defaults are used.
             crypto: binance
 
     display:
-        data_backend: pandas
         date_format: "YYYY-MM-DD"
         time_format: "HH:MM"
         timezone: null
@@ -85,6 +85,7 @@ If no file is found, the built-in defaults are used.
         },
         "data": {
             "storage_path": ".backtide",
+            "dataframe_library": "pandas",
             "providers": {
                 "stocks": "yahoo",
                 "etf": "yahoo",
@@ -93,7 +94,6 @@ If no file is found, the built-in defaults are used.
             }
         },
         "display": {
-            "data_backend": "pandas",
             "date_format": "YYYY-MM-DD",
             "time_format": "HH:MM",
             "timezone": null,

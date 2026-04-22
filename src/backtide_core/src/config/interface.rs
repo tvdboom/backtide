@@ -13,7 +13,7 @@
 //! | `[display]` | UI / Streamlit app                                   |
 
 use crate::config::errors::{ConfigError, ConfigResult};
-use crate::config::models::data_backend::DataBackend;
+use crate::config::models::dataframe_library::DataFrameLibrary;
 use crate::config::models::log_level::LogLevel;
 use crate::config::models::triangulation_strategy::TriangulationStrategy;
 use crate::config::utils::{fetch_config, parse_config};
@@ -316,6 +316,11 @@ impl GeneralConfig {
 ///     it defaults to: `{"stocks": "yahoo", "etf": "yahoo", "forex": "yahoo",
 ///     "crypto": "binance"}`.
 ///
+/// dataframe_library : [DataFrameLibrary], default="pandas"
+///     Which library to use for tabular data exchanged with user code (e.g.,
+///     storage query results, indicator inputs/outputs). Choose from: "numpy",
+///     "pandas", "polars".
+///
 /// See Also
 /// --------
 /// - backtide.config:get_config
@@ -328,6 +333,7 @@ pub struct DataConfig {
     pub storage_path: PathBuf,
     #[serde(deserialize_with = "crate::config::utils::deserialize_providers")]
     pub providers: HashMap<InstrumentType, Provider>,
+    pub dataframe_library: DataFrameLibrary,
 }
 
 impl Default for DataConfig {
@@ -335,6 +341,7 @@ impl Default for DataConfig {
         Self {
             storage_path: PathBuf::from(DEFAULT_STORAGE_PATH),
             providers: InstrumentType::iter().map(|at| (at, at.default_provider())).collect(),
+            dataframe_library: DataFrameLibrary::default(),
         }
     }
 }
@@ -345,8 +352,8 @@ impl DataConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (storage_path: "str"=".backtide", providers: "dict[str | InstrumentType, str | Provider] | None"=None))]
-    fn new(storage_path: &str, providers: Option<Bound<'_, PyAny>>) -> PyResult<Self> {
+    #[pyo3(signature = (storage_path: "str"=".backtide", providers: "dict[str | InstrumentType, str | Provider] | None"=None, dataframe_library: "str | DataFrameLibrary"=DataFrameLibrary::default()))]
+    fn new(storage_path: &str, providers: Option<Bound<'_, PyAny>>, dataframe_library: DataFrameLibrary) -> PyResult<Self> {
         let mut resolved = DataConfig::default().providers;
         if let Some(obj) = providers {
             let dict = obj.cast::<pyo3::types::PyDict>()?;
@@ -360,6 +367,7 @@ impl DataConfig {
         Ok(Self {
             storage_path: PathBuf::from(storage_path),
             providers: resolved,
+            dataframe_library,
         })
     }
 
@@ -374,7 +382,12 @@ impl DataConfig {
             format!("{{{}}}", pairs.join(", "))
         };
 
-        format!("DataConfig(storage_path={:?}, providers={})", self.storage_path, providers,)
+        format!(
+            "DataConfig(storage_path={:?}, providers={}, dataframe_library={:?})",
+            self.storage_path,
+            providers,
+            self.dataframe_library.to_string().to_lowercase(),
+        )
     }
 
     /// Convert the configuration object to a dictionary.
@@ -395,11 +408,6 @@ impl DataConfig {
 ///
 /// Attributes
 /// ----------
-/// data_backend : [DataBackend], default="pandas"
-///     Which dataframe library to use when providing data to the frontend (i.e.,
-///     the return of storage functions or parameters in the strategy function).
-///     Choose from: "numpy", "pandas", "polars".
-///
 /// date_format : str, default="YYYY-MM-DD"
 ///     Format in which to display dates in [momentjs] style. Valid formats include
 ///     `YYYY/MM/DD`, `DD/MM/YYYY`, or `MM/DD/YYYY` and can also use a period (.) or
@@ -434,7 +442,6 @@ impl DataConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DisplayConfig {
-    pub data_backend: DataBackend,
     pub date_format: String,
     pub time_format: String,
     pub timezone: Option<String>,
@@ -446,7 +453,6 @@ pub struct DisplayConfig {
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
-            data_backend: DataBackend::default(),
             date_format: "YYYY-MM-DD".to_owned(),
             time_format: "HH:MM".to_owned(),
             timezone: None,
@@ -464,7 +470,6 @@ impl DisplayConfig {
 
     #[new]
     #[pyo3(signature = (
-        data_backend: "str | DataBackend" = DataBackend::default(),
         date_format: "str"="YYYY-MM-DD",
         time_format: "str"="HH:MM",
         timezone: "str | None"=None,
@@ -473,7 +478,6 @@ impl DisplayConfig {
         port: "int"=8501
     ))]
     fn new(
-        data_backend: DataBackend,
         date_format: &str,
         time_format: &str,
         timezone: Option<&str>,
@@ -482,7 +486,6 @@ impl DisplayConfig {
         port: u16,
     ) -> Self {
         Self {
-            data_backend,
             date_format: date_format.to_owned(),
             time_format: time_format.to_owned(),
             timezone: timezone.map(|s| s.to_owned()),
@@ -494,8 +497,7 @@ impl DisplayConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "DisplayConfig(data_backend={:?}, date_format={:?}, time_format={:?}, timezone={:?}, logokit_api_key={:?}, address={:?}, port={:?})",
-            self.data_backend.to_string().to_lowercase(),
+            "DisplayConfig(date_format={:?}, time_format={:?}, timezone={:?}, logokit_api_key={:?}, address={:?}, port={:?})",
             self.date_format,
             self.time_format,
             self.timezone,

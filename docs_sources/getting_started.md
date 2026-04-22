@@ -28,16 +28,24 @@ this way pip can track metadata for it without having to have run the
 
 <br style="display: block; margin-top: 2em; content: ' '">
 
+**Optional dependencies**
+
+Some specific functionalities or configuration options require the installation
+of additional libraries. Install all [optional dependencies][optional] with:
+
+    pip install -U backtide[full]
+
+<br style="display: block; margin-top: 2em; content: ' '">
+
 **Contributing**
 
-If you are planning to [contribute][contributing] to the project,
-you'll need the [development dependencies][development]. Install them
-adding `[dev]` after the package's name.
+If you are planning to [contribute][contributing] to the project, you'll need the
+[development dependencies][development]. Install them with:
 
     pip install -U backtide[dev]
 
-Click [here](https://pypi.org/simple/backtide/) for a complete list of package
-files for all versions published on PyPI.
+Click [here](https://pypi.org/simple/backtide/) for a complete list of package files for all versions published
+on PyPI.
 
 <br><br>
 

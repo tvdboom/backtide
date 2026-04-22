@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyType;
 
 use crate::config::interface::Config;
-use crate::config::models::data_backend::DataBackend;
+use crate::config::models::dataframe_library::DataFrameLibrary;
 use crate::data::models::bar::Bar;
 
 /// Trait for all built-in indicators.
@@ -143,7 +143,7 @@ fn extract_ohlcv(
 /// The result is shaped as (n_points, n_series) — i.e. rows × columns.
 /// Single-series indicators return a 1-D array / single-column frame.
 fn to_backend_type(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
-    let backend = Config::get().map(|c| c.display.data_backend).unwrap_or(DataBackend::Pandas);
+    let backend = Config::get().map(|c| c.data.dataframe_library).unwrap_or(DataFrameLibrary::Pandas);
 
     let np = py.import("numpy")?;
 
@@ -151,12 +151,12 @@ fn to_backend_type(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> 
         // Single series → 1-D
         let arr = np.call_method1("array", (series.into_iter().next().unwrap(),))?;
         match backend {
-            DataBackend::Numpy => Ok(arr),
-            DataBackend::Pandas => {
+            DataFrameLibrary::Numpy => Ok(arr),
+            DataFrameLibrary::Pandas => {
                 let pd = py.import("pandas")?;
                 pd.call_method1("Series", (&arr,))
             },
-            DataBackend::Polars => {
+            DataFrameLibrary::Polars => {
                 let pl = py.import("polars")?;
                 pl.call_method1("Series", (&arr,))
             },
@@ -166,12 +166,12 @@ fn to_backend_type(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> 
         let arr_2d = np.call_method1("array", (series,))?;
         let arr_t = arr_2d.getattr("T")?;
         match backend {
-            DataBackend::Numpy => Ok(arr_t),
-            DataBackend::Pandas => {
+            DataFrameLibrary::Numpy => Ok(arr_t),
+            DataFrameLibrary::Pandas => {
                 let pd = py.import("pandas")?;
                 pd.call_method1("DataFrame", (&arr_t,))
             },
-            DataBackend::Polars => {
+            DataFrameLibrary::Polars => {
                 let pl = py.import("polars")?;
                 pl.call_method1("from_numpy", (&arr_t,))
             },
