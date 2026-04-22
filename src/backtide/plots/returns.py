@@ -123,4 +123,3 @@ def plot_returns(
         filename=filename,
         display=display,
     )
-

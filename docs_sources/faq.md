@@ -69,12 +69,6 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     conversion path is controlled by `triangulation_strategy` in the
     [configuration]. See the [currency conversion][data] section for details.
 
-??? faq "Can I run Backtide on macOS?"
-    While the CI pipeline does not currently test on macOS, the code is
-    platform-independent and the Rust core compiles on macOS. If you
-    encounter issues, please open an
-    [issue](https://github.com/tvdboom/backtide/issues).
-
 ??? faq "How do I run the benchmarks?"
     Backtide uses [Criterion.rs](https://github.com/bheisler/criterion.rs)
     for performance benchmarking. Run all benchmarks with

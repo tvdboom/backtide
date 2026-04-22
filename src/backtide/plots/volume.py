@@ -117,4 +117,3 @@ def plot_volume(
         filename=filename,
         display=display,
     )
-

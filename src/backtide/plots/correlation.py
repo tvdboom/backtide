@@ -117,7 +117,9 @@ def plot_correlation(
             colorscale="Blues",
             zmin=-1,
             zmax=1,
-            colorbar={"title": {"text": "Correlation", "font": {"size": cfg.plots.label_fontsize}}},
+            colorbar={
+                "title": {"text": "Correlation", "font": {"size": cfg.plots.label_fontsize}}
+            },
         )
     )
 
@@ -131,4 +133,3 @@ def plot_correlation(
         filename=filename,
         display=display,
     )
-

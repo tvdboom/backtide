@@ -20,6 +20,9 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/backtide_core
       - run: |
           uv sync --group tox
           uv run tox -e pre-commit
@@ -36,6 +39,9 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/backtide_core
       - name: Run tests
         run: |
           uv sync --group tox
@@ -54,10 +60,30 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/backtide_core
       - name: Run Cargo tests
         run: |
           uv sync --group tox
           uv run tox -e cargo-test
+
+  benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/backtide_core
+      - name: Run benchmarks
+        run: |
+          uv sync --group tox
+          uv run tox -e bench
 
   documentation:
     runs-on: ubuntu-latest
@@ -70,6 +96,9 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/backtide_core
       - run: |
           uv sync --group tox
           uv run tox -e docs

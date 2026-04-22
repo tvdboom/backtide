@@ -101,7 +101,8 @@ class MyIndicator(BaseIndicator):
         Parameters
         ----------
         data : {t}
-            Historical OHLCV data.
+            Historical OHLCV data with columns 'symbol', 'open', 'high',
+            'low', 'close', 'adj_close' 'volume'.
 
         Returns
         -------
@@ -264,8 +265,6 @@ if mode == "builtin":
                     format="%.1f" if isinstance(default, float) else None,
                     help=help_text,
                 )
-        else:
-            st.caption(f"{ind.name} has no configurable parameters.")
 
         st.caption(ind.description())
 

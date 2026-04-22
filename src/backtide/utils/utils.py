@@ -5,6 +5,8 @@ Description: Utility functions.
 
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterable
 import importlib
 from types import ModuleType

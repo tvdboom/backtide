@@ -144,10 +144,11 @@ def _plot(
         "height": height,
         "showlegend": legend is not None,
         "hoverlabel": {"font_size": cfg.plots.label_fontsize},
-        "font_size": cfg.plots.tick_fontsize,
         "margin": {"l": 50, "b": 50, "r": 0, "t": 25 + title_space, "pad": 0},
         "xaxis_tickformat": _moment_to_strftime(get_config().display.date_format),
+        "xaxis_tickfont_size": cfg.plots.tick_fontsize,
         "yaxis_tickformat": "f",
+        "yaxis_tickfont_size": cfg.plots.tick_fontsize,
     }
 
     if title_cfg:

@@ -125,4 +125,3 @@ def plot_drawdown(
         filename=filename,
         display=display,
     )
-

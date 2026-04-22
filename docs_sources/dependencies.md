@@ -14,7 +14,7 @@ And operating systems:
 
  * Linux (Ubuntu, Fedora, etc...)
  * Windows 8.1+
- * macOS (not tested)
+ * macOS
 
 <br><br>
 
