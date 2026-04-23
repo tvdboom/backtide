@@ -106,21 +106,18 @@ def plot_dividends(
                 marker_color=color,
                 marker_line_width=0,
                 opacity=0.85,
-                hovertemplate="%{x}<br>Dividend: $%{y:.4f}<extra>" + symbol + "</extra>",
+                hovertemplate="%{x}<br>Dividend: %{y:.4f}<extra>" + symbol + "</extra>",
             )
         )
 
-    fig.update_layout(
-        barmode="group",
-        bargap=0.15,
-    )
+    fig.update_layout(barmode="group", bargap=0.15)
 
     return _plot(
         fig,
         title=title,
         legend=legend,
         xlabel="Ex-Dividend Date",
-        ylabel="Dividend ($)",
+        ylabel="Dividend",
         figsize=figsize,
         filename=filename,
         display=display,

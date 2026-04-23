@@ -138,6 +138,7 @@ nav:
             - plot_drawdown: api/plots/plot_drawdown.md
             - plot_price: api/plots/plot_price.md
             - plot_returns: api/plots/plot_returns.md
+            - plot_seasonality: api/plots/plot_seasonality.md
             - plot_volume: api/plots/plot_volume.md
             - plot_vwap: api/plots/plot_vwap.md
             - plot_dividends: api/plots/plot_dividends.md

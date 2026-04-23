@@ -14,14 +14,17 @@ from backtide.core.storage import query_bars, query_dividends, query_instruments
 from backtide.indicators.utils import _load_stored_indicators
 from backtide.plots.candlestick import plot_candlestick
 from backtide.plots.correlation import plot_correlation
+from backtide.plots.dividends import plot_dividends
 from backtide.plots.drawdown import plot_drawdown
 from backtide.plots.price import PRICE_COLUMNS, plot_price
 from backtide.plots.returns import plot_returns
+from backtide.plots.seasonality import plot_seasonality
+from backtide.plots.stats import compute_summary_stats
 from backtide.plots.volume import plot_volume
 from backtide.plots.vwap import plot_vwap
-from backtide.plots.dividends import plot_dividends
 from backtide.ui.utils import (
     _default,
+    _get_logokit_url,
     _get_timezone,
     _persist,
     _to_upper_values,
@@ -134,21 +137,28 @@ bars = bars[
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
-    [
-        ":material/show_chart: Price",
-        ":material/candlestick_chart: Candlestick",
-        ":material/bar_chart: Volume",
-        ":material/waterfall_chart: VWAP",
-        ":material/stacked_line_chart: Returns",
-        ":material/trending_down: Drawdown",
-        ":material/grid_on: Correlation",
-        ":material/payments: Dividends",
-    ],
+TAB_LABELS = [
+    ":material/analytics: Summary",
+    ":material/show_chart: Price",
+    ":material/candlestick_chart: Candlestick",
+    ":material/bar_chart: Volume",
+    ":material/waterfall_chart: VWAP",
+    ":material/stacked_line_chart: Returns",
+    ":material/calendar_month: Seasonality",
+    ":material/trending_down: Drawdown",
+    ":material/grid_on: Correlation",
+    ":material/payments: Dividends",
+]
+
+tabs = st.tabs(
+    TAB_LABELS,
     key=(key := "plot_tabs"),
     default=_default(key),
     on_change=lambda k=key: _persist(k),
 )
+
+# Determine active tab index for lazy rendering
+active_tab = st.session_state.get("plot_tabs", TAB_LABELS[0])
 
 # Add datetime column for plotting
 bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
@@ -163,7 +173,84 @@ price_col_radio = lambda key: st.radio(
     on_change=lambda k=key: st.session_state.update(_price_col=st.session_state[k]),
 )
 
-with tab1:
+# ── Tab 0: Summary ───────────────────────────────────────────────────────────
+
+with tabs[0]:
+    col1, col2 = st.columns([10, 1])
+    col1.caption("Key performance and risk metrics for each selected symbol.")
+
+    with col2.popover(":material/tune:"):
+        price_col = price_col_radio("price_col_summary")
+
+    if active_tab == TAB_LABELS[0]:
+        stats_df = compute_summary_stats(data=bars, price_col=price_col)
+
+        logokit_key = cfg.display.logokit_api_key
+        if logokit_key:
+            stats_df.index = pd.Index(
+                data=stats_df.apply(
+                    lambda row: _get_logokit_url(
+                        row["Symbol"],
+                        all_i[row["Symbol"]].instrument_type,
+                        logokit_key,
+                    )
+                    if row["Symbol"] in all_i
+                    else "",
+                    axis=1,
+                ),
+                name="Logo",
+            )
+
+        summary_column_config = {
+            "Symbol": st.column_config.TextColumn(
+                pinned=True,
+                help="Ticker symbol of the instrument.",
+            ),
+            "Ann. Return": st.column_config.NumberColumn(
+                format="%+.2f%%",
+                help="Compound annual growth rate (CAGR). Measures the geometric average yearly return over the full period.",
+            ),
+            "Ann. Volatility": st.column_config.NumberColumn(
+                format="%.2f%%",
+                help="Annualized standard deviation of returns. Higher values indicate greater price variability and risk.",
+            ),
+            "Sharpe Ratio": st.column_config.NumberColumn(
+                format="%.2f",
+                help="Risk-adjusted return: excess return per unit of total volatility. Higher is better; above 1.0 is generally considered good.",
+            ),
+            "Sortino Ratio": st.column_config.NumberColumn(
+                format="%.2f",
+                help="Like the Sharpe ratio but only penalizes downside volatility. Better suited for assets with asymmetric return distributions.",
+            ),
+            "Max Drawdown": st.column_config.NumberColumn(
+                format="%.2f%%",
+                help="Largest peak-to-trough decline in cumulative returns. Represents the worst-case loss an investor would have experienced.",
+            ),
+            "Win Rate": st.column_config.NumberColumn(
+                format="%.1f%%",
+                help="Percentage of periods with a positive return. A value above 50% means the price went up more often than it went down.",
+            ),
+            "Total Bars": st.column_config.NumberColumn(
+                format="%d",
+                help="Total number of data points (bars) available for this symbol at the selected interval.",
+            ),
+        }
+
+        if logokit_key:
+            summary_column_config["Logo"] = st.column_config.ImageColumn(
+                label="", width="small"
+            )
+
+        st.dataframe(
+            stats_df,
+            column_config=summary_column_config,
+            hide_index=stats_df.index.name is None,
+            width="stretch",
+        )
+
+# ── Tab 1: Price ─────────────────────────────────────────────────────────────
+
+with tabs[1]:
     col1, col2 = st.columns([10, 1])
     col1.caption("Price over time for selected symbols.")
 
@@ -185,17 +272,20 @@ with tab1:
         else:
             selected_ind = []
 
-    st.plotly_chart(
-        plot_price(
-            data=bars,
-            price_col=price_col,
-            indicators={n: stored_ind[n] for n in selected_ind},
-            display=None,
-        ),
-        width="stretch",
-    )
+    if active_tab == TAB_LABELS[1]:
+        st.plotly_chart(
+            plot_price(
+                data=bars,
+                price_col=price_col,
+                indicators={n: stored_ind[n] for n in selected_ind},
+                display=None,
+            ),
+            width="stretch",
+        )
 
-with tab2:
+# ── Tab 2: Candlestick ───────────────────────────────────────────────────────
+
+with tabs[2]:
     col1, col2 = st.columns([10, 1])
     col1.caption("OHLC candlestick chart showing price action over time.")
 
@@ -225,64 +315,105 @@ with tab2:
             help="Hide/show the range slider below the chart.",
         )
 
-    # Only plot when both start and end are selected
-    if isinstance(cs_date_range, tuple) and len(cs_date_range) == 2:
-        _cs_start, _cs_end = cs_date_range
-    else:
-        _cs_start, _cs_end = default_start, max_date
+    if active_tab == TAB_LABELS[2]:
+        # Only plot when both start and end are selected
+        if isinstance(cs_date_range, tuple) and len(cs_date_range) == 2:
+            _cs_start, _cs_end = cs_date_range
+        else:
+            _cs_start, _cs_end = default_start, max_date
 
-    _cs_bars = bars[(bars["dt"].dt.date >= _cs_start) & (bars["dt"].dt.date <= _cs_end)]
+        _cs_bars = bars[(bars["dt"].dt.date >= _cs_start) & (bars["dt"].dt.date <= _cs_end)]
 
-    st.plotly_chart(
-        plot_candlestick(
-            _cs_bars,
-            rangeslider=cs_rangeslider,
-            display=None,
-        ),
-        width="stretch",
-    )
+        st.plotly_chart(
+            plot_candlestick(
+                _cs_bars,
+                rangeslider=cs_rangeslider,
+                display=None,
+            ),
+            width="stretch",
+        )
 
-with tab3:
+# ── Tab 3: Volume ────────────────────────────────────────────────────────────
+
+with tabs[3]:
     st.caption("Trading volume over time for selected symbols.")
 
-    st.plotly_chart(
-        plot_volume(data=bars, display=None),
-        width="stretch",
-    )
+    if active_tab == TAB_LABELS[3]:
+        st.plotly_chart(
+            plot_volume(data=bars, display=None),
+            width="stretch",
+        )
 
-with tab4:
+# ── Tab 4: VWAP ──────────────────────────────────────────────────────────────
+
+with tabs[4]:
     st.caption("Volume-Weighted Average Price compared to closing price.")
 
-    st.plotly_chart(
-        plot_vwap(data=bars, display=None),
-        width="stretch",
-    )
+    if active_tab == TAB_LABELS[4]:
+        st.plotly_chart(
+            plot_vwap(data=bars, display=None),
+            width="stretch",
+        )
 
-with tab5:
+# ── Tab 5: Returns ───────────────────────────────────────────────────────────
+
+with tabs[5]:
     col1, col2 = st.columns([10, 1])
     col1.caption("Distribution of period-over-period percentage returns.")
 
     with col2.popover(":material/tune:"):
         price_col = price_col_radio("price_col_dist")
 
-    st.plotly_chart(
-        plot_returns(data=bars, price_col=price_col, display=None),
-        width="stretch",
-    )
+    if active_tab == TAB_LABELS[5]:
+        st.plotly_chart(
+            plot_returns(data=bars, price_col=price_col, display=None),
+            width="stretch",
+        )
 
-with tab6:
+# ── Tab 6: Seasonality ───────────────────────────────────────────────────────
+
+with tabs[6]:
+    col1, col2 = st.columns([10, 1])
+    col1.caption("Monthly returns heatmap showing seasonal patterns.")
+
+    with col2.popover(":material/tune:"):
+        price_col = price_col_radio("price_col_season")
+
+        season_symbol = st.selectbox(
+            label="Symbol",
+            key=(key := "season_symbol"),
+            options=symbols,
+            index=0,
+            on_change=lambda k=key: _persist(k),
+            help="Select the symbol to display in the seasonality heatmap.",
+        )
+
+    if active_tab == TAB_LABELS[6]:
+        st.plotly_chart(
+            plot_seasonality(
+                data=bars, price_col=price_col, symbol=season_symbol, display=None
+            ),
+            width="stretch",
+        )
+
+# ── Tab 7: Drawdown ──────────────────────────────────────────────────────────
+
+with tabs[7]:
     col1, col2 = st.columns([10, 1])
     col1.caption("Percentage drawdown from the running peak over time.")
 
     with col2.popover(":material/tune:"):
         price_col = price_col_radio("price_col_drawdown")
 
-    st.plotly_chart(
-        plot_drawdown(data=bars, price_col=price_col, display=None),
-        width="stretch",
-    )
+    if active_tab == TAB_LABELS[7]:
+        st.plotly_chart(
+            plot_drawdown(data=bars, price_col=price_col, display=None),
+            width="stretch",
+        )
 
-with tab7:
+# ── Tab 8: Correlation ───────────────────────────────────────────────────────
+
+with tabs[8]:
     col1, col2 = st.columns([10, 1])
     col1.caption(
         "Pairwise correlation of returns across selected symbols. Select at least two symbols."
@@ -291,31 +422,34 @@ with tab7:
     with col2.popover(":material/tune:"):
         price_col = price_col_radio("price_col_corr")
 
-    if len(symbols) < 2:
-        st.info(
-            "Select at least two symbols to compute correlation.",
-            icon=":material/info:",
-        )
-    else:
-        st.plotly_chart(
-            plot_correlation(data=bars, price_col=price_col, display=None),
-            width="stretch",
-        )
+    if active_tab == TAB_LABELS[8]:
+        if len(symbols) < 2:
+            st.info(
+                "Select at least two symbols to compute correlation.",
+                icon=":material/info:",
+            )
+        else:
+            st.plotly_chart(
+                plot_correlation(data=bars, price_col=price_col, display=None),
+                width="stretch",
+            )
 
-with tab8:
+# ── Tab 9: Dividends ─────────────────────────────────────────────────────────
+
+with tabs[9]:
     st.caption("Dividend payment history for selected symbols.")
 
-    dividends = _to_pandas(query_dividends(symbol=symbols))
+    if active_tab == TAB_LABELS[9]:
+        dividends = _to_pandas(query_dividends(symbol=symbols))
 
-    if dividends.empty:
-        st.info(
-            "No dividend data available for the selected symbols.",
-            icon=":material/info:",
-        )
-    else:
-        dividends["dt"] = _ts_to_datetime(dividends["ex_date"], tz)
-        st.plotly_chart(
-            plot_dividends(data=dividends, display=None),
-            width="stretch",
-        )
-
+        if dividends.empty:
+            st.info(
+                "No dividend data available for the selected symbols.",
+                icon=":material/info:",
+            )
+        else:
+            dividends["dt"] = _ts_to_datetime(dividends["ex_date"], tz)
+            st.plotly_chart(
+                plot_dividends(data=dividends, display=None),
+                width="stretch",
+            )
