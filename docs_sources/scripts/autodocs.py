@@ -37,6 +37,18 @@ BACKTIDE_URL = "https://github.com/tvdboom/backtide/blob/master/"
 CUSTOM_URLS = {
     "logokit": "https://logokit.com/",
     "momentjs": "https://momentjscom.readthedocs.io/en/latest/moment/04-displaying/01-format/",
+    "wiki-adx": "https://en.wikipedia.org/wiki/Average_directional_movement_index",
+    "wiki-atr": "https://en.wikipedia.org/wiki/Average_true_range",
+    "wiki-bb": "https://en.wikipedia.org/wiki/Bollinger_Bands",
+    "wiki-cci": "https://en.wikipedia.org/wiki/Commodity_channel_index",
+    "wiki-ema": "https://en.wikipedia.org/wiki/Moving_average#Exponential_moving_average",
+    "wiki-macd": "https://en.wikipedia.org/wiki/MACD",
+    "wiki-obv": "https://en.wikipedia.org/wiki/On-balance_volume",
+    "wiki-rsi": "https://en.wikipedia.org/wiki/Relative_strength_index",
+    "wiki-sma": "https://en.wikipedia.org/wiki/Moving_average#Simple_moving_average",
+    "wiki-stoch": "https://en.wikipedia.org/wiki/Stochastic_oscillator",
+    "wiki-vwap": "https://en.wikipedia.org/wiki/Volume-weighted_average_price",
+    "wiki-wma": "https://en.wikipedia.org/wiki/Moving_average#Weighted_moving_average",
 }
 
 FENCE_RE = re.compile(r"```.*?```", re.DOTALL)

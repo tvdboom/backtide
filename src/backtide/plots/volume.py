@@ -72,7 +72,9 @@ def plot_volume(
 
     See Also
     --------
+    - backtide.plots:plot_candlestick
     - backtide.plots:plot_price
+    - backtide.plots:plot_vwap
 
     Examples
     --------
@@ -101,11 +103,17 @@ def plot_volume(
                 y=subset["volume"],
                 name=symbol,
                 marker_color=color,
-                opacity=0.7,
+                marker_line_width=0,
+                opacity=0.85,
+                hovertemplate="%{x}<br>Volume: %{y:,.0f}<extra>" + symbol + "</extra>",
             )
         )
 
-    fig.update_layout(barmode="group")
+    fig.update_layout(
+        barmode="overlay",
+        bargap=0.05,
+        bargroupgap=0,
+    )
 
     return _plot(
         fig,

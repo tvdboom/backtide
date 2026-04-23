@@ -139,6 +139,8 @@ nav:
             - plot_price: api/plots/plot_price.md
             - plot_returns: api/plots/plot_returns.md
             - plot_volume: api/plots/plot_volume.md
+            - plot_vwap: api/plots/plot_vwap.md
+            - plot_dividends: api/plots/plot_dividends.md
         - storage:
             - query_bars: api/storage/query_bars.md
             - query_bars_summary: api/storage/query_bars_summary.md
@@ -182,7 +184,19 @@ nav:
                 - Interval: api/models/data/interval.md
                 - Provider: api/models/data/provider.md
             - indicators:
+                - AverageDirectionalIndex: api/models/indicators/averagedirectionalindex.md
+                - AverageTrueRange: api/models/indicators/averagetruerange.md
                 - BaseIndicator: api/models/indicators/baseindicator.md
+                - BollingerBands: api/models/indicators/bollingerbands.md
+                - CommodityChannelIndex: api/models/indicators/commoditychannelindex.md
+                - ExponentialMovingAverage: api/models/indicators/exponentialmovingaverage.md
+                - MovingAverageConvergenceDivergence: api/models/indicators/movingaverageconvergencedivergence.md
+                - OnBalanceVolume: api/models/indicators/onbalancevolume.md
+                - RelativeStrengthIndex: api/models/indicators/relativestrengthindex.md
+                - SimpleMovingAverage: api/models/indicators/simplemovingaverage.md
+                - StochasticOscillator: api/models/indicators/stochasticoscillator.md
+                - VolumeWeightedAveragePrice: api/models/indicators/volumeweightedaverageprice.md
+                - WeightedMovingAverage: api/models/indicators/weightedmovingaverage.md
         - utils:
             - clear_cache: api/utils/clear_cache.md
             - init_logging: api/utils/init_logging.md

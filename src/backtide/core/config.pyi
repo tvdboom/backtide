@@ -314,8 +314,9 @@ class PlotsConfig:
     Attributes
     ----------
     template : str, default="plotly"
-        Plotly template used for figure styling. Common choices are `"plotly"`,
-        `"plotly_dark"`, `"plotly_white"`, `"ggplot2"`, `"seaborn"`.
+        Plotly template used for figure styling. Common choices are `plotly`,
+        `plotly_dark`, `plotly_white`, `ggplot2`, `seaborn`. This parameter
+        does not affect plots shown in the [application].
 
     palette : list[str]
         Ordered list of RGB color strings used for data traces. Colors cycle

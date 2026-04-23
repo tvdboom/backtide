@@ -79,6 +79,8 @@ def plot_candlestick(
     See Also
     --------
     - backtide.plots:plot_price
+    - backtide.plots:plot_volume
+    - backtide.plots:plot_vwap
 
     Examples
     --------

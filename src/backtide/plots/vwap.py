@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the drawdown chart function for data analysis.
+Description: Module containing the VWAP chart function for data analysis.
 
 """
 
@@ -19,30 +19,26 @@ from backtide.plots.utils import _plot
 cfg = get_config()
 
 
-def plot_drawdown(
+def plot_vwap(
     data: pd.DataFrame,
-    price_col: str = "adj_close",
     *,
     title: str | dict[str, Any] | None = None,
-    legend: str | dict[str, Any] | None = "lower left",
+    legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] | None = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
-    """Create a drawdown chart.
+    """Create a VWAP (Volume-Weighted Average Price) chart.
 
-    Plots the percentage drawdown from the running peak over time for
-    one or more symbols. Drawdown measures the decline from a historical
-    peak in price and is a key risk metric.
+    Displays the cumulative VWAP alongside the closing price for one or
+    more symbols. VWAP is a key benchmark used to assess whether a security
+    was bought or sold at a favorable price relative to volume.
 
     Parameters
     ----------
     data : pd.DataFrame
-        Input data containing columns `symbol`, the column specified by
-        `price_col`, and `dt` with the datetime.
-
-    price_col : str, default="adj_close"
-        Column name used to compute the drawdown.
+        Input data containing columns `symbol`, `close`, `high`, `low`,
+        `volume` and `dt` with the datetime.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -51,7 +47,7 @@ def plot_drawdown(
         - If str, text for the title.
         - If dict, [title configuration][parameters].
 
-    legend : str | dict | None, default="lower left"
+    legend : str | dict | None, default="upper left"
         Legend for the plot. See the [user guide][parameters] for an extended
         description of the choices.
 
@@ -77,9 +73,9 @@ def plot_drawdown(
 
     See Also
     --------
-    - backtide.plots:plot_correlation
+    - backtide.plots:plot_candlestick
     - backtide.plots:plot_price
-    - backtide.plots:plot_returns
+    - backtide.plots:plot_volume
 
     Examples
     --------
@@ -87,33 +83,51 @@ def plot_drawdown(
     import pandas as pd
 
     from backtide.storage import query_bars
-    from backtide.plots import plot_drawdown
+    from backtide.plots import plot_vwap
 
     df = query_bars(["AAPL", "MSFT"], "1d")
     df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
 
-    plot_drawdown(df)
+    plot_vwap(df)
     ```
 
     """
     fig = go.Figure()
 
     for idx, symbol in enumerate(data["symbol"].unique()):
-        subset = data[data["symbol"] == symbol].sort_values("dt")
-        prices = subset[price_col]
-        cummax = prices.cummax()
-        drawdown = (prices - cummax) / cummax * 100
+        subset = data[data["symbol"] == symbol].sort_values("dt").copy()
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
+        # Compute typical price and cumulative VWAP
+        typical_price = (subset["high"] + subset["low"] + subset["close"]) / 3
+        cum_vol = subset["volume"].cumsum()
+        cum_tp_vol = (typical_price * subset["volume"]).cumsum()
+        vwap = cum_tp_vol / cum_vol
+
+        # Close price as a thin line
         fig.add_trace(
             go.Scatter(
                 x=subset["dt"],
-                y=drawdown,
+                y=subset["close"],
                 mode="lines",
-                name=symbol,
-                line={"color": color, "width": 2},
-                fill="tozeroy",
-                fillcolor=f"rgba{color[3:-1]}, 0.15)",
+                name=f"{symbol} Close",
+                line={"color": color, "width": 1, "dash": "dot"},
+                opacity=0.5,
+                legendgroup=symbol,
+                hovertemplate="%{x}<br>Close: %{y:.2f}<extra>" + symbol + "</extra>",
+            )
+        )
+
+        # VWAP as a bold line
+        fig.add_trace(
+            go.Scatter(
+                x=subset["dt"],
+                y=vwap,
+                mode="lines",
+                name=f"{symbol} VWAP",
+                line={"color": color, "width": 2.5},
+                legendgroup=symbol,
+                hovertemplate="%{x}<br>VWAP: %{y:.2f}<extra>" + symbol + "</extra>",
             )
         )
 
@@ -122,8 +136,9 @@ def plot_drawdown(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel="Drawdown (%)",
+        ylabel="Price",
         figsize=figsize,
         filename=filename,
         display=display,
     )
+

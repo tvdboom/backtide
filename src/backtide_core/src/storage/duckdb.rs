@@ -506,11 +506,16 @@ impl Storage for DuckDb {
         conn.execute_batch("COMMIT")?;
 
         // Phase 2: Bulk-insert every row via the Appender.
+        // Deduplicate by (symbol, provider, ex_date), keeping the last occurrence.
         let mut appender = conn.appender("dividends")?;
         for s in &non_empty {
             let prov = s.provider.to_string();
-            for div in &s.dividends {
-                appender.append_row(params![&s.symbol, &prov, div.ex_date as i64, div.amount,])?;
+            let mut seen = HashSet::new();
+            for div in s.dividends.iter().rev() {
+                if seen.insert(div.ex_date) {
+                    appender
+                        .append_row(params![&s.symbol, &prov, div.ex_date as i64, div.amount,])?;
+                }
             }
         }
         appender.flush()?;

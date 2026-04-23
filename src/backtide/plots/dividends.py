@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the drawdown chart function for data analysis.
+Description: Module containing the dividend history chart for data analysis.
 
 """
 
@@ -19,30 +19,26 @@ from backtide.plots.utils import _plot
 cfg = get_config()
 
 
-def plot_drawdown(
+def plot_dividends(
     data: pd.DataFrame,
-    price_col: str = "adj_close",
     *,
     title: str | dict[str, Any] | None = None,
-    legend: str | dict[str, Any] | None = "lower left",
+    legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] | None = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
-    """Create a drawdown chart.
+    """Create a dividend history chart.
 
-    Plots the percentage drawdown from the running peak over time for
-    one or more symbols. Drawdown measures the decline from a historical
-    peak in price and is a key risk metric.
+    Displays dividend payments over time for one or more symbols as a bar
+    chart with markers, making it easy to compare payout history and
+    identify trends.
 
     Parameters
     ----------
     data : pd.DataFrame
-        Input data containing columns `symbol`, the column specified by
-        `price_col`, and `dt` with the datetime.
-
-    price_col : str, default="adj_close"
-        Column name used to compute the drawdown.
+        Input data containing columns `symbol`, `ex_date` (unix timestamp
+        or datetime) and `amount` with the dividend amount.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -51,7 +47,7 @@ def plot_drawdown(
         - If str, text for the title.
         - If dict, [title configuration][parameters].
 
-    legend : str | dict | None, default="lower left"
+    legend : str | dict | None, default="upper left"
         Legend for the plot. See the [user guide][parameters] for an extended
         description of the choices.
 
@@ -77,7 +73,7 @@ def plot_drawdown(
 
     See Also
     --------
-    - backtide.plots:plot_correlation
+    - backtide.plots:plot_drawdown
     - backtide.plots:plot_price
     - backtide.plots:plot_returns
 
@@ -86,13 +82,13 @@ def plot_drawdown(
     ```pycon
     import pandas as pd
 
-    from backtide.storage import query_bars
-    from backtide.plots import plot_drawdown
+    from backtide.storage import query_dividends
+    from backtide.plots import plot_dividends
 
-    df = query_bars(["AAPL", "MSFT"], "1d")
-    df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
+    df = query_dividends(["AAPL", "MSFT"])
+    df["dt"] = pd.to_datetime(df["ex_date"], unit="s", utc=True)
 
-    plot_drawdown(df)
+    plot_dividends(df)
     ```
 
     """
@@ -100,30 +96,33 @@ def plot_drawdown(
 
     for idx, symbol in enumerate(data["symbol"].unique()):
         subset = data[data["symbol"] == symbol].sort_values("dt")
-        prices = subset[price_col]
-        cummax = prices.cummax()
-        drawdown = (prices - cummax) / cummax * 100
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
         fig.add_trace(
-            go.Scatter(
+            go.Bar(
                 x=subset["dt"],
-                y=drawdown,
-                mode="lines",
+                y=subset["amount"],
                 name=symbol,
-                line={"color": color, "width": 2},
-                fill="tozeroy",
-                fillcolor=f"rgba{color[3:-1]}, 0.15)",
+                marker_color=color,
+                marker_line_width=0,
+                opacity=0.85,
+                hovertemplate="%{x}<br>Dividend: $%{y:.4f}<extra>" + symbol + "</extra>",
             )
         )
+
+    fig.update_layout(
+        barmode="group",
+        bargap=0.15,
+    )
 
     return _plot(
         fig,
         title=title,
         legend=legend,
-        xlabel="Date",
-        ylabel="Drawdown (%)",
+        xlabel="Ex-Dividend Date",
+        ylabel="Dividend ($)",
         figsize=figsize,
         filename=filename,
         display=display,
     )
+

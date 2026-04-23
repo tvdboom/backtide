@@ -21,7 +21,7 @@ use futures::future::{join_all, try_join_all};
 use futures::stream::{self, StreamExt};
 use indexmap::IndexMap;
 use itertools::Itertools;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
@@ -233,6 +233,8 @@ impl Engine {
 
             // ── Phase 2: collect results and build one bulk write ────────
 
+            // Deduplicate dividend series: keep only the first per (symbol, provider).
+            let mut seen_divs: HashSet<(String, Provider)> = HashSet::new();
             let mut bar_series: Vec<BarSeries> = Vec::new();
             let mut div_series: Vec<DividendSeries> = Vec::new();
             let mut outcomes: Vec<(usize, String, Interval, Result<usize, String>)> = Vec::new();
@@ -252,7 +254,9 @@ impl Engine {
                             bars: download.bars,
                         });
 
-                        if !download.dividends.is_empty() {
+                        if !download.dividends.is_empty()
+                            && seen_divs.insert((symbol.clone(), provider_enum))
+                        {
                             div_series.push(DividendSeries {
                                 symbol: symbol.clone(),
                                 provider: provider_enum,

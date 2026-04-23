@@ -5,13 +5,13 @@ repos:
     - id: ruff
       types_or: [ python, pyi ]
       args: [--fix]
-      files: ^(?!docs/).*\.(pyi?|ipy)$
+      files: ^(?!docs/).*\.(py|ipy)$
     - id: ruff-format
       types_or: [ python, pyi ]
       files: ^(?!docs/).*\.(py|ipy)$
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.11.6
+    rev: 0.11.7
     hooks:
       - id: uv-lock
 
@@ -55,7 +55,7 @@ repos:
 
       - id: ty
         name: ty check
-        entry: ty check
+        entry: uv run ty check
         language: system
         pass_filenames: false
         types: [python]

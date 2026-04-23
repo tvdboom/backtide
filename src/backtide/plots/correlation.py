@@ -73,6 +73,8 @@ def plot_correlation(
 
     See Also
     --------
+    - backtide.plots:plot_drawdown
+    - backtide.plots:plot_price
     - backtide.plots:plot_returns
 
     Examples

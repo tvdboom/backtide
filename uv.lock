@@ -81,8 +81,25 @@ full = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "kaleido" },
+    { name = "mike" },
+    { name = "mkdocs" },
+    { name = "mkdocs-autorefs" },
+    { name = "mkdocs-material" },
+    { name = "mkdocs-material-extensions" },
+    { name = "mkdocs-simple-hooks" },
+    { name = "pre-commit" },
+    { name = "pre-commit-uv" },
+    { name = "pymdown-extensions" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-xdist" },
+    { name = "pyyaml" },
+    { name = "regex" },
     { name = "ruff" },
-    { name = "rust-just" },
+    { name = "tox" },
+    { name = "tox-uv" },
     { name = "ty" },
 ]
 docs = [
@@ -97,6 +114,10 @@ docs = [
     { name = "pyyaml" },
     { name = "regex" },
 ]
+lint = [
+    { name = "ruff" },
+    { name = "ty" },
+]
 pre-commit = [
     { name = "pre-commit" },
     { name = "pre-commit-uv" },
@@ -110,6 +131,9 @@ test = [
 tox = [
     { name = "tox" },
     { name = "tox-uv" },
+]
+utils = [
+    { name = "rust-just" },
 ]
 
 [package.metadata]
@@ -129,8 +153,25 @@ provides-extras = ["full"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "kaleido", specifier = ">=1.2.0" },
+    { name = "mike", specifier = ">=2.1.4" },
+    { name = "mkdocs", specifier = ">=1.6.1" },
+    { name = "mkdocs-autorefs", specifier = ">=1.4.4" },
+    { name = "mkdocs-material", specifier = ">=9.7.6" },
+    { name = "mkdocs-material-extensions", specifier = ">=1.3.1" },
+    { name = "mkdocs-simple-hooks", specifier = ">=0.1.5" },
+    { name = "pre-commit", specifier = ">=4.5.1" },
+    { name = "pre-commit-uv", specifier = ">=4.2.1" },
+    { name = "pymdown-extensions", specifier = ">=10.21" },
+    { name = "pytest", specifier = ">=8.1.1" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-mock", specifier = ">=3.12.0" },
+    { name = "pytest-xdist", specifier = ">=3.5.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "regex", specifier = ">=2026.2.28" },
     { name = "ruff", specifier = ">=0.15.7" },
-    { name = "rust-just", specifier = ">=1.49.0" },
+    { name = "tox", specifier = ">=4.53.0" },
+    { name = "tox-uv", specifier = ">=1.33.4" },
     { name = "ty", specifier = ">=0.0.30" },
 ]
 docs = [
@@ -144,6 +185,10 @@ docs = [
     { name = "pymdown-extensions", specifier = ">=10.21" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "regex", specifier = ">=2026.2.28" },
+]
+lint = [
+    { name = "ruff", specifier = ">=0.15.7" },
+    { name = "ty", specifier = ">=0.0.30" },
 ]
 pre-commit = [
     { name = "pre-commit", specifier = ">=4.5.1" },
@@ -159,6 +204,7 @@ tox = [
     { name = "tox", specifier = ">=4.53.0" },
     { name = "tox-uv", specifier = ">=1.33.4" },
 ]
+utils = [{ name = "rust-just", specifier = ">=1.49.0" }]
 
 [[package]]
 name = "blinker"

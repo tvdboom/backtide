@@ -162,7 +162,7 @@ with metrics_container:
     )
 
 if indices:
-    col1, col2, _ = st.columns([2, 2, 3.9])
+    col1, col2, _ = st.columns([2, 2, 3])
 
     if col1.button(
         label=f"Analyze {len(indices)} series",

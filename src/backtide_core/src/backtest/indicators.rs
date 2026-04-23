@@ -260,7 +260,37 @@ macro_rules! indicator_pymethods {
 // Indicator structs
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Average Directional Index indicator.
+/// Quantifies trend strength on a scale of 0 to 100, regardless of direction.
+/// Values above 25 generally indicate a strong trend; below 20, a weak or
+/// ranging market. Read more on [Wikipedia][wiki-adx].
+///
+/// When to use: Determining whether a market is trending or ranging before
+/// applying trend-following or mean-reversion strategies.
+///
+/// Formula:
+///
+/// $$+DI_t = 100 \cdot \frac{Smoothed(+DM_t)}{ATR_t}$$
+/// $$-DI_t = 100 \cdot \frac{Smoothed(-DM_t)}{ATR_t}$$
+/// $$DX_t = 100 \cdot \frac{|+DI_t - (-DI_t)|}{+DI_t + (-DI_t)}$$
+/// $$ADX_t = EMA_n(DX_t)$$
+///
+/// Parameters
+/// ----------
+/// period : int, default=14
+///     Look-back window length.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:AverageTrueRange
+/// backtide.indicators:MovingAverageConvergenceDivergence
+/// backtide.indicators:RelativeStrengthIndex
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct AverageDirectionalIndex {
@@ -339,7 +369,35 @@ impl Indicator for AverageDirectionalIndex {
     }
 }
 
-/// Average True Range indicator.
+/// Measures market volatility by calculating the average of the true range
+/// over a period. The true range accounts for gaps between sessions.
+/// Read more on [Wikipedia][wiki-atr].
+///
+/// When to use: Position sizing, setting stop-loss levels, comparing
+/// volatility across instruments.
+///
+/// Formula:
+///
+/// $$TR_t = \max(H_t - L_t,\; |H_t - C_{t-1}|,\; |L_t - C_{t-1}|)$$
+/// $$ATR_t = \frac{1}{n} \sum_{i=0}^{n-1} TR_{t-i}$$
+///
+/// Parameters
+/// ----------
+/// period : int, default=14
+///     Look-back window length.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:AverageDirectionalIndex
+/// backtide.indicators:BollingerBands
+/// backtide.indicators:SimpleMovingAverage
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct AverageTrueRange {
@@ -376,7 +434,39 @@ impl Indicator for AverageTrueRange {
     }
 }
 
-/// Bollinger Bands indicator.
+/// Volatility bands placed above and below an n-period SMA. The bands widen
+/// during high volatility and contract during low volatility.
+/// Read more on [Wikipedia][wiki-bb].
+///
+/// When to use: Volatility assessment, mean-reversion strategies, breakout
+/// detection when price moves outside the bands.
+///
+/// Formula:
+///
+/// $$Upper_t = SMA_t + k \cdot \sigma_t$$
+/// $$Lower_t = SMA_t - k \cdot \sigma_t$$
+///
+/// where $\sigma_t$ is the rolling standard deviation over $n$ periods.
+///
+/// Parameters
+/// ----------
+/// period : int, default=20
+///     Number of bars for the moving average.
+/// std_dev : float, default=2.0
+///     Number of standard deviations.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:AverageTrueRange
+/// backtide.indicators:CommodityChannelIndex
+/// backtide.indicators:SimpleMovingAverage
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct BollingerBands {
@@ -425,7 +515,38 @@ impl Indicator for BollingerBands {
     }
 }
 
-/// Commodity Channel Index indicator.
+/// Measures how far the typical price deviates from its statistical mean,
+/// identifying cyclical trends. Values above +100 suggest overbought
+/// conditions; below -100, oversold.
+/// Read more on [Wikipedia][wiki-cci].
+///
+/// When to use: Identifying cyclical price patterns, spotting divergences,
+/// timing entries in commodities and equities.
+///
+/// Formula:
+///
+/// $$TP_t = \frac{H_t + L_t + C_t}{3}$$
+/// $$CCI_t = \frac{TP_t - SMA_n(TP_t)}{0.015 \cdot MD_t}$$
+///
+/// where $MD_t$ is the mean absolute deviation of $TP$ over $n$ periods.
+///
+/// Parameters
+/// ----------
+/// period : int, default=20
+///     Look-back window length.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:BollingerBands
+/// backtide.indicators:RelativeStrengthIndex
+/// backtide.indicators:StochasticOscillator
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct CommodityChannelIndex {
@@ -478,7 +599,36 @@ impl Indicator for CommodityChannelIndex {
     }
 }
 
-/// Exponential Moving Average indicator.
+/// A weighted moving average that gives exponentially more weight to recent
+/// prices, making it more responsive to new information than the SMA.
+/// Read more on [Wikipedia][wiki-ema].
+///
+/// When to use: Faster trend detection, reducing lag in crossover systems,
+/// building block for other indicators (MACD, ADX).
+///
+/// Formula:
+///
+/// $$EMA_t = \alpha \cdot C_t + (1 - \alpha) \cdot EMA_{t-1}$$
+///
+/// where $\alpha = \frac{2}{n + 1}$.
+///
+/// Parameters
+/// ----------
+/// period : int, default=14
+///     Look-back window length.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:MovingAverageConvergenceDivergence
+/// backtide.indicators:SimpleMovingAverage
+/// backtide.indicators:WeightedMovingAverage
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct ExponentialMovingAverage {
@@ -513,7 +663,40 @@ impl Indicator for ExponentialMovingAverage {
     }
 }
 
-/// Moving Average Convergence Divergence indicator.
+/// A trend-following momentum indicator that shows the relationship between
+/// two EMAs. The MACD line is the difference between a fast and slow EMA;
+/// the signal line is an EMA of the MACD line itself.
+/// Read more on [Wikipedia][wiki-macd].
+///
+/// When to use: Trend direction and momentum, signal line crossovers for
+/// entry/exit timing, histogram divergence analysis.
+///
+/// Formula:
+///
+/// $$MACD_t = EMA_{fast}(C_t) - EMA_{slow}(C_t)$$
+/// $$Signal_t = EMA_{signal}(MACD_t)$$
+///
+/// Parameters
+/// ----------
+/// fast_period : int, default=12
+///     Fast EMA period.
+/// slow_period : int, default=26
+///     Slow EMA period.
+/// signal_period : int, default=9
+///     Signal line EMA period.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:AverageDirectionalIndex
+/// backtide.indicators:ExponentialMovingAverage
+/// backtide.indicators:RelativeStrengthIndex
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct MovingAverageConvergenceDivergence {
@@ -568,7 +751,30 @@ impl Indicator for MovingAverageConvergenceDivergence {
     }
 }
 
-/// On-Balance Volume indicator.
+/// A cumulative volume indicator that adds volume on up-close days and
+/// subtracts it on down-close days. Rising OBV confirms an uptrend;
+/// falling OBV confirms a downtrend.
+/// Read more on [Wikipedia][wiki-obv].
+///
+/// When to use: Confirming price trends with volume, spotting divergences
+/// between price and volume momentum.
+///
+/// Formula:
+///
+/// $$OBV_t = \begin{cases} OBV_{t-1} + V_t & \text{if } C_t > C_{t-1} \\ OBV_{t-1} - V_t & \text{if } C_t < C_{t-1} \\ OBV_{t-1} & \text{otherwise} \end{cases}$$
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:MovingAverageConvergenceDivergence
+/// backtide.indicators:RelativeStrengthIndex
+/// backtide.indicators:VolumeWeightedAveragePrice
 #[pyclass(skip_from_py_object, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct OnBalanceVolume;
@@ -607,7 +813,37 @@ impl Indicator for OnBalanceVolume {
     }
 }
 
-/// Relative Strength Index indicator.
+/// A momentum oscillator that measures the speed and magnitude of recent
+/// price changes on a scale of 0 to 100. Values above 70 are typically
+/// considered overbought; below 30, oversold.
+/// Read more on [Wikipedia][wiki-rsi].
+///
+/// When to use: Identifying overbought/oversold conditions, spotting
+/// divergences, confirming trend strength.
+///
+/// Formula:
+///
+/// $$RSI = 100 - \frac{100}{1 + RS}$$
+///
+/// where $RS = \frac{\text{avg gain over } n}{\text{avg loss over } n}$.
+///
+/// Parameters
+/// ----------
+/// period : int, default=14
+///     Look-back window length.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:CommodityChannelIndex
+/// backtide.indicators:MovingAverageConvergenceDivergence
+/// backtide.indicators:StochasticOscillator
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct RelativeStrengthIndex {
@@ -669,7 +905,36 @@ impl Indicator for RelativeStrengthIndex {
     }
 }
 
-/// Simple Moving Average indicator.
+/// The arithmetic mean of the last n closing prices. Used to smooth
+/// short-term fluctuations and identify the direction of a trend.
+/// Read more on [Wikipedia][wiki-sma].
+///
+/// When to use: Trend identification, support/resistance levels, crossover
+/// strategies (e.g., golden cross / death cross).
+///
+/// Formula:
+///
+/// $$SMA_t = \frac{1}{n} \sum_{i=0}^{n-1} C_{t-i}$$
+///
+/// where $C_t$ is the closing price at time $t$ and $n$ is the period.
+///
+/// Parameters
+/// ----------
+/// period : int, default=14
+///     Look-back window length.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:BollingerBands
+/// backtide.indicators:ExponentialMovingAverage
+/// backtide.indicators:WeightedMovingAverage
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct SimpleMovingAverage {
@@ -704,7 +969,40 @@ impl Indicator for SimpleMovingAverage {
     }
 }
 
-/// Stochastic Oscillator indicator.
+/// Compares the closing price to the high-low range over a period,
+/// producing a %K line and a smoothed %D signal line. Both oscillate
+/// between 0 and 100.
+/// Read more on [Wikipedia][wiki-stoch].
+///
+/// When to use: Overbought/oversold signals, %K/%D crossovers for
+/// entry/exit timing, divergence analysis.
+///
+/// Formula:
+///
+/// $$\%K_t = 100 \cdot \frac{C_t - L_n}{H_n - L_n}$$
+/// $$\%D_t = SMA_d(\%K_t)$$
+///
+/// where $H_n$ and $L_n$ are the highest high and lowest low over $n$ periods.
+///
+/// Parameters
+/// ----------
+/// k_period : int, default=14
+///     %K look-back period.
+/// d_period : int, default=3
+///     %D smoothing period.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:CommodityChannelIndex
+/// backtide.indicators:MovingAverageConvergenceDivergence
+/// backtide.indicators:RelativeStrengthIndex
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct StochasticOscillator {
@@ -761,7 +1059,32 @@ impl Indicator for StochasticOscillator {
     }
 }
 
-/// Volume-Weighted Average Price indicator.
+/// The cumulative average price weighted by volume. Institutional traders
+/// use VWAP as a benchmark: buying below VWAP is considered favorable,
+/// selling above it likewise.
+/// Read more on [Wikipedia][wiki-vwap].
+///
+/// When to use: Intraday trading benchmark, assessing execution quality,
+/// dynamic support/resistance.
+///
+/// Formula:
+///
+/// $$VWAP_t = \frac{\sum_{i=1}^{t} TP_i \cdot V_i}{\sum_{i=1}^{t} V_i}$$
+///
+/// where $TP_i = \frac{H_i + L_i + C_i}{3}$.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:OnBalanceVolume
+/// backtide.indicators:SimpleMovingAverage
+/// backtide.indicators:WeightedMovingAverage
 #[pyclass(skip_from_py_object, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct VolumeWeightedAveragePrice;
@@ -804,7 +1127,36 @@ impl Indicator for VolumeWeightedAveragePrice {
     }
 }
 
-/// Weighted Moving Average indicator.
+/// A moving average where each price is multiplied by a linearly decreasing
+/// weight, placing more emphasis on recent data than the SMA but with a
+/// different weighting scheme than the EMA.
+/// Read more on [Wikipedia][wiki-wma].
+///
+/// When to use: Similar to EMA but with a linear instead of exponential
+/// decay -- useful when you want recent prices to matter more without the
+/// recursive smoothing of EMA.
+///
+/// Formula:
+///
+/// $$WMA_t = \frac{\sum_{i=0}^{n-1} (n - i) \cdot C_{t-i}}{\sum_{i=1}^{n} i}$$
+///
+/// Parameters
+/// ----------
+/// period : int, default=14
+///     Look-back window length.
+///
+/// Attributes
+/// ----------
+/// acronym : str
+///     Short ticker-style acronym.
+/// name : str
+///     Human-readable indicator name.
+///
+/// See Also
+/// --------
+/// backtide.indicators:ExponentialMovingAverage
+/// backtide.indicators:MovingAverageConvergenceDivergence
+/// backtide.indicators:SimpleMovingAverage
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct WeightedMovingAverage {

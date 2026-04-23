@@ -10,7 +10,7 @@ import streamlit as st
 
 from backtide.core.config import get_config
 from backtide.core.data import Interval
-from backtide.core.storage import query_bars, query_instruments
+from backtide.core.storage import query_bars, query_dividends, query_instruments
 from backtide.indicators.utils import _load_stored_indicators
 from backtide.plots.candlestick import plot_candlestick
 from backtide.plots.correlation import plot_correlation
@@ -18,6 +18,8 @@ from backtide.plots.drawdown import plot_drawdown
 from backtide.plots.price import PRICE_COLUMNS, plot_price
 from backtide.plots.returns import plot_returns
 from backtide.plots.volume import plot_volume
+from backtide.plots.vwap import plot_vwap
+from backtide.plots.dividends import plot_dividends
 from backtide.ui.utils import (
     _default,
     _get_timezone,
@@ -132,14 +134,16 @@ bars = bars[
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
     [
         ":material/show_chart: Price",
         ":material/candlestick_chart: Candlestick",
         ":material/bar_chart: Volume",
+        ":material/waterfall_chart: VWAP",
         ":material/stacked_line_chart: Returns",
         ":material/trending_down: Drawdown",
         ":material/grid_on: Correlation",
+        ":material/payments: Dividends",
     ],
     key=(key := "plot_tabs"),
     default=_default(key),
@@ -247,6 +251,14 @@ with tab3:
     )
 
 with tab4:
+    st.caption("Volume-Weighted Average Price compared to closing price.")
+
+    st.plotly_chart(
+        plot_vwap(data=bars, display=None),
+        width="stretch",
+    )
+
+with tab5:
     col1, col2 = st.columns([10, 1])
     col1.caption("Distribution of period-over-period percentage returns.")
 
@@ -258,7 +270,7 @@ with tab4:
         width="stretch",
     )
 
-with tab5:
+with tab6:
     col1, col2 = st.columns([10, 1])
     col1.caption("Percentage drawdown from the running peak over time.")
 
@@ -270,7 +282,7 @@ with tab5:
         width="stretch",
     )
 
-with tab6:
+with tab7:
     col1, col2 = st.columns([10, 1])
     col1.caption(
         "Pairwise correlation of returns across selected symbols. Select at least two symbols."
@@ -289,3 +301,21 @@ with tab6:
             plot_correlation(data=bars, price_col=price_col, display=None),
             width="stretch",
         )
+
+with tab8:
+    st.caption("Dividend payment history for selected symbols.")
+
+    dividends = _to_pandas(query_dividends(symbol=symbols))
+
+    if dividends.empty:
+        st.info(
+            "No dividend data available for the selected symbols.",
+            icon=":material/info:",
+        )
+    else:
+        dividends["dt"] = _ts_to_datetime(dividends["ex_date"], tz)
+        st.plotly_chart(
+            plot_dividends(data=dividends, display=None),
+            width="stretch",
+        )
+
