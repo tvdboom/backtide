@@ -309,7 +309,12 @@ def _generate_method_stub(
 
     if sig:
         ret_str = f" -> {ret_type}" if ret_type else ""
-        return f"{indent}def {name}{sig}{ret_str}: ...\n"
+        result = f"{indent}def {name}{sig}{ret_str}:\n"
+        if doc and not name.startswith("__"):
+            result += _format_docstring(doc, indent=indent + "    ")
+        else:
+            result += f"{indent}    ...\n"
+        return result
 
     # Fallback: generic signature
     if name == "__new__":
@@ -318,7 +323,12 @@ def _generate_method_stub(
         return f"{indent}def {name}(self, *args, **kwargs): ...\n"
 
     ret_str = f" -> {ret_type}" if ret_type else ""
-    return f"{indent}def {name}(self, *args, **kwargs){ret_str}: ...\n"
+    result = f"{indent}def {name}(self, *args, **kwargs){ret_str}:\n"
+    if doc and not name.startswith("__"):
+        result += _format_docstring(doc, indent=indent + "    ")
+    else:
+        result += f"{indent}    ...\n"
+    return result
 
 
 def _generate_class_stub(name: str, cls: type, all_doc_types: dict[str, str]) -> str:

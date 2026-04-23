@@ -15,6 +15,7 @@ from inspect import (
     getdoc,
     getmembers,
     getsourcelines,
+    isbuiltin,
     isclass,
     isfunction,
     ismethod,
@@ -117,9 +118,11 @@ class AutoDocs:
     def __init__(self, obj: type[object], method: str | None = None):
         if method:
             self.obj = getattr(obj, method)
+            self._parent_cls = obj
             self._parent_anchor = f"{obj.__name__.lower()}-"
         else:
             self.obj = obj
+            self._parent_cls = None
             self._parent_anchor = ""
 
         self.method = method
@@ -224,9 +227,9 @@ class AutoDocs:
                 obj = "enum"
             else:
                 obj = "class"
-        elif isinstance(self.obj, MethodType):
+        elif "cls" in params or isinstance(self.obj, MethodType):
             obj = "classmethod"
-        elif "self" in params:
+        elif "self" in params or self._parent_cls:
             obj = "method"
         else:
             obj = "function"
@@ -498,7 +501,10 @@ class AutoDocs:
         else:
             methods = [
                 m
-                for m, _ in getmembers(self.obj, predicate=lambda f: ismethod(f) or isfunction(f))
+                for m, _ in getmembers(
+                    self.obj,
+                    predicate=lambda f: ismethod(f) or isfunction(f) or isbuiltin(f) or isroutine(f),
+                )
                 if not m.startswith("_") and not any(re.fullmatch(p, m) for p in exclude)
             ]
 

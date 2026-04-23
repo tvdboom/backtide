@@ -195,29 +195,34 @@ macro_rules! indicator_pymethods {
     ($ty:ident) => {
         #[pymethods]
         impl $ty {
-            /// Short ticker-style acronym (e.g. `"SMA"`).
+            /// Short ticker-style acronym.
             #[classattr]
             fn acronym() -> &'static str {
                 <$ty as Indicator>::ACRONYM
             }
 
-            /// Human-readable name (e.g. `"Simple Moving Average"`).
+            /// Human-readable name.
             #[classattr]
             fn name() -> &'static str {
                 <$ty as Indicator>::NAME
             }
 
-            /// One-sentence explanation of what the indicator measures.
+            /// Short explanation of what the indicator measures.
+            ///
+            /// Returns
+            /// -------
+            /// str
+            ///     The description.
             #[classmethod]
             fn description(_cls: &Bound<'_, PyType>) -> &'static str {
                 <$ty as Indicator>::DESCRIPTION
             }
 
-            /// Compute the indicator on a DataFrame.
+            /// Compute the indicator on a dataset.
             ///
             /// Parameters
             /// ----------
-            /// data : np.ndarray | Series | DataFrame
+            /// data : np.ndarray | pd.DataFrame | pl.DataFrame
             ///     Historical OHLCV data.
             ///
             /// Returns
@@ -262,17 +267,21 @@ macro_rules! indicator_pymethods {
 
 /// Quantifies trend strength on a scale of 0 to 100, regardless of direction.
 /// Values above 25 generally indicate a strong trend; below 20, a weak or
-/// ranging market. Read more on [Wikipedia][wiki-adx].
-///
-/// When to use: Determining whether a market is trending or ranging before
-/// applying trend-following or mean-reversion strategies.
+/// ranging market. Useful for determining whether a market is trending or
+/// ranging before applying trend-following or mean-reversion strategies.
 ///
 /// Formula:
 ///
-/// $$+DI_t = 100 \cdot \frac{Smoothed(+DM_t)}{ATR_t}$$
-/// $$-DI_t = 100 \cdot \frac{Smoothed(-DM_t)}{ATR_t}$$
-/// $$DX_t = 100 \cdot \frac{|+DI_t - (-DI_t)|}{+DI_t + (-DI_t)}$$
-/// $$ADX_t = EMA_n(DX_t)$$
+/// $$
+/// \begin{aligned}
+/// +DI_t &= 100 \cdot \frac{Smoothed(+DM_t)}{ATR_t} \\\\
+/// -DI_t &= 100 \cdot \frac{Smoothed(-DM_t)}{ATR_t} \\\\
+/// DX_t &= 100 \cdot \frac{|+DI_t - (-DI_t)|}{+DI_t + (-DI_t)} \\\\
+/// ADX_t &= EMA_n(DX_t)
+/// \end{aligned}
+/// $$
+///
+/// Read more on [Wikipedia][wiki-adx].
 ///
 /// Parameters
 /// ----------
@@ -370,16 +379,20 @@ impl Indicator for AverageDirectionalIndex {
 }
 
 /// Measures market volatility by calculating the average of the true range
-/// over a period. The true range accounts for gaps between sessions.
-/// Read more on [Wikipedia][wiki-atr].
-///
-/// When to use: Position sizing, setting stop-loss levels, comparing
-/// volatility across instruments.
+/// over a period. The true range accounts for gaps between sessions. Useful
+/// for position sizing, setting stop-loss levels, and comparing volatility
+/// across instruments.
 ///
 /// Formula:
 ///
-/// $$TR_t = \max(H_t - L_t,\; |H_t - C_{t-1}|,\; |L_t - C_{t-1}|)$$
-/// $$ATR_t = \frac{1}{n} \sum_{i=0}^{n-1} TR_{t-i}$$
+/// $$
+/// \begin{aligned}
+/// TR_t &= \max(H_t - L_t,\; |H_t - C_{t-1}|,\; |L_t - C_{t-1}|) \\\\
+/// ATR_t &= \frac{1}{n} \sum_{i=0}^{n-1} TR_{t-i}
+/// \end{aligned}
+/// $$
+///
+/// Read more on [Wikipedia][wiki-atr].
 ///
 /// Parameters
 /// ----------
@@ -435,18 +448,21 @@ impl Indicator for AverageTrueRange {
 }
 
 /// Volatility bands placed above and below an n-period SMA. The bands widen
-/// during high volatility and contract during low volatility.
-/// Read more on [Wikipedia][wiki-bb].
-///
-/// When to use: Volatility assessment, mean-reversion strategies, breakout
-/// detection when price moves outside the bands.
+/// during high volatility and contract during low volatility. Useful for
+/// volatility assessment, mean-reversion strategies, and breakout detection
+/// when price moves outside the bands.
 ///
 /// Formula:
 ///
-/// $$Upper_t = SMA_t + k \cdot \sigma_t$$
-/// $$Lower_t = SMA_t - k \cdot \sigma_t$$
+/// $$
+/// \begin{aligned}
+/// Upper_t &= SMA_t + k \cdot \sigma_t \\\\
+/// Lower_t &= SMA_t - k \cdot \sigma_t
+/// \end{aligned}
+/// $$
 ///
-/// where $\sigma_t$ is the rolling standard deviation over $n$ periods.
+/// where $\sigma_t$ is the rolling standard deviation over $n$ periods. Read
+/// more on [Wikipedia][wiki-bb].
 ///
 /// Parameters
 /// ----------
@@ -517,18 +533,21 @@ impl Indicator for BollingerBands {
 
 /// Measures how far the typical price deviates from its statistical mean,
 /// identifying cyclical trends. Values above +100 suggest overbought
-/// conditions; below -100, oversold.
-/// Read more on [Wikipedia][wiki-cci].
-///
-/// When to use: Identifying cyclical price patterns, spotting divergences,
-/// timing entries in commodities and equities.
+/// conditions; below -100, oversold. Useful for identifying cyclical price
+/// patterns, spotting divergences, and timing entries in commodities and
+/// equities.
 ///
 /// Formula:
 ///
-/// $$TP_t = \frac{H_t + L_t + C_t}{3}$$
-/// $$CCI_t = \frac{TP_t - SMA_n(TP_t)}{0.015 \cdot MD_t}$$
+/// $$
+/// \begin{aligned}
+/// TP_t &= \frac{H_t + L_t + C_t}{3} \\\\
+/// CCI_t &= \frac{TP_t - SMA_n(TP_t)}{0.015 \cdot MD_t}
+/// \end{aligned}
+/// $$
 ///
-/// where $MD_t$ is the mean absolute deviation of $TP$ over $n$ periods.
+/// where $MD_t$ is the mean absolute deviation of $TP$ over $n$ periods. Read
+/// more on [Wikipedia][wiki-cci].
 ///
 /// Parameters
 /// ----------
@@ -600,17 +619,15 @@ impl Indicator for CommodityChannelIndex {
 }
 
 /// A weighted moving average that gives exponentially more weight to recent
-/// prices, making it more responsive to new information than the SMA.
-/// Read more on [Wikipedia][wiki-ema].
-///
-/// When to use: Faster trend detection, reducing lag in crossover systems,
+/// prices, making it more responsive to new information than the SMA. Useful
+/// for faster trend detection, reducing lag in crossover systems, and as a
 /// building block for other indicators (MACD, ADX).
 ///
 /// Formula:
 ///
 /// $$EMA_t = \alpha \cdot C_t + (1 - \alpha) \cdot EMA_{t-1}$$
 ///
-/// where $\alpha = \frac{2}{n + 1}$.
+/// where $\alpha = \frac{2}{n + 1}$. Read more on [Wikipedia][wiki-ema].
 ///
 /// Parameters
 /// ----------
@@ -665,16 +682,20 @@ impl Indicator for ExponentialMovingAverage {
 
 /// A trend-following momentum indicator that shows the relationship between
 /// two EMAs. The MACD line is the difference between a fast and slow EMA;
-/// the signal line is an EMA of the MACD line itself.
-/// Read more on [Wikipedia][wiki-macd].
-///
-/// When to use: Trend direction and momentum, signal line crossovers for
-/// entry/exit timing, histogram divergence analysis.
+/// the signal line is an EMA of the MACD line itself. Useful for trend
+/// direction and momentum, signal line crossovers for entry/exit timing,
+/// and histogram divergence analysis.
 ///
 /// Formula:
 ///
-/// $$MACD_t = EMA_{fast}(C_t) - EMA_{slow}(C_t)$$
-/// $$Signal_t = EMA_{signal}(MACD_t)$$
+/// $$
+/// \begin{aligned}
+/// MACD_t &= EMA_{fast}(C_t) - EMA_{slow}(C_t) \\\\
+/// Signal_t &= EMA_{signal}(MACD_t)
+/// \end{aligned}
+/// $$
+///
+/// Read more on [Wikipedia][wiki-macd].
 ///
 /// Parameters
 /// ----------
@@ -753,15 +774,14 @@ impl Indicator for MovingAverageConvergenceDivergence {
 
 /// A cumulative volume indicator that adds volume on up-close days and
 /// subtracts it on down-close days. Rising OBV confirms an uptrend;
-/// falling OBV confirms a downtrend.
-/// Read more on [Wikipedia][wiki-obv].
-///
-/// When to use: Confirming price trends with volume, spotting divergences
-/// between price and volume momentum.
+/// falling OBV confirms a downtrend. Useful for confirming price trends
+/// with volume and spotting divergences between price and volume momentum.
 ///
 /// Formula:
 ///
 /// $$OBV_t = \begin{cases} OBV_{t-1} + V_t & \text{if } C_t > C_{t-1} \\ OBV_{t-1} - V_t & \text{if } C_t < C_{t-1} \\ OBV_{t-1} & \text{otherwise} \end{cases}$$
+///
+/// Read more on [Wikipedia][wiki-obv].
 ///
 /// Attributes
 /// ----------
@@ -815,17 +835,16 @@ impl Indicator for OnBalanceVolume {
 
 /// A momentum oscillator that measures the speed and magnitude of recent
 /// price changes on a scale of 0 to 100. Values above 70 are typically
-/// considered overbought; below 30, oversold.
-/// Read more on [Wikipedia][wiki-rsi].
-///
-/// When to use: Identifying overbought/oversold conditions, spotting
-/// divergences, confirming trend strength.
+/// considered overbought; below 30, oversold. Useful for identifying
+/// overbought/oversold conditions, spotting divergences, and confirming
+/// trend strength.
 ///
 /// Formula:
 ///
 /// $$RSI = 100 - \frac{100}{1 + RS}$$
 ///
-/// where $RS = \frac{\text{avg gain over } n}{\text{avg loss over } n}$.
+/// where $RS = \frac{\text{avg gain over } n}{\text{avg loss over } n}$. Read
+/// more on [Wikipedia][wiki-rsi].
 ///
 /// Parameters
 /// ----------
@@ -906,17 +925,16 @@ impl Indicator for RelativeStrengthIndex {
 }
 
 /// The arithmetic mean of the last n closing prices. Used to smooth
-/// short-term fluctuations and identify the direction of a trend.
-/// Read more on [Wikipedia][wiki-sma].
-///
-/// When to use: Trend identification, support/resistance levels, crossover
+/// short-term fluctuations and identify the direction of a trend. Useful
+/// for trend identification, support/resistance levels, and crossover
 /// strategies (e.g., golden cross / death cross).
 ///
 /// Formula:
 ///
 /// $$SMA_t = \frac{1}{n} \sum_{i=0}^{n-1} C_{t-i}$$
 ///
-/// where $C_t$ is the closing price at time $t$ and $n$ is the period.
+/// where $C_t$ is the closing price at time $t$ and $n$ is the period. Read
+/// more on [Wikipedia][wiki-sma].
 ///
 /// Parameters
 /// ----------
@@ -971,18 +989,20 @@ impl Indicator for SimpleMovingAverage {
 
 /// Compares the closing price to the high-low range over a period,
 /// producing a %K line and a smoothed %D signal line. Both oscillate
-/// between 0 and 100.
-/// Read more on [Wikipedia][wiki-stoch].
-///
-/// When to use: Overbought/oversold signals, %K/%D crossovers for
-/// entry/exit timing, divergence analysis.
+/// between 0 and 100. Useful for overbought/oversold signals, %K/%D
+/// crossovers for entry/exit timing, and divergence analysis.
 ///
 /// Formula:
 ///
-/// $$\%K_t = 100 \cdot \frac{C_t - L_n}{H_n - L_n}$$
-/// $$\%D_t = SMA_d(\%K_t)$$
+/// $$
+/// \begin{aligned}
+/// \%K_t &= 100 \cdot \frac{C_t - L_n}{H_n - L_n} \\\\
+/// \%D_t &= SMA_d(\%K_t)
+/// \end{aligned}
+/// $$
 ///
 /// where $H_n$ and $L_n$ are the highest high and lowest low over $n$ periods.
+/// Read more on [Wikipedia][wiki-stoch].
 ///
 /// Parameters
 /// ----------
@@ -1061,17 +1081,14 @@ impl Indicator for StochasticOscillator {
 
 /// The cumulative average price weighted by volume. Institutional traders
 /// use VWAP as a benchmark: buying below VWAP is considered favorable,
-/// selling above it likewise.
-/// Read more on [Wikipedia][wiki-vwap].
-///
-/// When to use: Intraday trading benchmark, assessing execution quality,
-/// dynamic support/resistance.
+/// selling above it likewise. Useful as an intraday trading benchmark,
+/// for assessing execution quality, and as dynamic support/resistance.
 ///
 /// Formula:
 ///
 /// $$VWAP_t = \frac{\sum_{i=1}^{t} TP_i \cdot V_i}{\sum_{i=1}^{t} V_i}$$
 ///
-/// where $TP_i = \frac{H_i + L_i + C_i}{3}$.
+/// where $TP_i = \frac{H_i + L_i + C_i}{3}$. Read more on [Wikipedia][wiki-vwap].
 ///
 /// Attributes
 /// ----------
@@ -1129,16 +1146,14 @@ impl Indicator for VolumeWeightedAveragePrice {
 
 /// A moving average where each price is multiplied by a linearly decreasing
 /// weight, placing more emphasis on recent data than the SMA but with a
-/// different weighting scheme than the EMA.
-/// Read more on [Wikipedia][wiki-wma].
-///
-/// When to use: Similar to EMA but with a linear instead of exponential
-/// decay -- useful when you want recent prices to matter more without the
-/// recursive smoothing of EMA.
+/// different weighting scheme than the EMA. Useful when you want recent
+/// prices to matter more without the recursive smoothing of EMA.
 ///
 /// Formula:
 ///
 /// $$WMA_t = \frac{\sum_{i=0}^{n-1} (n - i) \cdot C_{t-i}}{\sum_{i=1}^{n} i}$$
+///
+/// Read more on [Wikipedia][wiki-wma].
 ///
 /// Parameters
 /// ----------
