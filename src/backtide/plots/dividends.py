@@ -124,14 +124,12 @@ def plot_dividends(
             )
         )
 
-    _cs = _get_currency_symbol(data)
-
     return _plot(
         fig,
         title=title,
         legend=legend,
         xlabel="Ex-Dividend Date",
-        ylabel=f"Dividend ({_cs})" if _cs else "Dividend",
+        ylabel=f"Dividend ({cs})" if (cs := _get_currency_symbol(data)) else "Dividend",
         figsize=figsize,
         filename=filename,
         display=display,

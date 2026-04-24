@@ -230,9 +230,8 @@ class BollingerBands:
     \end{aligned}
     $$
 
-    where $\sigma_t$ is the rolling standard deviation over $n$ periods.
-
-    Read more on [Wikipedia][wiki-bb].
+    where $\sigma_t$ is the rolling standard deviation over $n$ periods. Read
+    more on [Wikipedia][wiki-bb].
 
     Parameters
     ----------
@@ -389,9 +388,8 @@ class CommodityChannelIndex:
     \end{aligned}
     $$
 
-    where $MD_t$ is the mean absolute deviation of $TP$ over $n$ periods.
-
-    Read more on [Wikipedia][wiki-cci].
+    where $MD_t$ is the mean absolute deviation of $TP$ over $n$ periods. Read
+    more on [Wikipedia][wiki-cci].
 
     Parameters
     ----------
@@ -1086,9 +1084,7 @@ class ExponentialMovingAverage:
 
     $$EMA_t = \alpha \cdot C_t + (1 - \alpha) \cdot EMA_{t-1}$$
 
-    where $\alpha = \frac{2}{n + 1}$.
-
-    Read more on [Wikipedia][wiki-ema].
+    where $\alpha = \frac{2}{n + 1}$. Read more on [Wikipedia][wiki-ema].
 
     Parameters
     ----------
@@ -1613,9 +1609,8 @@ class RelativeStrengthIndex:
 
     $$RSI = 100 - \frac{100}{1 + RS}$$
 
-    where $RS = \frac{\text{avg gain over } n}{\text{avg loss over } n}$.
-
-    Read more on [Wikipedia][wiki-rsi].
+    where $RS = \frac{\text{avg gain over } n}{\text{avg loss over } n}$. Read
+    more on [Wikipedia][wiki-rsi].
 
     Parameters
     ----------
@@ -1698,9 +1693,8 @@ class SimpleMovingAverage:
 
     $$SMA_t = \frac{1}{n} \sum_{i=0}^{n-1} C_{t-i}$$
 
-    where $C_t$ is the closing price at time $t$ and $n$ is the period.
-
-    Read more on [Wikipedia][wiki-sma].
+    where $C_t$ is the closing price at time $t$ and $n$ is the period. Read
+    more on [Wikipedia][wiki-sma].
 
     Parameters
     ----------
@@ -1789,7 +1783,6 @@ class StochasticOscillator:
     $$
 
     where $H_n$ and $L_n$ are the highest high and lowest low over $n$ periods.
-
     Read more on [Wikipedia][wiki-stoch].
 
     Parameters
@@ -2036,9 +2029,7 @@ class VolumeWeightedAveragePrice:
 
     $$VWAP_t = \frac{\sum_{i=1}^{t} TP_i \cdot V_i}{\sum_{i=1}^{t} V_i}$$
 
-    where $TP_i = \frac{H_i + L_i + C_i}{3}$.
-
-    Read more on [Wikipedia][wiki-vwap].
+    where $TP_i = \frac{H_i + L_i + C_i}{3}$. Read more on [Wikipedia][wiki-vwap].
 
     Attributes
     ----------

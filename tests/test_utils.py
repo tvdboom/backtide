@@ -9,7 +9,7 @@ import pytest
 
 from backtide.utils import clear_cache, init_logging
 from backtide.utils.enum import CaseInsensitiveEnum
-from backtide.utils.utils import _format_compact, _to_list
+from backtide.utils.utils import _format_number, _to_list
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _to_list
@@ -67,11 +67,11 @@ class TestFormatCompact:
     )
     def test_magnitude(self, n, expected):
         """Each magnitude bracket formats correctly."""
-        assert _format_compact(n) == expected
+        assert _format_number(n) == expected
 
     def test_negative(self):
         """Negative numbers use the same brackets."""
-        assert "M" in _format_compact(-10_000_000)
+        assert "M" in _format_number(-10_000_000)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

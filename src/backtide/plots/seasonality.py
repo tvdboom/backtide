@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -124,16 +125,29 @@ def plot_seasonality(
 
     years = [str(y) for y in pivot.index]
     months = [MONTH_LABELS[m - 1] for m in pivot.columns]
+    n_years = len(years)
+
+    # Determine text color per cell: dark text on light backgrounds, white on dark
+    z_vals = pivot.values
+    z_abs_max = np.nanmax(np.abs(z_vals)) if np.any(np.isfinite(z_vals)) else 1.0
+    # RdYlGn: red (negative) and green (positive) are dark, yellow (near zero) is light
+    text_colors = [
+        [
+            "#333" if (pd.isna(v) or abs(v) < z_abs_max * 0.3) else "white"
+            for v in row
+        ]
+        for row in z_vals
+    ]
 
     fig = go.Figure(
         data=go.Heatmap(
-            z=pivot.values,
+            z=z_vals,
             x=months,
             y=years,
             colorscale="RdYlGn",
             zmid=0,
             texttemplate="%{z:+.1f}%",
-            textfont={"size": cfg.plots.label_fontsize, "color": "white"},
+            textfont={"size": 11},
             colorbar={
                 "title": {"text": "Return (%)", "font": {"size": cfg.plots.label_fontsize}}
             },
@@ -141,7 +155,30 @@ def plot_seasonality(
         )
     )
 
+    # Apply per-cell text colors via annotations (texttemplate doesn't support per-cell color)
+    fig.data[0].textfont.color = None  # clear global color
+    fig.data[0].texttemplate = None  # we'll use annotations instead
+
+    # Scale annotation font size based on number of years
+    _font_size = max(8, min(12, 200 // max(n_years, 1)))
+
+    annotations = []
+    for i, year in enumerate(years):
+        for j, month in enumerate(months):
+            val = z_vals[i][j]
+            if pd.notna(val):
+                annotations.append(
+                    {
+                        "x": month,
+                        "y": year,
+                        "text": f"{val:+.1f}%",
+                        "showarrow": False,
+                        "font": {"size": _font_size, "color": text_colors[i][j]},
+                    }
+                )
+
     fig.update_layout(
+        annotations=annotations,
         yaxis={
             "ticksuffix": "  ",
             "autorange": True,
@@ -151,11 +188,15 @@ def plot_seasonality(
         },
     )
 
+    # Scale figure height to the number of years so rows don't overlap
+    base_w, base_h = figsize or (900, 600)
+    scaled_h = max(base_h, n_years * 35)
+
     return _plot(
         fig,
         title=title,
         legend=legend,
-        figsize=figsize,
+        figsize=(base_w, scaled_h),
         filename=filename,
         display=display,
     )

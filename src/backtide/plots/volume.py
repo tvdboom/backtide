@@ -15,8 +15,8 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.config import get_config
-from backtide.plots.utils import _plot
-from backtide.utils.utils import _format_compact
+from backtide.plots.utils import _get_currency_symbol, _plot
+from backtide.utils.utils import _format_number
 
 cfg = get_config()
 
@@ -86,8 +86,9 @@ def plot_volume(
     from backtide.storage import query_bars
     from backtide.plots import plot_volume
 
-    df = query_bars(["AAPL", "MSFT"], "1d")
+    df = query_bars("AAPL", "1d")
     df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
+    df["currency"] = "USD"
 
     plot_volume(df)
     ```
@@ -107,16 +108,13 @@ def plot_volume(
                 mode="lines",
                 line={"width": 0.5, "color": color},
                 fill="tozeroy",
-                fillcolor=color.replace("rgb(", "rgba(").replace(")", ", 0.4)")
-                if color.startswith("rgb(")
-                else color,
+                fillcolor=f"rgba({color[4:-1]}, 0.4)",
                 opacity=0.85,
                 hovertemplate="%{x}<br>Volume: %{y:,.0f}<extra>" + symbol + "</extra>",
             )
         )
 
-
-    # Format y-axis ticks with compact notation (e.g. 1.5M, 200k)
+    # Format y-axis ticks with compact notation (e.g., 1.5M, 200k)
     all_volumes = data["volume"].dropna()
     if not all_volumes.empty:
         max_vol = all_volumes.max()
@@ -127,7 +125,7 @@ def plot_volume(
         fig.update_yaxes(
             tickmode="array",
             tickvals=tick_vals,
-            ticktext=[_format_compact(v) for v in tick_vals],
+            ticktext=[_format_number(v) for v in tick_vals],
         )
 
     return _plot(
@@ -135,7 +133,7 @@ def plot_volume(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel="Volume",
+        ylabel=f"Volume ({cs})" if (cs := _get_currency_symbol(data)) else "Volume (shares)",
         figsize=figsize,
         filename=filename,
         display=display,

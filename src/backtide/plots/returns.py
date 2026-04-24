@@ -115,6 +115,7 @@ def plot_returns(
 
     fig.update_layout(barmode="overlay")
 
+
     return _plot(
         fig,
         title=title,

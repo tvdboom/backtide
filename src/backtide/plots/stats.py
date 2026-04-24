@@ -96,12 +96,12 @@ def compute_summary_stats(
         records.append(
             {
                 "Symbol": symbol,
-                "Ann. Return": round(ann_return, 2),
-                "Ann. Volatility": round(ann_vol, 2),
-                "Sharpe Ratio": round(sharpe, 2),
-                "Sortino Ratio": round(sortino, 2),
-                "Max Drawdown": round(max_dd, 2),
-                "Win Rate": round(win_rate, 1),
+                "Ann. Return": ann_return,
+                "Ann. Volatility": ann_vol,
+                "Sharpe Ratio": sharpe,
+                "Sortino Ratio": sortino,
+                "Max Drawdown": max_dd,
+                "Win Rate": win_rate,
                 "Total Bars": len(subset),
             }
         )

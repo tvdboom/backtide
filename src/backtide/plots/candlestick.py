@@ -128,14 +128,12 @@ def plot_candlestick(
         uirevision="constant",
     )
 
-    _cs = _get_currency_symbol(data)
-
     return _plot(
         fig,
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Price ({_cs})" if _cs else "Price",
+        ylabel=f"Price ({cs})" if (cs := _get_currency_symbol(data)) else "Price",
         figsize=figsize,
         filename=filename,
         display=display,

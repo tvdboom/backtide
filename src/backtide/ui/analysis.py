@@ -30,7 +30,7 @@ from backtide.ui.utils import (
     _to_upper_values,
 )
 from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
-from backtide.utils.utils import _to_pandas, _ts_to_datetime
+from backtide.utils.utils import _format_number, _to_pandas, _ts_to_datetime
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility functions
@@ -167,8 +167,10 @@ bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
 # Add currency column from instruments
 bars["currency"] = bars["symbol"].map(lambda s: str(all_i[s].quote) if s in all_i else None)
 
-# Warn if symbols are denominated in multiple currencies
-if len(currencies := bars["currency"].dropna().unique()) > 1:
+# Warn if symbols are denominated in multiple currencies for relevant tabs
+currencies = bars["currency"].dropna().unique()
+non_currency_tabs = (TAB_LABELS[0], TAB_LABELS[5], TAB_LABELS[6], TAB_LABELS[7], TAB_LABELS[8])
+if len(currencies) > 1 and active_tab not in non_currency_tabs:
     st.warning(
         "The selected symbols are denominated in multiple currencies "
         f"({', '.join(f'**{c}**' for c in sorted(currencies))}). "
@@ -349,13 +351,47 @@ with tabs[2]:
 # ── Tab 3: Volume ────────────────────────────────────────────────────────────
 
 with tabs[3]:
-    st.caption("Trading volume over time for selected symbols.")
+    col1, col2 = st.columns([10, 1])
+    col1.caption("Trading volume over time for selected symbols.")
+
+    with col2.popover(":material/tune:"):
+        vol_dollar = st.toggle(
+            label="Dollar volume",
+            key=(key := "vol_dollar"),
+            value=_default(key, fallback=False),
+            on_change=lambda k=key: _persist(k),
+            help="Show volume as price x shares (dollar volume) instead of raw share count.",
+        )
+
+        vol_log = st.toggle(
+            label="Log scale",
+            key=(key := "vol_log_scale"),
+            value=_default(key, fallback=False),
+            on_change=lambda k=key: _persist(k),
+            help="Use a logarithmic scale for the y-axis.",
+        )
 
     if active_tab == TAB_LABELS[3]:
-        st.plotly_chart(
-            plot_volume(data=bars, display=None),
-            width="stretch",
-        )
+        vol_bars = bars.copy()
+        if vol_dollar:
+            vol_bars["volume"] = vol_bars["volume"] * vol_bars["close"]
+        else:
+            vol_bars = vol_bars.drop(columns=["currency"], errors="ignore")
+
+        fig = plot_volume(data=vol_bars, display=None)
+        if vol_log:
+            import numpy as np
+
+            max_vol = vol_bars["volume"].dropna().max()
+            max_exp = int(np.log10(max(max_vol, 1))) + 1
+            tick_vals = [10**i for i in range(max_exp + 1)]
+            fig.update_yaxes(
+                type="log",
+                tickmode="array",
+                tickvals=tick_vals,
+                ticktext=[_format_number(v) for v in tick_vals],
+            )
+        st.plotly_chart(fig, width="stretch")
 
 # ── Tab 4: VWAP ──────────────────────────────────────────────────────────────
 
@@ -377,11 +413,19 @@ with tabs[5]:
     with col2.popover(":material/tune:"):
         price_col = price_col_radio("price_col_dist")
 
-    if active_tab == TAB_LABELS[5]:
-        st.plotly_chart(
-            plot_returns(data=bars, price_col=price_col, display=None),
-            width="stretch",
+        ret_log = st.toggle(
+            label="Log scale",
+            key=(key := "ret_log_scale"),
+            value=_default(key, fallback=False),
+            on_change=lambda k=key: _persist(k),
+            help="Use a logarithmic scale for the y-axis.",
         )
+
+    if active_tab == TAB_LABELS[5]:
+        fig = plot_returns(data=bars, price_col=price_col, display=None)
+        if ret_log:
+            fig.update_yaxes(type="log")
+        st.plotly_chart(fig, width="stretch")
 
 # ── Tab 6: Seasonality ───────────────────────────────────────────────────────
 

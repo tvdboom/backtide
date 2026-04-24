@@ -189,16 +189,13 @@ def plot_price(
                         ]
                     )
 
-    _cs = _get_currency_symbol(data)
-    _ylabel = f"Price ({_cs})" if _cs else PRICE_COLUMNS[price_col]
-
     return _plot(
         fig,
         groupclick="togglegroup",
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=_ylabel,
+        ylabel=f"Price ({cs})" if (cs := _get_currency_symbol(data)) else "Price",
         figsize=figsize,
         filename=filename,
         display=display,

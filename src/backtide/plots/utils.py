@@ -12,7 +12,7 @@ from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
-
+from backtide.core.data import Currency
 from backtide.core.config import get_config
 from backtide.ui.utils import _moment_to_strftime
 
@@ -20,19 +20,17 @@ cfg = get_config()
 
 
 def _get_currency_symbol(data: pd.DataFrame) -> str | None:
-    """Extract a single currency symbol from the ``currency`` column.
+    """Extract a single currency symbol from the `currency` column.
 
-    Returns the symbol character (e.g. ``$``, ``€``) when every row shares
-    the same currency code, otherwise ``None``.
+    Returns the symbol character (e.g., ``$``, ``€``) when every row shares
+    the same currency code, otherwise `None`.
+
     """
     if "currency" not in data.columns:
         return None
 
-    codes = data["currency"].dropna().unique()
-    if len(codes) != 1:
+    if len(codes := data["currency"].dropna().unique()) != 1:
         return None
-
-    from backtide.core.data import Currency
 
     try:
         return Currency(codes[0]).symbol

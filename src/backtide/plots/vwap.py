@@ -110,10 +110,11 @@ def plot_vwap(
                 x=subset["dt"],
                 y=subset["close"],
                 mode="lines",
-                name=f"{symbol} Close",
+                name="Close",
                 line={"color": color, "width": 1, "dash": "dot"},
-                opacity=0.5,
+                opacity=0.2,
                 legendgroup=symbol,
+                legendgrouptitle_text=symbol,
                 hovertemplate="%{x}<br>Close: %{y:.2f}<extra>" + symbol + "</extra>",
             )
         )
@@ -124,21 +125,20 @@ def plot_vwap(
                 x=subset["dt"],
                 y=vwap,
                 mode="lines",
-                name=f"{symbol} VWAP",
+                name="VWAP",
                 line={"color": color, "width": 2.5},
                 legendgroup=symbol,
                 hovertemplate="%{x}<br>VWAP: %{y:.2f}<extra>" + symbol + "</extra>",
             )
         )
 
-    _cs = _get_currency_symbol(data)
-
     return _plot(
         fig,
+        groupclick="togglegroup",
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Price ({_cs})" if _cs else "Price",
+        ylabel=f"Price ({cs})" if (cs := _get_currency_symbol(data)) else "Price",
         figsize=figsize,
         filename=filename,
         display=display,

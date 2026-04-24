@@ -49,13 +49,13 @@ def _check_dependency(name: str, pypi_name: str | None = None) -> ModuleType:
         ) from None
 
 
-def _format_compact(n: float) -> str:
+def _format_number(n: int | float) -> str:
     """Transform a number to a nicely formatted string.
 
     Parameters
     ----------
     n : int | float
-        Number ot format.
+        Number to format.
 
     Returns
     -------
@@ -63,7 +63,11 @@ def _format_compact(n: float) -> str:
         Formatted string.
 
     """
-    if abs(n) >= 10_000_000:
+    if abs(n) >= 10_000_000_000:
+        return f"{n / 1_000_000_000:.0f}B"
+    elif abs(n) >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f}B"
+    elif abs(n) >= 10_000_000:
         return f"{n / 1_000_000:.0f}M"
     elif abs(n) >= 1_000_000:
         return f"{n / 1_000_000:.1f}M"
