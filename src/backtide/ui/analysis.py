@@ -133,6 +133,7 @@ bars = bars[
     )
 ]
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
@@ -162,6 +163,18 @@ active_tab = st.session_state.get("plot_tabs", TAB_LABELS[0])
 
 # Add datetime column for plotting
 bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
+
+# Add currency column from instruments
+bars["currency"] = bars["symbol"].map(lambda s: str(all_i[s].quote) if s in all_i else None)
+
+# Warn if symbols are denominated in multiple currencies
+if len(currencies := bars["currency"].dropna().unique()) > 1:
+    st.warning(
+        "The selected symbols are denominated in multiple currencies "
+        f"({', '.join(f'**{c}**' for c in sorted(currencies))}). "
+        "Currency labels are hidden from plot axes.",
+        icon=":material/warning:",
+    )
 
 price_col_radio = lambda key: st.radio(
     label="Price",
@@ -449,6 +462,9 @@ with tabs[9]:
             )
         else:
             dividends["dt"] = _ts_to_datetime(dividends["ex_date"], tz)
+            dividends["currency"] = dividends["symbol"].map(
+                lambda s: str(all_i[s].quote) if s in all_i else None
+            )
             st.plotly_chart(
                 plot_dividends(data=dividends, display=None),
                 width="stretch",

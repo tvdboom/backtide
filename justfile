@@ -41,3 +41,6 @@ tox:
 # Build and serve the docs locally
 docs:
     $env:PYTHONPATH="."; uv run mkdocs serve
+
+launch:
+    backtide launch

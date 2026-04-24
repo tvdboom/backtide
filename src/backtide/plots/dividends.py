@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.config import get_config
-from backtide.plots.utils import _plot
+from backtide.plots.utils import _get_currency_symbol, _plot
 
 cfg = get_config()
 
@@ -98,26 +98,40 @@ def plot_dividends(
         subset = data[data["symbol"] == symbol].sort_values("dt")
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
+        # Stem lines from zero to each dividend amount
+        for _, row in subset.iterrows():
+            fig.add_trace(
+                go.Scatter(
+                    x=[row["dt"], row["dt"]],
+                    y=[0, row["amount"]],
+                    mode="lines",
+                    line={"color": color, "width": 1.5},
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+
+        # Markers at the dividend amounts
         fig.add_trace(
-            go.Bar(
+            go.Scatter(
                 x=subset["dt"],
                 y=subset["amount"],
                 name=symbol,
-                marker_color=color,
-                marker_line_width=0,
-                opacity=0.85,
-                hovertemplate="%{x}<br>Dividend: %{y:.4f}<extra>" + symbol + "</extra>",
+                mode="markers",
+                marker={"color": color, "size": 8, "symbol": "circle"},
+                opacity=0.9,
+                hovertemplate="%{x}<br>Dividend: $%{y:.4f}<extra>" + symbol + "</extra>",
             )
         )
 
-    fig.update_layout(barmode="group", bargap=0.15)
+    _cs = _get_currency_symbol(data)
 
     return _plot(
         fig,
         title=title,
         legend=legend,
         xlabel="Ex-Dividend Date",
-        ylabel="Dividend",
+        ylabel=f"Dividend ({_cs})" if _cs else "Dividend",
         figsize=figsize,
         filename=filename,
         display=display,

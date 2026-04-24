@@ -48,3 +48,17 @@ Based on comprehensive [benchmarks](https://tvdboom.github.io/backtide/latest/co
 
 
 <br>
+
+📘 Documentation
+----------------
+
+**Relevant links** | |
+--- | ---
+⭐ **[About](https://tvdboom.github.io/backtide/latest/about/)** | Learn more about the package.
+🚀 **[Getting started](https://tvdboom.github.io/backtide/latest/getting_started/)** | New to backtide? Here's how to get you started!
+👨‍💻 **[User guide](https://tvdboom.github.io/backtide/latest/user_guide/)** | How to use backtide and its features.
+🎛️ **[API Reference](https://tvdboom.github.io/backtide/latest/API/backtide/api/)** | The detailed reference for backtide's API.
+❔ **[FAQ](https://tvdboom.github.io/backtide/latest/faq/)** | Get answers to frequently asked questions.
+🔧 **[Contributing](https://tvdboom.github.io/backtide/latest/contributing/)** | Do you wan to contribute to the project? Read this before creating a PR.
+🌳 **[Dependencies](https://tvdboom.github.io/backtide/latest/dependencies/)** | Which other packages does backtide depend on?
+📃 **[License](https://tvdboom.github.io/backtide/latest/license/)** | Copyright and permissions under the MIT license.

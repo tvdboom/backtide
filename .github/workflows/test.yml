@@ -7,8 +7,8 @@ on:
     branches: [master, development]
 
 env:
-  UV_VERSION: "0.11.6"
-  PYTHON_VERSION: "3.14t"
+  UV_VERSION: "0.11.7"
+  PYTHON_VERSION: "3.13t"
 
 jobs:
   pre-commit:

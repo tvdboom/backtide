@@ -125,22 +125,6 @@ def plot_seasonality(
     years = [str(y) for y in pivot.index]
     months = [MONTH_LABELS[m - 1] for m in pivot.columns]
 
-    # Build annotations
-    annotations = []
-    for i, year in enumerate(pivot.index):
-        for j, month in enumerate(pivot.columns):
-            val = pivot.iloc[i, j]
-            if pd.notna(val):
-                annotations.append(
-                    {
-                        "x": months[j],
-                        "y": years[i],
-                        "text": f"{val:+.1f}%",
-                        "showarrow": False,
-                        "font": {"size": cfg.plots.label_fontsize, "color": "white"},
-                    }
-                )
-
     fig = go.Figure(
         data=go.Heatmap(
             z=pivot.values,
@@ -148,6 +132,8 @@ def plot_seasonality(
             y=years,
             colorscale="RdYlGn",
             zmid=0,
+            texttemplate="%{z:+.1f}%",
+            textfont={"size": cfg.plots.label_fontsize, "color": "white"},
             colorbar={
                 "title": {"text": "Return (%)", "font": {"size": cfg.plots.label_fontsize}}
             },
@@ -156,8 +142,13 @@ def plot_seasonality(
     )
 
     fig.update_layout(
-        annotations=annotations,
-        yaxis={"ticksuffix": "  ", "autorange": "reversed"},
+        yaxis={
+            "ticksuffix": "  ",
+            "autorange": True,
+            "type": "category",
+            "categoryorder": "array",
+            "categoryarray": years,
+        },
     )
 
     return _plot(

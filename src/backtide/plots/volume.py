@@ -10,11 +10,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.config import get_config
 from backtide.plots.utils import _plot
+from backtide.utils.utils import _format_compact
 
 cfg = get_config()
 
@@ -98,22 +100,35 @@ def plot_volume(
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
         fig.add_trace(
-            go.Bar(
+            go.Scatter(
                 x=subset["dt"],
                 y=subset["volume"],
                 name=symbol,
-                marker_color=color,
-                marker_line_width=0,
+                mode="lines",
+                line={"width": 0.5, "color": color},
+                fill="tozeroy",
+                fillcolor=color.replace("rgb(", "rgba(").replace(")", ", 0.4)")
+                if color.startswith("rgb(")
+                else color,
                 opacity=0.85,
                 hovertemplate="%{x}<br>Volume: %{y:,.0f}<extra>" + symbol + "</extra>",
             )
         )
 
-    fig.update_layout(
-        barmode="overlay",
-        bargap=0.05,
-        bargroupgap=0,
-    )
+
+    # Format y-axis ticks with compact notation (e.g. 1.5M, 200k)
+    all_volumes = data["volume"].dropna()
+    if not all_volumes.empty:
+        max_vol = all_volumes.max()
+        tick_step = 10 ** int(np.log10(max(max_vol, 1)))
+        if max_vol / tick_step < 3:
+            tick_step //= 2
+        tick_vals = list(range(0, int(max_vol + tick_step), int(tick_step)))
+        fig.update_yaxes(
+            tickmode="array",
+            tickvals=tick_vals,
+            ticktext=[_format_compact(v) for v in tick_vals],
+        )
 
     return _plot(
         fig,

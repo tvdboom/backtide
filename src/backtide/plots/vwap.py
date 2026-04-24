@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.config import get_config
-from backtide.plots.utils import _plot
+from backtide.plots.utils import _get_currency_symbol, _plot
 
 cfg = get_config()
 
@@ -131,12 +131,14 @@ def plot_vwap(
             )
         )
 
+    _cs = _get_currency_symbol(data)
+
     return _plot(
         fig,
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel="Price",
+        ylabel=f"Price ({_cs})" if _cs else "Price",
         figsize=figsize,
         filename=filename,
         display=display,

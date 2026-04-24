@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 
 from backtide.config import get_config
 from backtide.indicators import BaseIndicator
-from backtide.plots.utils import _plot
+from backtide.plots.utils import _get_currency_symbol, _plot
 from backtide.utils.utils import _to_list, _to_pandas
 
 # Supported price columns and their display labels.
@@ -189,13 +189,16 @@ def plot_price(
                         ]
                     )
 
+    _cs = _get_currency_symbol(data)
+    _ylabel = f"Price ({_cs})" if _cs else PRICE_COLUMNS[price_col]
+
     return _plot(
         fig,
         groupclick="togglegroup",
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=PRICE_COLUMNS[price_col],
+        ylabel=_ylabel,
         figsize=figsize,
         filename=filename,
         display=display,

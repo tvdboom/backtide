@@ -14,6 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.plots.utils import (
+    _get_currency_symbol,
     _plot,
 )
 
@@ -127,12 +128,14 @@ def plot_candlestick(
         uirevision="constant",
     )
 
+    _cs = _get_currency_symbol(data)
+
     return _plot(
         fig,
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel="Price",
+        ylabel=f"Price ({_cs})" if _cs else "Price",
         figsize=figsize,
         filename=filename,
         display=display,
