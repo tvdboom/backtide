@@ -30,7 +30,7 @@ from backtide.ui.utils import (
     _to_upper_values,
 )
 from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
-from backtide.utils.utils import _format_number, _to_pandas, _ts_to_datetime
+from backtide.utils.utils import _to_pandas, _ts_to_datetime
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility functions
@@ -380,17 +380,7 @@ with tabs[3]:
 
         fig = plot_volume(data=vol_bars, display=None)
         if vol_log:
-            import numpy as np
-
-            max_vol = vol_bars["volume"].dropna().max()
-            max_exp = int(np.log10(max(max_vol, 1))) + 1
-            tick_vals = [10**i for i in range(max_exp + 1)]
-            fig.update_yaxes(
-                type="log",
-                tickmode="array",
-                tickvals=tick_vals,
-                ticktext=[_format_number(v) for v in tick_vals],
-            )
+            fig.update_yaxes(type="log")
         st.plotly_chart(fig, width="stretch")
 
 # ── Tab 4: VWAP ──────────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.config import get_config
-from backtide.plots.utils import _get_currency_symbol, _plot
+from backtide.plots.utils import _check_columns, _get_currency_symbol, _plot
 
 cfg = get_config()
 
@@ -92,6 +92,8 @@ def plot_vwap(
     ```
 
     """
+    _check_columns(data, ["symbol", "dt", "high", "low", "close", "volume"], "plot_vwap")
+
     fig = go.Figure()
 
     for idx, symbol in enumerate(data["symbol"].unique()):
@@ -143,4 +145,3 @@ def plot_vwap(
         filename=filename,
         display=display,
     )
-

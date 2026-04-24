@@ -483,20 +483,6 @@ class Currency:
         ...
     def __str__(self, /):
         ...
-    def display(self, amount) -> str:
-        """Format an amount with thousands separators and currency symbol.
-
-        Parameters
-        ----------
-        amount : int | float
-            Amount to display.
-
-        Returns
-        -------
-        str
-            Formatted amount with thousands separators and currency indicator.
-
-        """
     def format(self, amount) -> str:
         """Format an amount using this currency's symbol and placement convention.
 

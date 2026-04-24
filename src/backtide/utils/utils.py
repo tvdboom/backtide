@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+from backtide.core.data import Currency
 
 from backtide.config import DataFrameLibrary
 
@@ -77,6 +78,43 @@ def _format_number(n: int | float) -> str:
         return f"{n / 1_000:.1f}k"
     else:
         return f"{n:.0f}"
+
+
+def _format_price(n: int | float, decimals: int = 0, currency: str | None = None) -> str:
+    """Format a price using a currency's symbol and placement convention.
+
+    Parameters
+    ----------
+    n : int | float
+        Number to format.
+
+    decimals : int, default=0
+        Number of decimal places.
+
+    currency : str | None, default=None
+        Currency code to use for formatting. If None, no currency symbol
+        is shown.
+
+    Returns
+    -------
+    str
+        Formatted string.
+
+    """
+    n_str = f"{n:,.{decimals}f}"
+
+    if currency:
+        try:
+            curr = Currency(currency)
+        except ValueError:
+            return n_str
+
+        if curr.symbol_prefix:
+            return f"{curr.symbol}{n_str}"
+        else:
+            return f"{n_str} {curr.symbol}"
+
+    return n_str
 
 
 def _make_dummy_bars(

@@ -14,6 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.plots.utils import (
+    _check_columns,
     _get_currency_symbol,
     _plot,
 )
@@ -101,6 +102,8 @@ def plot_candlestick(
     ```
 
     """
+    _check_columns(data, ["symbol", "dt", "open", "high", "low", "close"], "plot_candlestick")
+
     fig = go.Figure()
 
     # Default candlestick colors

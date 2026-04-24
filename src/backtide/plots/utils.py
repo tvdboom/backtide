@@ -19,23 +19,50 @@ from backtide.ui.utils import _moment_to_strftime
 cfg = get_config()
 
 
-def _get_currency_symbol(data: pd.DataFrame) -> str | None:
-    """Extract a single currency symbol from the `currency` column.
+def _check_columns(data: pd.DataFrame, columns: list[str], caller: str) -> None:
+    """Verify that required columns exist in the DataFrame.
 
-    Returns the symbol character (e.g., ``$``, ``€``) when every row shares
-    the same currency code, otherwise `None`.
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The input DataFrame to check.
+
+    columns : list[str]
+        Column names that must be present.
+
+    caller : str
+        Name of the calling function, used in the error message.
+
+    Raises
+    ------
+    ValueError
+        If any of the required columns are missing.
+
+    """
+    if missing := [c for c in columns if c not in data.columns]:
+        raise ValueError(
+            f"Function {caller} requires column(s) {missing} but the provided data "
+            f"only has: {list(data.columns)}"
+        )
+
+
+def _get_currency_symbol(data: pd.DataFrame) -> Currency:
+    """Extract a single currency from the `currency` column.
+
+    Returns the currency when every row shares the same currency code,
+    otherwise `None`.
 
     """
     if "currency" not in data.columns:
         return None
 
-    if len(codes := data["currency"].dropna().unique()) != 1:
-        return None
+    if len(codes := data["currency"].dropna().unique()) == 1:
+        try:
+            return Currency(codes[0])
+        except (ValueError, KeyError):
+            return None
 
-    try:
-        return Currency(codes[0]).symbol
-    except (ValueError, KeyError):
-        return None
+    return None
 
 
 def _plot(
@@ -167,7 +194,6 @@ def _plot(
         "margin": {"l": 50, "b": 50, "r": 0, "t": 25 + title_space, "pad": 0},
         "xaxis_tickformat": _moment_to_strftime(get_config().display.date_format),
         "xaxis_tickfont_size": cfg.plots.tick_fontsize,
-        "yaxis_tickformat": "f",
         "yaxis_tickfont_size": cfg.plots.tick_fontsize,
     }
 

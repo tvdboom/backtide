@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.config import get_config
-from backtide.plots.utils import _plot
+from backtide.plots.utils import _check_columns, _plot
 
 cfg = get_config()
 
@@ -96,6 +96,8 @@ def plot_drawdown(
     ```
 
     """
+    _check_columns(data, ["symbol", price_col, "dt"], "plot_drawdown")
+
     fig = go.Figure()
 
     for idx, symbol in enumerate(data["symbol"].unique()):

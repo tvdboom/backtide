@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 
 from backtide.config import get_config
 from backtide.indicators import BaseIndicator
-from backtide.plots.utils import _get_currency_symbol, _plot
+from backtide.plots.utils import _check_columns, _get_currency_symbol, _plot
 from backtide.utils.utils import _to_list, _to_pandas
 
 # Supported price columns and their display labels.
@@ -121,6 +121,8 @@ def plot_price(
     ```
 
     """
+    _check_columns(data, ["symbol", price_col, "dt"], "plot_price")
+
     fig = go.Figure()
 
     ind_dict = None

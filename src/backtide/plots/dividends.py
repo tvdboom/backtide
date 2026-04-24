@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.config import get_config
-from backtide.plots.utils import _get_currency_symbol, _plot
+from backtide.plots.utils import _check_columns, _get_currency_symbol, _plot
 
 cfg = get_config()
 
@@ -92,6 +92,8 @@ def plot_dividends(
     ```
 
     """
+    _check_columns(data, ["symbol", "dt", "amount"], "plot_dividends")
+
     fig = go.Figure()
 
     for idx, symbol in enumerate(data["symbol"].unique()):

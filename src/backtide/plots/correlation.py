@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.config import get_config
-from backtide.plots.utils import _plot
+from backtide.plots.utils import _check_columns, _plot
 
 cfg = get_config()
 
@@ -92,6 +92,8 @@ def plot_correlation(
     ```
 
     """
+    _check_columns(data, ["symbol", price_col, "dt"], "plot_correlation")
+
     # Pivot to get one column per symbol, compute returns, then correlate
     pivot = data.pivot_table(index="dt", columns="symbol", values=price_col)
     returns = pivot.pct_change().dropna()

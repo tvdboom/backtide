@@ -10,13 +10,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.config import get_config
-from backtide.plots.utils import _get_currency_symbol, _plot
-from backtide.utils.utils import _format_number
+from backtide.plots.utils import _check_columns, _get_currency_symbol, _plot
+from backtide.utils.utils import _format_price
 
 cfg = get_config()
 
@@ -94,10 +93,13 @@ def plot_volume(
     ```
 
     """
+    _check_columns(data, ["symbol", "volume", "dt"], "plot_volume")
+
     fig = go.Figure()
+    currency = _get_currency_symbol(data)
 
     for idx, symbol in enumerate(data["symbol"].unique()):
-        subset = data[data["symbol"] == symbol].sort_values("dt")
+        subset = data[data["symbol"] == symbol]
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
         fig.add_trace(
@@ -110,30 +112,20 @@ def plot_volume(
                 fill="tozeroy",
                 fillcolor=f"rgba({color[4:-1]}, 0.4)",
                 opacity=0.85,
-                hovertemplate="%{x}<br>Volume: %{y:,.0f}<extra>" + symbol + "</extra>",
+                customdata=[_format_price(x["volume"], currency=x.get("currency")) for _, x in subset.iterrows()],
+                hovertemplate=f"%{{x}}<br>Volume: %{{customdata}}<extra>{symbol}</extra>",
             )
         )
 
-    # Format y-axis ticks with compact notation (e.g., 1.5M, 200k)
-    all_volumes = data["volume"].dropna()
-    if not all_volumes.empty:
-        max_vol = all_volumes.max()
-        tick_step = 10 ** int(np.log10(max(max_vol, 1)))
-        if max_vol / tick_step < 3:
-            tick_step //= 2
-        tick_vals = list(range(0, int(max_vol + tick_step), int(tick_step)))
-        fig.update_yaxes(
-            tickmode="array",
-            tickvals=tick_vals,
-            ticktext=[_format_number(v) for v in tick_vals],
-        )
+    # Compact SI notation for y-axis ticks (e.g. 1M, 200k)
+    fig.update_yaxes(tickformat="~s")
 
     return _plot(
         fig,
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Volume ({cs})" if (cs := _get_currency_symbol(data)) else "Volume (shares)",
+        ylabel=f"Volume ({currency.symbol})" if currency else "Volume",
         figsize=figsize,
         filename=filename,
         display=display,

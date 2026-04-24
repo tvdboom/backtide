@@ -328,27 +328,6 @@ impl Currency {
     pub fn symbol_prefix(&self) -> bool {
         self.data().4
     }
-
-    /// Format an amount using this currency's symbol and placement convention.
-    ///
-    /// Parameters
-    /// ----------
-    /// amount : int | float
-    ///     Amount to display.
-    ///
-    /// Returns
-    /// -------
-    /// str
-    ///     Formatted amount with currency indicator.
-    pub fn format(&self, amount: f64) -> String {
-        let decimals = self.decimals() as usize;
-        let symbol = self.symbol();
-        if self.symbol_prefix() {
-            format!("{symbol}{amount:.decimals$}")
-        } else {
-            format!("{amount:.decimals$} {symbol}")
-        }
-    }
 }
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Currency {
