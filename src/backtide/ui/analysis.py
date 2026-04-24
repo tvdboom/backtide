@@ -29,7 +29,6 @@ from backtide.ui.utils import (
     _persist,
     _to_upper_values,
 )
-from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
 from backtide.utils.utils import _to_pandas, _ts_to_datetime
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -86,7 +85,7 @@ symbols = st.multiselect(  # ty: ignore[no-matching-overload]
     default=default,
     format_func=lambda s: f"{s} - {all_i[s].name}" if all_i[s].instrument_type.is_equity else s,
     placeholder="Select one or more symbols...",
-    max_selections=MAX_INSTRUMENT_SELECTION,
+    max_selections=5,
     on_change=lambda k=key: (_to_upper_values("symbols"), _persist(k)),
     help="Select the symbols to analyze. Only symbols available in the database are shown.",
 )
@@ -178,14 +177,38 @@ if len(currencies) > 1 and active_tab not in non_currency_tabs:
         icon=":material/warning:",
     )
 
+# Shared price column selection across all tabs
+_PRICE_COL_KEYS = [
+    "price_col_summary",
+    "price_col_price",
+    "price_col_dist",
+    "price_col_season",
+    "price_col_drawdown",
+    "price_col_corr",
+]
+
+if "_price_col" not in st.session_state:
+    st.session_state["_price_col"] = _default("_price_col", "adj_close")
+
+
+def _sync_price_col(key: str) -> None:
+    """Sync a tab-specific radio key to the shared _price_col and all other radios."""
+    val = st.session_state[key]
+    st.session_state["_price_col"] = val
+    for k in _PRICE_COL_KEYS:
+        st.session_state[k] = val
+    _persist("_price_col")
+
+
 price_col_radio = lambda key: st.radio(
     label="Price",
     key=key,
     options=PRICE_COLUMNS,
-    index=list(PRICE_COLUMNS).index("adj_close" if (x := _default("price_col")) is None else x),
+    index=list(PRICE_COLUMNS).index(st.session_state.get(key, st.session_state["_price_col"])),
     format_func=lambda c: PRICE_COLUMNS[c],
     horizontal=False,
-    on_change=lambda k=key: st.session_state.update(_price_col=st.session_state[k]),
+    on_change=_sync_price_col,
+    args=(key,),
 )
 
 # ── Tab 0: Summary ───────────────────────────────────────────────────────────
@@ -199,69 +222,143 @@ with tabs[0]:
 
     if active_tab == TAB_LABELS[0]:
         stats_df = compute_summary_stats(data=bars, price_col=price_col)
-
         logokit_key = cfg.display.logokit_api_key
-        if logokit_key:
-            stats_df.index = pd.Index(
-                data=stats_df.apply(
-                    lambda row: _get_logokit_url(
-                        row["Symbol"],
-                        all_i[row["Symbol"]].instrument_type,
-                        logokit_key,
+
+        # ── Metric cards ─────────────────────────────────────────────────
+        n = len(stats_df)
+
+        for _, row in stats_df.iterrows():
+            sym = row["Symbol"]
+            inst = all_i.get(sym)
+            name = inst.name if inst else sym
+
+            with st.container(border=True):
+                # Header row: logo + symbol + name (left) | metrics (right)
+                header_col, *metric_cols = st.columns([2, 1, 1, 1, 1])
+
+                with header_col:
+                    if logokit_key and inst:
+                        logo_url = _get_logokit_url(sym, inst.instrument_type, logokit_key)
+                        st.markdown(
+                            f'<div style="display:flex;align-items:center;gap:10px">'
+                            f'<img src="{logo_url}" width="32" height="32" '
+                            f'style="border-radius:6px">'
+                            f"<div>"
+                            f'<span style="font-size:1.15em;font-weight:600">{sym}</span><br>'
+                            f'<span style="font-size:0.78em;color:gray">{name}</span>'
+                            f"</div></div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(f"**{sym}**")
+                        st.caption(name)
+
+                ret = row["Ann. Return"]
+                sharpe = row["Sharpe"]
+                max_dd = row["Max Drawdown"]
+                win_rate = row["Win Rate"]
+
+                _g = "color:green"
+                _r = "color:red"
+
+                with metric_cols[0]:
+                    _c = _g if ret >= 0 else _r
+                    st.markdown(
+                        f":material/trending_up: **Return**<br>"
+                        f'<span style="font-size:1.3em;{_c}">{ret:+.2f}%</span>',
+                        unsafe_allow_html=True,
                     )
-                    if row["Symbol"] in all_i
-                    else "",
-                    axis=1,
+
+                with metric_cols[1]:
+                    _c = _g if sharpe >= 1 else (_r if sharpe < 0 else "")
+                    st.markdown(
+                        f":material/speed: **Sharpe**<br>"
+                        f'<span style="font-size:1.3em;{_c}">{sharpe:.2f}</span>',
+                        unsafe_allow_html=True,
+                    )
+
+                with metric_cols[2]:
+                    _c = _r if max_dd < -20 else (_g if max_dd > -5 else "")
+                    st.markdown(
+                        f":material/trending_down: **Max Drawdown**<br>"
+                        f'<span style="font-size:1.3em;{_c}">{max_dd:.2f}%</span>',
+                        unsafe_allow_html=True,
+                    )
+
+                with metric_cols[3]:
+                    _c = _g if win_rate >= 50 else _r
+                    st.markdown(
+                        f":material/trophy: **Win Rate**<br>"
+                        f'<span style="font-size:1.3em;{_c}">{win_rate:.1f}%</span>',
+                        unsafe_allow_html=True,
+                    )
+
+        # ── Full table in expander ────────────────────────────────────────
+
+        with st.expander("Full statistics table", icon=":material/table:"):
+            summary_column_config = {
+                "Symbol": st.column_config.TextColumn(
+                    pinned=True,
+                    help="Ticker symbol of the instrument.",
                 ),
-                name="Logo",
+                "Ann. Return": st.column_config.NumberColumn(
+                    format="%+.2f%%",
+                    help="Compound annual growth rate (CAGR).",
+                ),
+                "Ann. Volatility": st.column_config.NumberColumn(
+                    format="%.2f%%",
+                    help="Annualized standard deviation of returns.",
+                ),
+                "Sharpe": st.column_config.NumberColumn(
+                    width="small",
+                    format="%.2f",
+                    help="Sharpe ratio: risk-adjusted return per unit of total volatility.",
+                ),
+                "Sortino": st.column_config.NumberColumn(
+                    width="small",
+                    format="%.2f",
+                    help="Sortino ratio: like Sharpe but only penalizes downside volatility.",
+                ),
+                "Max Drawdown": st.column_config.NumberColumn(
+                    format="%.2f%%",
+                    help="Largest peak-to-trough decline in cumulative returns.",
+                ),
+                "Win Rate": st.column_config.NumberColumn(
+                    format="%.1f%%",
+                    help="Percentage of periods with a positive return.",
+                ),
+                "Total Bars": st.column_config.NumberColumn(
+                    format="%d",
+                    help="Total number of bars for this symbol at the selected interval.",
+                ),
+            }
+
+            if logokit_key:
+                stats_df.index = pd.Index(
+                    data=stats_df.apply(
+                        lambda r: (
+                            _get_logokit_url(
+                                r["Symbol"],
+                                all_i[r["Symbol"]].instrument_type,
+                                logokit_key,
+                            )
+                            if r["Symbol"] in all_i
+                            else ""
+                        ),
+                        axis=1,
+                    ),
+                    name="Logo",
+                )
+                summary_column_config["Logo"] = st.column_config.ImageColumn(
+                    label="", width="small"
+                )
+
+            st.dataframe(
+                stats_df,
+                column_config=summary_column_config,
+                hide_index=stats_df.index.name is None,
+                width="stretch",
             )
-
-        summary_column_config = {
-            "Symbol": st.column_config.TextColumn(
-                pinned=True,
-                help="Ticker symbol of the instrument.",
-            ),
-            "Ann. Return": st.column_config.NumberColumn(
-                format="%+.2f%%",
-                help="Compound annual growth rate (CAGR). Measures the geometric average yearly return over the full period.",
-            ),
-            "Ann. Volatility": st.column_config.NumberColumn(
-                format="%.2f%%",
-                help="Annualized standard deviation of returns. Higher values indicate greater price variability and risk.",
-            ),
-            "Sharpe Ratio": st.column_config.NumberColumn(
-                format="%.2f",
-                help="Risk-adjusted return: excess return per unit of total volatility. Higher is better; above 1.0 is generally considered good.",
-            ),
-            "Sortino Ratio": st.column_config.NumberColumn(
-                format="%.2f",
-                help="Like the Sharpe ratio but only penalizes downside volatility. Better suited for assets with asymmetric return distributions.",
-            ),
-            "Max Drawdown": st.column_config.NumberColumn(
-                format="%.2f%%",
-                help="Largest peak-to-trough decline in cumulative returns. Represents the worst-case loss an investor would have experienced.",
-            ),
-            "Win Rate": st.column_config.NumberColumn(
-                format="%.1f%%",
-                help="Percentage of periods with a positive return. A value above 50% means the price went up more often than it went down.",
-            ),
-            "Total Bars": st.column_config.NumberColumn(
-                format="%d",
-                help="Total number of data points (bars) available for this symbol at the selected interval.",
-            ),
-        }
-
-        if logokit_key:
-            summary_column_config["Logo"] = st.column_config.ImageColumn(
-                label="", width="small"
-            )
-
-        st.dataframe(
-            stats_df,
-            column_config=summary_column_config,
-            hide_index=stats_df.index.name is None,
-            width="stretch",
-        )
 
 # ── Tab 1: Price ─────────────────────────────────────────────────────────────
 
@@ -437,9 +534,7 @@ with tabs[6]:
 
     if active_tab == TAB_LABELS[6]:
         st.plotly_chart(
-            plot_seasonality(
-                data=bars, price_col=price_col, symbol=season_symbol, display=None
-            ),
+            plot_seasonality(data=bars, price_col=price_col, symbol=season_symbol, display=None),
             width="stretch",
         )
 

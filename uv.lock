@@ -81,7 +81,7 @@ full = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "kaleido", marker = "python_full_version < '3.14'" },
+    { name = "kaleido" },
     { name = "mike" },
     { name = "mkdocs" },
     { name = "mkdocs-autorefs" },
@@ -103,7 +103,7 @@ dev = [
     { name = "ty" },
 ]
 docs = [
-    { name = "kaleido", marker = "python_full_version < '3.14'" },
+    { name = "kaleido" },
     { name = "mike" },
     { name = "mkdocs" },
     { name = "mkdocs-autorefs" },
@@ -153,7 +153,7 @@ provides-extras = ["full"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "kaleido", marker = "python_full_version < '3.14'", specifier = ">=1.2.0" },
+    { name = "kaleido", specifier = ">=1.2.0" },
     { name = "mike", specifier = ">=2.1.4" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-autorefs", specifier = ">=1.4.4" },
@@ -175,7 +175,7 @@ dev = [
     { name = "ty", specifier = ">=0.0.30" },
 ]
 docs = [
-    { name = "kaleido", marker = "python_full_version < '3.14'", specifier = ">=1.2.0" },
+    { name = "kaleido", specifier = ">=1.2.0" },
     { name = "mike", specifier = ">=2.1.4" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-autorefs", specifier = ">=1.4.4" },
@@ -336,8 +336,8 @@ name = "choreographer"
 version = "1.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "logistro", marker = "python_full_version < '3.14'" },
-    { name = "simplejson", marker = "python_full_version < '3.14'" },
+    { name = "logistro" },
+    { name = "simplejson" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/74/47/64a035c6f764450ea9f902cbeba14c8c70316c2641125510066d8f912bfa/choreographer-1.2.1.tar.gz", hash = "sha256:022afd72b1e9b0bcb950420b134e70055a294c791b6f36cfb47d89745b701b5f", size = 43399, upload-time = "2025-11-09T23:04:44.749Z" }
 wheels = [
@@ -612,11 +612,11 @@ name = "kaleido"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "choreographer", marker = "python_full_version < '3.14'" },
-    { name = "logistro", marker = "python_full_version < '3.14'" },
-    { name = "orjson", marker = "python_full_version < '3.14'" },
-    { name = "packaging", marker = "python_full_version < '3.14'" },
-    { name = "pytest-timeout", marker = "python_full_version < '3.14'" },
+    { name = "choreographer" },
+    { name = "logistro" },
+    { name = "orjson" },
+    { name = "packaging" },
+    { name = "pytest-timeout" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/38/ad/76eec859b71eda803a88ea50ed3f270281254656bb23d19eb0a39aa706a0/kaleido-1.2.0.tar.gz", hash = "sha256:fa621a14423e8effa2895a2526be00af0cf21655be1b74b7e382c171d12e71ef", size = 64160, upload-time = "2025-11-04T21:24:23.833Z" }
 wheels = [
@@ -1431,7 +1431,7 @@ name = "pytest-timeout"
 version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pytest", marker = "python_full_version < '3.14'" },
+    { name = "pytest" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973, upload-time = "2025-05-05T19:44:34.99Z" }
 wheels = [

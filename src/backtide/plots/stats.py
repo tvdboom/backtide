@@ -52,7 +52,7 @@ def compute_summary_stats(
 
     for symbol in sorted(data["symbol"].unique()):
         subset = data[data["symbol"] == symbol].sort_values("dt")
-        prices = subset[price_col].values
+        prices = subset[price_col].to_numpy()
         returns = pd.Series(prices).pct_change().dropna()
 
         if len(returns) < 2:
@@ -65,12 +65,17 @@ def compute_summary_stats(
             dts = subset["dt"].sort_values()
             median_delta = dts.diff().dropna().median()
             seconds = median_delta.total_seconds()
-            ann = max(1, int(round(365.25 * 86400 / seconds)))
+            ann = max(1, round(365.25 * 86400 / seconds))
 
         # Annualized return (geometric)
         total_return = prices[-1] / prices[0]
         n_years = len(returns) / ann
-        ann_return = (total_return ** (1 / n_years) - 1) * 100 if n_years > 0 else 0.0
+        if n_years > 0 and total_return > 0:
+            ann_return = (total_return ** (1 / n_years) - 1) * 100
+        elif n_years > 0:
+            ann_return = -100.0
+        else:
+            ann_return = 0.0
 
         # Annualized volatility
         ann_vol = returns.std() * np.sqrt(ann) * 100
@@ -98,8 +103,8 @@ def compute_summary_stats(
                 "Symbol": symbol,
                 "Ann. Return": ann_return,
                 "Ann. Volatility": ann_vol,
-                "Sharpe Ratio": sharpe,
-                "Sortino Ratio": sortino,
+                "Sharpe": sharpe,
+                "Sortino": sortino,
                 "Max Drawdown": max_dd,
                 "Win Rate": win_rate,
                 "Total Bars": len(subset),
@@ -107,4 +112,3 @@ def compute_summary_stats(
         )
 
     return pd.DataFrame(records)
-

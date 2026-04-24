@@ -8,7 +8,7 @@ Description: Module containing the correlation heatmap function for data analysi
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -17,6 +17,30 @@ from backtide.config import get_config
 from backtide.plots.utils import _check_columns, _plot
 
 cfg = get_config()
+
+
+@overload
+def plot_correlation(
+    data: pd.DataFrame,
+    price_col: str = ...,
+    *,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: None = ...,
+) -> go.Figure: ...
+@overload
+def plot_correlation(
+    data: pd.DataFrame,
+    price_col: str = ...,
+    *,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: bool = ...,
+) -> None: ...
 
 
 def plot_correlation(

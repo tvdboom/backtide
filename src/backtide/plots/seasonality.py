@@ -8,7 +8,7 @@ Description: Module containing the seasonality heatmap function for data analysi
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
 import numpy as np
 import pandas as pd
@@ -20,9 +20,45 @@ from backtide.plots.utils import _check_columns, _plot
 cfg = get_config()
 
 MONTH_LABELS = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
 ]
+
+
+@overload
+def plot_seasonality(
+    data: pd.DataFrame,
+    price_col: str = ...,
+    symbol: str | None = ...,
+    *,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: Literal[None] = ...,
+) -> go.Figure: ...
+@overload
+def plot_seasonality(
+    data: pd.DataFrame,
+    price_col: str = ...,
+    symbol: str | None = ...,
+    *,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: bool = ...,
+) -> None: ...
 
 
 def plot_seasonality(
@@ -39,7 +75,7 @@ def plot_seasonality(
     """Create a seasonality heatmap of monthly returns.
 
     Aggregates daily (or other interval) returns into calendar months and
-    displays a year × month grid colored by total return. Useful for
+    displays a year x month grid colored by total return. Useful for
     spotting recurring seasonal patterns.
 
     Parameters
@@ -117,7 +153,7 @@ def plot_seasonality(
     subset["month"] = subset["dt"].dt.month
 
     monthly = subset.groupby(["year", "month"])["return"].sum().reset_index()
-    pivot = monthly.pivot(index="year", columns="month", values="return")
+    pivot = monthly.pivot_table(index="year", columns="month", values="return")
 
     # Ensure all 12 months are present
     for m in range(1, 13):
@@ -130,14 +166,11 @@ def plot_seasonality(
     n_years = len(years)
 
     # Determine text color per cell: dark text on light backgrounds, white on dark
-    z_vals = pivot.values
+    z_vals = pivot.to_numpy()
     z_abs_max = np.nanmax(np.abs(z_vals)) if np.any(np.isfinite(z_vals)) else 1.0
     # RdYlGn: red (negative) and green (positive) are dark, yellow (near zero) is light
     text_colors = [
-        [
-            "#333" if (pd.isna(v) or abs(v) < z_abs_max * 0.3) else "white"
-            for v in row
-        ]
+        ["#333" if (pd.isna(v) or abs(v) < z_abs_max * 0.3) else "white" for v in row]
         for row in z_vals
     ]
 
@@ -150,9 +183,7 @@ def plot_seasonality(
             zmid=0,
             texttemplate="%{z:+.1f}%",
             textfont={"size": 11},
-            colorbar={
-                "title": {"text": "Return (%)", "font": {"size": cfg.plots.label_fontsize}}
-            },
+            colorbar={"title": {"text": "Return (%)", "font": {"size": cfg.plots.label_fontsize}}},
             hovertemplate="%{y} %{x}: %{z:+.2f}%<extra>" + sym + "</extra>",
         )
     )
@@ -202,4 +233,3 @@ def plot_seasonality(
         filename=filename,
         display=display,
     )
-

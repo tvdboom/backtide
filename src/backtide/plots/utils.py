@@ -12,8 +12,9 @@ from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
-from backtide.core.data import Currency
+
 from backtide.core.config import get_config
+from backtide.core.data import Currency
 from backtide.ui.utils import _moment_to_strftime
 
 cfg = get_config()

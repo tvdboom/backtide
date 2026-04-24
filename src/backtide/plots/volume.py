@@ -8,7 +8,7 @@ Description: Module containing the volume bar chart function for data analysis.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -20,6 +20,28 @@ from backtide.utils.utils import _format_price
 cfg = get_config()
 
 
+@overload
+def plot_volume(
+    data: pd.DataFrame,
+    *,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: None = ...,
+) -> go.Figure: ...
+@overload
+def plot_volume(
+    data: pd.DataFrame,
+    *,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: bool = ...,
+) -> None: ...
+
+
 def plot_volume(
     data: pd.DataFrame,
     *,
@@ -29,10 +51,10 @@ def plot_volume(
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
-    """Create a volume bar chart.
+    """Create a trading volume bar chart.
 
     Displays trading volume over time for one or more symbols. Each symbol
-    is rendered as a separate bar trace with its own color.
+    is rendered as a separate bar trace.
 
     Parameters
     ----------
@@ -87,7 +109,6 @@ def plot_volume(
 
     df = query_bars("AAPL", "1d")
     df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
-    df["currency"] = "USD"
 
     plot_volume(df)
     ```
@@ -112,7 +133,10 @@ def plot_volume(
                 fill="tozeroy",
                 fillcolor=f"rgba({color[4:-1]}, 0.4)",
                 opacity=0.85,
-                customdata=[_format_price(x["volume"], currency=x.get("currency")) for _, x in subset.iterrows()],
+                customdata=[
+                    _format_price(x["volume"], decimals=0, currency=x.get("currency"))
+                    for _, x in subset.iterrows()
+                ],
                 hovertemplate=f"%{{x}}<br>Volume: %{{customdata}}<extra>{symbol}</extra>",
             )
         )

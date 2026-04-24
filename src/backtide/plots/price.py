@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 from backtide.config import get_config
 from backtide.indicators import BaseIndicator
 from backtide.plots.utils import _check_columns, _get_currency_symbol, _plot
-from backtide.utils.utils import _to_list, _to_pandas
+from backtide.utils.utils import _format_price, _to_list, _to_pandas
 
 # Supported price columns and their display labels.
 PRICE_COLUMNS = {
@@ -30,6 +30,32 @@ PRICE_COLUMNS = {
 
 
 cfg = get_config()
+
+
+@overload
+def plot_price(
+    data: pd.DataFrame,
+    price_col: str = ...,
+    *,
+    indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = ...,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: None = ...,
+) -> go.Figure: ...
+@overload
+def plot_price(
+    data: pd.DataFrame,
+    price_col: str = ...,
+    *,
+    indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = ...,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: bool = ...,
+) -> None: ...
 
 
 def plot_price(
@@ -124,6 +150,7 @@ def plot_price(
     _check_columns(data, ["symbol", price_col, "dt"], "plot_price")
 
     fig = go.Figure()
+    currency = _get_currency_symbol(data)
 
     ind_dict = None
     if indicators is not None:
@@ -142,9 +169,14 @@ def plot_price(
                 y=subset[price_col],
                 mode="lines",
                 name="Price" if ind_dict else symbol,
+                line={"color": color, "width": 2},
                 legendgroup=symbol,
                 legendgrouptitle_text=symbol if ind_dict else None,
-                line={"color": color, "width": 2},
+                customdata=[
+                    _format_price(x[price_col], currency=x.get("currency"))
+                    for _, x in subset.iterrows()
+                ],
+                hovertemplate=f"%{{x}}<br>Price: %{{customdata}}<extra>{symbol}</extra>",
             )
         )
 
@@ -197,7 +229,7 @@ def plot_price(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Price ({cs})" if (cs := _get_currency_symbol(data)) else "Price",
+        ylabel=f"Price ({currency.symbol})" if currency else "Price",
         figsize=figsize,
         filename=filename,
         display=display,

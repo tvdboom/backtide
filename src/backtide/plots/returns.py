@@ -8,7 +8,7 @@ Description: Module containing the returns distribution chart for data analysis.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -17,6 +17,30 @@ from backtide.config import get_config
 from backtide.plots.utils import _check_columns, _plot
 
 cfg = get_config()
+
+
+@overload
+def plot_returns(
+    data: pd.DataFrame,
+    price_col: str = ...,
+    *,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: None = ...,
+) -> go.Figure: ...
+@overload
+def plot_returns(
+    data: pd.DataFrame,
+    price_col: str = ...,
+    *,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: bool = ...,
+) -> None: ...
 
 
 def plot_returns(
@@ -116,7 +140,6 @@ def plot_returns(
         )
 
     fig.update_layout(barmode="overlay")
-
 
     return _plot(
         fig,

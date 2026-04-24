@@ -499,12 +499,14 @@ class AutoDocs:
         if include:
             methods = include
         else:
+            members = getmembers(
+                self.obj,
+                predicate=lambda f: ismethod(f) or isfunction(f) or isbuiltin(f) or isroutine(f),
+            )
+
             methods = [
                 m
-                for m, _ in getmembers(
-                    self.obj,
-                    predicate=lambda f: ismethod(f) or isfunction(f) or isbuiltin(f) or isroutine(f),
-                )
+                for m, _ in members
                 if not m.startswith("_") and not any(re.fullmatch(p, m) for p in exclude)
             ]
 

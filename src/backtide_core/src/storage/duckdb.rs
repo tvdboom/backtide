@@ -513,8 +513,12 @@ impl Storage for DuckDb {
             let mut seen = HashSet::new();
             for div in s.dividends.iter().rev() {
                 if seen.insert(div.ex_date) {
-                    appender
-                        .append_row(params![&s.symbol, &prov, div.ex_date as i64, div.amount,])?;
+                    appender.append_row(params![
+                        &s.symbol,
+                        &prov,
+                        div.ex_date as i64,
+                        div.amount,
+                    ])?;
                 }
             }
         }

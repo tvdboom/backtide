@@ -8,7 +8,7 @@ Description: Module containing the candlestick chart function for data analysis.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -18,6 +18,31 @@ from backtide.plots.utils import (
     _get_currency_symbol,
     _plot,
 )
+from backtide.utils.utils import _format_price
+
+
+@overload
+def plot_candlestick(
+    data: pd.DataFrame,
+    *,
+    rangeslider: bool = ...,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: None = ...,
+) -> go.Figure: ...
+@overload
+def plot_candlestick(
+    data: pd.DataFrame,
+    *,
+    rangeslider: bool = ...,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: bool = ...,
+) -> None: ...
 
 
 def plot_candlestick(
@@ -105,10 +130,26 @@ def plot_candlestick(
     _check_columns(data, ["symbol", "dt", "open", "high", "low", "close"], "plot_candlestick")
 
     fig = go.Figure()
+    currency = _get_currency_symbol(data)
+    symbol = data["symbol"].iloc[0]
 
     # Default candlestick colors
     inc = "#26A69A"  # Teal (bullish)
     dec = "#EF5350"  # Red (bearish)
+
+    # Pre-format OHLC values for hover
+    triangle = lambda s, c: f"<span style='color:{c}'>{s}</span>"
+    customdata = data.apply(
+        lambda r: [
+            triangle("▲", "#26A69A") if r["close"] >= r["open"] else triangle("▼", "#EF5350"),
+            _format_price(r["open"], currency=r.get("currency")),
+            _format_price(r["high"], currency=r.get("currency")),
+            _format_price(r["low"], currency=r.get("currency")),
+            _format_price(r["close"], currency=r.get("currency")),
+        ],
+        axis=1,
+        result_type="expand",
+    )
 
     fig.add_trace(
         go.Candlestick(
@@ -118,9 +159,18 @@ def plot_candlestick(
             low=data["low"],
             close=data["close"],
             whiskerwidth=0.2,
-            name=data["symbol"].iloc[0],
+            name=symbol,
             increasing={"line": {"color": inc}, "fillcolor": inc},
             decreasing={"line": {"color": dec}, "fillcolor": dec},
+            customdata=customdata.values,
+            hovertemplate=(
+                "%{customdata[0]} %{x}<br>"
+                "Open: %{customdata[1]}<br>"
+                "High: %{customdata[2]}<br>"
+                "Low: %{customdata[3]}<br>"
+                "Close: %{customdata[4]}"
+                f"<extra>{symbol}</extra>"
+            ),
             showlegend=False,
         )
     )
@@ -136,7 +186,7 @@ def plot_candlestick(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Price ({cs})" if (cs := _get_currency_symbol(data)) else "Price",
+        ylabel=f"Price ({currency.symbol})" if currency else "Price",
         figsize=figsize,
         filename=filename,
         display=display,

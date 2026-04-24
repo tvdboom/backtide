@@ -15,9 +15,9 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
-from backtide.core.data import Currency
 
 from backtide.config import DataFrameLibrary
+from backtide.core.data import Currency
 
 if TYPE_CHECKING:
     import polars as pl
@@ -50,7 +50,7 @@ def _check_dependency(name: str, pypi_name: str | None = None) -> ModuleType:
         ) from None
 
 
-def _format_number(n: int | float) -> str:
+def _format_number(n: float) -> str:
     """Transform a number to a nicely formatted string.
 
     Parameters
@@ -80,7 +80,7 @@ def _format_number(n: int | float) -> str:
         return f"{n:.0f}"
 
 
-def _format_price(n: int | float, decimals: int = 0, currency: str | None = None) -> str:
+def _format_price(n: float, decimals: int | None = None, currency: str | None = None) -> str:
     """Format a price using a currency's symbol and placement convention.
 
     Parameters
@@ -88,8 +88,9 @@ def _format_price(n: int | float, decimals: int = 0, currency: str | None = None
     n : int | float
         Number to format.
 
-    decimals : int, default=0
-        Number of decimal places.
+    decimals : int | None, default=None
+        Number of decimal places. If None and the currency is recognized, it uses
+        the currency's decimal places. Else it uses 2.
 
     currency : str | None, default=None
         Currency code to use for formatting. If None, no currency symbol
@@ -101,20 +102,20 @@ def _format_price(n: int | float, decimals: int = 0, currency: str | None = None
         Formatted string.
 
     """
-    n_str = f"{n:,.{decimals}f}"
+    dec = 2 if decimals is None else decimals
 
     if currency:
         try:
             curr = Currency(currency)
         except ValueError:
-            return n_str
+            return f"{n:,.{dec}f}"
 
         if curr.symbol_prefix:
-            return f"{curr.symbol}{n_str}"
+            return f"{curr.symbol}{n:,.{curr.decimals if decimals is None else dec}f}"
         else:
-            return f"{n_str} {curr.symbol}"
+            return f"{n:,.{curr.decimals if decimals is None else dec}f} {curr.symbol}"
 
-    return n_str
+    return f"{n:,.{dec}f}"
 
 
 def _make_dummy_bars(
