@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from backtide.config import DataFrameLibrary
+from backtide.config import DataFrameLibrary, get_config
 from backtide.core.data import Currency
 
 if TYPE_CHECKING:
@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
+
+cfg = get_config()
 
 
 def _check_dependency(name: str, pypi_name: str | None = None) -> ModuleType:
@@ -110,7 +112,7 @@ def _format_price(n: float, decimals: int | None = None, currency: str | None = 
         except ValueError:
             return f"{n:,.{dec}f}"
 
-        if curr.symbol_prefix:
+        if cfg.display.currency_prefix:
             return f"{curr.symbol}{n:,.{curr.decimals if decimals is None else dec}f}"
         else:
             return f"{n:,.{curr.decimals if decimals is None else dec}f} {curr.symbol}"

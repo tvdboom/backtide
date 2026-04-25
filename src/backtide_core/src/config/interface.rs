@@ -438,6 +438,10 @@ impl DataConfig {
 /// timezone : str or None, default=None
 ///     IANA timezone name. `None` to use the system's local timezone.
 ///
+/// currency_prefix : bool, default=True
+///     Whether to place currency symbols before the amount (`True`) or after the
+///     amount (`False`).
+///
 /// logokit_api_key : str or None, default=None
 ///     API key for the [logokit] website, which is used to fetch images for instruments.
 ///     If `None`, no images are loaded.
@@ -463,6 +467,7 @@ pub struct DisplayConfig {
     pub date_format: String,
     pub time_format: String,
     pub timezone: Option<String>,
+    pub currency_prefix: bool,
     pub logokit_api_key: Option<String>,
     pub address: Option<String>,
     pub port: u16,
@@ -474,6 +479,7 @@ impl Default for DisplayConfig {
             date_format: "YYYY-MM-DD".to_owned(),
             time_format: "HH:MM".to_owned(),
             timezone: None,
+            currency_prefix: true,
             logokit_api_key: None,
             address: None,
             port: 8501,
@@ -491,6 +497,7 @@ impl DisplayConfig {
         date_format: "str"="YYYY-MM-DD",
         time_format: "str"="HH:MM",
         timezone: "str | None"=None,
+        currency_prefix: "bool"=true,
         logokit_api_key: "str | None"=None,
         address: "str | None"=None,
         port: "int"=8501
@@ -499,6 +506,7 @@ impl DisplayConfig {
         date_format: &str,
         time_format: &str,
         timezone: Option<&str>,
+        currency_prefix: bool,
         logokit_api_key: Option<&str>,
         address: Option<&str>,
         port: u16,
@@ -507,6 +515,7 @@ impl DisplayConfig {
             date_format: date_format.to_owned(),
             time_format: time_format.to_owned(),
             timezone: timezone.map(|s| s.to_owned()),
+            currency_prefix,
             logokit_api_key: logokit_api_key.map(|s| s.to_owned()),
             address: address.map(|a| a.to_owned()),
             port,
@@ -515,10 +524,11 @@ impl DisplayConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "DisplayConfig(date_format={:?}, time_format={:?}, timezone={:?}, logokit_api_key={:?}, address={:?}, port={:?})",
+            "DisplayConfig(date_format={:?}, time_format={:?}, timezone={:?}, currency_prefix={}, logokit_api_key={:?}, address={:?}, port={:?})",
             self.date_format,
             self.time_format,
             self.timezone,
+            self.currency_prefix,
             self.logokit_api_key.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
             self.address,
             self.port,

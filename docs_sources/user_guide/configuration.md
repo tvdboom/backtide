@@ -41,6 +41,7 @@ If no file is found, the built-in defaults are used.
     [display]
     date_format = "YYYY-MM-DD"
     time_format = "HH:MM"
+    currency_prefix = true
     port = 8501
 
     [plots]
@@ -81,6 +82,7 @@ If no file is found, the built-in defaults are used.
         date_format: "YYYY-MM-DD"
         time_format: "HH:MM"
         timezone: null
+        currency_prefix: true
         logokit_api_key: null
         address: null
         port: 8501
@@ -124,6 +126,7 @@ If no file is found, the built-in defaults are used.
             "date_format": "YYYY-MM-DD",
             "time_format": "HH:MM",
             "timezone": null,
+            "currency_prefix": true,
             "logokit_api_key": null,
             "address": null,
             "port": 8501

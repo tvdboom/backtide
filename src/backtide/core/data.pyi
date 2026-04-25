@@ -483,20 +483,6 @@ class Currency:
         ...
     def __str__(self, /):
         ...
-    def format(self, amount) -> str:
-        """Format an amount using this currency's symbol and placement convention.
-
-        Parameters
-        ----------
-        amount : int | float
-            Amount to display.
-
-        Returns
-        -------
-        str
-            Formatted amount with currency indicator.
-
-        """
     @staticmethod
     def get_default() -> Currency:
         """Return the default variant.

@@ -225,6 +225,10 @@ class DisplayConfig:
     timezone : str or None, default=None
         IANA timezone name. `None` to use the system's local timezone.
 
+    currency_prefix : bool, default=True
+        Whether to place currency symbols before the amount (`True`) or after the
+        amount (`False`).
+
     logokit_api_key : str or None, default=None
         API key for the [logokit] website, which is used to fetch images for instruments.
         If `None`, no images are loaded.
@@ -247,6 +251,7 @@ class DisplayConfig:
     """
 
     address: str | None
+    currency_prefix: bool
     date_format: str
     logokit_api_key: str | None
     port: int

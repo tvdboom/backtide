@@ -5,6 +5,8 @@ Description: Data analysis page for exploring stored market data.
 
 """
 
+from datetime import date, timedelta
+
 import pandas as pd
 import streamlit as st
 
@@ -90,16 +92,44 @@ symbols = st.multiselect(  # ty: ignore[no-matching-overload]
     help="Select the symbols to analyze. Only symbols available in the database are shown.",
 )
 
-interval = st.pills(
-    label="Interval",
-    key=(key := "interval"),
-    required=True,
-    options=Interval.variants(),
-    selection_mode="single",
-    default=_default(key, Interval.get_default()),
-    on_change=lambda k=key: _persist(k),
-    help="Select an interval to analyze.",
-)
+PERIOD_OPTIONS = ["All", "5Y", "1Y", "YTD", "6M", "3M", "1M", "7D", "1D", "Custom"]
+
+col1, col2 = st.columns(2)
+
+with col1:
+    interval = st.pills(
+        label="Interval",
+        key=(key := "interval"),
+        required=True,
+        options=Interval.variants(),
+        selection_mode="single",
+        default=_default(key, Interval.get_default()),
+        on_change=lambda k=key: _persist(k),
+        help="Select an interval to analyze.",
+    )
+
+with col2:
+    period = st.pills(
+        label="Period",
+        key=(key := "period"),
+        required=True,
+        options=PERIOD_OPTIONS,
+        selection_mode="single",
+        default=_default(key, "All"),
+        on_change=lambda k=key: _persist(k),
+        help="Filter data to a specific time window.",
+    )
+
+# Custom date range input (shown only when "Custom" is selected)
+if period == "Custom":
+    custom_range = st.date_input(
+        label="Date range",
+        key=(key := "custom_date_range"),
+        value=_default(key, (date.today() - timedelta(days=30), date.today())),
+        format=cfg.display.date_format,
+        on_change=lambda k=key: _persist(k),
+        help="Select a custom date range for the analysis.",
+    )
 
 if not symbols:
     st.warning("Select at least one symbol to begin the analysis.", icon=":material/warning:")
@@ -132,6 +162,40 @@ bars = bars[
     )
 ]
 
+# Add datetime column for plotting
+bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
+
+# ── Apply period filter ──────────────────────────────────────────────────────
+
+_today = pd.Timestamp.now(tz=tz)
+
+if period == "Custom":
+    if isinstance(custom_range, tuple) and len(custom_range) == 2:
+        _start, _end = custom_range
+        bars = bars[(bars["dt"].dt.date >= _start) & (bars["dt"].dt.date <= _end)]
+elif period != "All":
+    _offsets = {
+        "5Y": timedelta(days=5 * 365),
+        "1Y": timedelta(days=365),
+        "6M": timedelta(days=182),
+        "3M": timedelta(days=91),
+        "1M": timedelta(days=30),
+        "7D": timedelta(days=7),
+        "1D": timedelta(days=1),
+    }
+    if period == "YTD":
+        _cutoff = pd.Timestamp(date(_today.year, 1, 1), tz=tz)
+    else:
+        _cutoff = _today - _offsets[period]
+    bars = bars[bars["dt"] >= _cutoff]
+
+if bars.empty:
+    st.warning(
+        "No bars found for the selected period.",
+        icon=":material/warning:",
+    )
+    st.stop()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tabs
@@ -160,8 +224,6 @@ tabs = st.tabs(
 # Determine active tab index for lazy rendering
 active_tab = st.session_state.get("plot_tabs", TAB_LABELS[0])
 
-# Add datetime column for plotting
-bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
 
 # Add currency column from instruments
 bars["currency"] = bars["symbol"].map(lambda s: str(all_i[s].quote) if s in all_i else None)
@@ -401,24 +463,7 @@ with tabs[2]:
     col1, col2 = st.columns([10, 1])
     col1.caption("OHLC candlestick chart showing price action over time.")
 
-    # Compute available date range from bars
-    dates = bars["dt"].sort_values()
-    min_date = dates.iloc[0].date()
-    max_date = dates.iloc[-1].date()
-    default_start = dates.iloc[-min(90, len(dates.unique()))].date()
-
     with col2.popover(":material/tune:"):
-        cs_date_range = st.date_input(
-            label="Date range",
-            key=(key := "cs_date_range"),
-            value=(_default(key, (default_start, max_date))),
-            min_value=min_date,
-            max_value=max_date,
-            format=cfg.display.date_format,
-            on_change=lambda k=key: _persist(k),
-            help="Select the visible date range for the candlestick chart.",
-        )
-
         cs_rangeslider = st.toggle(
             label="Range slider",
             key=(key := "cs_rangeslider"),
@@ -428,17 +473,9 @@ with tabs[2]:
         )
 
     if active_tab == TAB_LABELS[2]:
-        # Only plot when both start and end are selected
-        if isinstance(cs_date_range, tuple) and len(cs_date_range) == 2:
-            _cs_start, _cs_end = cs_date_range
-        else:
-            _cs_start, _cs_end = default_start, max_date
-
-        _cs_bars = bars[(bars["dt"].dt.date >= _cs_start) & (bars["dt"].dt.date <= _cs_end)]
-
         st.plotly_chart(
             plot_candlestick(
-                _cs_bars,
+                bars,
                 rangeslider=cs_rangeslider,
                 display=None,
             ),
