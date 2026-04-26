@@ -8,7 +8,7 @@ Description: Shared plotting utilities for consistent figure styling.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -17,15 +17,23 @@ from backtide.core.config import get_config
 from backtide.core.data import Currency
 from backtide.ui.utils import _moment_to_strftime
 
+if TYPE_CHECKING:
+    import polars as pl
+
+    DataFrameLike: TypeAlias = pd.DataFrame | pl.DataFrame
+else:
+    DataFrameLike: TypeAlias = pd.DataFrame
+
+
 cfg = get_config()
 
 
-def _check_columns(data: pd.DataFrame, columns: list[str], caller: str) -> None:
+def _check_columns(data: DataFrameLike, columns: list[str], caller: str) -> None:
     """Verify that required columns exist in the DataFrame.
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pd.DataFrame | pl.DataFrame
         The input DataFrame to check.
 
     columns : list[str]

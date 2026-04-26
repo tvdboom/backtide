@@ -65,36 +65,6 @@ logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").set
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-STRATEGY_PLACEHOLDER = """\
-def strategy(data, state, indicators):
-    '''Function that decides the orders to place this tick.
-
-    Parameters
-    ---------
-    data : pd.DataFrame
-        Ticker data.
-
-    state : State
-        Current portfolio, etc...
-
-    indicators: dict[str, dict[str, float]] | None
-        Indicators calculated on the historical data. The first key is the
-        symbol and the second key is the name of the indicator. None if no
-        indicators were selected.
-
-    Returns
-    -------
-    list[Order]
-        Orders to place.
-
-    '''
-    orders = []
-
-    # ── Write your logic here ──────────────────────────
-
-    return orders
-"""
-
 
 def _apply_config_to_state(
     exp: ExperimentConfig,

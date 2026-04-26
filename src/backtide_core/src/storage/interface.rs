@@ -10,7 +10,6 @@ use crate::utils::dataframe::dict_to_dataframe;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // Helper functions
 // ────────────────────────────────────────────────────────────────────────────

@@ -10,19 +10,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, overload
 
-import pandas as pd
 import plotly.graph_objects as go
 
+from backtide.analysis.utils import DataFrameLike, _check_columns, _get_currency_symbol, _plot
 from backtide.config import get_config
-from backtide.analysis.utils import _check_columns, _get_currency_symbol, _plot
-from backtide.utils.utils import _format_price
+from backtide.utils.utils import _format_price, _to_pandas
 
 cfg = get_config()
 
 
 @overload
 def plot_volume(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -32,7 +31,7 @@ def plot_volume(
 ) -> go.Figure: ...
 @overload
 def plot_volume(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -43,7 +42,7 @@ def plot_volume(
 
 
 def plot_volume(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
@@ -58,7 +57,7 @@ def plot_volume(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pd.DataFrame | pl.DataFrame
         Input data containing columns `symbol`, `volume` and `dt` with the
         datetime.
 
@@ -110,10 +109,18 @@ def plot_volume(
     df = query_bars("AAPL", "1d")
     df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
 
+    # Plot raw share volume
     plot_volume(df)
+
+    # Plot price x share (dollar volume)
+    df_vol = df.copy()
+    df["volume"] = df["volume"] * df["close"]
+    df["currency"] = "USD"  # Add currency to format labels
+    plot_volume(df, title="Dollar volume for AAPL")
     ```
 
     """
+    data = _to_pandas(data)
     _check_columns(data, ["symbol", "volume", "dt"], "plot_volume")
 
     fig = go.Figure()

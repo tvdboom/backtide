@@ -20,4 +20,3 @@
 
 :: methods:
     toc_only: False
-

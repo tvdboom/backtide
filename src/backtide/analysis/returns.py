@@ -10,18 +10,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, overload
 
-import pandas as pd
 import plotly.graph_objects as go
 
+from backtide.analysis.utils import DataFrameLike, _check_columns, _plot
 from backtide.config import get_config
-from backtide.analysis.utils import _check_columns, _plot
+from backtide.utils.utils import _to_pandas
 
 cfg = get_config()
 
 
 @overload
 def plot_returns(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
     *,
     title: str | dict[str, Any] | None = ...,
@@ -32,7 +32,7 @@ def plot_returns(
 ) -> go.Figure: ...
 @overload
 def plot_returns(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
     *,
     title: str | dict[str, Any] | None = ...,
@@ -44,11 +44,11 @@ def plot_returns(
 
 
 def plot_returns(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = "adj_close",
     *,
     title: str | dict[str, Any] | None = None,
-    legend: str | dict[str, Any] | None = "upper right",
+    legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] | None = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
@@ -61,7 +61,7 @@ def plot_returns(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pd.DataFrame | pl.DataFrame
         Input data containing columns `symbol`, the column specified by
         `price_col`, and `dt` with the datetime.
 
@@ -75,7 +75,7 @@ def plot_returns(
         - If str, text for the title.
         - If dict, [title configuration][parameters].
 
-    legend : str | dict | None, default="upper right"
+    legend : str | dict | None, default="upper left"
         Legend for the plot. See the [user guide][parameters] for an extended
         description of the choices.
 
@@ -113,25 +113,25 @@ def plot_returns(
     from backtide.storage import query_bars
     from backtide.analysis import plot_returns
 
-    df = query_bars(["AAPL", "MSFT"], "1d")
+    df = query_bars("AAPL" "1d")
     df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
 
     plot_returns(df)
     ```
 
     """
+    data = _to_pandas(data)
     _check_columns(data, ["symbol", price_col, "dt"], "plot_returns")
 
     fig = go.Figure()
 
     for idx, symbol in enumerate(data["symbol"].unique()):
         subset = data[data["symbol"] == symbol].sort_values("dt")
-        returns = subset[price_col].pct_change().dropna() * 100
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
         fig.add_trace(
             go.Histogram(
-                x=returns,
+                x=subset[price_col].pct_change().dropna() * 100,
                 name=symbol,
                 marker_color=color,
                 opacity=0.7,

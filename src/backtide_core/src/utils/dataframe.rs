@@ -19,15 +19,14 @@ pub fn dict_to_dataframe<'py>(
             let values: Vec<Bound<'py, PyAny>> = data.values().iter().collect();
             let values_list = PyList::new(py, &values)?;
             np.call_method1("column_stack", (values_list,))
-        }
+        },
         DataFrameLibrary::Pandas => {
             let pd = py.import("pandas")?;
             pd.call_method1("DataFrame", (data,))
-        }
+        },
         DataFrameLibrary::Polars => {
             let pl = py.import("polars")?;
             pl.call_method1("from_dict", (data,))
-        }
+        },
     }
 }
-

@@ -14,8 +14,9 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+from backtide.analysis.utils import DataFrameLike, _check_columns, _plot
 from backtide.config import get_config
-from backtide.analysis.utils import _check_columns, _plot
+from backtide.utils.utils import _to_pandas
 
 cfg = get_config()
 
@@ -37,9 +38,8 @@ MONTH_LABELS = [
 
 @overload
 def plot_seasonality(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
-    symbol: str | None = ...,
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -49,9 +49,8 @@ def plot_seasonality(
 ) -> go.Figure: ...
 @overload
 def plot_seasonality(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
-    symbol: str | None = ...,
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -62,9 +61,8 @@ def plot_seasonality(
 
 
 def plot_seasonality(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = "adj_close",
-    symbol: str | None = None,
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = None,
@@ -80,17 +78,12 @@ def plot_seasonality(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pd.DataFrame | pl.DataFrame
         Input data containing columns `symbol`, the column specified by
         `price_col`, and `dt` with the datetime.
 
     price_col : str, default="adj_close"
         Column name used to compute returns.
-
-    symbol : str | None, default=None
-        Symbol to plot. If None and data contains a single symbol, that
-        symbol is used. If multiple symbols are present and symbol is
-        None, the first symbol alphabetically is selected.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -133,19 +126,24 @@ def plot_seasonality(
     from backtide.storage import query_bars
     from backtide.analysis import plot_seasonality
 
-    df = query_bars(["AAPL"], "1d")
+    df = query_bars("AAPL", "1d")
     df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
 
     plot_seasonality(df)
     ```
 
     """
+    data = _to_pandas(data)
     _check_columns(data, ["symbol", price_col, "dt"], "plot_seasonality")
 
     # Select single symbol
-    symbols = sorted(data["symbol"].unique())
-    sym = symbol or symbols[0]
-    subset = data[data["symbol"] == sym].sort_values("dt").copy()
+    if len(symbols := data["symbol"].unique()) > 1:
+        raise ValueError(
+            f"The plot_seasonality function requires a single symbol, "
+            f"but {len(symbols)} were found ({', '.join(symbols)})."
+        )
+
+    subset = data[data["symbol"] == symbols[0]].sort_values("dt").copy()
 
     # Compute monthly returns
     subset["return"] = subset[price_col].pct_change() * 100
@@ -159,65 +157,75 @@ def plot_seasonality(
     for m in range(1, 13):
         if m not in pivot.columns:
             pivot[m] = float("nan")
+
     pivot = pivot[sorted(pivot.columns)]
 
     years = [str(y) for y in pivot.index]
     months = [MONTH_LABELS[m - 1] for m in pivot.columns]
     n_years = len(years)
 
-    # Determine text color per cell: dark text on light backgrounds, white on dark
-    z_vals = pivot.to_numpy()
+    z_vals = pivot.to_numpy().round(2)
+
+    # Determine text color per cell: white on dark (intense) cells, dark on light
     z_abs_max = np.nanmax(np.abs(z_vals)) if np.any(np.isfinite(z_vals)) else 1.0
-    # RdYlGn: red (negative) and green (positive) are dark, yellow (near zero) is light
+    cell_text = [[f"{v:+.1f}%" if pd.notna(v) else "" for v in row] for row in z_vals]
     text_colors = [
-        ["#333" if (pd.isna(v) or abs(v) < z_abs_max * 0.3) else "white" for v in row]
+        ["white" if (pd.notna(v) and abs(v) >= z_abs_max * 0.35) else "#222" for v in row]
         for row in z_vals
     ]
 
+    # Scale font size based on number of years
+    font_size = max(8, min(12, 200 // max(n_years, 1)))
+
     fig = go.Figure(
         data=go.Heatmap(
-            z=z_vals,
             x=months,
             y=years,
+            z=z_vals,
+            text=cell_text,
+            texttemplate="%{text}",
+            textfont={"size": font_size},
             colorscale="RdYlGn",
             zmid=0,
-            texttemplate="%{z:+.1f}%",
-            textfont={"size": 11},
             colorbar={"title": {"text": "Return (%)", "font": {"size": cfg.plots.label_fontsize}}},
-            hovertemplate="%{y} %{x}: %{z:+.2f}%<extra>" + sym + "</extra>",
+            hovertemplate=f"%{{x}} %{{y}}: %{{z:+.2f}}%<extra>{symbols[0]}</extra>",
+            xgap=2,
+            ygap=2,
         )
     )
 
-    # Apply per-cell text colors via annotations (texttemplate doesn't support per-cell color)
-    fig.data[0].textfont.color = None  # clear global color
-    fig.data[0].texttemplate = None  # we'll use annotations instead
-
-    # Scale annotation font size based on number of years
-    _font_size = max(8, min(12, 200 // max(n_years, 1)))
-
+    # Apply per-cell text colors (textfont.color doesn't support 2D, so use annotations)
+    fig.data[0].texttemplate = None
     annotations = []
-    for i, year in enumerate(years):
-        for j, month in enumerate(months):
+    for i, _ in enumerate(years):
+        for j, _ in enumerate(months):
             val = z_vals[i][j]
             if pd.notna(val):
                 annotations.append(
                     {
-                        "x": month,
-                        "y": year,
-                        "text": f"{val:+.1f}%",
+                        "x": j,
+                        "y": i,
+                        "text": cell_text[i][j],
                         "showarrow": False,
-                        "font": {"size": _font_size, "color": text_colors[i][j]},
+                        "font": {"size": font_size, "color": text_colors[i][j]},
                     }
                 )
 
     fig.update_layout(
         annotations=annotations,
+        plot_bgcolor="white",
+        xaxis={
+            "type": "category",
+            "tickformat": "",
+            "showgrid": False,
+        },
         yaxis={
             "ticksuffix": "  ",
             "autorange": True,
             "type": "category",
             "categoryorder": "array",
             "categoryarray": years,
+            "showgrid": False,
         },
     )
 

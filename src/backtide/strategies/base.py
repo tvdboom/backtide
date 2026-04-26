@@ -38,7 +38,10 @@ class BaseStrategy(ABC):
 
     @abstractmethod
     def evaluate(
-        self, data: Any, state: State, indicators: Any,
+        self,
+        data: Any,
+        state: State,
+        indicators: Any,
     ) -> list[Order]:
         """Evaluate the strategy and return orders.
 

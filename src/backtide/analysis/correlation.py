@@ -10,18 +10,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, overload
 
-import pandas as pd
 import plotly.graph_objects as go
 
+from backtide.analysis.utils import DataFrameLike, _check_columns, _plot
 from backtide.config import get_config
-from backtide.analysis.utils import _check_columns, _plot
+from backtide.utils.utils import _to_pandas
 
 cfg = get_config()
 
 
 @overload
 def plot_correlation(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
     *,
     title: str | dict[str, Any] | None = ...,
@@ -32,7 +32,7 @@ def plot_correlation(
 ) -> go.Figure: ...
 @overload
 def plot_correlation(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
     *,
     title: str | dict[str, Any] | None = ...,
@@ -44,7 +44,7 @@ def plot_correlation(
 
 
 def plot_correlation(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = "adj_close",
     *,
     title: str | dict[str, Any] | None = None,
@@ -61,7 +61,7 @@ def plot_correlation(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pd.DataFrame | pl.DataFrame
         Input data containing columns `symbol`, the column specified by
         `price_col`, and `dt` with the datetime.
 
@@ -116,11 +116,12 @@ def plot_correlation(
     ```
 
     """
+    data = _to_pandas(data)
     _check_columns(data, ["symbol", price_col, "dt"], "plot_correlation")
 
     # Pivot to get one column per symbol, compute returns, then correlate
     pivot = data.pivot_table(index="dt", columns="symbol", values=price_col)
-    returns = pivot.pct_change().dropna()
+    returns = pivot.pct_change().dropna(how="all")
     corr = returns.corr()
 
     # Annotate cells with correlation values

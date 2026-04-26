@@ -56,8 +56,7 @@ def _check_strategy_code(code: str) -> str | None:
     params = list(sig.parameters.keys())
     if params != ["data", "state", "indicators"]:
         return (
-            "Method `evaluate` doesn't have "
-            "signature: `evaluate(self, data, state, indicators)`."
+            "Method `evaluate` doesn't have signature: `evaluate(self, data, state, indicators)`."
         )
 
     return None

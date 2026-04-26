@@ -45,7 +45,7 @@ ROOT = Path(__file__).resolve().parent.parent
 STUB_DIR = ROOT / "src" / "backtide" / "core"
 
 # Submodules to generate stubs for.
-SUBMODULES = ["backtest", "config", "data", "storage", "utils"]
+SUBMODULES = ["analysis", "backtest", "config", "data", "storage", "utils"]
 
 # PyO3 built-in dunder methods we always skip (they have no useful stub).
 SKIP_MEMBERS = {

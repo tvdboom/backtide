@@ -80,7 +80,7 @@ _SUMMARY_CSS = """
         }
 
         .metric-value {
-            font-size: 1.3em;
+            font-size: 1.1em;
         }
 
         .metric-value.positive { color: green; }

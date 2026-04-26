@@ -27,7 +27,6 @@ from backtide.ui.utils import (
 )
 from backtide.utils.constants import INVALID_FILENAME_CHARS
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
 # ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +43,14 @@ STRATEGY_PARAMS: dict[str, dict[str, tuple]] = {
     },
     "Bollinger Mean Reversion": {
         "period": ("Period", 20, 2, 500, 1, "Number of bars for the moving average."),
-        "std_dev": ("Std. deviations", 2.0, 0.1, 10.0, 0.1, "Number of standard deviations for the bands."),
+        "std_dev": (
+            "Std. deviations",
+            2.0,
+            0.1,
+            10.0,
+            0.1,
+            "Number of standard deviations for the bands.",
+        ),
     },
     "Buy & Hold": {},
     "Double Top": {
@@ -58,7 +64,14 @@ STRATEGY_PARAMS: dict[str, dict[str, tuple]] = {
     "MACD": {
         "fast_period": ("Fast period", 12, 2, 500, 1, "Number of bars for the fast EMA."),
         "slow_period": ("Slow period", 26, 2, 500, 1, "Number of bars for the slow EMA."),
-        "signal_period": ("Signal period", 9, 2, 500, 1, "Number of bars for the signal line EMA."),
+        "signal_period": (
+            "Signal period",
+            9,
+            2,
+            500,
+            1,
+            "Number of bars for the signal line EMA.",
+        ),
     },
     "Momentum": {
         "period": ("Period", 14, 2, 500, 1, "Look-back period for momentum."),
@@ -146,14 +159,14 @@ class MyStrategy(BaseStrategy):
         Returns
         -------
         list[Order]
-            Orders to place.
+            Orders to place this tick.
 
         """
         orders = []
 
         # ── Write your logic here ────────────────────────
 
-        
+
 
         # ───────────────────────────────────────────────────
 
@@ -274,9 +287,7 @@ if mode == "builtin":
             label="Strategy",
             key=(key := "new_builtin_strat_type"),
             options=BUILTIN_STRATEGIES,
-            index=BUILTIN_STRATEGIES.index(
-                _default(key, BUILTIN_STRATEGIES[0])
-            ),
+            index=BUILTIN_STRATEGIES.index(_default(key, BUILTIN_STRATEGIES[0])),
             format_func=lambda s: s.name,
             on_change=lambda k=key: _on_builtin_type_change(k),
         )
@@ -439,7 +450,7 @@ elif mode == "custom":
             width="stretch",
         ):
             try:
-                instance = _build_custom_strategy(code)
+                instance = _build_custom_strategy(code)  # ty: ignore[invalid-argument-type]
                 _save_strategy(instance, strat_name, cfg)
                 st.session_state.pop("_add_strategy_mode", None)
                 st.rerun()

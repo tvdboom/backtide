@@ -10,18 +10,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, overload
 
-import pandas as pd
 import plotly.graph_objects as go
 
+from backtide.analysis.utils import DataFrameLike, _check_columns, _plot
 from backtide.config import get_config
-from backtide.analysis.utils import _check_columns, _plot
+from backtide.utils.utils import _to_pandas
 
 cfg = get_config()
 
 
 @overload
 def plot_drawdown(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
     *,
     title: str | dict[str, Any] | None = ...,
@@ -32,7 +32,7 @@ def plot_drawdown(
 ) -> go.Figure: ...
 @overload
 def plot_drawdown(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
     *,
     title: str | dict[str, Any] | None = ...,
@@ -44,7 +44,7 @@ def plot_drawdown(
 
 
 def plot_drawdown(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = "adj_close",
     *,
     title: str | dict[str, Any] | None = None,
@@ -61,7 +61,7 @@ def plot_drawdown(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pd.DataFrame | pl.DataFrame
         Input data containing columns `symbol`, the column specified by
         `price_col`, and `dt` with the datetime.
 
@@ -120,6 +120,7 @@ def plot_drawdown(
     ```
 
     """
+    data = _to_pandas(data)
     _check_columns(data, ["symbol", price_col, "dt"], "plot_drawdown")
 
     fig = go.Figure()

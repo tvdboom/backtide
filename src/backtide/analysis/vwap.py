@@ -10,18 +10,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, overload
 
-import pandas as pd
 import plotly.graph_objects as go
 
+from backtide.analysis.utils import DataFrameLike, _check_columns, _get_currency_symbol, _plot
 from backtide.config import get_config
-from backtide.analysis.utils import _check_columns, _get_currency_symbol, _plot
+from backtide.utils.utils import _to_pandas
 
 cfg = get_config()
 
 
 @overload
 def plot_vwap(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -31,7 +31,7 @@ def plot_vwap(
 ) -> go.Figure: ...
 @overload
 def plot_vwap(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -42,7 +42,7 @@ def plot_vwap(
 
 
 def plot_vwap(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
@@ -58,7 +58,7 @@ def plot_vwap(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pd.DataFrame | pl.DataFrame
         Input data containing columns `symbol`, `close`, `high`, `low`,
         `volume` and `dt` with the datetime.
 
@@ -114,19 +114,19 @@ def plot_vwap(
     ```
 
     """
+    data = _to_pandas(data)
     _check_columns(data, ["symbol", "dt", "high", "low", "close", "volume"], "plot_vwap")
 
     fig = go.Figure()
+    currency = _get_currency_symbol(data)
 
     for idx, symbol in enumerate(data["symbol"].unique()):
-        subset = data[data["symbol"] == symbol].sort_values("dt").copy()
+        subset = data[data["symbol"] == symbol].sort_values("dt")
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
         # Compute typical price and cumulative VWAP
         typical_price = (subset["high"] + subset["low"] + subset["close"]) / 3
-        cum_vol = subset["volume"].cumsum()
-        cum_tp_vol = (typical_price * subset["volume"]).cumsum()
-        vwap = cum_tp_vol / cum_vol
+        vwap = (typical_price * subset["volume"]).cumsum() / subset["volume"].cumsum()
 
         # Close price as a thin line
         fig.add_trace(
@@ -136,7 +136,7 @@ def plot_vwap(
                 mode="lines",
                 name="Close",
                 line={"color": color, "width": 1, "dash": "dot"},
-                opacity=0.2,
+                opacity=0.8,
                 legendgroup=symbol,
                 legendgrouptitle_text=symbol,
                 hovertemplate="%{x}<br>Close: %{y:.2f}<extra>" + symbol + "</extra>",
@@ -162,7 +162,7 @@ def plot_vwap(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Price ({cs})" if (cs := _get_currency_symbol(data)) else "Price",
+        ylabel=f"Price ({currency.symbol})" if currency else "Price",
         figsize=figsize,
         filename=filename,
         display=display,

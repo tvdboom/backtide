@@ -10,20 +10,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, overload
 
-import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import (
+    DataFrameLike,
     _check_columns,
     _get_currency_symbol,
     _plot,
 )
-from backtide.utils.utils import _format_price
+from backtide.utils.utils import _format_price, _to_pandas
 
 
 @overload
 def plot_candlestick(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     *,
     rangeslider: bool = ...,
     title: str | dict[str, Any] | None = ...,
@@ -34,7 +34,7 @@ def plot_candlestick(
 ) -> go.Figure: ...
 @overload
 def plot_candlestick(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     *,
     rangeslider: bool = ...,
     title: str | dict[str, Any] | None = ...,
@@ -46,7 +46,7 @@ def plot_candlestick(
 
 
 def plot_candlestick(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     *,
     rangeslider: bool = True,
     title: str | dict[str, Any] | None = None,
@@ -65,7 +65,7 @@ def plot_candlestick(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pd.DataFrame | pl.DataFrame
         Input data containing columns `open`, `high`, `low`, `close`
         and `dt` with the datetime.
 
@@ -127,6 +127,7 @@ def plot_candlestick(
     ```
 
     """
+    data = _to_pandas(data)
     _check_columns(data, ["symbol", "dt", "open", "high", "low", "close"], "plot_candlestick")
 
     fig = go.Figure()

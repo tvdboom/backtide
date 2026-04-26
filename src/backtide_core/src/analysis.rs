@@ -93,8 +93,8 @@ fn compute_single(
     let downside: Vec<f64> = returns.iter().copied().filter(|&r| r < 0.0).collect();
     let sortino = if downside.len() > 1 {
         let ds_mean = downside.iter().sum::<f64>() / downside.len() as f64;
-        let ds_var =
-            downside.iter().map(|r| (r - ds_mean).powi(2)).sum::<f64>() / (downside.len() - 1) as f64;
+        let ds_var = downside.iter().map(|r| (r - ds_mean).powi(2)).sum::<f64>()
+            / (downside.len() - 1) as f64;
         let ds_std = ds_var.sqrt();
         if ds_std > 0.0 {
             excess / ds_std * ann.sqrt()
@@ -145,7 +145,6 @@ fn compute_single(
 // Python interface
 // ────────────────────────────────────────────────────────────────────────────
 
-
 /// Compute per-symbol summary statistics.
 ///
 /// Calculates key performance and risk metrics for each symbol in `data`.
@@ -179,6 +178,17 @@ fn compute_single(
 /// --------
 /// backtide.analysis:plot_returns
 /// backtide.analysis:plot_drawdown
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.storage import query_bars
+/// from backtide.analysis import compute_statistics
+///
+/// df = query_bars(["AAPL", "MSFT", "GOOG"], "1d")
+/// stats = compute_statistics(df)
+/// print(stats.head())
+/// ```
 #[pyfunction]
 #[pyo3(signature = (data, *, price_col="adj_close", risk_free_rate=0.0, periods_per_year=None))]
 pub fn compute_statistics<'py>(
@@ -189,10 +199,7 @@ pub fn compute_statistics<'py>(
     periods_per_year: Option<usize>,
 ) -> PyResult<Py<PyAny>> {
     // Normalize input to a pandas DataFrame regardless of the source type.
-    let module = data
-        .getattr("__class__")?
-        .getattr("__module__")?
-        .extract::<String>()?;
+    let module = data.getattr("__class__")?.getattr("__module__")?.extract::<String>()?;
 
     let df: Bound<'py, PyAny> = if module.starts_with("polars") {
         data.call_method0("to_pandas")?
@@ -226,20 +233,18 @@ pub fn compute_statistics<'py>(
             let ts_series = sorted.getattr("__getitem__").ok()?.call1(("open_ts",)).ok()?;
             let timestamps: Vec<f64> = ts_series.call_method0("to_list").ok()?.extract().ok()?;
 
-            Some(SymbolData { symbol: sym, prices, timestamps })
+            Some(SymbolData {
+                symbol: sym,
+                prices,
+                timestamps,
+            })
         })
         .collect();
 
     let results: Vec<SymbolStats> = symbol_data
         .into_par_iter()
         .filter_map(|sd| {
-            compute_single(
-                sd.symbol,
-                &sd.prices,
-                &sd.timestamps,
-                risk_free_rate,
-                periods_per_year,
-            )
+            compute_single(sd.symbol, &sd.prices, &sd.timestamps, risk_free_rate, periods_per_year)
         })
         .collect();
 
@@ -266,12 +271,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compute_statistics, &m)?)?;
     parent.add_submodule(&m)?;
 
-    parent
-        .py()
-        .import("sys")?
-        .getattr("modules")?
-        .set_item("backtide.core.analysis", &m)?;
+    parent.py().import("sys")?.getattr("modules")?.set_item("backtide.core.analysis", &m)?;
 
     Ok(())
 }
-

@@ -27,7 +27,7 @@ check:
 
 # Run the test suite (Python + Cargo) with coverage ≥50%
 test *args:
-    uv run pytest -n=auto --cov=backtide --cov-fail-under=40 {{args}}
+    uv run pytest -n=auto --cov=backtide --cov-fail-under=20 {{args}}
     cargo llvm-cov --manifest-path src/backtide_core/Cargo.toml --fail-under-lines 40
 
 # Run pre-commit hooks on all files

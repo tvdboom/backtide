@@ -11,12 +11,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, overload
 
-import pandas as pd
 import plotly.graph_objects as go
 
+from backtide.analysis.utils import DataFrameLike, _check_columns, _get_currency_symbol, _plot
 from backtide.config import get_config
 from backtide.indicators import BaseIndicator
-from backtide.analysis.utils import _check_columns, _get_currency_symbol, _plot
 from backtide.utils.utils import _format_price, _to_list, _to_pandas
 
 # Supported price columns and their display labels.
@@ -34,7 +33,7 @@ cfg = get_config()
 
 @overload
 def plot_price(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
     *,
     indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = ...,
@@ -46,7 +45,7 @@ def plot_price(
 ) -> go.Figure: ...
 @overload
 def plot_price(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = ...,
     *,
     indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = ...,
@@ -59,7 +58,7 @@ def plot_price(
 
 
 def plot_price(
-    data: pd.DataFrame,
+    data: DataFrameLike,
     price_col: str = "adj_close",
     *,
     indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = None,
@@ -75,7 +74,7 @@ def plot_price(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pd.DataFrame | pl.DataFrame
         Input data containing columns `symbol`, `open`, `high`, `low`, `close`
         and `dt` with the datetime.
 
@@ -147,6 +146,7 @@ def plot_price(
     ```
 
     """
+    data = _to_pandas(data)
     _check_columns(data, ["symbol", price_col, "dt"], "plot_price")
 
     fig = go.Figure()

@@ -63,17 +63,17 @@ accept OHLCV data in any configured [`DataFrameLibrary`] format and return
 results in that same format. See the API reference for full details on each
 indicator's parameters, attributes, and formulas.
 
-| Indicator | Acronym | Category | Description |
-|-----------|---------|----------|-------------|
-| [`AverageDirectionalIndex`] | ADX | Trend | Trend strength (0–100) regardless of direction |
-| [`AverageTrueRange`] | ATR | Volatility | Average of the true range over a period |
-| [`BollingerBands`] | BB | Volatility | Volatility bands around an SMA |
-| [`CommodityChannelIndex`] | CCI | Momentum | Deviation of typical price from its mean |
-| [`ExponentialMovingAverage`] | EMA | Trend | Exponentially weighted moving average |
-| [`MovingAverageConvergenceDivergence`] | MACD | Momentum | Trend-following momentum from two EMAs |
-| [`OnBalanceVolume`] | OBV | Volume | Cumulative volume confirming price trends |
-| [`RelativeStrengthIndex`] | RSI | Momentum | Overbought/oversold oscillator (0–100) |
-| [`SimpleMovingAverage`] | SMA | Trend | Arithmetic mean of the last N closing prices |
-| [`StochasticOscillator`] | STOCH | Momentum | Closing price relative to high-low range |
-| [`VolumeWeightedAveragePrice`] | VWAP | Volume | Cumulative average price weighted by volume |
-| [`WeightedMovingAverage`] | WMA | Trend | Linearly weighted moving average |
+| Indicator | Acronym | Category | Description                                     |
+|-----------|---------|----------|-------------------------------------------------|
+| [`AverageDirectionalIndex`] | ADX | Trend | Trend strength (0–100) regardless of direction. |
+| [`AverageTrueRange`] | ATR | Volatility | Average of the true range over a period.        |
+| [`BollingerBands`] | BB | Volatility | Volatility bands around an SMA.                 |
+| [`CommodityChannelIndex`] | CCI | Momentum | Deviation of typical price from its mean.       |
+| [`ExponentialMovingAverage`] | EMA | Trend | Exponentially weighted moving average.          |
+| [`MovingAverageConvergenceDivergence`] | MACD | Momentum | Trend-following momentum from two EMAs.         |
+| [`OnBalanceVolume`] | OBV | Volume | Cumulative volume confirming price trends.      |
+| [`RelativeStrengthIndex`] | RSI | Momentum | Overbought/oversold oscillator (0–100).         |
+| [`SimpleMovingAverage`] | SMA | Trend | Arithmetic mean of the last N closing prices.   |
+| [`StochasticOscillator`] | STOCH | Momentum | Closing price relative to high-low range.       |
+| [`VolumeWeightedAveragePrice`] | VWAP | Volume | Cumulative average price weighted by volume.    |
+| [`WeightedMovingAverage`] | WMA | Trend | Linearly weighted moving average.               |

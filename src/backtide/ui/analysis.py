@@ -10,10 +10,6 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
-from backtide.core.config import get_config
-from backtide.core.data import Interval
-from backtide.core.storage import query_bars, query_dividends, query_instruments
-from backtide.indicators.utils import _load_stored_indicators
 from backtide.analysis.candlestick import plot_candlestick
 from backtide.analysis.correlation import plot_correlation
 from backtide.analysis.dividends import plot_dividends
@@ -21,9 +17,14 @@ from backtide.analysis.drawdown import plot_drawdown
 from backtide.analysis.price import PRICE_COLUMNS, plot_price
 from backtide.analysis.returns import plot_returns
 from backtide.analysis.seasonality import plot_seasonality
-from backtide.core.analysis import compute_statistics
 from backtide.analysis.volume import plot_volume
 from backtide.analysis.vwap import plot_vwap
+from backtide.core.analysis import compute_statistics
+from backtide.core.config import get_config
+from backtide.core.data import Interval
+from backtide.core.storage import query_bars, query_dividends, query_instruments
+from backtide.data import Exchange
+from backtide.indicators.utils import _load_stored_indicators
 from backtide.ui.utils import (
     _SUMMARY_CSS,
     _default,
@@ -78,15 +79,11 @@ if len(all_i) == 0:
     )
     st.stop()
 
-# If there are symbols selected that are not in storage, remove them from selection
-if default := _default("symbols"):
-    default = [s for s in default if s in all_i]
-
 symbols = st.multiselect(  # ty: ignore[no-matching-overload]
     label="Symbols",
     key=(key := "symbols"),
     options=all_i,
-    default=default,
+    default=_default("symbols"),
     format_func=lambda s: f"{s} - {all_i[s].name}" if all_i[s].instrument_type.is_equity else s,
     placeholder="Select one or more symbols...",
     max_selections=5,
@@ -203,22 +200,22 @@ bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
 # ── Apply period filter ──────────────────────────────────────────────────────
 
 today = pd.Timestamp.now(tz=tz)
+offsets = {
+    "5Y": timedelta(days=5 * 365),
+    "1Y": timedelta(days=365),
+    "6M": timedelta(days=182),
+    "3M": timedelta(days=91),
+    "1M": timedelta(days=30),
+    "7d": timedelta(days=7),
+    "1d": timedelta(days=1),
+}
+
 if not period and isinstance(custom_range, tuple):
     bars = bars[(bars["dt"].dt.date >= custom_range[0]) & (bars["dt"].dt.date <= custom_range[1])]
 elif period != "Max":
-    offsets = {
-        "5Y": timedelta(days=5 * 365),
-        "1Y": timedelta(days=365),
-        "6M": timedelta(days=182),
-        "3M": timedelta(days=91),
-        "1M": timedelta(days=30),
-        "7d": timedelta(days=7),
-        "1d": timedelta(days=1),
-    }
-
     if period == "YTD":
         cutoff = pd.Timestamp(date(today.year, 1, 1), tz=tz)
-    else:
+    elif period:
         cutoff = today - offsets[period]
 
     bars = bars[bars["dt"] >= cutoff]
@@ -313,7 +310,7 @@ with tabs[0]:
 
     if active_tab == TAB_LABELS[0]:
         st.markdown(_SUMMARY_CSS, unsafe_allow_html=True)
-        stats_df = compute_statistics(data=bars, price_col=price_col)
+        stats_df = _to_pandas(compute_statistics(data=bars, price_col=price_col))
         logokit_key = cfg.display.logokit_api_key
 
         n = len(stats_df)
@@ -323,12 +320,12 @@ with tabs[0]:
             name = inst.name if inst else row["symbol"]
 
             with st.container(border=True):
-                col1, *cols = st.columns([1.9, 1, 0.7, 1.2, 1])
+                col1, *cols = st.columns([1.9, 1, 0.8, 1.2, 0.9])
 
                 with col1:
                     # Build country flag for equity instruments
                     flag = ""
-                    if inst and inst.instrument_type.is_equity and inst.exchange:
+                    if inst and isinstance(inst.exchange, Exchange):
                         alpha2 = inst.exchange.country.alpha2
                         flag = (
                             f" <img src='https://flagcdn.com/80x60/{alpha2.lower()}.png'"
@@ -364,7 +361,7 @@ with tabs[0]:
                 with cols[0]:
                     cls = "positive" if row["ann_return"] >= 0 else "negative"
                     st.markdown(
-                        f":material/trending_up: **Return**<br>"
+                        f":material/trending_up: **Ann. Return**<br>"
                         f'<span class="metric-value {cls}">{row["ann_return"]:+.2f}%</span>',
                         unsafe_allow_html=True,
                     )
@@ -395,48 +392,67 @@ with tabs[0]:
                         unsafe_allow_html=True,
                     )
 
-        with st.expander("Full statistics table", icon=":material/table:"):
-            summary_column_config = {
-                "Symbol": st.column_config.TextColumn(
+        with st.expander("Full statistics", icon=":material/table:"):
+
+            def _metric_bg(val: float, col: str) -> str:
+                """Return a background-color CSS string with intensity."""
+                if pd.isna(val):
+                    return ""
+                if col == "ann_return":
+                    good = val >= 0
+                    intensity = min(abs(val) / 50, 1.0)
+                elif col == "ann_volatility":
+                    good = val <= 20
+                    intensity = min(abs(val - 20) / 40, 1.0)
+                elif col in ("sharpe_ratio", "sortino_ratio"):
+                    good = val >= 0
+                    intensity = min(abs(val) / 3, 1.0)
+                elif col == "max_drawdown":
+                    good = val > -10
+                    intensity = min(abs(val) / 50, 1.0)
+                elif col == "win_rate":
+                    good = val >= 50
+                    intensity = min(abs(val - 50) / 30, 1.0)
+                else:
+                    return ""
+                rgb = "0,128,0" if good else "200,30,30"
+                alpha = 0.08 + intensity * 0.32
+                return f"background-color: rgba({rgb},{alpha:.2f})"
+
+            column_config = {
+                "symbol": st.column_config.TextColumn(
                     label="Symbol",
                     pinned=True,
                     help="Ticker symbol of the instrument.",
                 ),
-                "Ann. Return": st.column_config.NumberColumn(
+                "ann_return": st.column_config.Column(
                     label="Ann. Return",
-                    format="%+.2f%%",
                     help="Compound annual growth rate (CAGR).",
                 ),
-                "Ann. Volatility": st.column_config.NumberColumn(
+                "ann_volatility": st.column_config.Column(
                     label="Ann. Volatility",
-                    format="%.2f%%",
                     help="Annualized standard deviation of returns.",
                 ),
-                "Sharpe": st.column_config.NumberColumn(
-                    label="Sharpe ratio",
+                "sharpe_ratio": st.column_config.Column(
+                    label="Sharpe",
                     width="small",
-                    format="%.2f",
                     help="Sharpe ratio: risk-adjusted return per unit of total volatility.",
                 ),
-                "Sortino": st.column_config.NumberColumn(
-                    label="Sortino ratio",
+                "sortino_ratio": st.column_config.Column(
+                    label="Sortino",
                     width="small",
-                    format="%.2f",
                     help="Sortino ratio: like Sharpe but only penalizes downside volatility.",
                 ),
-                "Max Drawdown": st.column_config.NumberColumn(
+                "max_drawdown": st.column_config.Column(
                     label="Max Drawdown",
-                    format="%.2f%%",
                     help="Largest peak-to-trough decline in cumulative returns.",
                 ),
-                "Win Rate": st.column_config.NumberColumn(
+                "win_rate": st.column_config.Column(
                     label="Win Rate",
-                    format="%.1f%%",
                     help="Percentage of periods with a positive return.",
                 ),
-                "Total Bars": st.column_config.NumberColumn(
-                    label="Total bars",
-                    format="%d",
+                "total_bars": st.column_config.Column(
+                    label="Total Bars",
                     help="Total number of bars for this symbol at the selected interval.",
                 ),
             }
@@ -444,26 +460,43 @@ with tabs[0]:
             if logokit_key:
                 stats_df.index = pd.Index(
                     data=stats_df.apply(
-                        lambda r: (
-                            _get_logokit_url(
-                                r["symbol"],
-                                all_i[r["symbol"]].instrument_type,
-                                logokit_key,
-                            )
-                            if r["symbol"] in all_i
-                            else ""
+                        lambda r: _get_logokit_url(
+                            r["symbol"],
+                            all_i[r["symbol"]].instrument_type,
+                            str(logokit_key),
                         ),
                         axis=1,
                     ),
                     name="Logo",
                 )
-                summary_column_config["Logo"] = st.column_config.ImageColumn(
-                    label="", width="small"
-                )
+                column_config["Logo"] = st.column_config.ImageColumn("", width="small")
+
+            styled = stats_df.style
+            styled.format(
+                {
+                    "ann_return": "{:+.2f}%",
+                    "ann_volatility": "{:.2f}%",
+                    "sharpe_ratio": "{:.2f}",
+                    "sortino_ratio": "{:.2f}",
+                    "max_drawdown": "{:.2f}%",
+                    "win_rate": "{:.1f}%",
+                    "total_bars": "{:,.0f}",
+                }
+            )
+
+            for col in (
+                "ann_return",
+                "ann_volatility",
+                "sharpe_ratio",
+                "sortino_ratio",
+                "max_drawdown",
+                "win_rate",
+            ):
+                styled.map(lambda v, c=col: _metric_bg(v, c), subset=[col])
 
             st.dataframe(
-                stats_df,
-                column_config=summary_column_config,
+                styled,
+                column_config=column_config,
                 hide_index=stats_df.index.name is None,
                 width="stretch",
             )
@@ -616,10 +649,17 @@ with tabs[6]:
         )
 
     if active_tab == TAB_LABELS[6]:
+        season_bars = bars[bars["symbol"] == season_symbol]
         st.plotly_chart(
-            plot_seasonality(data=bars, price_col=price_col, symbol=season_symbol, display=None),
+            plot_seasonality(data=season_bars, price_col=price_col, display=None),
             width="stretch",
         )
+
+        if len(symbols) > 1:
+            st.warning(
+                f"Seasonality heatmap shows data for **{season_symbol}** only.",
+                icon=":material/warning:",
+            )
 
 # ── Tab 7: Drawdown ──────────────────────────────────────────────────────────
 
@@ -674,10 +714,28 @@ with tabs[9]:
             )
         else:
             dividends["dt"] = _ts_to_datetime(dividends["ex_date"], tz)
-            dividends["currency"] = dividends["symbol"].map(
-                lambda s: str(all_i[s].quote) if s in all_i else None
-            )
-            st.plotly_chart(
-                plot_dividends(data=dividends, display=None),
-                width="stretch",
-            )
+
+            # Apply the same period filter as bars
+            if not period and isinstance(custom_range, tuple):
+                dividends = dividends[
+                    (dividends["dt"].dt.date >= custom_range[0])
+                    & (dividends["dt"].dt.date <= custom_range[1])
+                ]
+            elif period and period != "Max":
+                if period == "YTD":
+                    div_cutoff = pd.Timestamp(date(today.year, 1, 1), tz=tz)
+                else:
+                    div_cutoff = today - offsets[period]
+                dividends = dividends[dividends["dt"] >= div_cutoff]
+
+            if dividends.empty:
+                st.info(
+                    "No dividend data available for the selected period.",
+                    icon=":material/info:",
+                )
+            else:
+                dividends["currency"] = dividends["symbol"].map(lambda s: str(all_i[s].quote))
+                st.plotly_chart(
+                    plot_dividends(data=dividends, display=None),
+                    width="stretch",
+                )
