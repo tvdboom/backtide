@@ -872,8 +872,8 @@ with tab5:
             icon=":material/info:",
         )
 
-        if st.button("Create a new indicator", icon=":material/show_chart:", type="secondary"):
-            st.switch_page("indicators.py")
+    if st.button("Create a new indicator", icon=":material/add:", type="secondary"):
+        st.switch_page("indicators.py")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

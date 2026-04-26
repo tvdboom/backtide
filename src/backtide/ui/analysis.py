@@ -29,6 +29,7 @@ from backtide.ui.utils import (
     _get_logokit_url,
     _get_timezone,
     _persist,
+    _query_bars_summary,
     _to_upper_values,
 )
 from backtide.utils.utils import _to_pandas, _ts_to_datetime
@@ -92,48 +93,88 @@ symbols = st.multiselect(  # ty: ignore[no-matching-overload]
     help="Select the symbols to analyze. Only symbols available in the database are shown.",
 )
 
-PERIOD_OPTIONS = ["All", "5Y", "1Y", "YTD", "6M", "3M", "1M", "7D", "1D", "Custom"]
+if not symbols:
+    st.warning("Select at least one symbol to begin the analysis.", icon=":material/warning:")
+    st.stop()
 
-col1, col2 = st.columns(2)
+# Determine which intervals are available for all selected symbols
+summary = _query_bars_summary()
+summary = summary[
+    summary.apply(
+        lambda r: (
+            r["symbol"] in symbols
+            and r["provider"] == str(cfg.data.providers[all_i[r["symbol"]].instrument_type])
+        ),
+        axis=1,
+    )
+]
+
+# Compute per-symbol interval sets and find the common ones
+intervals_per_sym = summary.groupby("symbol")["interval"].apply(set)
+if intervals_per_sym.empty:
+    st.warning("No data available for the selected symbols.", icon=":material/warning:")
+    st.stop()
+
+common_intervals = set.intersection(*intervals_per_sym.values)
+
+# Build ordered list of available intervals (preserving the canonical order)
+available_intervals = [i for i in Interval.variants() if str(i) in common_intervals]
+
+if not available_intervals:
+    # Show which intervals each symbol has
+    per_sym_info = "\n".join(
+        f"* **{sym}**: {', '.join(sorted(ivs))}" for sym, ivs in intervals_per_sym.items()
+    )
+    st.warning(
+        "The selected symbols have no intervals in common. "
+        f"Available intervals per symbol:\n{per_sym_info}",
+        icon=":material/warning:",
+    )
+    st.stop()
+
+col1, col2 = st.columns([1, 1.6])
 
 with col1:
+    _default_interval = _default(key := "interval", Interval.get_default())
+    if _default_interval not in available_intervals and available_intervals:
+        _default_interval = available_intervals[0]
+
     interval = st.pills(
         label="Interval",
-        key=(key := "interval"),
+        key=key,
         required=True,
-        options=Interval.variants(),
+        options=available_intervals,
         selection_mode="single",
-        default=_default(key, Interval.get_default()),
+        default=_default_interval,
         on_change=lambda k=key: _persist(k),
-        help="Select an interval to analyze.",
+        help=(
+            "Interval for which to analyze the data. Only intervals "
+            "available for all selected symbols are shown."
+        ),
     )
 
 with col2:
     period = st.pills(
         label="Period",
         key=(key := "period"),
-        required=True,
-        options=PERIOD_OPTIONS,
+        options=["Max", "5Y", "1Y", "YTD", "6M", "3M", "1M", "7d", "1d"],
         selection_mode="single",
-        default=_default(key, "All"),
+        default=_default(key, "Max"),
         on_change=lambda k=key: _persist(k),
         help="Filter data to a specific time window.",
     )
 
-# Custom date range input (shown only when "Custom" is selected)
-if period == "Custom":
-    custom_range = st.date_input(
-        label="Date range",
-        key=(key := "custom_date_range"),
-        value=_default(key, (date.today() - timedelta(days=30), date.today())),
-        format=cfg.display.date_format,
-        on_change=lambda k=key: _persist(k),
-        help="Select a custom date range for the analysis.",
-    )
-
-if not symbols:
-    st.warning("Select at least one symbol to begin the analysis.", icon=":material/warning:")
-    st.stop()
+    if not period:
+        custom_range = st.date_input(
+            label="Date range",
+            key=(key := "custom_date_range"),
+            value=_default(key, (date.today() - timedelta(days=30), date.today())),
+            format=cfg.display.date_format,
+            on_change=lambda k=key: _persist(k),
+            help="Select a custom date range for the analysis.",
+        )
+    else:
+        custom_range = None
 
 bars = _load_bars(symbols, interval)
 
@@ -144,15 +185,6 @@ if bars.empty:
     )
     st.stop()
 
-# Check if any of the selected symbols have no bars for the selected interval
-if missing := set(symbols) - set(bars["symbol"].unique()):
-    symbols = [s for s in symbols if s not in missing]
-    st.warning(
-        f"No bars found for the following symbols at the **{interval}** interval: "
-        f"{', '.join([f'**{m}**' for m in missing])}. They will be excluded from "
-        "the analysis.",
-        icon=":material/warning:",
-    )
 
 # Select only data from configured providers per symbol
 bars = bars[
@@ -167,33 +199,29 @@ bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
 
 # ── Apply period filter ──────────────────────────────────────────────────────
 
-_today = pd.Timestamp.now(tz=tz)
-
-if period == "Custom":
-    if isinstance(custom_range, tuple) and len(custom_range) == 2:
-        _start, _end = custom_range
-        bars = bars[(bars["dt"].dt.date >= _start) & (bars["dt"].dt.date <= _end)]
-elif period != "All":
-    _offsets = {
+today = pd.Timestamp.now(tz=tz)
+if isinstance(custom_range, tuple) and len(custom_range) == 2:
+    bars = bars[(bars["dt"].dt.date >= custom_range[0]) & (bars["dt"].dt.date <= custom_range[1])]
+elif period != "Max":
+    offsets = {
         "5Y": timedelta(days=5 * 365),
         "1Y": timedelta(days=365),
         "6M": timedelta(days=182),
         "3M": timedelta(days=91),
         "1M": timedelta(days=30),
-        "7D": timedelta(days=7),
-        "1D": timedelta(days=1),
+        "7d": timedelta(days=7),
+        "1d": timedelta(days=1),
     }
+
     if period == "YTD":
-        _cutoff = pd.Timestamp(date(_today.year, 1, 1), tz=tz)
+        cutoff = pd.Timestamp(date(today.year, 1, 1), tz=tz)
     else:
-        _cutoff = _today - _offsets[period]
-    bars = bars[bars["dt"] >= _cutoff]
+        cutoff = today - offsets[period]
+
+    bars = bars[bars["dt"] >= cutoff]
 
 if bars.empty:
-    st.warning(
-        "No bars found for the selected period.",
-        icon=":material/warning:",
-    )
+    st.warning("No bars found for the selected period.", icon=":material/warning:")
     st.stop()
 
 
@@ -224,7 +252,6 @@ tabs = st.tabs(
 # Determine active tab index for lazy rendering
 active_tab = st.session_state.get("plot_tabs", TAB_LABELS[0])
 
-
 # Add currency column from instruments
 bars["currency"] = bars["symbol"].map(lambda s: str(all_i[s].quote) if s in all_i else None)
 
@@ -240,7 +267,7 @@ if len(currencies) > 1 and active_tab not in non_currency_tabs:
     )
 
 # Shared price column selection across all tabs
-_PRICE_COL_KEYS = [
+PRICE_COL_KEYS = [
     "price_col_summary",
     "price_col_price",
     "price_col_dist",
@@ -252,13 +279,11 @@ _PRICE_COL_KEYS = [
 if "_price_col" not in st.session_state:
     st.session_state["_price_col"] = _default("_price_col", "adj_close")
 
-
 def _sync_price_col(key: str) -> None:
     """Sync a tab-specific radio key to the shared _price_col and all other radios."""
-    val = st.session_state[key]
-    st.session_state["_price_col"] = val
-    for k in _PRICE_COL_KEYS:
-        st.session_state[k] = val
+    st.session_state["_price_col"] = st.session_state[key]
+    for k in PRICE_COL_KEYS:
+        st.session_state[k] = st.session_state[key]
     _persist("_price_col")
 
 
