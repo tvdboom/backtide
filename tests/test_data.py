@@ -182,11 +182,9 @@ class TestCurrency:
         assert isinstance(c.decimals, int)
         assert isinstance(c.symbol_prefix, bool)
 
-    def test_format(self):
-        """format() returns a formatted string."""
-        result = Currency("USD").format(1234.56)
-        assert isinstance(result, str)
-        assert len(result) > 0
+    def test_symbol_prefix(self):
+        """symbol_prefix returns a boolean."""
+        assert isinstance(Currency("USD").symbol_prefix, bool)
 
 
 class TestExchange:

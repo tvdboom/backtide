@@ -14,17 +14,18 @@ from backtide.core.config import get_config
 from backtide.core.data import Interval
 from backtide.core.storage import query_bars, query_dividends, query_instruments
 from backtide.indicators.utils import _load_stored_indicators
-from backtide.plots.candlestick import plot_candlestick
-from backtide.plots.correlation import plot_correlation
-from backtide.plots.dividends import plot_dividends
-from backtide.plots.drawdown import plot_drawdown
-from backtide.plots.price import PRICE_COLUMNS, plot_price
-from backtide.plots.returns import plot_returns
-from backtide.plots.seasonality import plot_seasonality
-from backtide.plots.stats import compute_summary_stats
-from backtide.plots.volume import plot_volume
-from backtide.plots.vwap import plot_vwap
+from backtide.analysis.candlestick import plot_candlestick
+from backtide.analysis.correlation import plot_correlation
+from backtide.analysis.dividends import plot_dividends
+from backtide.analysis.drawdown import plot_drawdown
+from backtide.analysis.price import PRICE_COLUMNS, plot_price
+from backtide.analysis.returns import plot_returns
+from backtide.analysis.seasonality import plot_seasonality
+from backtide.core.analysis import compute_statistics
+from backtide.analysis.volume import plot_volume
+from backtide.analysis.vwap import plot_vwap
 from backtide.ui.utils import (
+    _SUMMARY_CSS,
     _default,
     _get_logokit_url,
     _get_timezone,
@@ -40,7 +41,7 @@ from backtide.utils.utils import _to_pandas, _ts_to_datetime
 
 
 @st.cache_data(show_spinner="Loading bars from database...", max_entries=10)
-def _load_bars(symbols: list[str], interval: str) -> pd.DataFrame:
+def _load_bars(symbols: list[str], interval: Interval) -> pd.DataFrame:
     """Fetch bars for the selected symbols and interval."""
     return _to_pandas(query_bars(symbol=symbols, interval=interval))
 
@@ -115,10 +116,12 @@ if intervals_per_sym.empty:
     st.warning("No data available for the selected symbols.", icon=":material/warning:")
     st.stop()
 
-common_intervals = set.intersection(*intervals_per_sym.values)
+common_intervals = set.intersection(*intervals_per_sym.to_numpy())
 
 # Build ordered list of available intervals (preserving the canonical order)
-available_intervals = [i for i in Interval.variants() if str(i) in common_intervals]
+available_intervals: list[Interval] = [
+    i for i in Interval.variants() if str(i) in common_intervals
+]
 
 if not available_intervals:
     # Show which intervals each symbol has
@@ -200,7 +203,7 @@ bars["dt"] = _ts_to_datetime(bars["open_ts"], tz)
 # ── Apply period filter ──────────────────────────────────────────────────────
 
 today = pd.Timestamp.now(tz=tz)
-if isinstance(custom_range, tuple) and len(custom_range) == 2:
+if not period and isinstance(custom_range, tuple):
     bars = bars[(bars["dt"].dt.date >= custom_range[0]) & (bars["dt"].dt.date <= custom_range[1])]
 elif period != "Max":
     offsets = {
@@ -279,6 +282,7 @@ PRICE_COL_KEYS = [
 if "_price_col" not in st.session_state:
     st.session_state["_price_col"] = _default("_price_col", "adj_close")
 
+
 def _sync_price_col(key: str) -> None:
     """Sync a tab-specific radio key to the shared _price_col and all other radios."""
     st.session_state["_price_col"] = st.session_state[key]
@@ -308,113 +312,130 @@ with tabs[0]:
         price_col = price_col_radio("price_col_summary")
 
     if active_tab == TAB_LABELS[0]:
-        stats_df = compute_summary_stats(data=bars, price_col=price_col)
+        st.markdown(_SUMMARY_CSS, unsafe_allow_html=True)
+        stats_df = compute_statistics(data=bars, price_col=price_col)
         logokit_key = cfg.display.logokit_api_key
 
-        # ── Metric cards ─────────────────────────────────────────────────
         n = len(stats_df)
 
         for _, row in stats_df.iterrows():
-            sym = row["Symbol"]
-            inst = all_i.get(sym)
-            name = inst.name if inst else sym
+            inst = all_i.get(row["symbol"])
+            name = inst.name if inst else row["symbol"]
 
             with st.container(border=True):
-                # Header row: logo + symbol + name (left) | metrics (right)
-                header_col, *metric_cols = st.columns([2, 1, 1, 1, 1])
+                col1, *cols = st.columns([1.9, 1, 0.7, 1.2, 1])
 
-                with header_col:
+                with col1:
+                    # Build country flag for equity instruments
+                    flag = ""
+                    if inst and inst.instrument_type.is_equity and inst.exchange:
+                        alpha2 = inst.exchange.country.alpha2
+                        flag = (
+                            f" <img src='https://flagcdn.com/80x60/{alpha2.lower()}.png'"
+                            f" class='flag'>"
+                        )
+
                     if logokit_key and inst:
-                        logo_url = _get_logokit_url(sym, inst.instrument_type, logokit_key)
+                        logo = _get_logokit_url(row["symbol"], inst.instrument_type, logokit_key)
                         st.markdown(
-                            f'<div style="display:flex;align-items:center;gap:10px">'
-                            f'<img src="{logo_url}" width="32" height="32" '
-                            f'style="border-radius:6px">'
-                            f"<div>"
-                            f'<span style="font-size:1.15em;font-weight:600">{sym}</span><br>'
-                            f'<span style="font-size:0.78em;color:gray">{name}</span>'
-                            f"</div></div>",
+                            f"""
+                            <div class="card-header">
+                                <img src="{logo}" class="logo">
+                                <div>
+                                    <span class="symbol">{row["symbol"]}{flag}</span>
+                                    <br>
+                                    <span class="name">{name}</span>
+                                </div>
+                            </div>
+                            """,
                             unsafe_allow_html=True,
                         )
                     else:
-                        st.markdown(f"**{sym}**")
-                        st.caption(name)
+                        st.markdown(
+                            """
+                            <div class="title">
+                                <span class="symbol">{row["symbol"]}{flag}</span>
+                                <span class="name">{name}</span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
 
-                ret = row["Ann. Return"]
-                sharpe = row["Sharpe"]
-                max_dd = row["Max Drawdown"]
-                win_rate = row["Win Rate"]
-
-                _g = "color:green"
-                _r = "color:red"
-
-                with metric_cols[0]:
-                    _c = _g if ret >= 0 else _r
+                with cols[0]:
+                    cls = "positive" if row["ann_return"] >= 0 else "negative"
                     st.markdown(
                         f":material/trending_up: **Return**<br>"
-                        f'<span style="font-size:1.3em;{_c}">{ret:+.2f}%</span>',
+                        f'<span class="metric-value {cls}">{row["ann_return"]:+.2f}%</span>',
                         unsafe_allow_html=True,
                     )
 
-                with metric_cols[1]:
-                    _c = _g if sharpe >= 1 else (_r if sharpe < 0 else "")
+                with cols[1]:
+                    sharpe = row["sharpe_ratio"]
+                    cls = "positive" if sharpe >= 1 else ("negative" if sharpe < 0 else "")
                     st.markdown(
                         f":material/speed: **Sharpe**<br>"
-                        f'<span style="font-size:1.3em;{_c}">{sharpe:.2f}</span>',
+                        f'<span class="metric-value {cls}">{sharpe:.2f}</span>',
                         unsafe_allow_html=True,
                     )
 
-                with metric_cols[2]:
-                    _c = _r if max_dd < -20 else (_g if max_dd > -5 else "")
+                with cols[2]:
+                    max_dd = row["max_drawdown"]
+                    cls = "negative" if max_dd < -20 else ("positive" if max_dd > -5 else "")
                     st.markdown(
                         f":material/trending_down: **Max Drawdown**<br>"
-                        f'<span style="font-size:1.3em;{_c}">{max_dd:.2f}%</span>',
+                        f'<span class="metric-value {cls}">{max_dd:.2f}%</span>',
                         unsafe_allow_html=True,
                     )
 
-                with metric_cols[3]:
-                    _c = _g if win_rate >= 50 else _r
+                with cols[3]:
+                    cls = "positive" if row["win_rate"] >= 50 else "negative"
                     st.markdown(
                         f":material/trophy: **Win Rate**<br>"
-                        f'<span style="font-size:1.3em;{_c}">{win_rate:.1f}%</span>',
+                        f'<span class="metric-value {cls}">{row["win_rate"]:.1f}%</span>',
                         unsafe_allow_html=True,
                     )
-
-        # ── Full table in expander ────────────────────────────────────────
 
         with st.expander("Full statistics table", icon=":material/table:"):
             summary_column_config = {
                 "Symbol": st.column_config.TextColumn(
+                    label="Symbol",
                     pinned=True,
                     help="Ticker symbol of the instrument.",
                 ),
                 "Ann. Return": st.column_config.NumberColumn(
+                    label="Ann. Return",
                     format="%+.2f%%",
                     help="Compound annual growth rate (CAGR).",
                 ),
                 "Ann. Volatility": st.column_config.NumberColumn(
+                    label="Ann. Volatility",
                     format="%.2f%%",
                     help="Annualized standard deviation of returns.",
                 ),
                 "Sharpe": st.column_config.NumberColumn(
+                    label="Sharpe ratio",
                     width="small",
                     format="%.2f",
                     help="Sharpe ratio: risk-adjusted return per unit of total volatility.",
                 ),
                 "Sortino": st.column_config.NumberColumn(
+                    label="Sortino ratio",
                     width="small",
                     format="%.2f",
                     help="Sortino ratio: like Sharpe but only penalizes downside volatility.",
                 ),
                 "Max Drawdown": st.column_config.NumberColumn(
+                    label="Max Drawdown",
                     format="%.2f%%",
                     help="Largest peak-to-trough decline in cumulative returns.",
                 ),
                 "Win Rate": st.column_config.NumberColumn(
+                    label="Win Rate",
                     format="%.1f%%",
                     help="Percentage of periods with a positive return.",
                 ),
                 "Total Bars": st.column_config.NumberColumn(
+                    label="Total bars",
                     format="%d",
                     help="Total number of bars for this symbol at the selected interval.",
                 ),
@@ -425,11 +446,11 @@ with tabs[0]:
                     data=stats_df.apply(
                         lambda r: (
                             _get_logokit_url(
-                                r["Symbol"],
-                                all_i[r["Symbol"]].instrument_type,
+                                r["symbol"],
+                                all_i[r["symbol"]].instrument_type,
                                 logokit_key,
                             )
-                            if r["Symbol"] in all_i
+                            if r["symbol"] in all_i
                             else ""
                         ),
                         axis=1,

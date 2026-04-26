@@ -8,7 +8,6 @@ use crate::backtest::models::conversion_period::ConversionPeriod;
 use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
 use crate::backtest::models::order_type::OrderType;
-use crate::backtest::models::strategy_type::StrategyType;
 use crate::data::models::currency::Currency;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
@@ -292,13 +291,14 @@ impl PortfolioExpConfig {
 
 /// Strategy settings for an experiment.
 ///
+/// Strategies are stored by name. Each name refers to a pickled strategy
+/// object saved in the local strategies directory.
+///
 /// Attributes
 /// ----------
-/// predefined_strategies : list[str | [StrategyType]], default=[]
-///     Built-in strategies to run.
-///
-/// custom_strategies : list[tuple[str, str]], default=[]
-///     User-defined strategy code as `(name, code)` tuples.
+/// strategies : list[str], default=[]
+///     Names of the strategies to use in this experiment. Each name must
+///     match a stored strategy.
 ///
 /// See Also
 /// --------
@@ -312,8 +312,8 @@ impl PortfolioExpConfig {
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StrategyExpConfig {
-    pub predefined_strategies: Vec<StrategyType>,
-    pub custom_strategies: Vec<(String, String)>,
+    #[serde(default)]
+    pub strategies: Vec<String>,
 }
 
 #[pymethods]
@@ -322,19 +322,15 @@ impl StrategyExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (predefined_strategies: "list[str | StrategyType]"=vec![], custom_strategies: "list[tuple[str, str]]"=vec![]))]
-    fn new(
-        predefined_strategies: Vec<StrategyType>,
-        custom_strategies: Vec<(String, String)>,
-    ) -> Self {
+    #[pyo3(signature = (strategies: "list[str]"=vec![]))]
+    fn new(strategies: Vec<String>) -> Self {
         Self {
-            predefined_strategies,
-            custom_strategies,
+            strategies,
         }
     }
 
     fn __repr__(&self) -> String {
-        format!("StrategyExpConfig(predefined={:?})", self.predefined_strategies,)
+        format!("StrategyExpConfig(strategies={:?})", self.strategies)
     }
 
     /// Convert to a dictionary.
@@ -768,10 +764,10 @@ pub struct ExperimentConfigInner {
 ///     Initial cash, base currency and starting positions.
 ///
 /// strategy : [StrategyExpConfig]
-///     Predefined and custom strategies.
+///     Strategies to use in this experiment.
 ///
 /// indicators : [IndicatorExpConfig]
-///     Built-in and custom indicators.
+///     Indicators to use in this experiment.
 ///
 /// exchange : [ExchangeExpConfig]
 ///     Commission, slippage, order execution, margin and short-selling.

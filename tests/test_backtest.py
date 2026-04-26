@@ -19,7 +19,6 @@ from backtide.backtest import (
     GeneralExpConfig,
     OrderType,
     PortfolioExpConfig,
-    StrategyType,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -175,8 +174,6 @@ class TestExperimentConfig:
         (CommissionType, "Fixed"),
         (CommissionType, "PercentagePlusFixed"),
         (OrderType, "Market"),
-        (StrategyType, "BuyAndHold"),
-        (StrategyType, "SmaCrossover"),
     ],
 )
 def test_enum_from_string(cls, valid_str):
@@ -200,7 +197,6 @@ def test_enum_class_attrs():
         CurrencyConversionMode,
         EmptyBarPolicy,
         OrderType,
-        StrategyType,
     ],
 )
 def test_enum_variants(cls):
@@ -210,33 +206,11 @@ def test_enum_variants(cls):
 
 @pytest.mark.parametrize(
     "cls",
-    [CommissionType, EmptyBarPolicy, OrderType, StrategyType],
+    [CommissionType, EmptyBarPolicy, OrderType],
 )
 def test_enum_get_default(cls):
     """Backtest enums with get_default return a value."""
     assert cls.get_default() is not None
-
-
-class TestStrategyType:
-    """Tests for the StrategyType enum."""
-
-    def test_name(self):
-        """Test name property."""
-        assert StrategyType("BuyAndHold").name == "Buy & Hold"
-
-    def test_description(self):
-        """Test description method."""
-        assert len(StrategyType("BuyAndHold").description()) > 0
-
-    def test_is_rotation(self):
-        """Test is_rotation property."""
-        assert StrategyType("RocRotation").is_rotation is True
-        assert StrategyType("BuyAndHold").is_rotation is False
-
-    def test_invalid_raises(self):
-        """Test invalid value raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown strategy type"):
-            StrategyType("invalid")
 
 
 class TestCommissionType:

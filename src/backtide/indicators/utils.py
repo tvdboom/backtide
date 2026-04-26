@@ -23,7 +23,7 @@ def _build_custom_indicator(code: str) -> BaseIndicator:
     tree = ast.parse(code)
 
     if not tree.body or not isinstance(tree.body[-1], ast.Expr):
-        raise ValueError("The last statement must be an instantiation of the indicator")
+        raise ValueError("The last statement must be an instantiation of the indicator.")
 
     # Exec everything except the last statement, eval the last
     ns = {}
@@ -68,13 +68,13 @@ def _get_indicator_label(name: str, ind: BaseIndicator) -> str:
     """Build a UI label for an indicator."""
     cls = type(ind)
     if _is_builtin_indicator(ind):
-        label = f":material/show_chart: **{name}** · _{cls.acronym}_"
+        label = f":material/show_chart: **{name}** · _{cls.acronym}_\n\n"
 
         # Show parameters for builtin indicators
         _, args = ind.__reduce__()
         sig = inspect.signature(cls)
         if params := dict(zip(sig.parameters, args, strict=True)):
-            label += f" · {', '.join(f'{k}={v}' for k, v in params.items())}"
+            label += " · ".join(f"{k}={v}" for k, v in params.items())
 
         return label
     else:

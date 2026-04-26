@@ -80,7 +80,7 @@ deployment. Click on the icons to read more about its main functionalities.
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/plots" draggable="false">
+      <a href="../user_guide/analysis" draggable="false">
         <img src="../img/icons/icon_8.svg" alt="Analysis and Interpretability" draggable="false">
         <figcaption style="margin-top: -8px"><strong>Analysis &<br>Interpretability</strong></figcaption>
       </a>

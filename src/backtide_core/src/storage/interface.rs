@@ -1,42 +1,19 @@
 //! Python interface for the storage module.
 
-use crate::config::interface::Config;
-use crate::config::models::dataframe_library::DataFrameLibrary;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
+use crate::utils::dataframe::dict_to_dataframe;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helper functions
 // ────────────────────────────────────────────────────────────────────────────
-
-/// Build a DataFrame from a Python dict, using the configured backend.
-fn dict_to_dataframe<'py>(
-    py: Python<'py>,
-    data: &Bound<'py, PyDict>,
-) -> PyResult<Bound<'py, PyAny>> {
-    match Config::get()?.data.dataframe_library {
-        DataFrameLibrary::Numpy => {
-            let np = py.import("numpy")?;
-            let values: Vec<Bound<'py, PyAny>> = data.values().iter().collect();
-            let values_list = PyList::new(py, &values)?;
-            np.call_method1("column_stack", (values_list,))
-        },
-        DataFrameLibrary::Pandas => {
-            let pd = py.import("pandas")?;
-            pd.call_method1("DataFrame", (data,))
-        },
-        DataFrameLibrary::Polars => {
-            let pl = py.import("polars")?;
-            pl.call_method1("from_dict", (data,))
-        },
-    }
-}
 
 /// Parse a Python value that may be a single item or a list into `Vec<T>`.
 fn parse_one_or_many<'py, T>(value: Bound<'py, PyAny>) -> PyResult<Vec<T>>

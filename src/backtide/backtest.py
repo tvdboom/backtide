@@ -16,8 +16,10 @@ from backtide.core.backtest import (
     ExperimentConfig,
     GeneralExpConfig,
     IndicatorExpConfig,
+    Order,
     OrderType,
+    Portfolio,
     PortfolioExpConfig,
+    State,
     StrategyExpConfig,
-    StrategyType,
 )

@@ -5,7 +5,6 @@ Description: Run a new backtest page.
 
 """
 
-import ast
 from datetime import datetime as dt
 import json
 import logging
@@ -13,7 +12,6 @@ import tomllib
 from typing import Any
 import uuid
 
-from code_editor import code_editor
 import streamlit as st
 from streamlit.runtime.state import SessionStateProxy
 import yaml
@@ -32,16 +30,15 @@ from backtide.backtest import (
     OrderType,
     PortfolioExpConfig,
     StrategyExpConfig,
-    StrategyType,
 )
 from backtide.config import get_config
 from backtide.core.data import resolve_profiles
 from backtide.data import Currency, InstrumentProfile, InstrumentType
 from backtide.indicators.utils import _get_indicator_label, _load_stored_indicators
 from backtide.storage import query_instruments
+from backtide.strategies.utils import _get_strategy_label, _load_stored_strategies
 from backtide.ui.utils import (
     _CARD_CSS,
-    _CODE_OPTIONS,
     _clear_state,
     _default,
     _draw_cards,
@@ -122,8 +119,7 @@ def _apply_config_to_state(
     state["base_currency"] = exp.portfolio.base_currency
     state["starting_positions"] = exp.portfolio.starting_positions
 
-    state["predefined_strategies"] = exp.strategy.predefined_strategies
-    state["custom_strategies"] = exp.strategy.custom_strategies
+    state["strategies"] = exp.strategy.strategies
     state["indicators"] = exp.indicators.indicators
 
     ex = exp.exchange
@@ -171,6 +167,14 @@ def _build_indicator_config(
     return IndicatorExpConfig(indicators=list(selected))
 
 
+def _build_strategy_config(
+    state: dict[str, Any] | SessionStateProxy,
+) -> StrategyExpConfig:
+    """Build a StrategyExpConfig from the selected strategy names."""
+    selected = state.get("strategies", [])
+    return StrategyExpConfig(strategies=list(selected))
+
+
 def _build_config_toml(
     state: dict[str, Any] | SessionStateProxy,
     experiment_name: str,
@@ -201,7 +205,7 @@ def _build_config_toml(
                 "starting_positions", defaults.portfolio.starting_positions
             ),
         ),
-        strategy=StrategyExpConfig(),
+        strategy=_build_strategy_config(state),
         indicators=_build_indicator_config(state),
         exchange=ExchangeExpConfig(
             commission_type=state.get("commission_type", defaults.exchange.commission_type),
@@ -240,23 +244,6 @@ def _build_config_toml(
         ),
     )
     return cfg.to_toml()
-
-
-def _check_strategy_code(code: str) -> str | None:
-    """Validate that *code* defines `strategy(data, state, indicators)`."""
-    try:
-        tree = ast.parse(code)
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and node.name == "strategy":
-                if [a.arg for a in node.args.args] == ["data", "state", "indicators"]:
-                    return None
-                return (
-                    "Function `strategy` doesn't have "
-                    "signature: `strategy(data, state, indicators)`."
-                )
-        return "No function `strategy(data, state, indicators)` found in the code."
-    except SyntaxError as ex:
-        return f"Syntax error:\n\n{ex}"
 
 
 def _parse_config_upload(upload: Any) -> ExperimentConfig:
@@ -316,7 +303,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         ":material/dashboard: General",
         ":material/analytics: Data",
         ":material/account_balance_wallet: Portfolio",
-        ":material/psychology: Strategy",
+        ":material/psychology: Strategies",
         ":material/show_chart: Indicators",
         ":material/storefront: Exchange",
         ":material/build: Engine",
@@ -711,132 +698,34 @@ with tab3:
 # ─────────────────────────────────────────────────────────────────────────────
 
 with tab4:
-    st.markdown("**Predefined strategies**")
     st.caption(
-        "Select one or more built-in strategies to include in the experiment. "
-        "Useful for benchmarking against your own strategies.",
+        "Strategies define the trading logic that is evaluated at every interval of the "
+        "simulation. Select one or more saved strategies to include in the experiment. "
+        "You can create predefined (built-in) or custom strategies on the **Strategies** page.",
     )
 
-    selected_predefined = st.multiselect(
-        label="Built-in strategies",
-        key=(key := "predefined_strategies"),
-        options=StrategyType.variants(),
-        format_func=lambda s: s.name,
-        default=_default(key, []),
-        placeholder="Select strategies...",
-        on_change=lambda k=key: _persist(k),
-        help="Choose built-in strategies to run alongside your custom ones.",
-    )
-
-    if selected_predefined:
-        with st.expander(
-            label="Strategy descriptions",
-            key=(key := "strategy_expander"),
-            icon=":material/info:",
-            expanded=bool(_default(key)),
+    if stored_strat := _load_stored_strategies(cfg):
+        selected_strat = st.multiselect(
+            label="Saved strategies",
+            key=(key := "strategies"),
+            options=stored_strat,
+            default=_default(key, []),
+            placeholder="Select strategies...",
             on_change=lambda k=key: _persist(k),
-        ):
-            for strategy in selected_predefined:
-                category = "Portfolio Rotation" if strategy.is_rotation else "Single asset"
-                st.markdown(f"**{strategy.name}** · _{category}_")
-                st.caption(strategy.description())
-
-    st.divider()
-
-    st.markdown("**Custom strategies**")
-    st.caption(
-        "Add one or more custom strategy functions. Each strategy is evaluated "
-        "independently during the simulation.",
-    )
-
-    if "custom_strategies" not in st.session_state:
-        st.session_state.custom_strategies = []
-
-    for i, custom_strategy in enumerate(st.session_state.custom_strategies):
-        with st.container(border=True):
-            col1, col2 = st.columns([5, 1], vertical_alignment="center")
-
-            name = col1.text_input(
-                label="Strategy name",
-                key=(key := f"strategy_name_{i}"),
-                value=_default(key),
-                max_chars=40,
-                placeholder=f"Strategy {i + 1}",
-                label_visibility="collapsed",
-                on_change=lambda k=key: _persist(k),
-            )
-
-            if col2.button(
-                label="Remove",
-                key=f"remove_strategy_{i}",
-                icon=":material/close:",
-                type="tertiary",
-            ):
-                st.session_state.custom_strategies.pop(i)
-                st.rerun()
-
-            source = st.segmented_control(
-                label="Source",
-                key=(key := f"strategy_source_{i}"),
-                required=True,
-                options=_CODE_OPTIONS,
-                default=_default(key, _CODE_OPTIONS[0]),
-                label_visibility="collapsed",
-                on_change=lambda k=key: _persist(k),
-            )
-
-            code: str | None = None
-            if source == _CODE_OPTIONS[0]:
-                resp = code_editor(
-                    code=custom_strategy.get("code") or STRATEGY_PLACEHOLDER,
-                    key=f"strategy_code_editor_{i}",
-                    response_mode="debounce",
-                    buttons=[
-                        {
-                            "name": "Copy",
-                            "feather": "Copy",
-                            "hasText": True,
-                            "commands": ["copyAll"],
-                            "style": {"top": "0.46rem", "right": "0.4rem"},
-                        },
-                    ],
-                )
-                code = resp["text"]
-            else:
-                strategy_file = st.file_uploader(
-                    label="Strategy file",
-                    key=f"strategy_file_{i}",
-                    type="py",
-                    accept_multiple_files=False,
-                    label_visibility="collapsed",
-                    help=(
-                        "Upload a Python file that defines a top-level function with signature: "
-                        "`strategy(data, state, indicators) -> list[Order]`."
-                    ),
-                )
-
-                if strategy_file is not None:
-                    code = strategy_file.read().decode("utf-8")
-                    with st.expander("Preview uploaded file"):
-                        st.code(code, language="python", line_numbers=True)
-                else:
-                    st.info("No file uploaded yet.", icon=":material/upload_file:")
-
-            if code:
-                if err := _check_strategy_code(code):
-                    st.error(f"**Strategy {i + 1}:** {err}")
-
-        st.session_state.custom_strategies[i] = {"name": name, "source": source, "code": code}
-
-    if st.button(
-        label="Add strategy",
-        icon=":material/add:",
-        type="secondary",
-    ):
-        st.session_state.custom_strategies.append(
-            {"name": "", "source": _CODE_OPTIONS[0], "code": ""}
+            help="Choose which strategies to use in this experiment.",
         )
-        st.rerun()
+
+        # Show a summary of selected strategies
+        for name in selected_strat:
+            st.caption(_get_strategy_label(name, stored_strat[name]))
+    else:
+        st.info(
+            "No saved strategies yet. Create a strategy on the **Strategies** page first.",
+            icon=":material/info:",
+        )
+
+    if st.button("Create a new strategy", icon=":material/add:", type="secondary"):
+        st.switch_page("strategies.py")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -868,7 +757,7 @@ with tab5:
             st.caption(_get_indicator_label(name, stored_ind[name]))
     else:
         st.info(
-            "No saved indicators yet. Create indicators on the **Indicators** page first.",
+            "No saved indicators yet. Create an indicator on the **Indicators** page first.",
             icon=":material/info:",
         )
 

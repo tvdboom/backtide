@@ -213,6 +213,16 @@ experiment = st.Page(
     title="Experiment",
     icon=":material/science:",
 )
+strategies = st.Page(
+    "strategies.py",
+    title="Strategies",
+    icon=":material/psychology:",
+)
+indicators = st.Page(
+    "indicators.py",
+    title="Indicators",
+    icon=":material/show_chart:",
+)
 results = st.Page(
     "results.py",
     title="Results",
@@ -233,38 +243,12 @@ analysis = st.Page(
     title="Analysis",
     icon=":material/assessment:",
 )
-indicators = st.Page(
-    "indicators.py",
-    title="Indicators",
-    icon=":material/show_chart:",
-)
-
-
-PAGES_URLS = {
-    "Experiment": f"{DOCS_URL}/user_guide/backtest/experiment/",
-    "Results": f"{DOCS_URL}/user_guide/backtest/results/",
-    "Indicators": f"{DOCS_URL}/user_guide/backtest/indicators/",
-    "Download": f"{DOCS_URL}/user_guide/data/",
-    "Storage": f"{DOCS_URL}/user_guide/storage/",
-    "Analysis": f"{DOCS_URL}/user_guide/data/analysis",
-}
 
 pg = st.navigation(
-    {"Backtest": [experiment, results, indicators], "Data": [download, storage, analysis]}
-)
-
-# todo: fix!
-# Inject the docs button for the current page at the top of the content area
-st.html(
-    f"""
-    <a class="docs-btn" href="{PAGES_URLS[pg.title]}" target="_blank" title="Documentation">
-        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-        </svg>
-        Docs
-    </a>
-    """,
+    {
+        "Backtest": [experiment, results, strategies, indicators],
+        "Data": [download, storage, analysis],
+    }
 )
 
 pg.run()

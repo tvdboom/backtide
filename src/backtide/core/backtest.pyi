@@ -1,30 +1,52 @@
 """Type stubs for `backtide.core.backtest` (auto-generated)."""
 
 __all__ = [
+    "AdaptiveRsi",
+    "AlphaRsiPro",
     "AverageDirectionalIndex",
     "AverageTrueRange",
     "BollingerBands",
+    "BollingerMeanReversion",
+    "BuyAndHold",
     "CommissionType",
     "CommodityChannelIndex",
     "ConversionPeriod",
     "CurrencyConversionMode",
     "DataExpConfig",
+    "DoubleTop",
     "EmptyBarPolicy",
     "EngineExpConfig",
     "ExchangeExpConfig",
     "ExperimentConfig",
     "ExponentialMovingAverage",
     "GeneralExpConfig",
+    "HybridAlphaRsi",
     "IndicatorExpConfig",
+    "Macd",
+    "Momentum",
     "MovingAverageConvergenceDivergence",
+    "MultiBollingerRotation",
     "OnBalanceVolume",
+    "Order",
     "OrderType",
+    "Portfolio",
     "PortfolioExpConfig",
     "RelativeStrengthIndex",
+    "RiskAverse",
+    "Roc",
+    "RocRotation",
+    "Rsi",
+    "Rsrs",
+    "RsrsRotation",
     "SimpleMovingAverage",
+    "SmaCrossover",
+    "SmaNaive",
+    "State",
     "StochasticOscillator",
     "StrategyExpConfig",
-    "StrategyType",
+    "TripleRsiRotation",
+    "TurtleTrading",
+    "Vcp",
     "VolumeWeightedAveragePrice",
     "WeightedMovingAverage",
 ]
@@ -37,8 +59,193 @@ import polars as pl
 
 from backtide.core.data import Currency, InstrumentType, Interval
 
+class AdaptiveRsi:
+    """Relative Strength Index with a dynamically adaptive look-back period.
+
+    Dynamically adjusts its look-back period based on current market volatility
+    and cycle length. In calm, trending markets the period lengthens for smoother
+    signals; in volatile or choppy regimes it shortens for faster reaction. Useful
+    when a fixed-period RSI produces too many whipsaws or lags behind regime
+    changes.
+
+    Parameters
+    ----------
+    min_period : int, default=8
+        Minimum adaptive RSI period.
+
+    max_period : int, default=28
+        Maximum adaptive RSI period.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:AlphaRsiPro
+    backtide.strategies:HybridAlphaRsi
+    backtide.strategies:Rsi
+
+    """
+
+    max_period: Any
+    min_period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class AlphaRsiPro:
+    """Advanced Relative Strength Index with adaptive overbought/oversold levels.
+
+    An advanced RSI variant that computes adaptive overbought and oversold
+    thresholds based on recent volatility, and adds a trend-bias filter to
+    avoid counter-trend entries. In strong uptrends the oversold level is
+    raised so buy signals fire earlier; in downtrends the overbought level
+    is lowered so sells trigger sooner. Useful for reducing false signals
+    in trending markets compared to a plain RSI strategy.
+
+    Parameters
+    ----------
+    period : int, default=14
+        RSI look-back period.
+
+    vol_window : int, default=20
+        Window for the volatility-based level adjustment.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:AdaptiveRsi
+    backtide.strategies:HybridAlphaRsi
+    backtide.strategies:Rsi
+
+    """
+
+    period: Any
+    vol_window: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
 class AverageDirectionalIndex:
-    """Quantifies trend strength on a scale of 0 to 100, regardless of direction.
+    """Average Directional Index (ADX).
+
+    Quantifies trend strength on a scale of 0 to 100, regardless of direction.
     Values above 25 generally indicate a strong trend; below 20, a weak or
     ranging market. Useful for determining whether a market is trending or
     ranging before applying trend-following or mean-reversion strategies.
@@ -65,6 +272,7 @@ class AverageDirectionalIndex:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -128,7 +336,9 @@ class AverageDirectionalIndex:
         """
 
 class AverageTrueRange:
-    """Measures market volatility by calculating the average of the true range
+    """Average True Range (ATR).
+
+    Measures market volatility by calculating the average of the true range
     over a period. The true range accounts for gaps between sessions. Useful
     for position sizing, setting stop-loss levels, and comparing volatility
     across instruments.
@@ -153,6 +363,7 @@ class AverageTrueRange:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -216,7 +427,9 @@ class AverageTrueRange:
         """
 
 class BollingerBands:
-    """Volatility bands placed above and below an n-period SMA. The bands widen
+    """Bollinger Bands (BB).
+
+    Volatility bands placed above and below an n-period SMA. The bands widen
     during high volatility and contract during low volatility. Useful for
     volatility assessment, mean-reversion strategies, and breakout detection
     when price moves outside the bands.
@@ -237,6 +450,7 @@ class BollingerBands:
     ----------
     period : int, default=20
         Number of bars for the moving average.
+
     std_dev : float, default=2.0
         Number of standard deviations.
 
@@ -244,6 +458,7 @@ class BollingerBands:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -304,6 +519,176 @@ class BollingerBands:
         -------
         str
             The description.
+
+        """
+
+class BollingerMeanReversion:
+    """Mean-reversion strategy using Bollinger Band boundaries.
+
+    A mean-reversion strategy that enters long when the price touches or
+    crosses below the lower Bollinger Band and exits when it reaches the
+    upper band. The assumption is that price will revert to its moving
+    average after an extreme excursion. Useful in range-bound or
+    mean-reverting markets.
+
+    Parameters
+    ----------
+    period : int, default=20
+        Number of bars for the Bollinger Band moving average.
+
+    std_dev : float, default=2.0
+        Number of standard deviations for the band width.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:MultiBollingerRotation
+    backtide.strategies:Rsi
+    backtide.strategies:SmaCrossover
+
+    """
+
+    period: Any
+    std_dev: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class BuyAndHold:
+    """Passive baseline that buys once and holds indefinitely.
+
+    The simplest possible strategy: buy on the very first bar and hold the
+    position until the end of the simulation. Serves as the baseline
+    benchmark against which all other strategies are compared. Equivalent
+    to a passive index investment over the backtest window.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:Momentum
+    backtide.strategies:SmaNaive
+    backtide.strategies:TurtleTrading
+
+    """
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
 
         """
 
@@ -373,7 +758,9 @@ class CommissionType:
         """
 
 class CommodityChannelIndex:
-    """Measures how far the typical price deviates from its statistical mean,
+    """Commodity Channel Index (CCI).
+
+    Measures how far the typical price deviates from its statistical mean,
     identifying cyclical trends. Values above +100 suggest overbought
     conditions; below -100, oversold. Useful for identifying cyclical price
     patterns, spotting divergences, and timing entries in commodities and
@@ -400,6 +787,7 @@ class CommodityChannelIndex:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -673,6 +1061,92 @@ class DataExpConfig:
         -------
         dict
             Self as dict.
+
+        """
+
+class DoubleTop:
+    """Chart-pattern breakout triggered by a double-top formation.
+
+    Detects a double-top chart pattern — two consecutive peaks at roughly
+    the same price level — and enters long on the subsequent breakout above
+    the neckline. Includes a trend filter and volume confirmation to reduce
+    false breakouts. Useful for pattern-recognition-based breakout trading.
+
+    Parameters
+    ----------
+    lookback : int, default=60
+        Number of bars to search for the double-top pattern.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:Momentum
+    backtide.strategies:TurtleTrading
+    backtide.strategies:Vcp
+
+    """
+
+    lookback: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
 
         """
 
@@ -964,10 +1438,10 @@ class ExperimentConfig:
         Initial cash, base currency and starting positions.
 
     strategy : [StrategyExpConfig]
-        Predefined and custom strategies.
+        Strategies to use in this experiment.
 
     indicators : [IndicatorExpConfig]
-        Built-in and custom indicators.
+        Indicators to use in this experiment.
 
     exchange : [ExchangeExpConfig]
         Commission, slippage, order execution, margin and short-selling.
@@ -1075,7 +1549,9 @@ class ExperimentConfig:
         """
 
 class ExponentialMovingAverage:
-    """A weighted moving average that gives exponentially more weight to recent
+    """Exponential Moving Average (EMA).
+
+    A weighted moving average that gives exponentially more weight to recent
     prices, making it more responsive to new information than the SMA. Useful
     for faster trend detection, reducing lag in crossover systems, and as a
     building block for other indicators (MACD, ADX).
@@ -1095,6 +1571,7 @@ class ExponentialMovingAverage:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -1219,6 +1696,101 @@ class GeneralExpConfig:
 
         """
 
+class HybridAlphaRsi:
+    """Full-featured Relative Strength Index combining adaptive period, levels, and trend filter.
+
+    The most sophisticated RSI variant, combining an adaptive look-back
+    period (like [`AdaptiveRsi`]), adaptive overbought/oversold levels
+    (like [`AlphaRsiPro`]), and trend confirmation via a moving-average
+    filter. Designed to deliver the highest-quality RSI signals across
+    different market regimes.
+
+    Parameters
+    ----------
+    min_period : int, default=8
+        Minimum adaptive RSI period.
+
+    max_period : int, default=28
+        Maximum adaptive RSI period.
+
+    vol_window : int, default=20
+        Window for the volatility-based level adjustment.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:AdaptiveRsi
+    backtide.strategies:AlphaRsiPro
+    backtide.strategies:Rsi
+
+    """
+
+    max_period: Any
+    min_period: Any
+    vol_window: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
 class IndicatorExpConfig:
     """Indicator settings for an experiment.
 
@@ -1277,8 +1849,195 @@ class IndicatorExpConfig:
 
         """
 
+class Macd:
+    """Moving Average Convergence Divergence crossover strategy.
+
+    Buys on a MACD golden cross (MACD line crosses above the signal line)
+    and sells on a death cross (MACD line crosses below the signal line).
+    Captures medium-term trend changes driven by the divergence between
+    fast and slow exponential moving averages. Useful for trend-following
+    in moderately trending markets.
+
+    Parameters
+    ----------
+    fast_period : int, default=12
+        Fast EMA period.
+
+    slow_period : int, default=26
+        Slow EMA period.
+
+    signal_period : int, default=9
+        Signal line EMA period.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:Momentum
+    backtide.strategies:SmaCrossover
+    backtide.strategies:Rsi
+
+    """
+
+    fast_period: Any
+    signal_period: Any
+    slow_period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class Momentum:
+    """Trend-following strategy driven by short-term price momentum.
+
+    Buys when short-term momentum turns positive (e.g. price rises above
+    a recent trough) and sells when the price falls below a trend-filtering
+    moving average. A straightforward trend-following approach that aims to
+    ride established moves and exit before they reverse.
+
+    Parameters
+    ----------
+    period : int, default=14
+        Look-back period for the momentum calculation.
+
+    ma_period : int, default=50
+        Moving average period for the trend filter.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:BuyAndHold
+    backtide.strategies:Roc
+    backtide.strategies:SmaCrossover
+
+    """
+
+    ma_period: Any
+    period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
 class MovingAverageConvergenceDivergence:
-    """A trend-following momentum indicator that shows the relationship between
+    """Moving Average Convergence Divergence (MACD).
+
+    A trend-following momentum indicator that shows the relationship between
     two EMAs. The MACD line is the difference between a fast and slow EMA;
     the signal line is an EMA of the MACD line itself. Useful for trend
     direction and momentum, signal line crossovers for entry/exit timing,
@@ -1299,8 +2058,10 @@ class MovingAverageConvergenceDivergence:
     ----------
     fast_period : int, default=12
         Fast EMA period.
+
     slow_period : int, default=26
         Slow EMA period.
+
     signal_period : int, default=9
         Signal line EMA period.
 
@@ -1308,6 +2069,7 @@ class MovingAverageConvergenceDivergence:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -1372,8 +2134,109 @@ class MovingAverageConvergenceDivergence:
 
         """
 
+class MultiBollingerRotation:
+    """Multi-asset Bollinger Bands breakout rotation strategy.
+
+    A breakout rotation strategy that periodically ranks all assets by
+    how far their price exceeds the upper Bollinger Band and rotates into
+    the top K positions. Assets that have broken out above their bands
+    are considered to be in strong uptrends. Useful for momentum-driven
+    portfolio rotation across a basket of assets.
+
+    Parameters
+    ----------
+    period : int, default=20
+        Bollinger Band moving average period.
+
+    std_dev : float, default=2.0
+        Number of standard deviations for the bands.
+
+    top_k : int, default=5
+        Number of top-ranked assets to hold.
+
+    rebalance_interval : int, default=20
+        Number of bars between rebalancing.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:BollingerMeanReversion
+    backtide.strategies:RocRotation
+    backtide.strategies:TripleRsiRotation
+
+    """
+
+    period: Any
+    rebalance_interval: Any
+    std_dev: Any
+    top_k: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
 class OnBalanceVolume:
-    """A cumulative volume indicator that adds volume on up-close days and
+    """On-Balance Volume (OBV).
+
+    A cumulative volume indicator that adds volume on up-close days and
     subtracts it on down-close days. Rising OBV confirms an uptrend;
     falling OBV confirms a downtrend. Useful for confirming price trends
     with volume and spotting divergences between price and volume momentum.
@@ -1388,6 +2251,7 @@ class OnBalanceVolume:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -1448,6 +2312,59 @@ class OnBalanceVolume:
 
         """
 
+class Order:
+    """A trading order submitted during the simulation.
+
+    Attributes
+    ----------
+    symbol : str
+        The ticker symbol this order targets.
+
+    order_type : [OrderType]
+        The execution semantics (market, limit, stop-loss, etc.).
+
+    quantity : int
+        Signed quantity. Positive for buy orders, negative for sell orders.
+
+    price : float | None
+        Limit / stop price. ``None`` for market orders.
+
+    See Also
+    --------
+    - backtide.backtest:OrderType
+    - backtide.backtest:Portfolio
+    - backtide.backtest:State
+
+    """
+
+    order_type: OrderType
+    price: float | None
+    quantity: int
+    symbol: str
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+
 class OrderType:
     """The type of order that can be submitted to the exchange.
 
@@ -1464,7 +2381,6 @@ class OrderType:
     --------
     - backtide.backtest:CommissionType
     - backtide.backtest:ExchangeExpConfig
-    - backtide.backtest:StrategyType
 
     """
 
@@ -1536,6 +2452,61 @@ class OrderType:
 
         """
 
+class Portfolio:
+    """A snapshot of the portfolio's holdings at a point in time.
+
+    Cash is represented as a mapping from currency to amount, allowing
+    multi-currency portfolios. Positions are a mapping from ticker
+    symbol to signed quantity (positive = long, negative = short).
+
+    Attributes
+    ----------
+    cash : dict[[Currency], float]
+        Cash balances keyed by currency. Each value is the amount held
+        in that currency.
+
+    positions : dict[str, int]
+        Open positions keyed by ticker symbol. Positive values are long
+        positions, negative values are short positions.
+
+    orders : list[[Order]]
+        Currently open (unfilled) orders.
+
+    See Also
+    --------
+    - backtide.backtest:Order
+    - backtide.backtest:State
+    - backtide.backtest:ExperimentConfig
+
+    """
+
+    cash: dict[Currency, float]
+    orders: list[Order]
+    positions: dict[str, int]
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+
 class PortfolioExpConfig:
     """Portfolio settings for an experiment.
 
@@ -1599,7 +2570,9 @@ class PortfolioExpConfig:
         """
 
 class RelativeStrengthIndex:
-    """A momentum oscillator that measures the speed and magnitude of recent
+    """Relative Strength Index (RSI).
+
+    A momentum oscillator that measures the speed and magnitude of recent
     price changes on a scale of 0 to 100. Values above 70 are typically
     considered overbought; below 30, oversold. Useful for identifying
     overbought/oversold conditions, spotting divergences, and confirming
@@ -1621,6 +2594,7 @@ class RelativeStrengthIndex:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -1683,8 +2657,559 @@ class RelativeStrengthIndex:
 
         """
 
+class RiskAverse:
+    """Low-volatility breakout strategy for risk-conscious investors.
+
+    Targets low-volatility stocks making new highs on above-average volume.
+    Combines a volatility filter (e.g., ATR below a threshold) with a
+    breakout condition and volume confirmation to find "quiet" stocks that
+    are about to move. Designed for risk-conscious investors who want
+    trend exposure with lower drawdowns.
+
+    Parameters
+    ----------
+    vol_period : int, default=14
+        ATR look-back period for the volatility filter.
+
+    breakout_period : int, default=20
+        Number of bars for the new-high breakout condition.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:BuyAndHold
+    backtide.strategies:TurtleTrading
+    backtide.strategies:Vcp
+
+    """
+
+    breakout_period: Any
+    vol_period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class Roc:
+    """Rate of Change momentum strategy.
+
+    A simple momentum strategy based on Rate of Change. Buys when the ROC
+    over a specified period exceeds an upper threshold (strong upward
+    momentum) and sells when ROC falls below a lower threshold. Useful as
+    a straightforward momentum filter.
+
+    Parameters
+    ----------
+    period : int, default=12
+        ROC look-back period.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:Momentum
+    backtide.strategies:RocRotation
+    backtide.strategies:Rsi
+
+    """
+
+    period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class RocRotation:
+    """Multi-asset portfolio rotation ranked by Rate of Change.
+
+    Periodically ranks all assets by their Rate of Change (momentum) over
+    a given window and rotates the portfolio into the top K performers.
+    A classic relative-momentum rotation approach used to capture the
+    strongest trends across a basket of instruments.
+
+    Parameters
+    ----------
+    period : int, default=12
+        ROC look-back period for ranking.
+
+    top_k : int, default=5
+        Number of top-ranked assets to hold.
+
+    rebalance_interval : int, default=20
+        Number of bars between rebalancing.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:Roc
+    backtide.strategies:RsrsRotation
+    backtide.strategies:TripleRsiRotation
+
+    """
+
+    period: Any
+    rebalance_interval: Any
+    top_k: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class Rsi:
+    """Relative Strength Index combined with Bollinger Bands for dual confirmation.
+
+    Combines RSI and Bollinger Bands. Enters long when RSI is in oversold
+    territory **and** price is at or below the lower Bollinger Band, giving
+    a dual confirmation of mean-reversion conditions. Exits when RSI
+    returns to neutral or price reaches the upper band. Useful for
+    catching bounces with higher conviction than RSI or Bollinger Bands
+    alone.
+
+    Parameters
+    ----------
+    rsi_period : int, default=14
+        RSI look-back period.
+
+    bb_period : int, default=20
+        Bollinger Band moving average period.
+
+    bb_std : float, default=2.0
+        Number of standard deviations for the bands.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:AdaptiveRsi
+    backtide.strategies:AlphaRsiPro
+    backtide.strategies:BollingerMeanReversion
+
+    """
+
+    bb_period: Any
+    bb_std: Any
+    rsi_period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class Rsrs:
+    """Resistance Support Relative Strength trend-detection strategy.
+
+    Uses linear regression of high vs. low prices (Resistance Support
+    Relative Strength) to detect when support is strengthening. Buys when
+    the RSRS indicator signals that the support floor is rising faster
+    than resistance, indicating a potential upward breakout. Useful for
+    quantitative trend detection based on price structure.
+
+    Parameters
+    ----------
+    period : int, default=18
+        Look-back window for the linear regression.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:Momentum
+    backtide.strategies:RsrsRotation
+    backtide.strategies:TurtleTrading
+
+    """
+
+    period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class RsrsRotation:
+    """Multi-asset portfolio rotation ranked by Resistance Support Relative Strength.
+
+    Periodically ranks all assets by their RSRS indicator value and
+    rotates into those with the strongest support signals. Assets whose
+    support floor is rising fastest relative to resistance are considered
+    to have the best risk/reward profile. Useful for support-based
+    portfolio rotation across a universe of stocks.
+
+    Parameters
+    ----------
+    period : int, default=18
+        RSRS look-back window for ranking.
+
+    top_k : int, default=5
+        Number of top-ranked assets to hold.
+
+    rebalance_interval : int, default=20
+        Number of bars between rebalancing.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:RocRotation
+    backtide.strategies:Rsrs
+    backtide.strategies:TripleRsiRotation
+
+    """
+
+    period: Any
+    rebalance_interval: Any
+    top_k: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
 class SimpleMovingAverage:
-    """The arithmetic mean of the last n closing prices. Used to smooth
+    """Simple Moving Average (SMA).
+
+    The arithmetic mean of the last n closing prices. Used to smooth
     short-term fluctuations and identify the direction of a trend. Useful
     for trend identification, support/resistance levels, and crossover
     strategies (e.g., golden cross / death cross).
@@ -1705,6 +3230,7 @@ class SimpleMovingAverage:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -1767,8 +3293,243 @@ class SimpleMovingAverage:
 
         """
 
+class SmaCrossover:
+    """Simple Moving Average crossover strategy using fast and slow periods.
+
+    Generates buy and sell signals based on moving-average crossovers.
+    A **golden cross** (fast MA crosses above slow MA) triggers a buy;
+    a **death cross** (fast MA crosses below slow MA) triggers a sell.
+    More robust than the naive SMA strategy because it requires
+    confirmation from two different time horizons.
+
+    Parameters
+    ----------
+    fast_period : int, default=20
+        Fast moving average period.
+
+    slow_period : int, default=50
+        Slow moving average period.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:Macd
+    backtide.strategies:Momentum
+    backtide.strategies:SmaNaive
+
+    """
+
+    fast_period: Any
+    slow_period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class SmaNaive:
+    """Naive single Simple Moving Average trend-following strategy.
+
+    The simplest trend-following strategy: buys when the price is above a
+    single moving average and sells when below. No second average or
+    additional filter is used, so it reacts quickly but can generate many
+    whipsaws in sideways markets. Useful as a baseline trend-following
+    strategy.
+
+    Parameters
+    ----------
+    period : int, default=20
+        Moving average period.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:BuyAndHold
+    backtide.strategies:Momentum
+    backtide.strategies:SmaCrossover
+
+    """
+
+    period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class State:
+    """The simulation state passed to a strategy's `evaluate` method on every tick.
+
+    Contains the current portfolio (cash balances and open positions) and
+    the UTC timestamp of the bar being processed as seconds since the Unix
+    epoch.
+
+    Attributes
+    ----------
+    portfolio : [Portfolio]
+        Current portfolio holdings (cash and positions).
+
+    timestamp : int
+        UTC timestamp of the current bar in seconds since the Unix epoch.
+
+    datetime : datetime.datetime
+        The `timestamp` as a timezone-aware datetime. Uses the timezone from
+        `config.display.timezone`. Falls back to the system's local timezone
+        if none is configured.
+
+    See Also
+    --------
+    - backtide.backtest:ExperimentConfig
+    - backtide.backtest:Portfolio
+    - backtide.backtest:Order
+
+    """
+
+    datetime: datetime.datetime
+    portfolio: Portfolio
+    timestamp: int
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+
 class StochasticOscillator:
-    """Compares the closing price to the high-low range over a period,
+    """Stochastic Oscillator (STOCH).
+
+    Compares the closing price to the high-low range over a period,
     producing a %K line and a smoothed %D signal line. Both oscillate
     between 0 and 100. Useful for overbought/oversold signals, %K/%D
     crossovers for entry/exit timing, and divergence analysis.
@@ -1789,6 +3550,7 @@ class StochasticOscillator:
     ----------
     k_period : int, default=14
         %K look-back period.
+
     d_period : int, default=3
         %D smoothing period.
 
@@ -1796,6 +3558,7 @@ class StochasticOscillator:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -1862,13 +3625,14 @@ class StochasticOscillator:
 class StrategyExpConfig:
     """Strategy settings for an experiment.
 
+    Strategies are stored by name. Each name refers to a pickled strategy
+    object saved in the local strategies directory.
+
     Attributes
     ----------
-    predefined_strategies : list[str | [StrategyType]], default=[]
-        Built-in strategies to run.
-
-    custom_strategies : list[tuple[str, str]], default=[]
-        User-defined strategy code as `(name, code)` tuples.
+    strategies : list[str], default=[]
+        Names of the strategies to use in this experiment. Each name must
+        match a stored strategy.
 
     See Also
     --------
@@ -1882,8 +3646,7 @@ class StrategyExpConfig:
 
     """
 
-    custom_strategies: list[tuple[str, str]]
-    predefined_strategies: list[str | StrategyType]
+    strategies: list[str]
 
     def __eq__(self, value, /):
         ...
@@ -1917,51 +3680,53 @@ class StrategyExpConfig:
 
         """
 
-class StrategyType:
-    """A predefined (built-in) strategy type.
+class TripleRsiRotation:
+    """Multi-timeframe Relative Strength Index portfolio rotation strategy.
 
-    Each variant represents a complete trading strategy shipped with
-    backtide. Predefined strategies can be selected alongside custom
-    user-defined strategies for performance comparison.
+    Ranks assets by a composite score derived from long-term, medium-term,
+    and short-term RSI values and periodically rotates the portfolio into
+    the highest-scoring positions. The triple-time-frame approach helps
+    distinguish strong multi-horizon momentum from single-period flukes.
+    Useful for momentum rotation with multi-horizon confirmation.
+
+    Parameters
+    ----------
+    short_period : int, default=5
+        Short-term RSI period.
+
+    medium_period : int, default=14
+        Medium-term RSI period.
+
+    long_period : int, default=28
+        Long-term RSI period.
+
+    top_k : int, default=5
+        Number of top-ranked assets to hold.
+
+    rebalance_interval : int, default=20
+        Number of bars between rebalancing.
 
     Attributes
     ----------
     name : str
-        The human-readable display name of the strategy.
+        Human-readable strategy name.
 
-    is_rotation : bool
-        Whether this is a portfolio rotation (multi-asset) strategy.
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
 
     See Also
     --------
-    - backtide.backtest:OrderType
-    - backtide.backtest:StrategyExpConfig
+    backtide.strategies:MultiBollingerRotation
+    backtide.strategies:RocRotation
+    backtide.strategies:RsrsRotation
 
     """
 
-    is_rotation: bool
-    name: str
-
-    AdaptiveRsi: ClassVar[StrategyType]
-    AlphaRsiPro: ClassVar[StrategyType]
-    BollingerBands: ClassVar[StrategyType]
-    BuyAndHold: ClassVar[StrategyType]
-    DoubleTop: ClassVar[StrategyType]
-    HybridAlphaRsi: ClassVar[StrategyType]
-    Macd: ClassVar[StrategyType]
-    Momentum: ClassVar[StrategyType]
-    MultiBbRotation: ClassVar[StrategyType]
-    RiskAverse: ClassVar[StrategyType]
-    Roc: ClassVar[StrategyType]
-    RocRotation: ClassVar[StrategyType]
-    Rsi: ClassVar[StrategyType]
-    Rsrs: ClassVar[StrategyType]
-    RsrsRotation: ClassVar[StrategyType]
-    SmaCrossover: ClassVar[StrategyType]
-    SmaNaive: ClassVar[StrategyType]
-    TripleRsiRotation: ClassVar[StrategyType]
-    TurtleTrading: ClassVar[StrategyType]
-    Vcp: ClassVar[StrategyType]
+    long_period: Any
+    medium_period: Any
+    rebalance_interval: Any
+    short_period: Any
+    top_k: Any
 
     def __eq__(self, value, /):
         ...
@@ -1975,7 +3740,100 @@ class StrategyType:
         ...
     def __init__(self, /, *args, **kwargs):
         ...
-    def __int__(self, /):
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
+
+        Returns
+        -------
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
+
+        """
+
+class TurtleTrading:
+    """Classic channel-breakout trend-following system with ATR-based position sizing.
+
+    A classic trend-following system inspired by the Turtle Traders. Buys
+    on a breakout above the highest high of the last N bars and sells on
+    a breakdown below the lowest low of the last M bars. Uses ATR-based
+    position sizing to normalise risk across instruments. Useful for
+    systematic trend-following with built-in risk management.
+
+    Parameters
+    ----------
+    entry_period : int, default=20
+        Number of bars for the entry breakout (highest high).
+
+    exit_period : int, default=10
+        Number of bars for the exit breakdown (lowest low).
+
+    atr_period : int, default=20
+        ATR period for position sizing.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:BuyAndHold
+    backtide.strategies:Momentum
+    backtide.strategies:RiskAverse
+
+    """
+
+    atr_period: Any
+    entry_period: Any
+    exit_period: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
         ...
     def __le__(self, value, /):
         ...
@@ -1989,38 +3847,132 @@ class StrategyType:
         ...
     def __str__(self, /):
         ...
-    def description(self) -> str:
-        """Return the description of the strategy.
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
 
         Returns
         -------
         str
-            A human-readable summary of the strategy's logic.
+            The description.
 
         """
-    @staticmethod
-    def get_default() -> StrategyType:
-        """Return the default variant.
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
 
         Returns
         -------
-        self
-            The default variant.
+        list[[Order]]
+            The orders to place this tick.
 
         """
-    @staticmethod
-    def variants() -> list[StrategyType]:
-        """Return all variants.
+
+class Vcp:
+    """Volatility Contraction Pattern breakout strategy.
+
+    Detects a Volatility Contraction Pattern: a series of progressively
+    tighter price consolidations with declining volume. When both price
+    range and volume have contracted sufficiently, the strategy enters long
+    on a breakout above the consolidation ceiling. Useful for swing trading
+    setups where decreasing supply precedes a sharp move.
+
+    Parameters
+    ----------
+    lookback : int, default=60
+        Number of bars to detect the contraction pattern.
+
+    contractions : int, default=3
+        Minimum number of contracting ranges required.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable strategy name.
+
+    is_multi_asset : bool
+        Whether this is a multi-asset strategy.
+
+    See Also
+    --------
+    backtide.strategies:DoubleTop
+    backtide.strategies:RiskAverse
+    backtide.strategies:TurtleTrading
+
+    """
+
+    contractions: Any
+    lookback: Any
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(cls) -> str:
+        """Short explanation of what the strategy does.
 
         Returns
         -------
-        list[self]
-            All variants of this type.
+        str
+            The description.
+
+        """
+    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+        """Evaluate the strategy and return orders.
+
+        Parameters
+        ----------
+        data : np.array | pd.DataFrame | pl.DataFrame
+            Historical OHLCV data available up to the current bar.
+
+        state : [State]
+            Current simulation state.
+
+        indicators : np.array | pd.DataFrame | pl.DataFrame | None
+            Indicators calculated on the historical data. None if no
+            indicators were selected.
+
+        Returns
+        -------
+        list[[Order]]
+            The orders to place this tick.
 
         """
 
 class VolumeWeightedAveragePrice:
-    """The cumulative average price weighted by volume. Institutional traders
+    """Volume-Weighted Average Price (VWAP).
+
+    The cumulative average price weighted by volume. Institutional traders
     use VWAP as a benchmark: buying below VWAP is considered favorable,
     selling above it likewise. Useful as an intraday trading benchmark,
     for assessing execution quality, and as dynamic support/resistance.
@@ -2035,6 +3987,7 @@ class VolumeWeightedAveragePrice:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 
@@ -2096,7 +4049,9 @@ class VolumeWeightedAveragePrice:
         """
 
 class WeightedMovingAverage:
-    """A moving average where each price is multiplied by a linearly decreasing
+    """Weighted Moving Average (WMA).
+
+    A moving average where each price is multiplied by a linearly decreasing
     weight, placing more emphasis on recent data than the SMA but with a
     different weighting scheme than the EMA. Useful when you want recent
     prices to matter more without the recursive smoothing of EMA.
@@ -2116,6 +4071,7 @@ class WeightedMovingAverage:
     ----------
     acronym : str
         Short ticker-style acronym.
+
     name : str
         Human-readable indicator name.
 

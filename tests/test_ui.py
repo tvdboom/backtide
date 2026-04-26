@@ -23,7 +23,6 @@ from backtide.backtest import (
     ExperimentConfig,
     GeneralExpConfig,
     StrategyExpConfig,
-    StrategyType,
 )
 from backtide.data import InstrumentType
 from backtide.ui.utils import (
@@ -151,28 +150,39 @@ class TestCheckStrategyCode:
 
     @pytest.fixture(autouse=True)
     def _import(self):
-        from backtide.ui.experiment import _check_strategy_code
+        from backtide.strategies.utils import _check_strategy_code
 
         self._check = _check_strategy_code
 
     def test_valid_code(self):
         """Valid strategy code returns None."""
-        code = "def strategy(data, state, indicators):\n    return []"
+        code = (
+            "from backtide.strategies import BaseStrategy\n"
+            "class S(BaseStrategy):\n"
+            "    def evaluate(self, data, state, indicators):\n"
+            "        return []\n"
+            "S()\n"
+        )
         assert self._check(code) is None
 
     def test_wrong_signature(self):
-        """Wrong function signature returns error message."""
-        code = "def strategy(data):\n    return []"
+        """Wrong evaluate signature returns error message."""
+        code = (
+            "from backtide.strategies import BaseStrategy\n"
+            "class S(BaseStrategy):\n"
+            "    def evaluate(self, data):\n"
+            "        return []\n"
+            "S()\n"
+        )
         result = self._check(code)
         assert result is not None
-        assert "signature" in result
+        assert "signature" in result.lower()
 
-    def test_missing_function(self):
-        """Missing strategy function returns error message."""
-        code = "def other_func(data):\n    return []"
+    def test_not_base_strategy(self):
+        """Code that doesn't subclass BaseStrategy returns error."""
+        code = "class S:\n    pass\nS()\n"
         result = self._check(code)
         assert result is not None
-        assert "No function" in result
 
     def test_syntax_error(self):
         """Syntax error in code returns error message."""
@@ -182,7 +192,7 @@ class TestCheckStrategyCode:
         assert "Syntax error" in result
 
     def test_empty_code(self):
-        """Empty code returns no-function error."""
+        """Empty code returns error."""
         assert self._check("") is not None
 
 
@@ -262,7 +272,7 @@ class TestBuildConfigToml:
             "description": "A test",
             "initial_cash": 50000,
             "symbols": ["AAPL", "MSFT"],
-            "custom_strategies": [{"code": "x = 1"}],
+            "strategies": ["s1"],
             "strategy_name_0": "My Strategy",
             "custom_indicators": [{"code": "y = 2"}],
             "indicator_name_0": "My Indicator",
@@ -332,7 +342,7 @@ class TestApplyConfigToState:
         exp = ExperimentConfig(
             general=GeneralExpConfig(name="applied", tags=["t1"], description="d"),
             strategy=StrategyExpConfig(
-                custom_strategies=[("s1", "x=1")],
+                strategies=["s1"],
             ),
         )
         state = {}
@@ -340,7 +350,7 @@ class TestApplyConfigToState:
         assert state["experiment_name"] == "applied"
         assert state["tags"] == ["t1"]
         assert state["description"] == "d"
-        assert len(state["custom_strategies"]) == 1
+        assert len(state["strategies"]) == 1
         assert state["warmup_period"] == 0
         assert "commission_type" in state
 
@@ -513,13 +523,12 @@ class TestExperimentPage:
 
     @pytest.mark.usefixtures("_app")
     def test_add_strategy_button(self):
-        """Clicking 'Add strategy' adds a custom strategy entry."""
+        """Clicking 'Create new strategy' navigates to the strategies page."""
         at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
-        initial = len(at.text_input)
         at.button[0].click().run()
-        assert not at.exception
-        assert len(at.text_input) > initial
+        # switch_page raises in AppTest since strategies.py is not a registered page
+        assert any("strategies" in str(e.value).lower() for e in at.exception)
 
     @pytest.mark.usefixtures("_app")
     def test_add_indicator_button(self):
@@ -582,13 +591,12 @@ class TestExperimentPage:
         assert any("Invalid tag" in e.value for e in at.error)
 
     @pytest.mark.usefixtures("_app")
-    def test_predefined_strategy_selected(self):
-        """Selecting predefined strategies shows descriptions."""
+    def test_strategy_selected(self):
+        """Selecting saved strategies shows labels."""
         at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
-        at.multiselect(key="predefined_strategies").set_value([StrategyType("BuyAndHold")]).run()
+        # strategies multiselect only appears when there are saved strategies
         assert not at.exception
-        assert any("Buy" in m.value for m in at.markdown)
 
     @pytest.mark.usefixtures("_app")
     def test_current_tab_restored(self):

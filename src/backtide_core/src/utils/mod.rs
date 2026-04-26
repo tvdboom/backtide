@@ -2,6 +2,7 @@ use crate::utils::interface::{clear_cache, init_logging};
 use pyo3::prelude::*;
 use pyo3::{wrap_pyfunction, Bound, PyResult};
 
+pub mod dataframe;
 pub mod http;
 pub mod interface;
 pub mod progress;

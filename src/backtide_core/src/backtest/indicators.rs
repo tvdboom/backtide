@@ -265,6 +265,8 @@ macro_rules! indicator_pymethods {
 // Indicator structs
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Average Directional Index (ADX).
+///
 /// Quantifies trend strength on a scale of 0 to 100, regardless of direction.
 /// Values above 25 generally indicate a strong trend; below 20, a weak or
 /// ranging market. Useful for determining whether a market is trending or
@@ -292,6 +294,7 @@ macro_rules! indicator_pymethods {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -318,7 +321,7 @@ impl AverageDirectionalIndex {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.indicators")?.getattr("AverageDirectionalIndex")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.period,)))
     }
 }
@@ -378,6 +381,8 @@ impl Indicator for AverageDirectionalIndex {
     }
 }
 
+/// Average True Range (ATR).
+///
 /// Measures market volatility by calculating the average of the true range
 /// over a period. The true range accounts for gaps between sessions. Useful
 /// for position sizing, setting stop-loss levels, and comparing volatility
@@ -403,6 +408,7 @@ impl Indicator for AverageDirectionalIndex {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -429,7 +435,7 @@ impl AverageTrueRange {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.indicators")?.getattr("AverageTrueRange")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.period,)))
     }
 }
@@ -447,6 +453,8 @@ impl Indicator for AverageTrueRange {
     }
 }
 
+/// Bollinger Bands (BB).
+///
 /// Volatility bands placed above and below an n-period SMA. The bands widen
 /// during high volatility and contract during low volatility. Useful for
 /// volatility assessment, mean-reversion strategies, and breakout detection
@@ -468,6 +476,7 @@ impl Indicator for AverageTrueRange {
 /// ----------
 /// period : int, default=20
 ///     Number of bars for the moving average.
+///
 /// std_dev : float, default=2.0
 ///     Number of standard deviations.
 ///
@@ -475,6 +484,7 @@ impl Indicator for AverageTrueRange {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -488,6 +498,7 @@ impl Indicator for AverageTrueRange {
 pub struct BollingerBands {
     /// Look-back window length.
     period: usize,
+
     /// Number of standard deviations for the band width.
     std_dev: f64,
 }
@@ -504,7 +515,7 @@ impl BollingerBands {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize, f64))> {
-        let cls = py.import("backtide.indicators")?.getattr("BollingerBands")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.period, self.std_dev)))
     }
 }
@@ -531,6 +542,8 @@ impl Indicator for BollingerBands {
     }
 }
 
+/// Commodity Channel Index (CCI).
+///
 /// Measures how far the typical price deviates from its statistical mean,
 /// identifying cyclical trends. Values above +100 suggest overbought
 /// conditions; below -100, oversold. Useful for identifying cyclical price
@@ -558,6 +571,7 @@ impl Indicator for BollingerBands {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -584,7 +598,7 @@ impl CommodityChannelIndex {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.indicators")?.getattr("CommodityChannelIndex")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.period,)))
     }
 }
@@ -618,6 +632,8 @@ impl Indicator for CommodityChannelIndex {
     }
 }
 
+/// Exponential Moving Average (EMA).
+///
 /// A weighted moving average that gives exponentially more weight to recent
 /// prices, making it more responsive to new information than the SMA. Useful
 /// for faster trend detection, reducing lag in crossover systems, and as a
@@ -638,6 +654,7 @@ impl Indicator for CommodityChannelIndex {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -664,7 +681,7 @@ impl ExponentialMovingAverage {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.indicators")?.getattr("ExponentialMovingAverage")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.period,)))
     }
 }
@@ -680,6 +697,8 @@ impl Indicator for ExponentialMovingAverage {
     }
 }
 
+/// Moving Average Convergence Divergence (MACD).
+///
 /// A trend-following momentum indicator that shows the relationship between
 /// two EMAs. The MACD line is the difference between a fast and slow EMA;
 /// the signal line is an EMA of the MACD line itself. Useful for trend
@@ -701,8 +720,10 @@ impl Indicator for ExponentialMovingAverage {
 /// ----------
 /// fast_period : int, default=12
 ///     Fast EMA period.
+///
 /// slow_period : int, default=26
 ///     Slow EMA period.
+///
 /// signal_period : int, default=9
 ///     Signal line EMA period.
 ///
@@ -710,6 +731,7 @@ impl Indicator for ExponentialMovingAverage {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -723,8 +745,10 @@ impl Indicator for ExponentialMovingAverage {
 pub struct MovingAverageConvergenceDivergence {
     /// Fast EMA period.
     fast_period: usize,
+
     /// Slow EMA period.
     slow_period: usize,
+
     /// Signal line EMA period.
     signal_period: usize,
 }
@@ -745,8 +769,7 @@ impl MovingAverageConvergenceDivergence {
         &self,
         py: Python<'py>,
     ) -> PyResult<(Bound<'py, PyAny>, (usize, usize, usize))> {
-        let cls =
-            py.import("backtide.indicators")?.getattr("MovingAverageConvergenceDivergence")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.fast_period, self.slow_period, self.signal_period)))
     }
 }
@@ -772,6 +795,8 @@ impl Indicator for MovingAverageConvergenceDivergence {
     }
 }
 
+/// On-Balance Volume (OBV).
+///
 /// A cumulative volume indicator that adds volume on up-close days and
 /// subtracts it on down-close days. Rising OBV confirms an uptrend;
 /// falling OBV confirms a downtrend. Useful for confirming price trends
@@ -787,6 +812,7 @@ impl Indicator for MovingAverageConvergenceDivergence {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -807,7 +833,7 @@ impl OnBalanceVolume {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, ())> {
-        let cls = py.import("backtide.indicators")?.getattr("OnBalanceVolume")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, ()))
     }
 }
@@ -833,6 +859,8 @@ impl Indicator for OnBalanceVolume {
     }
 }
 
+/// Relative Strength Index (RSI).
+///
 /// A momentum oscillator that measures the speed and magnitude of recent
 /// price changes on a scale of 0 to 100. Values above 70 are typically
 /// considered overbought; below 30, oversold. Useful for identifying
@@ -855,6 +883,7 @@ impl Indicator for OnBalanceVolume {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -881,7 +910,7 @@ impl RelativeStrengthIndex {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.indicators")?.getattr("RelativeStrengthIndex")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.period,)))
     }
 }
@@ -924,6 +953,8 @@ impl Indicator for RelativeStrengthIndex {
     }
 }
 
+/// Simple Moving Average (SMA).
+///
 /// The arithmetic mean of the last n closing prices. Used to smooth
 /// short-term fluctuations and identify the direction of a trend. Useful
 /// for trend identification, support/resistance levels, and crossover
@@ -945,6 +976,7 @@ impl Indicator for RelativeStrengthIndex {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -971,7 +1003,7 @@ impl SimpleMovingAverage {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.indicators")?.getattr("SimpleMovingAverage")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.period,)))
     }
 }
@@ -987,6 +1019,8 @@ impl Indicator for SimpleMovingAverage {
     }
 }
 
+/// Stochastic Oscillator (STOCH).
+///
 /// Compares the closing price to the high-low range over a period,
 /// producing a %K line and a smoothed %D signal line. Both oscillate
 /// between 0 and 100. Useful for overbought/oversold signals, %K/%D
@@ -1008,6 +1042,7 @@ impl Indicator for SimpleMovingAverage {
 /// ----------
 /// k_period : int, default=14
 ///     %K look-back period.
+///
 /// d_period : int, default=3
 ///     %D smoothing period.
 ///
@@ -1015,6 +1050,7 @@ impl Indicator for SimpleMovingAverage {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -1028,6 +1064,7 @@ impl Indicator for SimpleMovingAverage {
 pub struct StochasticOscillator {
     /// %K look-back period.
     k_period: usize,
+
     /// %D smoothing period.
     d_period: usize,
 }
@@ -1044,7 +1081,7 @@ impl StochasticOscillator {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize, usize))> {
-        let cls = py.import("backtide.indicators")?.getattr("StochasticOscillator")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.k_period, self.d_period)))
     }
 }
@@ -1079,6 +1116,8 @@ impl Indicator for StochasticOscillator {
     }
 }
 
+/// Volume-Weighted Average Price (VWAP).
+///
 /// The cumulative average price weighted by volume. Institutional traders
 /// use VWAP as a benchmark: buying below VWAP is considered favorable,
 /// selling above it likewise. Useful as an intraday trading benchmark,
@@ -1094,6 +1133,7 @@ impl Indicator for StochasticOscillator {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -1114,7 +1154,7 @@ impl VolumeWeightedAveragePrice {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, ())> {
-        let cls = py.import("backtide.indicators")?.getattr("VolumeWeightedAveragePrice")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, ()))
     }
 }
@@ -1144,6 +1184,8 @@ impl Indicator for VolumeWeightedAveragePrice {
     }
 }
 
+/// Weighted Moving Average (WMA).
+///
 /// A moving average where each price is multiplied by a linearly decreasing
 /// weight, placing more emphasis on recent data than the SMA but with a
 /// different weighting scheme than the EMA. Useful when you want recent
@@ -1164,6 +1206,7 @@ impl Indicator for VolumeWeightedAveragePrice {
 /// ----------
 /// acronym : str
 ///     Short ticker-style acronym.
+///
 /// name : str
 ///     Human-readable indicator name.
 ///
@@ -1190,7 +1233,7 @@ impl WeightedMovingAverage {
     }
 
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (usize,))> {
-        let cls = py.import("backtide.indicators")?.getattr("WeightedMovingAverage")?;
+        let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.period,)))
     }
 }

@@ -119,7 +119,8 @@ nav:
         - Data: user_guide/data.md
         - Storage: user_guide/storage.md
         - Indicators: user_guide/indicators.md
-        - Plots: user_guide/plots.md
+        - Strategies: user_guide/strategies.md
+        - Analysis: user_guide/analysis.md
         - Configuration: user_guide/configuration.md
     - API:
         - config:
@@ -131,16 +132,17 @@ nav:
             - fetch_instruments: api/data/fetch_instruments.md
             - list_instruments: api/data/list_instruments.md
             - resolve_profiles: api/data/resolve_profiles.md
-        - plots:
-            - plot_candlestick: api/plots/plot_candlestick.md
-            - plot_correlation: api/plots/plot_correlation.md
-            - plot_drawdown: api/plots/plot_drawdown.md
-            - plot_price: api/plots/plot_price.md
-            - plot_returns: api/plots/plot_returns.md
-            - plot_seasonality: api/plots/plot_seasonality.md
-            - plot_volume: api/plots/plot_volume.md
-            - plot_vwap: api/plots/plot_vwap.md
-            - plot_dividends: api/plots/plot_dividends.md
+        - analysis:
+            - compute_statistics: api/analysis/compute_statistics.md
+            - plot_candlestick: api/analysis/plot_candlestick.md
+            - plot_correlation: api/analysis/plot_correlation.md
+            - plot_drawdown: api/analysis/plot_drawdown.md
+            - plot_price: api/analysis/plot_price.md
+            - plot_returns: api/analysis/plot_returns.md
+            - plot_seasonality: api/analysis/plot_seasonality.md
+            - plot_volume: api/analysis/plot_volume.md
+            - plot_vwap: api/analysis/plot_vwap.md
+            - plot_dividends: api/analysis/plot_dividends.md
         - storage:
             - query_bars: api/storage/query_bars.md
             - query_bars_summary: api/storage/query_bars_summary.md
@@ -159,10 +161,12 @@ nav:
                 - ExperimentConfig: api/models/backtest/experimentconfig.md
                 - GeneralExpConfig: api/models/backtest/generalexpconfig.md
                 - IndicatorExpConfig: api/models/backtest/indicatorexpconfig.md
+                - Order: api/models/backtest/order.md
                 - OrderType: api/models/backtest/ordertype.md
+                - Portfolio: api/models/backtest/portfolio.md
                 - PortfolioExpConfig: api/models/backtest/portfolioexpconfig.md
+                - State: api/models/backtest/state.md
                 - StrategyExpConfig: api/models/backtest/strategyexpconfig.md
-                - StrategyType: api/models/backtest/strategytype.md
             - config:
                 - Config: api/models/config/config.md
                 - DataConfig: api/models/config/dataconfig.md
@@ -197,6 +201,28 @@ nav:
                 - StochasticOscillator: api/models/indicators/stochasticoscillator.md
                 - VolumeWeightedAveragePrice: api/models/indicators/volumeweightedaverageprice.md
                 - WeightedMovingAverage: api/models/indicators/weightedmovingaverage.md
+            - strategies:
+                - AdaptiveRsi: api/models/strategies/adaptiversi.md
+                - AlphaRsiPro: api/models/strategies/alpharsipro.md
+                - BaseStrategy: api/models/strategies/basestrategy.md
+                - BollingerMeanReversion: api/models/strategies/bollingermeanreversion.md
+                - BuyAndHold: api/models/strategies/buyandhold.md
+                - DoubleTop: api/models/strategies/doubletop.md
+                - HybridAlphaRsi: api/models/strategies/hybridalpharsi.md
+                - Macd: api/models/strategies/macd.md
+                - Momentum: api/models/strategies/momentum.md
+                - MultiBollingerRotation: api/models/strategies/multibollingerrotation.md
+                - RiskAverse: api/models/strategies/riskaverse.md
+                - Roc: api/models/strategies/roc.md
+                - RocRotation: api/models/strategies/rocrotation.md
+                - Rsi: api/models/strategies/rsi.md
+                - Rsrs: api/models/strategies/rsrs.md
+                - RsrsRotation: api/models/strategies/rsrsrotation.md
+                - SmaCrossover: api/models/strategies/smacrossover.md
+                - SmaNaive: api/models/strategies/smanaive.md
+                - TripleRsiRotation: api/models/strategies/triplersirotation.md
+                - TurtleTrading: api/models/strategies/turtletrading.md
+                - Vcp: api/models/strategies/vcp.md
         - utils:
             - clear_cache: api/utils/clear_cache.md
             - init_logging: api/utils/init_logging.md

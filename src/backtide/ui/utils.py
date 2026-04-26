@@ -44,6 +44,50 @@ from backtide.utils.utils import _to_list, _to_pandas
 
 _CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
 
+_SUMMARY_CSS = """
+    <style>
+        .card-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+        }
+
+        .logo {
+            height: 64px;
+            border-radius: 6px;
+        }
+
+        .title {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .symbol {
+            font-size: 0.95em;
+            font-weight: 700;
+        }
+
+        .name {
+            font-size: 0.88em;
+            opacity: 0.7;
+        }
+
+        .flag {
+            height: 20px;
+            vertical-align: middle;
+            margin-top: -6px;
+            margin-left: 8px;
+        }
+
+        .metric-value {
+            font-size: 1.3em;
+        }
+
+        .metric-value.positive { color: green; }
+        .metric-value.negative { color: red; }
+    </style>
+    """
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility functions
