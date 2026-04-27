@@ -12,7 +12,7 @@ from typing import Any, overload
 
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import DataFrameLike, _check_columns, _plot
+from backtide.analysis.utils import DataFrameLike, _check_columns, _plot, _resolve_dt
 from backtide.config import get_config
 from backtide.utils.utils import _to_pandas
 
@@ -116,7 +116,7 @@ def plot_correlation(
     ```
 
     """
-    data = _to_pandas(data)
+    data = _resolve_dt(_to_pandas(data))
     _check_columns(data, ["symbol", price_col, "dt"], "plot_correlation")
 
     # Pivot to get one column per symbol, compute returns, then correlate

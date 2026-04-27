@@ -52,6 +52,11 @@ def _check_indicator_code(code: str, cfg: Config) -> str | None:
     except Exception as ex:  # noqa: BLE001
         return f"Failed to instantiate indicator: {ex}"
 
+    # Verify the compute method exists with the correct signature
+    sig = inspect.signature(instance.compute)
+    if list(sig.parameters.keys()) != ["data"]:
+        return "Method `compute` doesn't have signature: `compute(self, data)`."
+
     dummy = _make_dummy_bars(cfg.data.dataframe_library)
     try:
         result = instance.compute(dummy)

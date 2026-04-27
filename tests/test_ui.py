@@ -159,7 +159,7 @@ class TestCheckStrategyCode:
         code = (
             "from backtide.strategies import BaseStrategy\n"
             "class S(BaseStrategy):\n"
-            "    def evaluate(self, data, state, indicators):\n"
+            "    def evaluate(self, data, portfolio, state, indicators):\n"
             "        return []\n"
             "S()\n"
         )

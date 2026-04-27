@@ -17,6 +17,7 @@ from backtide.analysis.utils import (
     _check_columns,
     _get_currency_symbol,
     _plot,
+    _resolve_dt,
 )
 from backtide.utils.utils import _format_price, _to_pandas
 
@@ -127,7 +128,7 @@ def plot_candlestick(
     ```
 
     """
-    data = _to_pandas(data)
+    data = _resolve_dt(_to_pandas(data))
     _check_columns(data, ["symbol", "dt", "open", "high", "low", "close"], "plot_candlestick")
 
     fig = go.Figure()

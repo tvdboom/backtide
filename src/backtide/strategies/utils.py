@@ -40,7 +40,7 @@ def _build_custom_strategy(code: str) -> BaseStrategy:
 
 
 def _check_strategy_code(code: str) -> str | None:
-    """Validate that `code` defines a class with `evaluate(self, data, state, indicators)`."""
+    """Validate that `code` defines a method with the expected signature."""
     try:
         ast.parse(code)
     except SyntaxError as ex:
@@ -53,11 +53,32 @@ def _check_strategy_code(code: str) -> str | None:
 
     # Verify the evaluate method exists with the correct signature
     sig = inspect.signature(instance.evaluate)
-    params = list(sig.parameters.keys())
-    if params != ["data", "state", "indicators"]:
+    if list(sig.parameters.keys()) != ["data", "portfolio", "state", "indicators"]:
         return (
-            "Method `evaluate` doesn't have signature: `evaluate(self, data, state, indicators)`."
+            "Method `evaluate` doesn't have signature: "
+            "`evaluate(self, data, portfolio, state, indicators)`."
         )
+
+    # Check that every return statement in `evaluate` yields a list expression.
+    tree = ast.parse(code)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name != "evaluate":
+            continue
+
+        returns = [n for n in ast.walk(node) if isinstance(n, ast.Return)]
+        if not returns:
+            return "Method `evaluate` must return a list of Orders."
+
+        for ret in returns:
+            if ret.value is None:
+                return "Method `evaluate` must return a list of Orders, not None."
+            if isinstance(ret.value, ast.Constant):
+                return (
+                    "Method `evaluate` must return a list of Orders, "
+                    f"not a constant ({ret.value.value!r})."
+                )
 
     return None
 

@@ -12,7 +12,13 @@ from typing import Any, overload
 
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import DataFrameLike, _check_columns, _get_currency_symbol, _plot
+from backtide.analysis.utils import (
+    DataFrameLike,
+    _check_columns,
+    _get_currency_symbol,
+    _plot,
+    _resolve_dt,
+)
 from backtide.config import get_config
 from backtide.utils.utils import _to_pandas
 
@@ -114,7 +120,7 @@ def plot_dividends(
     ```
 
     """
-    data = _to_pandas(data)
+    data = _resolve_dt(_to_pandas(data))
     _check_columns(data, ["symbol", "dt", "amount"], "plot_dividends")
 
     fig = go.Figure()

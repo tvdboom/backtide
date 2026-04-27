@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyType;
 
 use crate::backtest::models::order::Order;
+use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
 
 /// Trait for all built-in strategies.
@@ -54,6 +55,9 @@ macro_rules! strategy_pymethods {
             /// data : np.array | pd.DataFrame | pl.DataFrame
             ///     Historical OHLCV data available up to the current bar.
             ///
+            /// portfolio : [Portfolio]
+            ///     Current portfolio holdings (cash, positions and open orders).
+            ///
             /// state : [State]
             ///     Current simulation state.
             ///
@@ -69,6 +73,7 @@ macro_rules! strategy_pymethods {
                 &self,
                 _py: Python<'py>,
                 _data: &Bound<'py, PyAny>,
+                _portfolio: &Portfolio,
                 _state: &State,
                 _indicators: &Bound<'py, PyAny>,
             ) -> PyResult<Vec<Order>> {

@@ -15,7 +15,8 @@ import plotly.graph_objects as go
 
 from backtide.core.config import get_config
 from backtide.core.data import Currency
-from backtide.ui.utils import _moment_to_strftime
+from backtide.ui.utils import _get_timezone, _moment_to_strftime
+from backtide.utils.utils import _ts_to_datetime
 
 if TYPE_CHECKING:
     import polars as pl
@@ -26,6 +27,33 @@ else:
 
 
 cfg = get_config()
+
+
+def _resolve_dt(data: pd.DataFrame) -> pd.DataFrame:
+    """Ensure a `dt` datetime column exists, converting timestamps if needed.
+
+    Checks for an existing `dt` or `datetime` column first. If neither exists,
+    looks for `open_ts`, `ts`, or `ex_date` (unix-seconds columns) and converts
+    to timezone-aware datetimes using the configured display timezone. A copy
+    is returned to never mutate the original data.
+
+    """
+    if "dt" in data.columns:
+        return data
+
+    if "datetime" in data.columns:
+        data = data.copy()
+        data["dt"] = data["datetime"]
+        return data
+
+    tz = _get_timezone(get_config().display.timezone)
+    for ts_col in ("open_ts", "ts", "ex_date"):
+        if ts_col in data.columns:
+            data = data.copy()
+            data["dt"] = _ts_to_datetime(data[ts_col], tz)
+            return data
+
+    return data
 
 
 def _check_columns(data: DataFrameLike, columns: list[str], caller: str) -> None:

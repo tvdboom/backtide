@@ -23,14 +23,15 @@ When running a backtest, the strategy's `evaluate` method is called on every
 bar. It receives:
 
 - `data` — OHLCV data available up to the current bar.
-- `state` — the current [state] (cash, positions, orders, etc...).
+- `portfolio` — the current [portfolio] (cash, positions and open orders).
+- `state` — the current [state] (timestamp, bar index, warmup flag, etc...).
 - `indicators` — pre-computed [indicator values][indicators] (only up to the current bar).
 
 ```python
 from backtide.strategies import SmaCrossover
 
 strategy = SmaCrossover(fast_period=20, slow_period=50)
-orders = strategy.evaluate(data, state, indicators)
+orders = strategy.evaluate(data, portfolio, state, indicators)
 ```
 
 <br>
@@ -46,7 +47,7 @@ from backtide.strategies import BaseStrategy
 
 
 class MyStrategy(BaseStrategy):
-    def evaluate(self, data, state, indicators):
+    def evaluate(self, data, portfolio, state, indicators):
         orders = []
 
         # Your logic here ...

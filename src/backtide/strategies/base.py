@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from backtide.backtest import Order, State
+    from backtide.backtest import Order, Portfolio, State
 
 
 class BaseStrategy(ABC):
@@ -28,7 +28,7 @@ class BaseStrategy(ABC):
         def __init__(self, threshold=0.02):
             self.threshold = threshold
 
-        def evaluate(self, data, state, indicators):
+        def evaluate(self, data, portfolio, state, indicators):
             orders = []
             # Your logic here ...
             return orders
@@ -40,6 +40,7 @@ class BaseStrategy(ABC):
     def evaluate(
         self,
         data: Any,
+        portfolio: Portfolio,
         state: State,
         indicators: Any,
     ) -> list[Order]:
@@ -50,8 +51,11 @@ class BaseStrategy(ABC):
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
 
+        portfolio : Portfolio
+            Current portfolio holdings (cash, positions and open orders).
+
         state : State
-            Current simulation state (portfolio, timestamp).
+            Current simulation state.
 
         indicators : np.array | pd.DataFrame | pl.DataFrame | None
             Pre-computed indicator values. None if no indicators were

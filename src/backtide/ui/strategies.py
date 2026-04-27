@@ -136,11 +136,11 @@ STRATEGY_PARAMS: dict[str, dict[str, tuple]] = {
 code_placeholder = lambda t: (
     f'''\
 from backtide.strategies import BaseStrategy
-from backtide.backtest import Order, State
+from backtide.backtest import Order, Portfolio, State
 
 
 class MyStrategy(BaseStrategy):
-    def evaluate(self, data, state, indicators):
+    def evaluate(self, data, portfolio, state, indicators):
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -149,8 +149,11 @@ class MyStrategy(BaseStrategy):
             Historical OHLCV data with columns 'symbol', 'open', 'high',
             'low', 'close', 'adj_close' 'volume'.
 
+        portfolio : Portfolio
+            Current portfolio holdings (cash and positions).
+
         state : State
-            Current simulation state (portfolio, timestamp).
+            Current simulation state.
 
         indicators: {t} | None
             Indicators calculated on the historical data. None if no
@@ -406,7 +409,7 @@ elif mode == "custom":
         else:
             st.caption(
                 "The uploaded file must contain a class that inherits from `BaseStrategy` "
-                "with an `evaluate(self, data, state, indicators)` method."
+                "with an `evaluate(self, data, portfolio, state, indicators)` method."
             )
 
             strategy_file = st.file_uploader(
