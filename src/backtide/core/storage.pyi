@@ -219,8 +219,8 @@ def query_instruments(
     stocks = query_instruments("stocks", "yahoo", limit=5)
     print(stocks)
 
-    nyse = query_instruments("stocks", exchange="XNYS", limit=5)
-    print(nyse)
+    xnas = query_instruments("stocks", exchange="XNAS", limit=5)
+    print(xnas)
     ```
 
     """

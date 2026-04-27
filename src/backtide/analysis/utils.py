@@ -8,7 +8,7 @@ Description: Shared plotting utilities for consistent figure styling.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, overload
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -102,13 +102,45 @@ def _get_currency_symbol(data: pd.DataFrame) -> Currency | None:
     return None
 
 
+@overload
+def _plot(
+    fig: go.Figure,
+    *,
+    xlabel: str | None = ...,
+    ylabel: str | None = ...,
+    xlim: tuple[float, float] | None = ...,
+    ylim: tuple[float, float] | None = ...,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: None = ...,
+    **kwargs,
+) -> go.Figure: ...
+@overload
+def _plot(
+    fig: go.Figure,
+    *,
+    xlabel: str | None = ...,
+    ylabel: str | None = ...,
+    xlim: tuple[float, float] | None = ...,
+    ylim: tuple[float, float] | None = ...,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: bool = ...,
+    **kwargs,
+) -> None: ...
+
+
 def _plot(
     fig: go.Figure,
     *,
     xlabel: str | None = None,
     ylabel: str | None = None,
-    xlim: tuple[int, int] | None = None,
-    ylim: tuple[int, int] | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper right",
     figsize: tuple[int, int] | None = None,
@@ -132,10 +164,10 @@ def _plot(
     ylabel : str | None, default=None
         Label for the y-axis.
 
-    xlim : tuple[int, int] | None, default=None
+    xlim : tuple[float, float] | None, default=None
         Limits for the x-axis as `(min, max)`.
 
-    ylim : tuple[int, int] | None, default=None
+    ylim : tuple[float, float] | None, default=None
         Limits for the y-axis as `(min, max)`.
 
     title : str | dict | None, default=None

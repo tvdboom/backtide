@@ -739,7 +739,7 @@ with tab_map[tab_returns]:
         fig = plot_returns(data=bars, price_col=price_col, display=None)
         if ret_log:
             fig.update_yaxes(type="log")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 # ── Tab: Seasonality ──────────────────────────────────────────────────────────
 
@@ -843,7 +843,7 @@ if tab_volume in tab_map:
             fig = plot_volume(data=vol_bars, display=None)
             if vol_log:
                 fig.update_yaxes(type="log")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
 # ── Tab: VWAP ─────────────────────────────────────────────────────────────────
 

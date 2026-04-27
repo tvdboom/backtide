@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the seasonality heatmap function for data analysis.
+Description: Module containing the seasonality heatmap function.
 
 """
 
@@ -122,19 +122,16 @@ def plot_seasonality(
     Examples
     --------
     ```pycon
-    import pandas as pd
-
     from backtide.storage import query_bars
     from backtide.analysis import plot_seasonality
 
     # Daily interval
     df = query_bars("AAPL", "1d")
-    plot_seasonality(df)
+    plot_seasonality(df.iloc[-5 * 250:, :])  # Just show the last 5 years
 
     # Intraday interval
     df = query_bars("AAPL", "1h")
     plot_seasonality(df)
-
     ```
 
     """

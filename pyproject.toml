@@ -167,7 +167,13 @@ convention = "numpy"
 
 [tool.coverage.run]
 omit = [
-    "backtide/ui/app.py",  # Streamlit entry point (navigation wiring only)
+    "*/ui/app.py",  # Streamlit entry point (navigation wiring only)
+    "*/ui/analysis.py",  # Streamlit page script (tested via AppTest)
+    "*/ui/download.py",  # Streamlit page script (tested via AppTest)
+    "*/ui/indicators.py",  # Streamlit page script (tested via AppTest)
+    "*/ui/results.py",  # Streamlit page script (tested via AppTest)
+    "*/ui/storage.py",  # Streamlit page script (tested via AppTest)
+    "*/ui/strategies.py",  # Streamlit page script (tested via AppTest)
 ]
 
 [tool.coverage.report]

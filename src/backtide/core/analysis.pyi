@@ -47,4 +47,15 @@ def compute_statistics(
     backtide.analysis:plot_returns
     backtide.analysis:plot_drawdown
 
+    Examples
+    --------
+    ```pycon
+    from backtide.storage import query_bars
+    from backtide.analysis import compute_statistics
+
+    df = query_bars(["AAPL", "MSFT"], "1d")
+    stats = compute_statistics(df)
+    print(stats.head())
+    ```
+
     """

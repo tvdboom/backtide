@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the returns distribution chart for data analysis.
+Description: Module containing the returns distribution chart.
 
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, overload
 
+import numpy as np
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import DataFrameLike, _check_columns, _plot, _resolve_dt
@@ -108,12 +109,10 @@ def plot_returns(
     Examples
     --------
     ```pycon
-    import pandas as pd
-
     from backtide.storage import query_bars
     from backtide.analysis import plot_returns
 
-    df = query_bars("AAPL" "1d")
+    df = query_bars("AAPL", "1d")
     plot_returns(df)
     ```
 
@@ -123,28 +122,91 @@ def plot_returns(
 
     fig = go.Figure()
 
-    for idx, symbol in enumerate(data["symbol"].unique()):
+    # Collect per-symbol returns first so we can derive a shared, robust
+    # x-axis range that crops extreme outliers (which would otherwise compress
+    # the bulk of the distribution into a single bin).
+    series_by_symbol = {}
+    for symbol in data["symbol"].unique():
         subset = data[data["symbol"] == symbol].sort_values("dt")
+        returns = subset[price_col].pct_change().dropna().to_numpy() * 100
+        if returns.size:
+            series_by_symbol[str(symbol)] = returns
+
+    if not series_by_symbol:
+        return _plot(
+            fig,
+            title=title,
+            legend=legend,
+            xlabel="Return (%)",
+            ylabel="Density",
+            figsize=figsize,
+            filename=filename,
+            display=display,
+        )
+
+    # Robust symmetric range based on the 0.5-99.5 percentiles across all
+    # symbols. Outliers stay in the data (so stats stay honest) but the view
+    # focuses on the meaningful bulk of the distribution.
+    all_returns = np.concatenate(list(series_by_symbol.values()))
+    lo, hi = np.percentile(all_returns, [0.5, 99.5])
+    bound = float(max(abs(lo), abs(hi)) or np.std(all_returns) * 4 or 1.0)
+    bin_size = (2 * bound) / 60  # ~60 visible bins
+
+    x_curve = np.linspace(-bound, bound, 400)
+
+    for idx, (symbol, returns) in enumerate(series_by_symbol.items()):
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
         fig.add_trace(
             go.Histogram(
-                x=subset[price_col].pct_change().dropna() * 100,
+                x=returns,
                 name=symbol,
+                legendgroup=symbol,
                 marker_color=color,
-                opacity=0.7,
-                nbinsx=50,
+                marker_line_width=0,
+                opacity=0.55,
+                histnorm="probability density",
+                xbins={"start": -bound, "end": bound, "size": bin_size},
+                hovertemplate=f"Return: %{{x:.2f}}%<br>Density: %{{y:.3f}}<extra>{symbol}</extra>",
             )
         )
 
-    fig.update_layout(barmode="overlay")
+        # Overlay a normal-fit curve for a smoother visual reference.
+        mu = float(np.mean(returns))
+        sigma = float(np.std(returns, ddof=1)) if returns.size > 1 else 0.0
+        if sigma > 0:
+            pdf = np.exp(-0.5 * ((x_curve - mu) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi))
+            fig.add_trace(
+                go.Scatter(
+                    x=x_curve,
+                    y=pdf,
+                    mode="lines",
+                    name=f"{symbol} (normal fit)",
+                    legendgroup=symbol,
+                    showlegend=False,
+                    line={"color": color, "width": 2, "dash": "dot"},
+                    hoverinfo="skip",
+                )
+            )
+
+    # Reference line at zero return.
+    fig.add_vline(
+        x=0,
+        line_width=2,
+        line_dash="dash",
+        line_color="rgba(120, 120, 120, 0.7)",
+    )
+
+    fig.update_layout(barmode="overlay", bargap=0.02)
 
     return _plot(
         fig,
+        groupclick="togglegroup",
         title=title,
         legend=legend,
         xlabel="Return (%)",
-        ylabel="Frequency",
+        ylabel="Density",
+        xlim=(-bound, bound),
         figsize=figsize,
         filename=filename,
         display=display,

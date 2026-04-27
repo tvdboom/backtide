@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the drawdown chart function for data analysis.
+Description: Module containing the drawdown chart function.
 
 """
 
@@ -108,13 +108,11 @@ def plot_drawdown(
     Examples
     --------
     ```pycon
-    import pandas as pd
-
     from backtide.storage import query_bars
     from backtide.analysis import plot_drawdown
 
     df = query_bars(["AAPL", "MSFT"], "1d")
-    plot_drawdown(df)
+    plot_drawdown(df, legend="lower right")
     ```
 
     """

@@ -63,6 +63,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
+      - name: Set Python library path
+        run: echo "LD_LIBRARY_PATH=$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" >> "$GITHUB_ENV"
       - name: Run Cargo tests
         run: |
           uv sync --group tox
@@ -80,6 +82,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
+      - name: Set Python library path
+        run: echo "LD_LIBRARY_PATH=$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" >> "$GITHUB_ENV"
       - name: Run benchmarks
         run: |
           uv sync --group tox

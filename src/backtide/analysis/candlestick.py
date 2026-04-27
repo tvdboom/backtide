@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the candlestick chart function for data analysis.
+Description: Module containing the candlestick chart function.
 
 """
 
@@ -113,8 +113,6 @@ def plot_candlestick(
     Examples
     --------
     ```pycon
-    import pandas as pd
-
     from backtide.storage import query_bars
     from backtide.analysis import plot_candlestick
 

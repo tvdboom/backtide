@@ -2,8 +2,69 @@
 
 use crate::utils::dataframe::dict_to_dataframe;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyDict, PyList, PyTuple};
 use rayon::prelude::*;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Helper functions
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Ensures a `dt` datetime column exists.
+///
+/// Converts Unix-second timestamps from `open_ts` / `ts` / `ex_date` to
+/// timezone-aware datetimes using the configured display timezone. Returns
+/// a (possibly new) dataframe. The original is never mutated.
+fn resolve_dt<'py>(py: Python<'py>, df: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let columns: Vec<String> = df.getattr("columns")?.call_method0("tolist")?.extract()?;
+
+    if columns.iter().any(|c| c == "dt") {
+        return Ok(df.clone());
+    }
+
+    if columns.iter().any(|c| c == "datetime") {
+        let copy = df.call_method0("copy")?;
+        let datetime_col = copy.call_method1("__getitem__", ("datetime",))?;
+        copy.call_method1("__setitem__", ("dt", datetime_col))?;
+        return Ok(copy);
+    }
+
+    // Resolve the configured display timezone (falls back to local).
+    let tz_name: Option<String> = py
+        .import("backtide.core.config")?
+        .call_method0("get_config")?
+        .getattr("display")?
+        .getattr("timezone")?
+        .extract()?;
+
+    let zoneinfo = py.import("zoneinfo")?.getattr("ZoneInfo")?;
+    let tz = if let Some(name) = tz_name.filter(|s| !s.is_empty()) {
+        zoneinfo.call1((name,))?
+    } else {
+        py.import("tzlocal")?.call_method0("get_localzone")?
+    };
+
+    let pd = py.import("pandas")?;
+    for ts_col in ["open_ts", "ts", "ex_date"] {
+        if columns.iter().any(|c| c == ts_col) {
+            let copy = df.call_method0("copy")?;
+            let series = copy.call_method1("__getitem__", (ts_col,))?;
+
+            // pd.to_datetime(series, unit="s", utc=True).dt.tz_convert(tz)
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("unit", "s")?;
+            kwargs.set_item("utc", true)?;
+            let dt = pd
+                .call_method("to_datetime", PyTuple::new(py, [series])?, Some(&kwargs))?
+                .getattr("dt")?
+                .call_method1("tz_convert", (tz,))?;
+
+            copy.call_method1("__setitem__", ("dt", dt))?;
+            return Ok(copy);
+        }
+    }
+
+    Ok(df.clone())
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Pure-Rust statistics kernel
@@ -185,7 +246,7 @@ fn compute_single(
 /// from backtide.storage import query_bars
 /// from backtide.analysis import compute_statistics
 ///
-/// df = query_bars(["AAPL", "MSFT", "GOOG"], "1d")
+/// df = query_bars(["AAPL", "MSFT"], "1d")
 /// stats = compute_statistics(df)
 /// print(stats.head())
 /// ```
@@ -206,6 +267,9 @@ pub fn compute_statistics<'py>(
     } else {
         data.clone()
     };
+
+    // Ensure a `dt` column exists.
+    let df = resolve_dt(py, &df)?;
 
     // Get unique symbols, sorted
     let symbols_col = df.getattr("__getitem__")?.call1(("symbol",))?;

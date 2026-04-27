@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the volume bar chart function for data analysis.
+Description: Module containing the volume bar chart function.
 
 """
 
@@ -107,8 +107,6 @@ def plot_volume(
     Examples
     --------
     ```pycon
-    import pandas as pd
-
     from backtide.storage import query_bars
     from backtide.analysis import plot_volume
 
@@ -121,7 +119,7 @@ def plot_volume(
     df_vol = df.copy()
     df_vol["volume"] = df_vol["volume"] * df_vol["close"]
     df_vol["currency"] = "USD"  # Add currency to format labels
-    plot_volume(df_vol, title="Dollar volume for AAPL")
+    plot_volume(df_vol, title="Dollar volume for Apple")
     ```
 
     """

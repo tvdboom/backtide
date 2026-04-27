@@ -109,6 +109,7 @@ def plot_volatility(
     --------
     - backtide.analysis:plot_drawdown
     - backtide.analysis:plot_returns
+    - backtide.analysis:plot_seasonality
 
     Examples
     --------
@@ -141,7 +142,7 @@ def plot_volatility(
                 mode="lines",
                 name=symbol,
                 line={"color": color, "width": 2},
-                hovertemplate=f"%{{x}}<br>Rolling volatility: %{{y:.2f}}%<extra>{symbol}</extra>",
+                hovertemplate=f"%{{x}}<br>Volatility: %{{y:.2f}}%<extra>{symbol}</extra>",
             )
         )
 

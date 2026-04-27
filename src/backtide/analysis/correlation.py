@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the correlation heatmap function for data analysis.
+Description: Module containing the correlation heatmap function.
 
 """
 
@@ -104,8 +104,6 @@ def plot_correlation(
     Examples
     --------
     ```pycon
-    import pandas as pd
-
     from backtide.storage import query_bars
     from backtide.analysis import plot_correlation
 

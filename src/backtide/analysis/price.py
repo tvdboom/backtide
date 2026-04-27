@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the price line chart function for data analysis.
+Description: Module containing the price line chart function.
 
 """
 
@@ -131,8 +131,6 @@ def plot_price(
     Examples
     --------
     ```pycon
-    import pandas as pd
-
     from backtide.storage import query_bars
     from backtide.analysis import plot_price
     from backtide.indicators import BollingerBands, SimpleMovingAverage

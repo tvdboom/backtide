@@ -6,6 +6,7 @@ Description: Shared fixtures for the test suite.
 """
 
 import os
+import tempfile
 
 import pytest
 
@@ -16,23 +17,15 @@ from backtide.data import (
     Interval,
 )
 
-
-@pytest.fixture(scope="session", autouse=True)
-def _init_config(tmp_path_factory):
-    """Set a deterministic config for all tests.
-
-    Uses a temporary directory for storage so tests never touch the real DB.
-    Uses yahoo as crypto provider since binance doesn't allow requests from CI.
-
-    """
-    set_config(
-        Config(
-            data=DataConfig(
-                storage_path=str(tmp_path_factory.mktemp("test_backtide_storage")),
-                providers={"crypto": "yahoo"},
-            ),
-        )
+# Set a deterministic config.
+set_config(
+    Config(
+        data=DataConfig(
+            storage_path=tempfile.mkdtemp(prefix="backtide_test_storage_"),
+            providers={"crypto": "yahoo"},
+        ),
     )
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

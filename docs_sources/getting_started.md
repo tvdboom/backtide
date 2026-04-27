@@ -88,7 +88,7 @@ Import backtide in any Python script or notebook for full programmatic control.
 from backtide.data import resolve_profiles, download_bars
 from backtide.storage import query_bars
 
-profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", "1d")
+profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", ["1h", "1d"])
 result = download_bars(profiles)
 
 data = query_bars("AAPL")

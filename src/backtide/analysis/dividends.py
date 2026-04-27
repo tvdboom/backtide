@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the dividend history chart for data analysis.
+Description: Module containing the dividend history chart.
 
 """
 
@@ -108,13 +108,10 @@ def plot_dividends(
     Examples
     --------
     ```pycon
-    import pandas as pd
-
     from backtide.storage import query_dividends
     from backtide.analysis import plot_dividends
 
     df = query_dividends(["AAPL", "MSFT"])
-    df["dt"] = pd.to_datetime(df["ex_date"], unit="s", utc=True)
 
     plot_dividends(df)
     ```

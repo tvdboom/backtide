@@ -53,58 +53,78 @@ familiarize yourself with the project layout before making any major contributio
 ### Folder structure
 
 ```text
-backtide/                       # Repository root
-├── pyproject.toml              # Python package metadata, dependencies & tool config
-├── tox.ini                     # Test / CI task runner configuration
-├── uv.lock                     # Locked dependency versions (managed by uv)
-├── mkdocs.yml                  # Documentation site configuration
-├── backtide.config.toml        # Default runtime configuration file
-├── .pre-commit-config.yaml     # Pre-commit hook definitions
+backtide/                           # Repository root
+├── pyproject.toml                  # Python package metadata, dependencies & tool config
+├── tox.ini                         # Test / CI task runner configuration
+├── uv.lock                         # Locked dependency versions (managed by uv)
+├── justfile                        # Convenience task recipes for `just`
+├── mkdocs.yml                      # Documentation site configuration
+├── backtide.config.toml            # Default runtime configuration file
+├── .pre-commit-config.yaml         # Pre-commit hook definitions
 │
-├── backtide/                   # Python package (public API)
-│   ├── __init__.py             # Top-level re-exports
-│   ├── backtest.py             # Backtest model re-exports
-│   ├── cli.py                  # Click CLI entry point (backtide launch / download)
-│   ├── config.py               # Configuration re-exports
-│   ├── constants.py            # Python-side constants
-│   ├── data.py                 # Data re-exports
-│   ├── storage.py              # Storage re-exports
-│   ├── core.*.pyd              # Compiled Rust extension (built by maturin)
-│   ├── ui/                     # Streamlit interactive UI
-│   │   ├── app.py              # Main Streamlit application
-│   │   ├── download.py         # Download page
-│   │   ├── experiment.py       # Experiment page
-│   │   ├── results.py          # Results page
-│   │   ├── storage.py          # Storage page
-│   │   └── utils.py            # UI helpers
-│   └── utils/                  # Python utility modules
-│       ├── constants.py
-│       ├── enum.py
-│       └── utils.py
+├── src/                            # Python package + Rust crate live under src/
+│   ├── backtide/                   # Python package (public API)
+│   │   ├── __init__.py
+│   │   ├── backtest.py             # Backtest model re-exports
+│   │   ├── cli.py                  # Click CLI entry point (backtide launch / download)
+│   │   ├── config.py               # Configuration re-exports
+│   │   ├── data.py                 # Data re-exports
+│   │   ├── storage.py              # Storage re-exports
+│   │   ├── core.*.pyd / .so        # Compiled Rust extension (built by maturin)
+│   │   ├── core/                   # Type stubs (.pyi) for the compiled extension
+│   │   ├── analysis/               # Plotting & statistics functions
+│   │   ├── indicators/             # Technical indicators (Python wrappers + base class)
+│   │   ├── strategies/             # Trading strategies (Python wrappers + base class)
+│   │   ├── ui/                     # Streamlit interactive UI
+│   │   │   ├── app.py              # Main Streamlit application (navigation)
+│   │   │   ├── analysis.py         # Analysis page
+│   │   │   ├── download.py         # Download page
+│   │   │   ├── experiment.py       # Experiment page
+│   │   │   ├── indicators.py       # Indicators page
+│   │   │   ├── results.py          # Results page
+│   │   │   ├── storage.py          # Storage page
+│   │   │   ├── strategies.py       # Strategies page
+│   │   │   └── utils.py            # UI helpers
+│   │   └── utils/                  # Python utility modules
+│   │       ├── constants.py
+│   │       ├── enum.py
+│   │       └── utils.py
+│   │
+│   └── backtide_core/              # Rust crate (compiled into backtide.core via PyO3)
+│       ├── Cargo.toml              # Crate metadata & dependencies
+│       ├── Cargo.lock              # Locked Rust dependency versions
+│       ├── rustfmt.toml            # Rust formatter configuration
+│       ├── src/
+│       │   ├── lib.rs              # Crate root & PyO3 module registration
+│       │   ├── engine.rs           # Core backtest engine
+│       │   ├── analysis.rs         # Statistics computation
+│       │   ├── constants.rs        # Shared constants
+│       │   ├── errors.rs           # Error types
+│       │   ├── backtest/           # Backtest models, indicators & strategies
+│       │   ├── config/             # Configuration models & parsing
+│       │   ├── data/               # Data layer: models & providers (Yahoo, Binance, Kraken, Coinbase)
+│       │   ├── storage/            # Storage layer: DuckDB backend & Storage trait
+│       │   └── utils/              # Utility functions & HTTP helpers
+│       └── benches/                # Criterion.rs benchmarks
+│           ├── storage_bench.rs    # DuckDB storage throughput / latency benchmarks
+│           └── data_bench.rs       # Live API download latency benchmarks
 │
-├── backtide_core/              # Rust crate (compiled into backtide.core via PyO3)
-│   ├── Cargo.toml              # Crate metadata & dependencies
-│   ├── Cargo.lock              # Locked Rust dependency versions
-│   ├── rustfmt.toml            # Rust formatter configuration
-│   ├── src/
-│   │   ├── lib.rs              # Crate root & PyO3 module registration
-│   │   ├── engine.rs           # Core backtest engine
-│   │   ├── constants.rs        # Shared constants
-│   │   ├── errors.rs           # Error types
-│   │   ├── backtest/           # Backtest models
-│   │   ├── config/             # Configuration models & parsing
-│   │   ├── data/               # Data layer: models, providers (Yahoo, Binance, Kraken, Coinbase)
-│   │   ├── storage/            # Storage layer: DuckDB backend & Storage trait
-│   │   └── utils/              # Utility functions & HTTP helpers
-│   └── benches/                # Criterion.rs benchmarks
-│       ├── storage_bench.rs    # DuckDB storage throughput / latency benchmarks
-│       └── data_bench.rs       # Live API download latency benchmarks
-│
-├── tests/                      # Python unit tests (pytest)
+├── tests/                          # Python unit tests (pytest)
 │   ├── __init__.py
-│   └── test_config.py
+│   ├── conftest.py                 # Shared fixtures
+│   ├── test_analysis.py
+│   ├── test_backtest.py
+│   ├── test_cli.py
+│   ├── test_config.py
+│   ├── test_data.py
+│   ├── test_storage.py
+│   ├── test_ui.py
+│   └── test_utils.py
 │
-├── docs_sources/               # MkDocs documentation sources
+├── scripts/                        # Developer scripts
+│   └── generate_stubs.py           # Regenerate .pyi stubs from the compiled extension
+│
+├── docs_sources/                   # MkDocs documentation sources
 │   ├── index.md
 │   ├── about.md
 │   ├── getting_started.md
@@ -112,14 +132,14 @@ backtide/                       # Repository root
 │   ├── dependencies.md
 │   ├── faq.md
 │   ├── license.md
-│   ├── user_guide/             # User-guide pages
-│   ├── api/                    # Auto-generated API reference pages
-│   ├── img/                    # Images, icons, logos
-│   ├── overrides/              # MkDocs Material theme overrides
-│   ├── scripts/                # Build-time hooks (autodocs, autorun)
-│   └── stylesheets/            # Custom CSS / JS
+│   ├── user_guide/                 # User-guide pages
+│   ├── api/                        # Auto-generated API reference pages
+│   ├── img/                        # Images, icons, logos
+│   ├── overrides/                  # MkDocs Material theme overrides
+│   ├── scripts/                    # Build-time hooks (autodocs, autorun)
+│   └── stylesheets/                # Custom CSS / JS
 │
-└── images/                     # Branding instruments & provider logos
+└── images/                         # Branding assets & provider logos
 ```
 
 ### Key technologies
@@ -135,7 +155,7 @@ backtide/                       # Repository root
 | Testing        | [pytest](https://docs.pytest.org) (Python) · `cargo test` (Rust)            |
 | Linting        | [Ruff](https://docs.astral.sh/ruff/) (Python) · `cargo clippy` / `cargo fmt` (Rust) |
 | Benchmarking   | [Criterion.rs](https://github.com/bheisler/criterion.rs)                    |
-| Task runner    | [tox](https://tox.wiki) with the [tox-uv](https://github.com/tox-dev/tox-uv) plugin |
+| Task runner    | [tox](https://tox.wiki) with the [tox-uv](https://github.com/tox-dev/tox-uv) plugin · [just](https://just.systems) for local recipes |
 | Package mgmt   | [uv](https://docs.astral.sh/uv/)                                            |
 
 
@@ -160,17 +180,34 @@ uv sync --all-groups
 ### 3. Build the Rust extension (development mode)
 
 ```bash
-maturin develop --manifest-path backtide_core/Cargo.toml
+uv pip install -e .
 ```
 
-This compiles the `backtide_core` crate and installs the resulting
-`.pyd` / `.so` extension into the active environment so that
-`import backtide.core` works without a full wheel build.
+This triggers `maturin` (configured as the PEP 517 build backend in
+`pyproject.toml`) to compile the `backtide_core` crate and place the resulting
+`.pyd` / `.so` extension next to the Python package, so that `import backtide.core`
+works without a full wheel build.
+
+If you prefer to invoke `maturin` directly:
+
+```bash
+maturin develop --manifest-path src/backtide_core/Cargo.toml
+```
 
 ### 4. Install pre-commit hooks
 
 ```bash
 pre-commit install
+```
+
+### 5. (Optional) install `just` for local task recipes
+
+A `justfile` at the repository root provides convenience recipes such as
+`just build`, `just test`, `just lint`, `just docs` and `just launch`.
+
+```bash
+uv tool install rust-just
+just --list
 ```
 
 <br><br>
@@ -197,7 +234,7 @@ pytest -n auto tests/
 Rust unit tests embedded in the `backtide_core` crate:
 
 ```bash
-cargo test --manifest-path backtide_core/Cargo.toml
+cargo test --manifest-path src/backtide_core/Cargo.toml --no-default-features
 ```
 
 <br><br>
@@ -214,7 +251,7 @@ in `tox.ini` and uses the [tox-uv](https://github.com/tox-dev/tox-uv) plugin so 
 | Environment       | What it does                                                             |
 |-------------------|--------------------------------------------------------------------------|
 | `py311` … `py314` | Build the wheel (including Rust compilation) and run pytest on that Python version. |
-| `py314-min`       | Test against the **oldest compatible** versions of runtime dependencies. |
+| `py311-min`       | Test against the **oldest compatible** versions of runtime dependencies. |
 | `cargo-test`      | Run `cargo test` on the Rust crate.                                      |
 | `pre-commit`      | Run all pre-commit hooks (`ruff`, `ruff-format`, `cargo fmt`, `cargo clippy`, …). |
 | `bench`           | Run Criterion.rs benchmarks (see [Benchmarks](#benchmarks)).             |
@@ -227,8 +264,9 @@ in `tox.ini` and uses the [tox-uv](https://github.com/tox-dev/tox-uv) plugin so 
 
 Performance of the Rust core is tracked with
 [Criterion.rs](https://github.com/bheisler/criterion.rs) benchmarks defined in
-`backtide_core/benches/`. Criterion generates HTML reports in `backtide_core/target/criterion/report/index.html`.
-Two benchmark suites exist:
+`src/backtide_core/benches/`. Criterion generates HTML reports in
+`src/backtide_core/target/criterion/report/index.html`. Two benchmark suites
+exist:
 
 ### Storage benchmarks
 
@@ -246,13 +284,13 @@ conditions.
 
 ```bash
 # All benchmarks
-cargo bench --manifest-path backtide_core/Cargo.toml
+cargo bench --manifest-path src/backtide_core/Cargo.toml
 
 # Storage only
-cargo bench --manifest-path backtide_core/Cargo.toml --bench storage_bench
+cargo bench --manifest-path src/backtide_core/Cargo.toml --bench storage_bench
 
 # Data/download only
-cargo bench --manifest-path backtide_core/Cargo.toml --bench data_bench
+cargo bench --manifest-path src/backtide_core/Cargo.toml --bench data_bench
 ```
 
 Or via tox:

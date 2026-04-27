@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the VWAP chart function for data analysis.
+Description: Module containing the VWAP chart function.
 
 """
 

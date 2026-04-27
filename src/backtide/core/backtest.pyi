@@ -128,13 +128,16 @@ class AdaptiveRsi:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -220,13 +223,16 @@ class AlphaRsiPro:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -591,13 +597,16 @@ class BollingerMeanReversion:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -670,13 +679,16 @@ class BuyAndHold:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -1128,13 +1140,16 @@ class DoubleTop:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -1769,13 +1784,16 @@ class HybridAlphaRsi:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -1922,13 +1940,16 @@ class Macd:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -2012,13 +2033,16 @@ class Momentum:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -2211,13 +2235,16 @@ class MultiBollingerRotation:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -2726,13 +2753,16 @@ class RiskAverse:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -2812,13 +2842,16 @@ class Roc:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -2906,13 +2939,16 @@ class RocRotation:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -3002,13 +3038,16 @@ class Rsi:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -3089,13 +3128,16 @@ class Rsrs:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -3184,13 +3226,16 @@ class RsrsRotation:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -3362,13 +3407,16 @@ class SmaCrossover:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -3449,13 +3497,16 @@ class SmaNaive:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -3474,17 +3525,25 @@ class SmaNaive:
 class State:
     """The simulation state passed to a strategy's `evaluate` method on every tick.
 
-    Contains the current portfolio (cash balances and open positions) and
-    the UTC timestamp of the bar being processed as seconds since the Unix
-    epoch.
+    Contains metadata about the current position in the simulation: the UTC
+    timestamp of the bar being processed, the zero-based bar index, the total
+    number of bars in the dataset, and whether the engine is still in the
+    warmup phase (where indicators are computed but no orders are placed).
 
     Attributes
     ----------
-    portfolio : [Portfolio]
-        Current portfolio holdings (cash and positions).
-
     timestamp : int
         UTC timestamp of the current bar in seconds since the Unix epoch.
+
+    bar_index : int
+        Zero-based index of the current bar in the dataset.
+
+    total_bars : int
+        Total number of bars in the dataset.
+
+    is_warmup : bool
+        Whether the engine is currently in the warmup phase. During warmup
+        indicators are computed but orders are not executed.
 
     datetime : datetime.datetime
         The `timestamp` as a timezone-aware datetime. Uses the timezone from
@@ -3499,9 +3558,11 @@ class State:
 
     """
 
+    bar_index: int
     datetime: datetime.datetime
-    portfolio: Portfolio
+    is_warmup: bool
     timestamp: int
+    total_bars: int
 
     def __eq__(self, value, /):
         ...
@@ -3761,13 +3822,16 @@ class TripleRsiRotation:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -3856,13 +3920,16 @@ class TurtleTrading:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
@@ -3947,13 +4014,16 @@ class Vcp:
             The description.
 
         """
-    def evaluate(self, _data, _state, _indicators) -> list[Order]:
+    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
+
+        portfolio : [Portfolio]
+            Current portfolio holdings (cash, positions and open orders).
 
         state : [State]
             Current simulation state.
