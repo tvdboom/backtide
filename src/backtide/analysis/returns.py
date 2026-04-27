@@ -114,8 +114,6 @@ def plot_returns(
     from backtide.analysis import plot_returns
 
     df = query_bars("AAPL" "1d")
-    df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
-
     plot_returns(df)
     ```
 

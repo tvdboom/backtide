@@ -113,16 +113,15 @@ def plot_volume(
     from backtide.analysis import plot_volume
 
     df = query_bars("AAPL", "1d")
-    df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
 
     # Plot raw share volume
     plot_volume(df)
 
     # Plot price x share (dollar volume)
     df_vol = df.copy()
-    df["volume"] = df["volume"] * df["close"]
-    df["currency"] = "USD"  # Add currency to format labels
-    plot_volume(df, title="Dollar volume for AAPL")
+    df_vol["volume"] = df_vol["volume"] * df_vol["close"]
+    df_vol["currency"] = "USD"  # Add currency to format labels
+    plot_volume(df_vol, title="Dollar volume for AAPL")
     ```
 
     """

@@ -123,7 +123,6 @@ def plot_candlestick(
     # Show only the last 30 days
     df = df.sort_values("open_ts").iloc[-30:]
 
-    df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
     plot_candlestick(df, title="AAPL Daily")
     ```
 

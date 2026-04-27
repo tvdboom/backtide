@@ -138,7 +138,6 @@ def plot_price(
     from backtide.indicators import BollingerBands, SimpleMovingAverage
 
     df = query_bars(["AAPL", "MSFT"], "1d")
-    df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
 
     # Compare the price of two symbols
     plot_price(df)

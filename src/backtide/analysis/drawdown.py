@@ -114,8 +114,6 @@ def plot_drawdown(
     from backtide.analysis import plot_drawdown
 
     df = query_bars(["AAPL", "MSFT"], "1d")
-    df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
-
     plot_drawdown(df)
     ```
 

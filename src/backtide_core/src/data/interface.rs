@@ -255,7 +255,7 @@ pub fn list_instruments(
 /// ```pycon
 /// from backtide.data import resolve_profiles, download_bars
 ///
-/// profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", "1d")
+/// profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", ["1h", "1d"])
 /// result = download_bars(profiles)
 /// print(result)
 /// ```

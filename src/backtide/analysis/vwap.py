@@ -20,7 +20,7 @@ from backtide.analysis.utils import (
     _resolve_dt,
 )
 from backtide.config import get_config
-from backtide.utils.utils import _to_pandas
+from backtide.utils.utils import _format_price, _to_pandas
 
 cfg = get_config()
 
@@ -114,8 +114,6 @@ def plot_vwap(
     from backtide.analysis import plot_vwap
 
     df = query_bars(["AAPL", "MSFT"], "1d")
-    df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
-
     plot_vwap(df)
     ```
 
@@ -125,14 +123,22 @@ def plot_vwap(
 
     fig = go.Figure()
     currency = _get_currency_symbol(data)
+    intraday = data["dt"].dt.date.duplicated(keep=False).any()
 
     for idx, symbol in enumerate(data["symbol"].unique()):
         subset = data[data["symbol"] == symbol].sort_values("dt")
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
-        # Compute typical price and cumulative VWAP
+        # Compute typical price and VWAP
         typical_price = (subset["high"] + subset["low"] + subset["close"]) / 3
-        vwap = (typical_price * subset["volume"]).cumsum() / subset["volume"].cumsum()
+        tp_vol = typical_price * subset["volume"]
+
+        if intraday:
+            # Reset VWAP daily for intraday data
+            day = subset["dt"].dt.date
+            vwap = tp_vol.groupby(day).cumsum() / subset["volume"].groupby(day).cumsum()
+        else:
+            vwap = tp_vol.cumsum() / subset["volume"].cumsum()
 
         # Close price as a thin line
         fig.add_trace(
@@ -145,7 +151,11 @@ def plot_vwap(
                 opacity=0.8,
                 legendgroup=symbol,
                 legendgrouptitle_text=symbol,
-                hovertemplate="%{x}<br>Close: %{y:.2f}<extra>" + symbol + "</extra>",
+                customdata=[
+                    _format_price(x["close"], currency=x.get("currency"))
+                    for _, x in subset.iterrows()
+                ],
+                hovertemplate=f"%{{x}}<br>Close: %{{customdata}}<extra>{symbol}</extra>",
             )
         )
 
@@ -158,7 +168,11 @@ def plot_vwap(
                 name="VWAP",
                 line={"color": color, "width": 2},
                 legendgroup=symbol,
-                hovertemplate="%{x}<br>VWAP: %{y:.2f}<extra>" + symbol + "</extra>",
+                customdata=[
+                    _format_price(vwap[i], currency=x.get("currency"))
+                    for i, x in subset.iterrows()
+                ],
+                hovertemplate=f"%{{x}}<br>VWAP: %{{customdata}}<extra>{symbol}</extra>",
             )
         )
 

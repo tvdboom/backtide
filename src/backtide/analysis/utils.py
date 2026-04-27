@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 
 from backtide.core.config import get_config
 from backtide.core.data import Currency
-from backtide.ui.utils import _get_timezone, _moment_to_strftime
+from backtide.ui.utils import _get_timezone
 from backtide.utils.utils import _ts_to_datetime
 
 if TYPE_CHECKING:
@@ -229,7 +229,6 @@ def _plot(
         "showlegend": legend is not None,
         "hoverlabel": {"font_size": cfg.plots.label_fontsize},
         "margin": {"l": 50, "b": 50, "r": 0, "t": 25 + title_space, "pad": 0},
-        "xaxis_tickformat": _moment_to_strftime(get_config().display.date_format),
         "xaxis_tickfont_size": cfg.plots.tick_fontsize,
         "yaxis_tickfont_size": cfg.plots.tick_fontsize,
     }

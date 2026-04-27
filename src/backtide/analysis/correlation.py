@@ -110,8 +110,6 @@ def plot_correlation(
     from backtide.analysis import plot_correlation
 
     df = query_bars(["AAPL", "MSFT", "GOOG"], "1d")
-    df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
-
     plot_correlation(df)
     ```
 

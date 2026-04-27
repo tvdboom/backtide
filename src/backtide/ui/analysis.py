@@ -84,7 +84,7 @@ symbols = st.multiselect(  # ty: ignore[no-matching-overload]
     label="Symbols",
     key=(key := "symbols"),
     options=all_i,
-    default=_default("symbols"),
+    default=_default("symbols", [])[:5],
     format_func=lambda s: f"{s} - {all_i[s].name}" if all_i[s].instrument_type.is_equity else s,
     placeholder="Select one or more symbols...",
     max_selections=5,
@@ -745,7 +745,10 @@ with tab_map[tab_returns]:
 
 with tab_map[tab_seasonality]:
     col1, col2 = st.columns([10, 1])
-    col1.caption("Monthly returns heatmap showing seasonal patterns.")
+    if interval.is_intraday():
+        col1.caption("Average returns heatmap by hour and day of week.")
+    else:
+        col1.caption("Average returns heatmap by month and year.")
 
     with col2.popover(":material/tune:"):
         price_col = price_col_radio("price_col_season")
@@ -760,9 +763,12 @@ with tab_map[tab_seasonality]:
         )
 
     if active_tab == tab_seasonality:
-        season_bars = bars[bars["symbol"] == season_symbol]
         st.plotly_chart(
-            plot_seasonality(data=season_bars, price_col=price_col, display=None),
+            plot_seasonality(
+                data=bars[bars["symbol"] == season_symbol],
+                price_col=price_col,
+                display=None,
+            ),
             width="stretch",
         )
 
