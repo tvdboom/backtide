@@ -120,7 +120,7 @@ nav:
         - Storage: user_guide/storage.md
         - Indicators: user_guide/indicators.md
         - Strategies: user_guide/strategies.md
-        - Analysis: user_guide/analysis.md
+        - Plots: user_guide/plots.md
         - Configuration: user_guide/configuration.md
     - API:
         - config:
@@ -136,13 +136,14 @@ nav:
             - compute_statistics: api/analysis/compute_statistics.md
             - plot_candlestick: api/analysis/plot_candlestick.md
             - plot_correlation: api/analysis/plot_correlation.md
+            - plot_dividends: api/analysis/plot_dividends.md
             - plot_drawdown: api/analysis/plot_drawdown.md
             - plot_price: api/analysis/plot_price.md
             - plot_returns: api/analysis/plot_returns.md
             - plot_seasonality: api/analysis/plot_seasonality.md
+            - plot_volatility: api/analysis/plot_volatility.md
             - plot_volume: api/analysis/plot_volume.md
             - plot_vwap: api/analysis/plot_vwap.md
-            - plot_dividends: api/analysis/plot_dividends.md
         - storage:
             - query_bars: api/storage/query_bars.md
             - query_bars_summary: api/storage/query_bars_summary.md

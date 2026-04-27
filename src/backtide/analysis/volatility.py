@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Module containing the dividend history chart for data analysis.
+Description: Module containing the rolling volatility chart.
 
 """
 
@@ -12,13 +12,7 @@ from typing import Any, overload
 
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import (
-    DataFrameLike,
-    _check_columns,
-    _get_currency_symbol,
-    _plot,
-    _resolve_dt,
-)
+from backtide.analysis.utils import DataFrameLike, _check_columns, _plot, _resolve_dt
 from backtide.config import get_config
 from backtide.utils.utils import _to_pandas
 
@@ -26,8 +20,10 @@ cfg = get_config()
 
 
 @overload
-def plot_dividends(
+def plot_volatility(
     data: DataFrameLike,
+    price_col: str = ...,
+    window: int = ...,
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -36,8 +32,10 @@ def plot_dividends(
     display: None = ...,
 ) -> go.Figure: ...
 @overload
-def plot_dividends(
+def plot_volatility(
     data: DataFrameLike,
+    price_col: str = ...,
+    window: int = ...,
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -47,8 +45,10 @@ def plot_dividends(
 ) -> None: ...
 
 
-def plot_dividends(
+def plot_volatility(
     data: DataFrameLike,
+    price_col: str = "adj_close",
+    window: int = 21,
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
@@ -56,17 +56,23 @@ def plot_dividends(
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
-    """Create a dividend history chart.
+    """Create a rolling volatility chart.
 
-    Displays dividend payments over time for one or more symbols as a bar
-    chart with markers, making it easy to compare payout history and
-    identify trends.
+    Plots the rolling standard deviation of percentage returns over a
+    configurable window for one or more symbols. Useful for tracking how
+    risk evolves over time and comparing volatility regimes.
 
     Parameters
     ----------
     data : pd.DataFrame | pl.DataFrame
-        Input data containing columns `symbol`, `ex_date` (unix timestamp
-        or datetime) and `amount` with the dividend amount.
+        Input data containing columns `symbol`, the column specified by
+        `price_col`, and `dt` with the datetime.
+
+    price_col : str, default="adj_close"
+        Column name used to compute returns.
+
+    window : int, default=21
+        Rolling window size (number of bars) for computing volatility.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -102,7 +108,6 @@ def plot_dividends(
     See Also
     --------
     - backtide.analysis:plot_drawdown
-    - backtide.analysis:plot_price
     - backtide.analysis:plot_returns
 
     Examples
@@ -110,49 +115,35 @@ def plot_dividends(
     ```pycon
     import pandas as pd
 
-    from backtide.storage import query_dividends
-    from backtide.analysis import plot_dividends
+    from backtide.storage import query_bars
+    from backtide.analysis import plot_volatility
 
-    df = query_dividends(["AAPL", "MSFT"])
-    df["dt"] = pd.to_datetime(df["ex_date"], unit="s", utc=True)
+    df = query_bars("AAPL", "1d")
+    df["dt"] = pd.to_datetime(df["open_ts"], unit="s", utc=True)
 
-    plot_dividends(df)
+    plot_volatility(df, window=21)
     ```
 
     """
     data = _resolve_dt(_to_pandas(data))
-    _check_columns(data, ["symbol", "dt", "amount"], "plot_dividends")
+    _check_columns(data, ["symbol", price_col, "dt"], "plot_volatility")
 
     fig = go.Figure()
-    currency = _get_currency_symbol(data)
 
     for idx, symbol in enumerate(data["symbol"].unique()):
         subset = data[data["symbol"] == symbol].sort_values("dt")
+        returns = subset[price_col].pct_change() * 100
+        rolling_vol = returns.rolling(window=window).std()
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
-        # Stem lines from zero to each dividend amount
-        for _, row in subset.iterrows():
-            fig.add_trace(
-                go.Scatter(
-                    x=[row["dt"], row["dt"]],
-                    y=[0, row["amount"]],
-                    mode="lines",
-                    line={"color": color, "width": 2},
-                    showlegend=False,
-                    hoverinfo="skip",
-                )
-            )
-
-        # Markers at the dividend amounts
         fig.add_trace(
             go.Scatter(
                 x=subset["dt"],
-                y=subset["amount"],
+                y=rolling_vol,
+                mode="lines",
                 name=symbol,
-                mode="markers",
-                marker={"color": color, "size": 8, "symbol": "circle"},
-                opacity=0.9,
-                hovertemplate="%{x}<br>Dividend: $%{y:.2f}<extra>" + symbol + "</extra>",
+                line={"color": color, "width": 2},
+                hovertemplate=f"%{{x}}<br>Rolling volatility: %{{y:.2f}}%<extra>{symbol}</extra>",
             )
         )
 
@@ -160,8 +151,8 @@ def plot_dividends(
         fig,
         title=title,
         legend=legend,
-        xlabel="Ex-Dividend Date",
-        ylabel=f"Dividend ({currency.symbol})" if currency else "Dividend",
+        xlabel="Date",
+        ylabel="Volatility (%)",
         figsize=figsize,
         filename=filename,
         display=display,

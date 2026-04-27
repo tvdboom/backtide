@@ -141,7 +141,7 @@ def plot_vwap(
                 y=subset["close"],
                 mode="lines",
                 name="Close",
-                line={"color": color, "width": 1, "dash": "dot"},
+                line={"color": color, "width": 2, "dash": "dot"},
                 opacity=0.8,
                 legendgroup=symbol,
                 legendgrouptitle_text=symbol,
@@ -156,7 +156,7 @@ def plot_vwap(
                 y=vwap,
                 mode="lines",
                 name="VWAP",
-                line={"color": color, "width": 2.5},
+                line={"color": color, "width": 2},
                 legendgroup=symbol,
                 hovertemplate="%{x}<br>VWAP: %{y:.2f}<extra>" + symbol + "</extra>",
             )

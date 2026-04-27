@@ -12,6 +12,7 @@ from backtide.analysis.drawdown import plot_drawdown
 from backtide.analysis.price import plot_price
 from backtide.analysis.returns import plot_returns
 from backtide.analysis.seasonality import plot_seasonality
+from backtide.analysis.volatility import plot_volatility
 from backtide.analysis.volume import plot_volume
 from backtide.analysis.vwap import plot_vwap
 from backtide.core.analysis import compute_statistics
