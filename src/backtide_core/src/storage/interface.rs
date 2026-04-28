@@ -374,3 +374,61 @@ pub fn delete_symbols(
 
     Ok(Engine::get()?.delete_symbols(&tuples)?)
 }
+
+/// Return stored experiments, optionally filtered by a search string.
+///
+/// The `search` parameter does a case-insensitive substring match on
+/// experiment name and tags.
+///
+/// Parameters
+/// ----------
+/// search : str | None, default=None
+///     Substring matched against experiment name and tags. `None`
+///     returns every experiment.
+///
+/// limit : int | None, default=None
+///     Maximum number of rows to return. `None` means no limit.
+///
+/// Returns
+/// -------
+/// pd.DataFrame | pl.DataFrame
+///     One row per experiment.
+#[pyfunction]
+#[pyo3(signature = (search: "str | None"=None, *, limit: "int | None"=None))]
+pub fn query_experiments(
+    py: Python<'_>,
+    search: Option<&str>,
+    limit: Option<usize>,
+) -> PyResult<Py<PyAny>> {
+    let rows = Engine::get()?.db.query_experiments(search, limit)?;
+    to_df!(py, rows, {
+        "id"            => |r| &r.id,
+        "name"          => |r| &r.name,
+        "tags"          => |r| r.tags.join(","),
+        "description"   => |r| &r.description,
+        "started_at"    => |r| r.started_at,
+        "finished_at"   => |r| r.finished_at,
+        "status"        => |r| &r.status,
+        "total_return"  => |r| r.total_return,
+        "n_strategies"  => |r| r.n_strategies,
+    })
+}
+
+/// Return every per-strategy result for a given experiment.
+///
+/// Parameters
+/// ----------
+/// experiment_id : str
+///     The experiment id (as stored in the `experiments` table).
+///
+/// Returns
+/// -------
+/// list[[StrategyRunResult]]
+///     One result entry per strategy that ran in this experiment.
+#[pyfunction]
+#[pyo3(signature = (experiment_id: "str") -> "list[StrategyRunResult]")]
+pub fn query_experiment_strategies(
+    experiment_id: &str,
+) -> PyResult<Vec<crate::backtest::models::experiment_result::StrategyRunResult>> {
+    Ok(Engine::get()?.db.query_experiment_strategies(experiment_id)?)
+}

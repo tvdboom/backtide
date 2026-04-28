@@ -45,6 +45,7 @@ pub enum OrderType {
     TrailingStop,
     TrailingStopLimit,
     SettlePosition,
+    CancelOrder,
 }
 
 #[pymethods]
@@ -78,6 +79,7 @@ impl OrderType {
             Self::TrailingStop => "Trailing-Stop",
             Self::TrailingStopLimit => "Trailing-Stop-Limit",
             Self::SettlePosition => "Settle-Position",
+            Self::CancelOrder => "Cancel-Order",
         }
     }
 
@@ -98,6 +100,7 @@ impl OrderType {
             Self::TrailingStop => "A stop order whose trigger price trails the market price by a fixed offset, locking in gains as the price moves favourably.",
             Self::TrailingStopLimit => "A trailing stop that converts to a limit order instead of a market order when triggered.",
             Self::SettlePosition => "Closes an existing open position entirely at the current market price.",
+            Self::CancelOrder => "Cancels a previously submitted order, identified by its id.",
         }
     }
 

@@ -30,6 +30,7 @@ from backtide.backtest import (
     OrderType,
     PortfolioExpConfig,
     StrategyExpConfig,
+    run_experiment,
 )
 from backtide.config import get_config
 from backtide.core.data import resolve_profiles
@@ -59,8 +60,6 @@ from backtide.utils.constants import (
 logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(
     logging.ERROR
 )
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -151,66 +150,69 @@ def _build_config_toml(
     defaults: ExperimentConfig,
 ) -> str:
     """Build an ExperimentConfig from widget state and return it as TOML."""
+
+    def _get(key: str, fallback: Any) -> Any:
+        """Pull *key* from state, but coerce ``None`` to *fallback*.
+
+        Streamlit widgets can yield ``None`` (e.g. when a text widget is empty
+        or the key is present but unset), and most of the Rust-backed configs
+        reject ``None`` for non-optional fields.
+        """
+        v = state.get(key, fallback)
+        return fallback if v is None else v
+
     cfg = ExperimentConfig(
         general=GeneralExpConfig(
-            name=experiment_name,
-            tags=state.get("tags", defaults.general.tags),
-            description=state.get("description", defaults.general.description),
+            name=experiment_name or "",
+            tags=_get("tags", defaults.general.tags),
+            description=_get("description", defaults.general.description),
         ),
         data=DataExpConfig(
-            instrument_type=state.get("instrument_type", defaults.data.instrument_type),
+            instrument_type=_get("instrument_type", defaults.data.instrument_type),
             symbols=[
                 s.symbol if hasattr(s, "symbol") else str(s)
-                for s in state.get("symbols", defaults.data.symbols)
+                for s in _get("symbols", defaults.data.symbols)
             ],
-            full_history=state.get("full_history", defaults.data.full_history),
+            full_history=_get("full_history", defaults.data.full_history),
             start_date=str(state.get("start_date")) if state.get("start_date") else None,
             end_date=str(state.get("end_date")) if state.get("end_date") else None,
-            interval=state.get("interval", defaults.data.interval),
+            interval=_get("interval", defaults.data.interval),
         ),
         portfolio=PortfolioExpConfig(
-            initial_cash=state.get("initial_cash", defaults.portfolio.initial_cash),
-            base_currency=state.get("base_currency", defaults.portfolio.base_currency),
-            starting_positions=state.get(
-                "starting_positions", defaults.portfolio.starting_positions
-            ),
+            initial_cash=_get("initial_cash", defaults.portfolio.initial_cash),
+            base_currency=_get("base_currency", defaults.portfolio.base_currency),
+            starting_positions=_get("starting_positions", defaults.portfolio.starting_positions),
         ),
         strategy=_build_strategy_config(state),
         indicators=_build_indicator_config(state),
         exchange=ExchangeExpConfig(
-            commission_type=state.get("commission_type", defaults.exchange.commission_type),
-            commission_pct=state.get("commission_pct", defaults.exchange.commission_pct),
-            commission_fixed=state.get("commission_fixed", defaults.exchange.commission_fixed),
-            slippage=state.get("slippage", defaults.exchange.slippage),
-            allowed_order_types=state.get(
-                "allowed_order_types", defaults.exchange.allowed_order_types
-            ),
-            partial_fills=state.get("partial_fills", defaults.exchange.partial_fills),
-            allow_margin=state.get("allow_margin", defaults.exchange.allow_margin),
-            max_leverage=state.get("max_leverage", defaults.exchange.max_leverage),
-            initial_margin=state.get("initial_margin", defaults.exchange.initial_margin),
-            maintenance_margin=state.get(
-                "maintenance_margin", defaults.exchange.maintenance_margin
-            ),
-            margin_interest=state.get("margin_interest", defaults.exchange.margin_interest),
-            allow_short_selling=state.get(
-                "allow_short_selling", defaults.exchange.allow_short_selling
-            ),
-            borrow_rate=state.get("borrow_rate", defaults.exchange.borrow_rate),
-            max_position_size=state.get("max_position_size", defaults.exchange.max_position_size),
-            conversion_mode=state.get("conversion_mode", defaults.exchange.conversion_mode),
+            commission_type=_get("commission_type", defaults.exchange.commission_type),
+            commission_pct=_get("commission_pct", defaults.exchange.commission_pct),
+            commission_fixed=_get("commission_fixed", defaults.exchange.commission_fixed),
+            slippage=_get("slippage", defaults.exchange.slippage),
+            allowed_order_types=_get("allowed_order_types", defaults.exchange.allowed_order_types),
+            partial_fills=_get("partial_fills", defaults.exchange.partial_fills),
+            allow_margin=_get("allow_margin", defaults.exchange.allow_margin),
+            max_leverage=_get("max_leverage", defaults.exchange.max_leverage),
+            initial_margin=_get("initial_margin", defaults.exchange.initial_margin),
+            maintenance_margin=_get("maintenance_margin", defaults.exchange.maintenance_margin),
+            margin_interest=_get("margin_interest", defaults.exchange.margin_interest),
+            allow_short_selling=_get("allow_short_selling", defaults.exchange.allow_short_selling),
+            borrow_rate=_get("borrow_rate", defaults.exchange.borrow_rate),
+            max_position_size=_get("max_position_size", defaults.exchange.max_position_size),
+            conversion_mode=_get("conversion_mode", defaults.exchange.conversion_mode),
             conversion_threshold=state.get("conversion_threshold"),
             conversion_period=state.get("conversion_period"),
             conversion_interval=state.get("conversion_interval"),
         ),
         engine=EngineExpConfig(
-            warmup_period=state.get("warmup_period", defaults.engine.warmup_period),
-            trade_on_close=state.get("trade_on_close", defaults.engine.trade_on_close),
-            risk_free_rate=state.get("risk_free_rate", defaults.engine.risk_free_rate),
-            benchmark=state.get("benchmark", defaults.engine.benchmark),
-            exclusive_orders=state.get("exclusive_orders", defaults.engine.exclusive_orders),
+            warmup_period=_get("warmup_period", defaults.engine.warmup_period),
+            trade_on_close=_get("trade_on_close", defaults.engine.trade_on_close),
+            risk_free_rate=_get("risk_free_rate", defaults.engine.risk_free_rate),
+            benchmark=_get("benchmark", defaults.engine.benchmark),
+            exclusive_orders=_get("exclusive_orders", defaults.engine.exclusive_orders),
             random_seed=state.get("random_seed"),
-            empty_bar_policy=state.get("empty_bar_policy", defaults.engine.empty_bar_policy),
+            empty_bar_policy=_get("empty_bar_policy", defaults.engine.empty_bar_policy),
         ),
     )
     return cfg.to_toml()
@@ -300,7 +302,7 @@ with tab1:
         key=(key := "experiment_name"),
         value=_default(key),
         placeholder=st.session_state.experiment_id,
-        max_chars=40,
+        max_chars=28,
         on_change=lambda k=key: _persist(k),
         help=(
             "A human-readable name to identify this experiment (optional). "
@@ -320,7 +322,7 @@ with tab1:
 
     col2.download_button(
         label="Download configuration",
-        data=_build_experiment_config,
+        data=_build_experiment_config(),
         file_name=f"{experiment_name or st.session_state.experiment_id}.toml",
         mime="application/toml",
         icon=":material/download:",
@@ -1161,17 +1163,53 @@ with tab7:
 
 st.divider()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Experiment logic
+# ─────────────────────────────────────────────────────────────────────────────
+
+running_experiment = st.session_state.get("running_experiment", False)
+
 if st.button(
     label="Run experiment",
+    key="running_experiment",
     icon=":material/play_circle:",
     type="primary",
-    disabled=not (profiles and start_ts and latest_ts),
+    disabled=not (profiles and start_ts and latest_ts and selected_strat) or running_experiment,
     shortcut="Enter",
     width="stretch",
 ):
-    with st.spinner(f"Running experiment {experiment_name}..."):
-        # TODO: implement backtest execution logic
-        st.success(
-            f"Backtest **{experiment_name}** queued successfully.",
-            icon=":material/check_circle:",
-        )
+    cfg_str = _build_experiment_config()
+    exp_cfg = ExperimentConfig.from_toml(cfg_str)
+    with st.spinner(f"Running experiment **{experiment_name}**..."):
+        try:
+            result = run_experiment(exp_cfg, verbose=False)
+        except Exception as ex:  # noqa: BLE001
+            st.error(f"Experiment failed: {ex}", icon=":material/error:")
+        else:
+            n_strats = len(result.strategies)
+
+            if result.status == "completed" and not result.warnings:
+                st.success(
+                    f"Experiment **{experiment_name}** finished successfully. "
+                    f"Evaluated {n_strats} strateg{'y' if n_strats == 1 else 'ies'}.",
+                    icon=":material/check_circle:",
+                )
+            elif result.status == "completed":
+                st.warning(
+                    f"Experiment **{experiment_name}** finished with {len(warnings)} warning"
+                    f"{'s' if len(warnings) > 1 else ''}. Evaluated {n_strats} strateg"
+                    f"{'y' if n_strats == 1 else 'ies'}.\n\n"
+                    + "\n".join(f"- {w}" for w in warnings),
+                    icon=":material/warning:",
+                )
+            else:
+                st.error(
+                    f"Experiment **{experiment_name}** failed.\n\n"
+                    + "\n".join(f"- {w}" for w in warnings),
+                    icon=":material/error:",
+                )
+
+            st.session_state["last_experiment_id"] = result.experiment_id
+            if st.button("View results", icon=":material/fact_check:"):
+                st.switch_page("results.py")

@@ -246,7 +246,7 @@ analysis = st.Page(
 
 pg = st.navigation(
     {
-        "Backtest": [experiment, results, strategies, indicators],
+        "Backtest": [experiment, strategies, indicators, results],
         "Data": [download, storage, analysis],
     }
 )

@@ -987,6 +987,30 @@ class TestBuildConfigToml:
         assert "2020-01-01" in result
         assert "2023-12-31" in result
 
+    def test_none_values_coerced_to_defaults(self):
+        """None values in state must not break the Rust constructors.
+
+        Streamlit text widgets can return ``None`` (e.g. an empty
+        ``text_area`` after the user clears it). The builder must coerce
+        those back to the dataclass defaults rather than passing ``None``
+        through to the typed Rust fields.
+        """
+        # Simulate every str-typed widget being explicitly None.
+        state = {
+            "description": None,
+            "tags": None,
+            "benchmark": None,
+            "symbols": None,
+        }
+        # Should not raise.
+        result = self._build(state, "exp", ExperimentConfig())
+        assert "exp" in result
+
+    def test_empty_experiment_name_uses_blank(self):
+        """An empty experiment name is allowed (mirrors the UI default)."""
+        result = self._build({}, "", ExperimentConfig())
+        assert isinstance(result, str)
+
 
 class TestParseConfigUpload:
     """Tests for _parse_config_upload."""

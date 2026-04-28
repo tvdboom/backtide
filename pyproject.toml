@@ -161,6 +161,10 @@ force-sort-within-sections = true
     "INP001",  # Part of an implicit namespace package
     "T201",  # Use print statement
 ]
+"run_cargo.py" = [
+    "INP001",  # Part of an implicit namespace package
+    "T201",  # Use print statement
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"

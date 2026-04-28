@@ -13,6 +13,7 @@ use crate::storage::models::bar_summary::BarSummary;
 use crate::storage::models::dividend_series::DividendSeries;
 use crate::storage::models::stored_bar::StoredBar;
 use crate::storage::models::stored_dividend::StoredDividend;
+use crate::storage::models::stored_experiment::StoredExperiment;
 use crate::storage::traits::Storage;
 use duckdb::params;
 use duckdb::params_from_iter;
@@ -80,8 +81,60 @@ impl Storage for DuckDb {
                 amount            DOUBLE NOT NULL,
                 UNIQUE (symbol, provider, ex_date)
             );
+
+            CREATE TABLE IF NOT EXISTS experiments (
+                id                VARCHAR PRIMARY KEY,
+                name              VARCHAR NOT NULL,
+                tags              VARCHAR NOT NULL,
+                description       VARCHAR NOT NULL,
+                config_toml       VARCHAR NOT NULL,
+                started_at        BIGINT NOT NULL,
+                finished_at       BIGINT NOT NULL,
+                status            VARCHAR NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS experiment_strategies (
+                id                VARCHAR PRIMARY KEY,
+                experiment_id     VARCHAR NOT NULL,
+                strategy_id       VARCHAR NOT NULL,
+                strategy_name     VARCHAR NOT NULL,
+                metrics           VARCHAR NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS experiment_equity (
+                strategy_run_id   VARCHAR NOT NULL,
+                ts                BIGINT NOT NULL,
+                equity            DOUBLE NOT NULL,
+                cash              DOUBLE NOT NULL,
+                drawdown          DOUBLE NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS experiment_orders (
+                strategy_run_id   VARCHAR NOT NULL,
+                order_id          VARCHAR NOT NULL,
+                ts                BIGINT NOT NULL,
+                symbol            VARCHAR NOT NULL,
+                order_type        VARCHAR NOT NULL,
+                quantity          BIGINT NOT NULL,
+                price             DOUBLE,
+                status            VARCHAR NOT NULL,
+                fill_price        DOUBLE,
+                reason            VARCHAR NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS experiment_trades (
+                strategy_run_id   VARCHAR NOT NULL,
+                symbol            VARCHAR NOT NULL,
+                quantity          BIGINT NOT NULL,
+                entry_ts          BIGINT NOT NULL,
+                exit_ts           BIGINT NOT NULL,
+                entry_price       DOUBLE NOT NULL,
+                exit_price        DOUBLE NOT NULL,
+                pnl               DOUBLE NOT NULL
+            );
         ",
         )?;
+
 
         Ok(())
     }
@@ -590,6 +643,270 @@ impl Storage for DuckDb {
 
         conn.execute_batch("COMMIT")?;
         Ok(total_deleted)
+    }
+
+    fn write_experiment(
+        &self,
+        config: &crate::backtest::models::experiment_config::ExperimentConfig,
+        result: &crate::backtest::models::experiment_result::ExperimentResult,
+    ) -> StorageResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("BEGIN TRANSACTION")?;
+
+        // Use the inner serializable representation for TOML.
+        let inner = crate::backtest::models::experiment_config::ExperimentConfigInner {
+            general: config.general.clone(),
+            data: config.data.clone(),
+            portfolio: config.portfolio.clone(),
+            strategy: config.strategy.clone(),
+            indicators: config.indicators.clone(),
+            exchange: config.exchange.clone(),
+            engine: config.engine.clone(),
+        };
+        let cfg_toml = toml::to_string_pretty(&inner).unwrap_or_default();
+        let tags_str = result.tags.join(",");
+
+        conn.execute(
+            "INSERT OR REPLACE INTO experiments
+             (id, name, tags, description, config_toml, started_at, finished_at, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                result.experiment_id,
+                result.name,
+                tags_str,
+                config.general.description,
+                cfg_toml,
+                result.started_at,
+                result.finished_at,
+                result.status,
+            ],
+        )?;
+
+        for strat in &result.strategies {
+            let run_id = &strat.strategy_id;
+            let metrics_str = serde_json::to_string(&strat.metrics).unwrap_or_default();
+
+            conn.execute(
+                "INSERT OR REPLACE INTO experiment_strategies
+                 (id, experiment_id, strategy_id, strategy_name, metrics) VALUES (?, ?, ?, ?, ?)",
+                params![run_id, result.experiment_id, strat.strategy_id, strat.strategy_name, metrics_str],
+            )?;
+
+            // Wipe any previous artefacts (idempotent re-runs).
+            conn.execute(
+                "DELETE FROM experiment_equity WHERE strategy_run_id = ?",
+                params![run_id],
+            )?;
+            conn.execute(
+                "DELETE FROM experiment_orders WHERE strategy_run_id = ?",
+                params![run_id],
+            )?;
+            conn.execute(
+                "DELETE FROM experiment_trades WHERE strategy_run_id = ?",
+                params![run_id],
+            )?;
+
+            for s in &strat.equity_curve {
+                conn.execute(
+                    "INSERT INTO experiment_equity (strategy_run_id, ts, equity, cash, drawdown)
+                     VALUES (?, ?, ?, ?, ?)",
+                    params![run_id, s.timestamp, s.equity, s.cash, s.drawdown],
+                )?;
+            }
+            for o in &strat.orders {
+                conn.execute(
+                    "INSERT INTO experiment_orders
+                     (strategy_run_id, order_id, ts, symbol, order_type, quantity, price, status, fill_price, reason)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    params![
+                        run_id,
+                        o.order.id,
+                        o.timestamp,
+                        o.order.symbol,
+                        o.order.order_type.to_string(),
+                        o.order.quantity,
+                        o.order.price,
+                        o.status,
+                        o.fill_price,
+                        o.reason,
+                    ],
+                )?;
+            }
+            for t in &strat.trades {
+                conn.execute(
+                    "INSERT INTO experiment_trades
+                     (strategy_run_id, symbol, quantity, entry_ts, exit_ts, entry_price, exit_price, pnl)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    params![
+                        run_id,
+                        t.symbol,
+                        t.quantity,
+                        t.entry_ts,
+                        t.exit_ts,
+                        t.entry_price,
+                        t.exit_price,
+                        t.pnl,
+                    ],
+                )?;
+            }
+        }
+
+        conn.execute_batch("COMMIT")?;
+        Ok(())
+    }
+
+    fn query_experiments(
+        &self,
+        search: Option<&str>,
+        limit: Option<usize>,
+    ) -> StorageResult<Vec<StoredExperiment>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut sql = String::from(
+            "SELECT e.id, e.name, e.tags, e.description, e.started_at, e.finished_at, e.status,
+                    (SELECT AVG(CAST(json_extract(metrics, '$.total_return') AS DOUBLE))
+                       FROM experiment_strategies s WHERE s.experiment_id = e.id) AS total_return,
+                    (SELECT COUNT(*) FROM experiment_strategies s WHERE s.experiment_id = e.id) AS n_strategies
+             FROM experiments e",
+        );
+        let mut where_clause = String::new();
+        let mut params_vec: Vec<String> = Vec::new();
+        if let Some(q) = search {
+            if !q.is_empty() {
+                let pat = format!("%{}%", q.to_lowercase());
+                where_clause.push_str(" WHERE LOWER(name) LIKE ? OR LOWER(tags) LIKE ?");
+                params_vec.push(pat.clone());
+                params_vec.push(pat);
+            }
+        }
+        sql.push_str(&where_clause);
+        sql.push_str(" ORDER BY started_at DESC");
+        if let Some(l) = limit {
+            sql.push_str(&format!(" LIMIT {l}"));
+        }
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(params_vec.iter()), |row| {
+                let tags_str: String = row.get(2)?;
+                let tags = if tags_str.is_empty() {
+                    Vec::new()
+                } else {
+                    tags_str.split(',').map(|s| s.to_owned()).collect()
+                };
+                Ok(StoredExperiment {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    tags,
+                    description: row.get(3)?,
+                    started_at: row.get(4)?,
+                    finished_at: row.get(5)?,
+                    status: row.get(6)?,
+                    total_return: row.get::<_, Option<f64>>(7)?,
+                    n_strategies: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn query_experiment_strategies(
+        &self,
+        experiment_id: &str,
+    ) -> StorageResult<Vec<crate::backtest::models::experiment_result::StrategyRunResult>> {
+        use crate::backtest::models::experiment_result::{
+            EquitySample, OrderRecord, StrategyRunResult, Trade,
+        };
+        use crate::backtest::models::order::Order;
+        use crate::backtest::models::order_type::OrderType;
+
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT id, strategy_id, strategy_name, metrics
+             FROM experiment_strategies
+             WHERE experiment_id = ?
+             ORDER BY strategy_id",
+        )?;
+        let strats: Vec<(String, String, String, String)> = stmt
+            .query_map(params![experiment_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut out = Vec::with_capacity(strats.len());
+        for (run_id, strategy_id, name, metrics_str) in strats {
+            let metrics: std::collections::HashMap<String, f64> =
+                serde_json::from_str(&metrics_str).unwrap_or_default();
+
+            let mut eq_stmt = conn.prepare(
+                "SELECT ts, equity, cash, drawdown FROM experiment_equity
+                 WHERE strategy_run_id = ? ORDER BY ts",
+            )?;
+            let equity_curve = eq_stmt
+                .query_map(params![run_id], |row| {
+                    Ok(EquitySample {
+                        timestamp: row.get(0)?,
+                        equity: row.get(1)?,
+                        cash: row.get(2)?,
+                        drawdown: row.get(3)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let mut o_stmt = conn.prepare(
+                "SELECT order_id, ts, symbol, order_type, quantity, price, status, fill_price, reason
+                 FROM experiment_orders WHERE strategy_run_id = ? ORDER BY ts",
+            )?;
+            let orders = o_stmt
+                .query_map(params![run_id], |row| {
+                    let ot: String = row.get(3)?;
+                    let order_type: OrderType = ot.parse().unwrap_or_default();
+                    Ok(OrderRecord {
+                        order: Order {
+                            id: row.get(0)?,
+                            symbol: row.get(2)?,
+                            order_type,
+                            quantity: row.get(4)?,
+                            price: row.get(5)?,
+                        },
+                        timestamp: row.get(1)?,
+                        status: row.get(6)?,
+                        fill_price: row.get(7)?,
+                        reason: row.get(8)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let mut t_stmt = conn.prepare(
+                "SELECT symbol, quantity, entry_ts, exit_ts, entry_price, exit_price, pnl
+                 FROM experiment_trades WHERE strategy_run_id = ? ORDER BY entry_ts",
+            )?;
+            let trades = t_stmt
+                .query_map(params![run_id], |row| {
+                    Ok(Trade {
+                        symbol: row.get(0)?,
+                        quantity: row.get(1)?,
+                        entry_ts: row.get(2)?,
+                        exit_ts: row.get(3)?,
+                        entry_price: row.get(4)?,
+                        exit_price: row.get(5)?,
+                        pnl: row.get(6)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            out.push(StrategyRunResult {
+                strategy_id,
+                strategy_name: name,
+                equity_curve,
+                trades,
+                orders,
+                metrics,
+            });
+        }
+
+        Ok(out)
     }
 }
 

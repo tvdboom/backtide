@@ -1,8 +1,12 @@
+use crate::backtest::interface::run_experiment;
 use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::conversion_period::ConversionPeriod;
 use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
 use crate::backtest::models::experiment_config::*;
+use crate::backtest::models::experiment_result::{
+    EquitySample, ExperimentResult, OrderRecord, StrategyRunResult, Trade,
+};
 use crate::backtest::models::order::Order;
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
@@ -10,7 +14,9 @@ use crate::backtest::models::state::State;
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
+pub mod engine;
 pub mod indicators;
+pub mod interface;
 pub mod models;
 pub mod strategies;
 
@@ -37,6 +43,13 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<IndicatorExpConfig>()?;
     m.add_class::<PortfolioExpConfig>()?;
     m.add_class::<StrategyExpConfig>()?;
+
+    // Experiment result
+    m.add_class::<EquitySample>()?;
+    m.add_class::<ExperimentResult>()?;
+    m.add_class::<OrderRecord>()?;
+    m.add_class::<StrategyRunResult>()?;
+    m.add_class::<Trade>()?;
 
     // Indicators
     m.add_class::<indicators::AverageDirectionalIndex>()?;
@@ -73,6 +86,9 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<strategies::TripleRsiRotation>()?;
     m.add_class::<strategies::TurtleTrading>()?;
     m.add_class::<strategies::Vcp>()?;
+
+    // Functions
+    m.add_function(wrap_pyfunction!(run_experiment, &m)?)?;
 
     parent.add_submodule(&m)?;
 

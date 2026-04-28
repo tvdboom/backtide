@@ -5,12 +5,15 @@ __all__ = [
     "query_bars",
     "query_bars_summary",
     "query_dividends",
+    "query_experiment_strategies",
+    "query_experiments",
     "query_instruments",
 ]
 
 import pandas as pd
 import polars as pl
 
+from backtide.core.backtest import StrategyRunResult
 from backtide.core.data import Instrument
 
 def delete_symbols(symbol=None, interval=None, provider=None, *, series=None) -> int:
@@ -173,6 +176,43 @@ def query_dividends(symbol=None, provider=None, *, limit=None) -> pd.DataFrame |
     df = query_dividends()
     print(df.head())
     ```
+
+    """
+
+def query_experiment_strategies(experiment_id) -> list[StrategyRunResult]:
+    """Return every per-strategy result for a given experiment.
+
+    Parameters
+    ----------
+    experiment_id : str
+        The experiment id (as stored in the `experiments` table).
+
+    Returns
+    -------
+    list[[StrategyRunResult]]
+        One result entry per strategy that ran in this experiment.
+
+    """
+
+def query_experiments(search=None, *, limit=None) -> pd.DataFrame | pl.DataFrame:
+    """Return stored experiments, optionally filtered by a search string.
+
+    The `search` parameter does a case-insensitive substring match on
+    experiment name and tags.
+
+    Parameters
+    ----------
+    search : str | None, default=None
+        Substring matched against experiment name and tags. `None`
+        returns every experiment.
+
+    limit : int | None, default=None
+        Maximum number of rows to return. `None` means no limit.
+
+    Returns
+    -------
+    pd.DataFrame | pl.DataFrame
+        One row per experiment.
 
     """
 

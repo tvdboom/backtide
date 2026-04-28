@@ -88,13 +88,13 @@ def _get_strategy_label(name: str, strat: Any) -> str:
     cls = type(strat)
     if _is_builtin_strategy(strat):
         category = "Multi-Asset" if cls.is_multi_asset else "Single Asset"
-        label = f":material/psychology: **{name}** · _{cls.name}_ · {category}\n\n"
+        label = f":material/psychology: **{name}** · _{cls.name}_ · {category}"
 
         # Show parameters for builtin strategies
         _, args = strat.__reduce__()
         sig = inspect.signature(cls)
         if params := dict(zip(sig.parameters, args, strict=True)):
-            label += " · ".join(f"{k}={v}" for k, v in params.items())
+            label += " · " + ", ".join(f"{k}={v}" for k, v in params.items())
 
         return label
     else:

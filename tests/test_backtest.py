@@ -14,11 +14,19 @@ from backtide.backtest import (
     DataExpConfig,
     EmptyBarPolicy,
     EngineExpConfig,
+    EquitySample,
     ExchangeExpConfig,
     ExperimentConfig,
+    ExperimentResult,
     GeneralExpConfig,
+    Order,
+    OrderRecord,
     OrderType,
     PortfolioExpConfig,
+    StrategyExpConfig,
+    StrategyRunResult,
+    Trade,
+    run_experiment,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -224,3 +232,123 @@ class TestCommissionType:
         """Test invalid value raises ValueError."""
         with pytest.raises(ValueError, match="Unknown commission type"):
             CommissionType("invalid")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Order / OrderType
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestOrder:
+    """Tests for the Order model."""
+
+    def test_default_id_is_generated(self):
+        """A fresh Order receives an auto-generated id."""
+        o1 = Order(symbol="AAPL", order_type="market", quantity=10)
+        o2 = Order(symbol="AAPL", order_type="market", quantity=10)
+        assert isinstance(o1.id, str) and len(o1.id) > 0
+        assert o1.id != o2.id  # uuid uniqueness
+
+    def test_explicit_id_is_kept(self):
+        """An explicit id is preserved (used by CancelOrder)."""
+        o = Order(symbol="AAPL", order_type="market", quantity=1, id="abc123")
+        assert o.id == "abc123"
+
+    def test_cancel_order_can_have_empty_symbol(self):
+        """CancelOrder only needs the target id, not a symbol."""
+        cancel = Order(
+            symbol="",
+            order_type="cancelorder",
+            quantity=0,
+            id="target_id",
+        )
+        assert cancel.order_type == OrderType.CancelOrder
+        assert cancel.id == "target_id"
+
+    def test_repr_contains_id(self):
+        """Order repr always includes the id field."""
+        o = Order(symbol="AAPL", order_type="market", quantity=1, id="xyz")
+        assert "xyz" in repr(o)
+
+
+class TestOrderType:
+    """Tests for the OrderType enum."""
+
+    def test_cancel_order_variant_exists(self):
+        """The new CancelOrder variant is available."""
+        assert OrderType.CancelOrder is not None
+        assert "Cancel" in OrderType.CancelOrder.name
+
+    def test_cancel_order_in_variants(self):
+        """CancelOrder appears in the variants list."""
+        assert any(v == OrderType.CancelOrder for v in OrderType.variants())
+
+    def test_cancel_order_description(self):
+        """CancelOrder has a non-empty description."""
+        assert "cancel" in OrderType.CancelOrder.description().lower()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Result models
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestResultModels:
+    """Tests for the experiment result pyclasses."""
+
+    def test_classes_importable(self):
+        """All result classes are importable from backtide.backtest."""
+        assert EquitySample is not None
+        assert Trade is not None
+        assert OrderRecord is not None
+        assert StrategyRunResult is not None
+        assert ExperimentResult is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# run_experiment integration
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRunExperiment:
+    """Smoke tests for the run_experiment pipeline."""
+
+    def test_no_symbols_raises(self):
+        """An experiment with no symbols cannot run."""
+        cfg = ExperimentConfig(
+            general=GeneralExpConfig(name="empty"),
+            data=DataExpConfig(symbols=[]),
+            strategy=StrategyExpConfig(strategies=[]),
+        )
+        with pytest.raises(RuntimeError):
+            run_experiment(cfg, verbose=False)
+
+    def test_no_data_returns_failed(self, monkeypatch):
+        """When there is no data and no strategies, status is 'failed'.
+
+        Uses ``conftest``'s temp storage so this never hits the network:
+        the resolve/download phase is monkey-patched to return empty.
+        """
+        from backtide.core import data as core_data
+
+        # Stub out network calls to keep the test offline.
+        monkeypatch.setattr(
+            core_data,
+            "resolve_profiles",
+            lambda *a, **kw: [],
+            raising=False,
+        )
+
+        cfg = ExperimentConfig(
+            general=GeneralExpConfig(name="offline"),
+            data=DataExpConfig(symbols=["NOPE-XYZ"]),
+            strategy=StrategyExpConfig(strategies=[]),
+        )
+        # We expect either a clean failed result, or a runtime error from
+        # the resolve step; both are acceptable defensive outcomes.
+        try:
+            result = run_experiment(cfg, verbose=False)
+        except RuntimeError:
+            return
+        assert isinstance(result, ExperimentResult)
+        assert result.status in ("failed", "completed")

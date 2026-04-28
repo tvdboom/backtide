@@ -12,6 +12,8 @@ from backtide.storage import (
     query_bars,
     query_bars_summary,
     query_dividends,
+    query_experiment_strategies,
+    query_experiments,
     query_instruments,
 )
 
@@ -131,3 +133,49 @@ class TestDeleteSymbols:
     def test_all_filters(self):
         """All optional filters can be combined."""
         assert isinstance(delete_symbols("AAPL", interval="1d", provider="yahoo"), int)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# query_experiments / query_experiment_strategies
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestQueryExperiments:
+    """Tests for the 'query_experiments' function."""
+
+    def test_returns_dataframe(self):
+        """query_experiments always returns a pandas DataFrame."""
+        assert isinstance(query_experiments(), pd.DataFrame)
+
+    def test_columns(self):
+        """The returned dataframe has the expected columns."""
+        df = query_experiments()
+        for col in (
+            "id",
+            "name",
+            "tags",
+            "description",
+            "started_at",
+            "finished_at",
+            "status",
+            "total_return",
+            "n_strategies",
+        ):
+            assert col in df.columns
+
+    def test_search_no_match(self):
+        """An unmatchable search yields an empty dataframe."""
+        df = query_experiments("__definitely_not_a_real_experiment__")
+        assert df.empty
+
+    def test_limit_accepted(self):
+        """The limit kwarg is accepted."""
+        assert isinstance(query_experiments(limit=10), pd.DataFrame)
+
+
+class TestQueryExperimentStrategies:
+    """Tests for the 'query_experiment_strategies' function."""
+
+    def test_unknown_id_returns_empty_list(self):
+        """Querying a missing experiment id returns ``[]``."""
+        assert query_experiment_strategies("__missing__") == []

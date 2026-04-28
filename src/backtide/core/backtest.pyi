@@ -16,8 +16,10 @@ __all__ = [
     "DoubleTop",
     "EmptyBarPolicy",
     "EngineExpConfig",
+    "EquitySample",
     "ExchangeExpConfig",
     "ExperimentConfig",
+    "ExperimentResult",
     "ExponentialMovingAverage",
     "GeneralExpConfig",
     "HybridAlphaRsi",
@@ -28,6 +30,7 @@ __all__ = [
     "MultiBollingerRotation",
     "OnBalanceVolume",
     "Order",
+    "OrderRecord",
     "OrderType",
     "Portfolio",
     "PortfolioExpConfig",
@@ -44,11 +47,14 @@ __all__ = [
     "State",
     "StochasticOscillator",
     "StrategyExpConfig",
+    "StrategyRunResult",
+    "Trade",
     "TripleRsiRotation",
     "TurtleTrading",
     "Vcp",
     "VolumeWeightedAveragePrice",
     "WeightedMovingAverage",
+    "run_experiment",
 ]
 
 from typing import Any, ClassVar
@@ -128,7 +134,7 @@ class AdaptiveRsi:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -223,7 +229,7 @@ class AlphaRsiPro:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -597,7 +603,7 @@ class BollingerMeanReversion:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -679,7 +685,7 @@ class BuyAndHold:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -1140,7 +1146,7 @@ class DoubleTop:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -1312,6 +1318,54 @@ class EngineExpConfig:
             Self as dict.
 
         """
+
+class EquitySample:
+    """A single equity-curve sample taken once per simulated bar.
+
+    Attributes
+    ----------
+    timestamp : int
+        UTC timestamp in seconds since the Unix epoch.
+
+    equity : float
+        Total portfolio value (cash + positions) in the base currency.
+
+    cash : float
+        Cash balance in the base currency at this bar.
+
+    drawdown : float
+        Running drawdown (negative or zero) versus the all-time high
+        equity, expressed as a fraction (e.g. -0.12 = -12 %).
+
+    """
+
+    cash: float
+    drawdown: float
+    equity: float
+    timestamp: int
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
 
 class ExchangeExpConfig:
     """Exchange and execution settings for an experiment.
@@ -1563,6 +1617,71 @@ class ExperimentConfig:
 
         """
 
+class ExperimentResult:
+    """The complete result of a single experiment run.
+
+    Attributes
+    ----------
+    experiment_id : str
+        Unique identifier of the persisted experiment row.
+
+    name : str
+        Human-readable name (mirrors the config).
+
+    tags : list[str]
+        Tags assigned to the experiment.
+
+    started_at : int
+        UTC timestamp (seconds) when the run started.
+
+    finished_at : int
+        UTC timestamp (seconds) when the run finished.
+
+    status : str
+        ``"completed"`` if every strategy succeeded, ``"failed"`` otherwise.
+
+    strategies : list[[StrategyRunResult]]
+        One result entry per evaluated strategy.
+
+    warnings : list[str]
+        Non-fatal warnings emitted during the run.
+
+    """
+
+    experiment_id: str
+    finished_at: int
+    name: str
+    started_at: int
+    status: str
+    strategies: list[StrategyRunResult]
+    tags: list[str]
+    warnings: list[str]
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+
 class ExponentialMovingAverage:
     """Exponential Moving Average (EMA).
 
@@ -1784,7 +1903,7 @@ class HybridAlphaRsi:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -1940,7 +2059,7 @@ class Macd:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -2033,7 +2152,7 @@ class Momentum:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -2235,7 +2354,7 @@ class MultiBollingerRotation:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -2344,6 +2463,11 @@ class Order:
 
     Attributes
     ----------
+    id : str
+        Unique identifier of the order. Auto-generated if not provided.
+        For [`OrderType.CancelOrder`][OrderType] orders, the `id` field
+        identifies the *target* order that should be cancelled.
+
     symbol : str
         The ticker symbol this order targets.
 
@@ -2364,10 +2488,62 @@ class Order:
 
     """
 
+    id: str
     order_type: OrderType
     price: float | None
     quantity: int
     symbol: str
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+
+class OrderRecord:
+    """A record of an order as resolved by the engine.
+
+    Attributes
+    ----------
+    order : [Order]
+        The original order.
+
+    timestamp : int
+        The bar timestamp at which the order was processed.
+
+    status : str
+        ``"filled"``, ``"cancelled"``, ``"rejected"`` or ``"pending"``.
+
+    fill_price : float | None
+        Average fill price (None if not filled).
+
+    reason : str
+        Human-readable note (rejection / cancellation reason).
+
+    """
+
+    fill_price: float | None
+    order: Order
+    reason: str
+    status: str
+    timestamp: int
 
     def __eq__(self, value, /):
         ...
@@ -2413,6 +2589,7 @@ class OrderType:
 
     name: str
 
+    CancelOrder: ClassVar[OrderType]
     Limit: ClassVar[OrderType]
     Market: ClassVar[OrderType]
     SettlePosition: ClassVar[OrderType]
@@ -2753,7 +2930,7 @@ class RiskAverse:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -2842,7 +3019,7 @@ class Roc:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -2939,7 +3116,7 @@ class RocRotation:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -3038,7 +3215,7 @@ class Rsi:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -3128,7 +3305,7 @@ class Rsrs:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -3226,7 +3403,7 @@ class RsrsRotation:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -3407,7 +3584,7 @@ class SmaCrossover:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -3497,7 +3674,7 @@ class SmaNaive:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -3741,6 +3918,122 @@ class StrategyExpConfig:
 
         """
 
+class StrategyRunResult:
+    """Result of running a single strategy as part of an experiment.
+
+    Attributes
+    ----------
+    strategy_id : str
+        Unique identifier for this strategy run.
+
+    strategy_name : str
+        The user-facing name of the strategy.
+
+    equity_curve : list[[EquitySample]]
+        Per-bar equity samples in chronological order.
+
+    trades : list[[Trade]]
+        All round-trip trades closed during the run.
+
+    orders : list[[OrderRecord]]
+        All orders the engine processed (filled, cancelled, rejected).
+
+    metrics : dict[str, float]
+        Summary metrics (total_return, sharpe, max_drawdown, ...).
+
+    """
+
+    equity_curve: list[EquitySample]
+    metrics: dict[str, float]
+    orders: list[OrderRecord]
+    strategy_id: str
+    strategy_name: str
+    trades: list[Trade]
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+
+class Trade:
+    """A single round-trip trade (open + close of a position).
+
+    Attributes
+    ----------
+    symbol : str
+        The traded instrument's symbol.
+
+    quantity : int
+        Signed quantity. Positive = long round trip, negative = short.
+
+    entry_ts : int
+        Open timestamp (seconds since the Unix epoch).
+
+    exit_ts : int
+        Close timestamp (seconds since the Unix epoch).
+
+    entry_price : float
+        Average fill price at entry, in the instrument's quote currency.
+
+    exit_price : float
+        Average fill price at exit.
+
+    pnl : float
+        Profit and loss in the base currency, after commission.
+
+    """
+
+    entry_price: float
+    entry_ts: int
+    exit_price: float
+    exit_ts: int
+    pnl: float
+    quantity: int
+    symbol: str
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+
 class TripleRsiRotation:
     """Multi-timeframe Relative Strength Index portfolio rotation strategy.
 
@@ -3822,7 +4115,7 @@ class TripleRsiRotation:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -3920,7 +4213,7 @@ class TurtleTrading:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -4014,7 +4307,7 @@ class Vcp:
             The description.
 
         """
-    def evaluate(self, _data, _portfolio, _state, _indicators) -> list[Order]:
+    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
@@ -4203,3 +4496,49 @@ class WeightedMovingAverage:
             The description.
 
         """
+
+def run_experiment(config, *, verbose=True) -> ExperimentResult:
+    """Run a backtest experiment with the provided configuration.
+
+    Performs the full pipeline end-to-end:
+
+    1. Resolves and downloads any missing market data (skipped if already
+       present in the local DuckDB cache).
+    2. Computes every selected indicator once over the entire dataset, in
+       parallel across symbols. Custom (Python) indicators are dispatched
+       via PyO3.
+    3. Runs every selected strategy fully in parallel — each strategy has
+       its own independent portfolio, order book and equity curve.
+    4. Persists the aggregated [`ExperimentResult`] (and per-strategy
+       artefacts) into the experiment tables in DuckDB.
+
+    Parameters
+    ----------
+    config : [ExperimentConfig]
+        The complete experiment configuration.
+
+    verbose : bool, default=True
+        Whether to display indicatif progress bars for each phase.
+
+    Returns
+    -------
+    [ExperimentResult]
+        The aggregated result of the run.
+
+    See Also
+    --------
+    - backtide.backtest:ExperimentConfig
+    - backtide.backtest:ExperimentResult
+    - backtide.storage:query_experiments
+
+    Examples
+    --------
+    ```pycon
+    from backtide.backtest import ExperimentConfig, run_experiment
+
+    cfg = ExperimentConfig()
+    result = run_experiment(cfg)
+    print(result)
+    ```
+
+    """

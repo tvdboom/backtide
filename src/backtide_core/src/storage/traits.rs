@@ -10,6 +10,7 @@ use crate::storage::models::bar_summary::BarSummary;
 use crate::storage::models::dividend_series::DividendSeries;
 use crate::storage::models::stored_bar::StoredBar;
 use crate::storage::models::stored_dividend::StoredDividend;
+use crate::storage::models::stored_experiment::StoredExperiment;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -65,4 +66,25 @@ pub trait Storage: Send + Sync {
         &self,
         series: &[(String, Option<Interval>, Option<Provider>)],
     ) -> StorageResult<u64>;
+
+    /// Persist one experiment run to the database (all related tables).
+    fn write_experiment(
+        &self,
+        config: &crate::backtest::models::experiment_config::ExperimentConfig,
+        result: &crate::backtest::models::experiment_result::ExperimentResult,
+    ) -> StorageResult<()>;
+
+    /// Query experiments, optionally filtered by `search` (matches name
+    /// or any tag, case-insensitive substring).
+    fn query_experiments(
+        &self,
+        search: Option<&str>,
+        limit: Option<usize>,
+    ) -> StorageResult<Vec<StoredExperiment>>;
+
+    /// Load every persisted [`StrategyRunResult`] for a given experiment.
+    fn query_experiment_strategies(
+        &self,
+        experiment_id: &str,
+    ) -> StorageResult<Vec<crate::backtest::models::experiment_result::StrategyRunResult>>;
 }
