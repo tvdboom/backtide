@@ -56,7 +56,7 @@ def _resolve_dt(data: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
-def _check_columns(data: DataFrameLike, columns: list[str], caller: str) -> None:
+def _check_columns(data: DataFrameLike, columns: list[str], caller: str):
     """Verify that required columns exist in the DataFrame.
 
     Parameters

@@ -6,6 +6,7 @@ Description: Module containing re-exports of `backtide.core.storage`.
 """
 
 from backtide.core.storage import (
+    delete_experiment,
     delete_symbols,
     query_bars,
     query_bars_summary,

@@ -165,8 +165,8 @@ class TestQueryExperiments:
 
     def test_search_no_match(self):
         """An unmatchable search yields an empty dataframe."""
-        df = query_experiments("__definitely_not_a_real_experiment__")
-        assert df.empty
+        df = query_experiments(search="__definitely_not_a_real_experiment__")
+        assert len(df) == 0
 
     def test_limit_accepted(self):
         """The limit kwarg is accepted."""

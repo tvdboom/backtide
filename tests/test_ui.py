@@ -51,8 +51,6 @@ from backtide.strategies.utils import (
 from backtide.ui.experiment import (
     _apply_config_to_state,
     _build_config_toml,
-    _build_indicator_config,
-    _build_strategy_config,
     _on_config_upload,
     _parse_config_upload,
 )
@@ -1117,34 +1115,6 @@ class TestApplyConfigToState:
 # ─────────────────────────────────────────────────────────────────────────────
 # Experiment helper tests
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestBuildIndicatorConfig:
-    """Tests for _build_indicator_config."""
-
-    def test_empty_state(self):
-        """Empty state returns empty indicators."""
-        cfg = _build_indicator_config({})
-        assert cfg.indicators == []
-
-    def test_with_indicators(self):
-        """State with indicators returns them."""
-        cfg = _build_indicator_config({"indicators": ["SMA", "RSI"]})
-        assert cfg.indicators == ["SMA", "RSI"]
-
-
-class TestBuildStrategyConfig:
-    """Tests for _build_strategy_config."""
-
-    def test_empty_state(self):
-        """Empty state returns empty strategies."""
-        cfg = _build_strategy_config({})
-        assert cfg.strategies == []
-
-    def test_with_strategies(self):
-        """State with strategies returns them."""
-        cfg = _build_strategy_config({"strategies": ["s1", "s2"]})
-        assert cfg.strategies == ["s1", "s2"]
 
 
 class TestOnConfigUpload:

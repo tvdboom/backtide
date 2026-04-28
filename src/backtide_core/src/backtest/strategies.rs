@@ -848,7 +848,6 @@ impl MultiBollingerRotation {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
@@ -1452,7 +1451,6 @@ impl TripleRsiRotation {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
@@ -1646,9 +1644,7 @@ impl StrategyDecide for BuyAndHold {
         state: &State,
     ) -> Vec<Order> {
         // Buy on the first non-warmup bar; never sell.
-        if state.bar_index != state.total_bars.saturating_sub(state.total_bars).max(0)
-            && portfolio.positions.values().any(|q| *q > 0)
-        {
+        if state.bar_index != 0 && portfolio.positions.values().any(|q| *q > 0) {
             return Vec::new();
         }
         let mut orders = Vec::new();
@@ -2005,7 +2001,7 @@ impl StrategyDecide for MultiBollingerRotation {
         portfolio: &Portfolio,
         state: &State,
     ) -> Vec<Order> {
-        if state.bar_index % self.rebalance_interval as u64 != 0 {
+        if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
         let scores: Vec<(String, f64)> = closes
@@ -2036,7 +2032,7 @@ impl StrategyDecide for RocRotation {
         portfolio: &Portfolio,
         state: &State,
     ) -> Vec<Order> {
-        if state.bar_index % self.rebalance_interval as u64 != 0 {
+        if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
         let scores: Vec<(String, f64)> =
@@ -2054,7 +2050,7 @@ impl StrategyDecide for RsrsRotation {
         portfolio: &Portfolio,
         state: &State,
     ) -> Vec<Order> {
-        if state.bar_index % self.rebalance_interval as u64 != 0 {
+        if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
         let scores: Vec<(String, f64)> =
@@ -2072,7 +2068,7 @@ impl StrategyDecide for TripleRsiRotation {
         portfolio: &Portfolio,
         state: &State,
     ) -> Vec<Order> {
-        if state.bar_index % self.rebalance_interval as u64 != 0 {
+        if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
         let scores: Vec<(String, f64)> = closes

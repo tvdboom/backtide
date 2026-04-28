@@ -69,29 +69,37 @@ def _apply_config_to_state(
     exp: ExperimentConfig,
     state: dict[str, Any] | SessionStateProxy,
 ):
-    """Write all fields of *exp* into the session *state* dict."""
-    state["experiment_name"] = INVALID_FILENAME_CHARS.sub("", exp.general.name)
-    state["tags"] = exp.general.tags
-    state["description"] = exp.general.description
+    """Write all fields of *exp* into the session *state* dict.
 
-    state["instrument_type"] = exp.data.instrument_type
-    state["symbols"] = exp.data.symbols
-    state["full_history"] = exp.data.full_history
+    Writes both the live widget key and the shadow key (``_<key>``) so values
+    survive widget unmounting (e.g. when navigating to another page).
+    """
+
+    def _set(key: str, value: Any):
+        state[key] = value
+        state[f"_{key}"] = value
+
+    _set("experiment_name", INVALID_FILENAME_CHARS.sub("", exp.general.name))
+    _set("tags", exp.general.tags)
+    _set("description", exp.general.description)
+
+    _set("instrument_type", exp.data.instrument_type)
+    _set("symbols", exp.data.symbols)
+    _set("full_history", exp.data.full_history)
     if not exp.data.full_history:
         if exp.data.start_date:
-            state["start_date"] = dt.fromisoformat(str(exp.data.start_date)).date()
+            _set("start_date", dt.fromisoformat(str(exp.data.start_date)).date())
         if exp.data.end_date:
-            state["end_date"] = dt.fromisoformat(str(exp.data.end_date)).date()
-    state["interval"] = exp.data.interval
+            _set("end_date", dt.fromisoformat(str(exp.data.end_date)).date())
+    _set("interval", exp.data.interval)
 
-    state["initial_cash"] = exp.portfolio.initial_cash
-    state["base_currency"] = exp.portfolio.base_currency
-    state["starting_positions"] = exp.portfolio.starting_positions
+    _set("initial_cash", exp.portfolio.initial_cash)
+    _set("base_currency", exp.portfolio.base_currency)
+    _set("starting_positions", exp.portfolio.starting_positions)
 
-    state["strategies"] = exp.strategy.strategies
-    state["indicators"] = exp.indicators.indicators
+    _set("strategies", exp.strategy.strategies)
+    _set("indicators", exp.indicators.indicators)
 
-    ex = exp.exchange
     for key in (
         "commission_type",
         "commission_pct",
@@ -109,12 +117,11 @@ def _apply_config_to_state(
         "max_position_size",
         "conversion_mode",
     ):
-        state[key] = getattr(ex, key)
+        _set(key, getattr(exp.exchange, key))
     for key in ("conversion_threshold", "conversion_period", "conversion_interval"):
-        if getattr(ex, key) is not None:
-            state[key] = getattr(ex, key)
+        if getattr(exp.exchange, key) is not None:
+            _set(key, getattr(exp.exchange, key))
 
-    eng = exp.engine
     for key in (
         "warmup_period",
         "trade_on_close",
@@ -124,24 +131,7 @@ def _apply_config_to_state(
         "random_seed",
         "empty_bar_policy",
     ):
-        state[key] = getattr(eng, key)
-
-
-def _build_indicator_config(
-    state: dict[str, Any] | SessionStateProxy,
-) -> IndicatorExpConfig:
-    """Build an IndicatorExpConfig from the selected indicator names."""
-    selected = state.get("indicators", [])
-    # selected is a list of indicator names (strings)
-    return IndicatorExpConfig(indicators=list(selected))
-
-
-def _build_strategy_config(
-    state: dict[str, Any] | SessionStateProxy,
-) -> StrategyExpConfig:
-    """Build a StrategyExpConfig from the selected strategy names."""
-    selected = state.get("strategies", [])
-    return StrategyExpConfig(strategies=list(selected))
+        _set(key, getattr(exp.engine, key))
 
 
 def _build_config_toml(
@@ -183,8 +173,8 @@ def _build_config_toml(
             base_currency=_get("base_currency", defaults.portfolio.base_currency),
             starting_positions=_get("starting_positions", defaults.portfolio.starting_positions),
         ),
-        strategy=_build_strategy_config(state),
-        indicators=_build_indicator_config(state),
+        strategy=StrategyExpConfig(strategies=list(state.get("strategies", []))),
+        indicators=IndicatorExpConfig(indicators=list(state.get("indicators", []))),
         exchange=ExchangeExpConfig(
             commission_type=_get("commission_type", defaults.exchange.commission_type),
             commission_pct=_get("commission_pct", defaults.exchange.commission_pct),
@@ -302,7 +292,7 @@ with tab1:
         key=(key := "experiment_name"),
         value=_default(key),
         placeholder=st.session_state.experiment_id,
-        max_chars=28,
+        max_chars=40,
         on_change=lambda k=key: _persist(k),
         help=(
             "A human-readable name to identify this experiment (optional). "
@@ -857,8 +847,8 @@ with tab6:
 
         enable_margin = col_toggle.toggle(
             label="Allow margin trading",
-            value=_default(key, fallback=exp.exchange.allow_margin),
             key=(key := "allow_margin"),
+            value=_default(key, fallback=exp.exchange.allow_margin),
             on_change=lambda k=key: _persist(k),
             help=(
                 "Safety guardrail for margin usage. When enabled (default), the strategy "
@@ -1069,7 +1059,7 @@ with tab7:
 
         trade_on_close = st.toggle(
             label="Trade on close",
-            key=(Key := "trade_on_close"),
+            key=(key := "trade_on_close"),
             value=_default(key, fallback=exp.engine.trade_on_close),
             on_change=lambda k=key: _persist(k),
             help=(
@@ -1099,7 +1089,8 @@ with tab7:
 
         benchmark = st.text_input(
             label="Benchmark symbol",
-            key="benchmark",
+            key=(key := "benchmark"),
+            value=_default(key, exp.engine.benchmark or ""),
             placeholder="e.g. SPY",
             max_chars=20,
             on_change=lambda k=key: _persist(k),
@@ -1170,7 +1161,8 @@ st.divider()
 
 running_experiment = st.session_state.get("running_experiment", False)
 
-if st.button(
+run_button_slot = st.empty()
+clicked = run_button_slot.button(
     label="Run experiment",
     key="running_experiment",
     icon=":material/play_circle:",
@@ -1178,7 +1170,12 @@ if st.button(
     disabled=not (profiles and start_ts and latest_ts and selected_strat) or running_experiment,
     shortcut="Enter",
     width="stretch",
-):
+)
+
+if clicked:
+    # Hide the run button while the experiment is executing.
+    run_button_slot.empty()
+
     cfg_str = _build_experiment_config()
     exp_cfg = ExperimentConfig.from_toml(cfg_str)
     with st.spinner(f"Running experiment **{experiment_name}**..."):
@@ -1197,19 +1194,28 @@ if st.button(
                 )
             elif result.status == "completed":
                 st.warning(
-                    f"Experiment **{experiment_name}** finished with {len(warnings)} warning"
-                    f"{'s' if len(warnings) > 1 else ''}. Evaluated {n_strats} strateg"
-                    f"{'y' if n_strats == 1 else 'ies'}.\n\n"
-                    + "\n".join(f"- {w}" for w in warnings),
+                    f"Experiment **{experiment_name}** finished with {len(result.warnings)} "
+                    f"warning{'s' if len(result.warnings) > 1 else ''}. Evaluated {n_strats} "
+                    f"{'strategy' if n_strats == 1 else 'strategies'}.\n\n"
+                    + "\n".join(f"- {w}" for w in result.warnings),
                     icon=":material/warning:",
                 )
             else:
                 st.error(
                     f"Experiment **{experiment_name}** failed.\n\n"
-                    + "\n".join(f"- {w}" for w in warnings),
+                    + "\n".join(f"- {w}" for w in result.warnings),
                     icon=":material/error:",
                 )
 
-            st.session_state["last_experiment_id"] = result.experiment_id
-            if st.button("View results", icon=":material/fact_check:"):
-                st.switch_page("results.py")
+            st.button(
+                label="View results",
+                icon=":material/fact_check:",
+                type="primary",
+                shortcut="Enter",
+                width="stretch",
+                on_click=lambda: st.session_state.update(to_results=result.experiment_id),
+            )
+
+if st.session_state.get("to_results"):
+    st.session_state["selected_experiment_id"] = st.session_state.pop("to_results")
+    st.switch_page("results.py")

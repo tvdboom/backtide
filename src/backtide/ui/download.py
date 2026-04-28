@@ -21,6 +21,7 @@ from backtide.ui.utils import (
     _clear_state,
     _default,
     _draw_cards,
+    _fmt_duration,
     _fmt_number,
     _get_instrument_type_description,
     _get_timezone,
@@ -199,19 +200,7 @@ if profiles and intervals:
         st.html(_CARD_CSS + html)
 
     estimated_memory = (n_bars * BYTES_PER_ROW) / (1024**2)
-    estimated_seconds = int(n_bars / ROWS_PER_SECOND)
-
-    hours, remainder = divmod(estimated_seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    if hours:
-        time_str = f"{hours}h {minutes}m"
-    elif minutes:
-        time_str = f"{minutes}m {seconds}s"
-    elif seconds:
-        time_str = f"{seconds}s"
-    else:
-        time_str = "<1s"
+    time_str = _fmt_duration(n_bars / ROWS_PER_SECOND)
 
     if estimated_memory >= 1024:
         size_str = f"{estimated_memory / 1024:.2f} GB"

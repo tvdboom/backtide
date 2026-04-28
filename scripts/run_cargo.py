@@ -26,7 +26,7 @@ import sys
 import sysconfig
 
 
-def _prepend(env: dict[str, str], key: str, value: str) -> None:
+def _prepend(env: dict[str, str], key: str, value: str):
     """Prepend `value` to the `os.pathsep`-separated variable `key` in `env`.
 
     If `key` is unset or empty, it is set to `value`. Otherwise, `value`

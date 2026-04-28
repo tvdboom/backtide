@@ -3936,7 +3936,7 @@ class StrategyRunResult:
         All round-trip trades closed during the run.
 
     orders : list[[OrderRecord]]
-        All orders the engine processed (filled, cancelled, rejected).
+        All orders the engine processed (filled, canceled, rejected).
 
     metrics : dict[str, float]
         Summary metrics (total_return, sharpe, max_drawdown, ...).
@@ -4510,7 +4510,7 @@ def run_experiment(config, *, verbose=True) -> ExperimentResult:
     3. Runs every selected strategy fully in parallel — each strategy has
        its own independent portfolio, order book and equity curve.
     4. Persists the aggregated [`ExperimentResult`] (and per-strategy
-       artefacts) into the experiment tables in DuckDB.
+       artifacts) into the experiment tables in DuckDB.
 
     Parameters
     ----------
@@ -4518,7 +4518,7 @@ def run_experiment(config, *, verbose=True) -> ExperimentResult:
         The complete experiment configuration.
 
     verbose : bool, default=True
-        Whether to display indicatif progress bars for each phase.
+        Whether to display a progress bar while running.
 
     Returns
     -------

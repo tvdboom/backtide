@@ -51,3 +51,6 @@ harness = false
 [[bench]]
 name = "data_bench"
 harness = false
+
+[lints.clippy]
+type_complexity = "allow"

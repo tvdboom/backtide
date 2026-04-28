@@ -559,7 +559,7 @@ class TestComputeStatistics:
         assert result.iloc[0]["max_drawdown"] <= 0
 
     def test_win_rate_in_range(self, daily_bars):
-        """Win rate should be between 0 and 100."""
+        """Win rate should be between 0 and 1 (fraction)."""
         result = cast(pd.DataFrame, compute_statistics(daily_bars))
         wr = result.iloc[0]["win_rate"]
-        assert 0 <= wr <= 100
+        assert 0 <= wr <= 1

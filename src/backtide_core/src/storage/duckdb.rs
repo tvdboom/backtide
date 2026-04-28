@@ -1,5 +1,10 @@
 //! DuckDB storage solution.
 
+use crate::backtest::models::experiment_result::{
+    EquitySample, OrderRecord, StrategyRunResult, Trade,
+};
+use crate::backtest::models::order::Order;
+use crate::backtest::models::order_type::OrderType;
 use crate::data::models::bar::Bar;
 use crate::data::models::dividend::Dividend;
 use crate::data::models::exchange::Exchange;
@@ -98,7 +103,8 @@ impl Storage for DuckDb {
                 experiment_id     VARCHAR NOT NULL,
                 strategy_id       VARCHAR NOT NULL,
                 strategy_name     VARCHAR NOT NULL,
-                metrics           VARCHAR NOT NULL
+                metrics           VARCHAR NOT NULL,
+                UNIQUE (experiment_id, strategy_id)
             );
 
             CREATE TABLE IF NOT EXISTS experiment_equity (
@@ -106,7 +112,8 @@ impl Storage for DuckDb {
                 ts                BIGINT NOT NULL,
                 equity            DOUBLE NOT NULL,
                 cash              DOUBLE NOT NULL,
-                drawdown          DOUBLE NOT NULL
+                drawdown          DOUBLE NOT NULL,
+                PRIMARY KEY (strategy_run_id, ts)
             );
 
             CREATE TABLE IF NOT EXISTS experiment_orders (
@@ -119,7 +126,8 @@ impl Storage for DuckDb {
                 price             DOUBLE,
                 status            VARCHAR NOT NULL,
                 fill_price        DOUBLE,
-                reason            VARCHAR NOT NULL
+                reason            VARCHAR NOT NULL,
+                PRIMARY KEY (strategy_run_id, order_id)
             );
 
             CREATE TABLE IF NOT EXISTS experiment_trades (
@@ -130,11 +138,11 @@ impl Storage for DuckDb {
                 exit_ts           BIGINT NOT NULL,
                 entry_price       DOUBLE NOT NULL,
                 exit_price        DOUBLE NOT NULL,
-                pnl               DOUBLE NOT NULL
+                pnl               DOUBLE NOT NULL,
+                PRIMARY KEY (strategy_run_id, symbol, entry_ts, exit_ts)
             );
         ",
         )?;
-
 
         Ok(())
     }
@@ -689,7 +697,13 @@ impl Storage for DuckDb {
             conn.execute(
                 "INSERT OR REPLACE INTO experiment_strategies
                  (id, experiment_id, strategy_id, strategy_name, metrics) VALUES (?, ?, ?, ?, ?)",
-                params![run_id, result.experiment_id, strat.strategy_id, strat.strategy_name, metrics_str],
+                params![
+                    run_id,
+                    result.experiment_id,
+                    strat.strategy_id,
+                    strat.strategy_name,
+                    metrics_str
+                ],
             )?;
 
             // Wipe any previous artefacts (idempotent re-runs).
@@ -757,6 +771,7 @@ impl Storage for DuckDb {
 
     fn query_experiments(
         &self,
+        experiment_id: Option<&[String]>,
         search: Option<&str>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredExperiment>> {
@@ -769,17 +784,29 @@ impl Storage for DuckDb {
                     (SELECT COUNT(*) FROM experiment_strategies s WHERE s.experiment_id = e.id) AS n_strategies
              FROM experiments e",
         );
-        let mut where_clause = String::new();
+        let mut conditions: Vec<String> = Vec::new();
         let mut params_vec: Vec<String> = Vec::new();
+
+        if let Some(ids) = experiment_id {
+            if !ids.is_empty() {
+                let placeholders =
+                    std::iter::repeat_n("?", ids.len()).collect::<Vec<_>>().join(", ");
+                conditions.push(format!("e.id IN ({placeholders})"));
+                params_vec.extend(ids.iter().cloned());
+            }
+        }
         if let Some(q) = search {
             if !q.is_empty() {
                 let pat = format!("%{}%", q.to_lowercase());
-                where_clause.push_str(" WHERE LOWER(name) LIKE ? OR LOWER(tags) LIKE ?");
+                conditions.push("(LOWER(name) LIKE ? OR LOWER(tags) LIKE ?)".to_string());
                 params_vec.push(pat.clone());
                 params_vec.push(pat);
             }
         }
-        sql.push_str(&where_clause);
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
         sql.push_str(" ORDER BY started_at DESC");
         if let Some(l) = limit {
             sql.push_str(&format!(" LIMIT {l}"));
@@ -813,13 +840,7 @@ impl Storage for DuckDb {
     fn query_experiment_strategies(
         &self,
         experiment_id: &str,
-    ) -> StorageResult<Vec<crate::backtest::models::experiment_result::StrategyRunResult>> {
-        use crate::backtest::models::experiment_result::{
-            EquitySample, OrderRecord, StrategyRunResult, Trade,
-        };
-        use crate::backtest::models::order::Order;
-        use crate::backtest::models::order_type::OrderType;
-
+    ) -> StorageResult<Vec<StrategyRunResult>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
@@ -830,13 +851,18 @@ impl Storage for DuckDb {
         )?;
         let strats: Vec<(String, String, String, String)> = stmt
             .query_map(params![experiment_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut out = Vec::with_capacity(strats.len());
         for (run_id, strategy_id, name, metrics_str) in strats {
-            let metrics: std::collections::HashMap<String, f64> =
+            let metrics: HashMap<String, f64> =
                 serde_json::from_str(&metrics_str).unwrap_or_default();
 
             let mut eq_stmt = conn.prepare(
@@ -907,6 +933,37 @@ impl Storage for DuckDb {
         }
 
         Ok(out)
+    }
+
+    fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("BEGIN TRANSACTION")?;
+
+        // Delete dependent rows first (no FK cascade in DuckDB).
+        conn.execute(
+            "DELETE FROM experiment_equity WHERE strategy_run_id IN
+                (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
+            params![experiment_id],
+        )?;
+        conn.execute(
+            "DELETE FROM experiment_orders WHERE strategy_run_id IN
+                (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
+            params![experiment_id],
+        )?;
+        conn.execute(
+            "DELETE FROM experiment_trades WHERE strategy_run_id IN
+                (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
+            params![experiment_id],
+        )?;
+        conn.execute(
+            "DELETE FROM experiment_strategies WHERE experiment_id = ?",
+            params![experiment_id],
+        )?;
+        let removed =
+            conn.execute("DELETE FROM experiments WHERE id = ?", params![experiment_id])?;
+
+        conn.execute_batch("COMMIT")?;
+        Ok(removed as u64)
     }
 }
 

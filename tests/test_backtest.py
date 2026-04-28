@@ -246,7 +246,8 @@ class TestOrder:
         """A fresh Order receives an auto-generated id."""
         o1 = Order(symbol="AAPL", order_type="market", quantity=10)
         o2 = Order(symbol="AAPL", order_type="market", quantity=10)
-        assert isinstance(o1.id, str) and len(o1.id) > 0
+        assert isinstance(o1.id, str)
+        assert len(o1.id) > 0
         assert o1.id != o2.id  # uuid uniqueness
 
     def test_explicit_id_is_kept(self):
@@ -335,7 +336,7 @@ class TestRunExperiment:
         monkeypatch.setattr(
             core_data,
             "resolve_profiles",
-            lambda *a, **kw: [],
+            list,
             raising=False,
         )
 

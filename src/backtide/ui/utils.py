@@ -118,6 +118,39 @@ def _fmt_number(n: float) -> str:
         return str(n)
 
 
+def _adaptive_decimals(value: float) -> int:
+    """Return decimal precision based on magnitude."""
+    a = abs(value)
+    if a >= 100:
+        return 0
+    if a >= 10:
+        return 1
+    return 2
+
+
+def _fmt_metric(value: float, *, signed: bool = False, suffix: str = "") -> str:
+    """Format a numeric metric with magnitude-adaptive decimals."""
+    d = _adaptive_decimals(value)
+    sign = "+" if signed else ""
+    return f"{value:{sign}.{d}f}{suffix}"
+
+
+def _fmt_duration(total_seconds: float) -> str:
+    """Format a duration (in seconds) as a compact human-readable string."""
+    total_seconds = int(total_seconds)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    if seconds:
+        return f"{seconds}s"
+
+    return "<1s"
+
+
 def _get_timezone(tz: str | None) -> ZoneInfo:
     """Return the timezone from config or local."""
     if tz:

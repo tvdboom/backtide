@@ -74,10 +74,12 @@ pub trait Storage: Send + Sync {
         result: &crate::backtest::models::experiment_result::ExperimentResult,
     ) -> StorageResult<()>;
 
-    /// Query experiments, optionally filtered by `search` (matches name
-    /// or any tag, case-insensitive substring).
+    /// Query experiments, optionally filtered by `experiment_id` (one or
+    /// many ids) and/or `search` (matches name or any tag,
+    /// case-insensitive substring). Filters combine with AND semantics.
     fn query_experiments(
         &self,
+        experiment_id: Option<&[String]>,
         search: Option<&str>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredExperiment>>;
@@ -87,4 +89,7 @@ pub trait Storage: Send + Sync {
         &self,
         experiment_id: &str,
     ) -> StorageResult<Vec<crate::backtest::models::experiment_result::StrategyRunResult>>;
+
+    /// Delete a single experiment and all its child rows.
+    fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64>;
 }

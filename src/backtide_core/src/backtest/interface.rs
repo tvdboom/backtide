@@ -17,7 +17,7 @@ use pyo3::prelude::*;
 /// 3. Runs every selected strategy fully in parallel — each strategy has
 ///    its own independent portfolio, order book and equity curve.
 /// 4. Persists the aggregated [`ExperimentResult`] (and per-strategy
-///    artefacts) into the experiment tables in DuckDB.
+///    artifacts) into the experiment tables in DuckDB.
 ///
 /// Parameters
 /// ----------
@@ -25,7 +25,7 @@ use pyo3::prelude::*;
 ///     The complete experiment configuration.
 ///
 /// verbose : bool, default=True
-///     Whether to display indicatif progress bars for each phase.
+///     Whether to display a progress bar while running.
 ///
 /// Returns
 /// -------
@@ -50,10 +50,13 @@ use pyo3::prelude::*;
 #[pyfunction]
 #[pyo3(signature = (config: "ExperimentConfig", *, verbose: "bool" = true) -> "ExperimentResult")]
 pub fn run_experiment(
+    py: Python<'_>,
     config: PyRef<'_, ExperimentConfig>,
     verbose: bool,
 ) -> PyResult<ExperimentResult> {
     let cfg = config.clone();
     let engine = Engine::get()?;
-    Ok(engine.run_experiment(&cfg, verbose)?)
+
+    // Release the GIL so rayon workers can acquire it.
+    Ok(py.detach(|| engine.run_experiment(&cfg, verbose))?)
 }

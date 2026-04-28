@@ -28,7 +28,6 @@ pub trait Indicator {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Extract parallel `(open, high, low, close, volume)` arrays from a bar slice.
-#[allow(clippy::type_complexity)]
 fn extract_ohlcv_from_bars(bars: &[Bar]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
     (
         bars.iter().map(|b| b.open).collect(),
@@ -119,7 +118,6 @@ fn true_range(high: &[f64], low: &[f64], close: &[f64]) -> Vec<f64> {
 /// Extract `open`, `high`, `low`, `close`, `volume` arrays from a pandas DataFrame.
 ///
 /// Falls back to a zero-filled volume array when the column is missing.
-#[allow(clippy::type_complexity)]
 fn extract_ohlcv(
     df: &Bound<'_, PyAny>,
 ) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> {

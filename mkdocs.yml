@@ -144,12 +144,16 @@ nav:
             - plot_volatility: api/analysis/plot_volatility.md
             - plot_volume: api/analysis/plot_volume.md
             - plot_vwap: api/analysis/plot_vwap.md
+        - backtest:
+            - run_experiment: api/backtest/run_experiment.md
         - storage:
+            - delete_symbols: api/storage/delete_symbols.md
             - query_bars: api/storage/query_bars.md
             - query_bars_summary: api/storage/query_bars_summary.md
             - query_dividends: api/storage/query_dividends.md
+            - query_experiment_strategies: api/storage/query_experiment_strategies.md
+            - query_experiments: api/storage/query_experiments.md
             - query_instruments: api/storage/query_instruments.md
-            - delete_symbols: api/storage/delete_symbols.md
         - models:
             - backtest:
                 - CommissionType: api/models/backtest/commissiontype.md
@@ -158,16 +162,21 @@ nav:
                 - DataExpConfig: api/models/backtest/dataexpconfig.md
                 - EmptyBarPolicy: api/models/backtest/emptybarpolicy.md
                 - EngineExpConfig: api/models/backtest/engineexpconfig.md
+                - EquitySample: api/models/backtest/equitysample.md
                 - ExchangeExpConfig: api/models/backtest/exchangeexpconfig.md
                 - ExperimentConfig: api/models/backtest/experimentconfig.md
+                - ExperimentResult: api/models/backtest/experimentresult.md
                 - GeneralExpConfig: api/models/backtest/generalexpconfig.md
                 - IndicatorExpConfig: api/models/backtest/indicatorexpconfig.md
                 - Order: api/models/backtest/order.md
+                - OrderRecord: api/models/backtest/orderrecord.md
                 - OrderType: api/models/backtest/ordertype.md
                 - Portfolio: api/models/backtest/portfolio.md
                 - PortfolioExpConfig: api/models/backtest/portfolioexpconfig.md
                 - State: api/models/backtest/state.md
                 - StrategyExpConfig: api/models/backtest/strategyexpconfig.md
+                - StrategyRunResult: api/models/backtest/strategyrunresult.md
+                - Trade: api/models/backtest/trade.md
             - config:
                 - Config: api/models/config/config.md
                 - DataConfig: api/models/config/dataconfig.md

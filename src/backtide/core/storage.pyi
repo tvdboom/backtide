@@ -1,6 +1,7 @@
 """Type stubs for `backtide.core.storage` (auto-generated)."""
 
 __all__ = [
+    "delete_experiment",
     "delete_symbols",
     "query_bars",
     "query_bars_summary",
@@ -15,6 +16,35 @@ import polars as pl
 
 from backtide.core.backtest import StrategyRunResult
 from backtide.core.data import Instrument
+
+def delete_experiment(experiment_id) -> int:
+    """Delete a single experiment from the database.
+
+    Parameters
+    ----------
+    experiment_id : str
+        The id of the experiment to delete.
+
+    Returns
+    -------
+    int
+        Number of experiments removed (0 if the id wasn't found, 1 otherwise).
+
+    See Also
+    --------
+    - backtide.storage:delete_symbols
+    - backtide.storage:query_experiment_strategies
+    - backtide.storage:query_experiments
+
+    Examples
+    --------
+    ```pycon
+    from backtide.storage import delete_experiment
+
+    delete_experiment("abc123")  # norun
+    ```
+
+    """
 
 def delete_symbols(symbol=None, interval=None, provider=None, *, series=None) -> int:
     """Delete bars (and orphaned dividends) from the database.
@@ -129,6 +159,12 @@ def query_bars_summary() -> pd.DataFrame | pl.DataFrame:
     pd.DataFrame | pl.DataFrame
         One summary row per stored series.
 
+    See Also
+    --------
+    - backtide.storage:query_bars
+    - backtide.storage:query_dividends
+    - backtide.storage:query_instruments
+
     Examples
     --------
     ```pycon
@@ -192,16 +228,42 @@ def query_experiment_strategies(experiment_id) -> list[StrategyRunResult]:
     list[[StrategyRunResult]]
         One result entry per strategy that ran in this experiment.
 
+    See Also
+    --------
+    - backtide.backtest:run_experiment
+    - backtide.storage:query_experiments
+
+    Examples
+    --------
+    ```pycon
+    from backtide.storage import query_experiments, query_experiment_strategies
+
+    experiments = query_experiments()
+    if not experiments.empty:
+        runs = query_experiment_strategies(experiments.iloc[0]["id"])
+        print(runs)
+    ```
+
     """
 
-def query_experiments(search=None, *, limit=None) -> pd.DataFrame | pl.DataFrame:
-    """Return stored experiments, optionally filtered by a search string.
+def query_experiments(
+    experiment_id=None,
+    *,
+    search=None,
+    limit=None,
+) -> pd.DataFrame | pl.DataFrame:
+    """Return stored experiments, optionally filtered by id and/or a search string.
 
     The `search` parameter does a case-insensitive substring match on
-    experiment name and tags.
+    experiment name and tags. When both `experiment_id` and `search` are
+    given they are combined with AND semantics.
 
     Parameters
     ----------
+    experiment_id : str | list[str] | None, default=None
+        One or more experiment ids to filter on. `None` (default)
+        ignores this filter.
+
     search : str | None, default=None
         Substring matched against experiment name and tags. `None`
         returns every experiment.
@@ -213,6 +275,20 @@ def query_experiments(search=None, *, limit=None) -> pd.DataFrame | pl.DataFrame
     -------
     pd.DataFrame | pl.DataFrame
         One row per experiment.
+
+    See Also
+    --------
+    - backtide.backtest:run_experiment
+    - backtide.storage:query_experiment_strategies
+
+    Examples
+    --------
+    ```pycon
+    from backtide.storage import query_experiments
+
+    df = query_experiments()
+    print(df.head())
+    ```
 
     """
 
@@ -247,6 +323,11 @@ def query_instruments(
     -------
     list[Instrument]
         Matching instruments from the database.
+
+    See Also
+    --------
+    - backtide.data:fetch_instruments
+    - backtide.storage:query_bars
 
     Examples
     --------

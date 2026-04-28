@@ -29,6 +29,7 @@ from backtide.indicators.utils import _load_stored_indicators
 from backtide.ui.utils import (
     _SUMMARY_CSS,
     _default,
+    _fmt_metric,
     _get_logokit_url,
     _get_timezone,
     _persist,
@@ -325,7 +326,7 @@ if "_price_col" not in st.session_state:
     st.session_state["_price_col"] = _default("_price_col", "adj_close")
 
 
-def _sync_price_col(key: str) -> None:
+def _sync_price_col(key: str):
     """Sync a tab-specific radio key to the shared _price_col and all other radios."""
     st.session_state["_price_col"] = st.session_state[key]
     for k in PRICE_COL_KEYS:
@@ -365,7 +366,7 @@ with tab_map[tab_summary]:
             name = inst.name if inst else row["symbol"]
 
             with st.container(border=True):
-                col1, *cols = st.columns([1.9, 1, 0.8, 1.2, 0.9])
+                col1, *cols = st.columns([2.5, 1, 1, 1, 1])
 
                 with col1:
                     # Build country flag for equity instruments
@@ -406,8 +407,9 @@ with tab_map[tab_summary]:
                 with cols[0]:
                     cls = "positive" if row["ann_return"] >= 0 else "negative"
                     st.markdown(
-                        f":material/trending_up: **Ann. Return**<br>"
-                        f'<span class="metric-value {cls}">{row["ann_return"]:+.2f}%</span>',
+                        f":material/trending_up: **CAGR**<br>"
+                        f'<span class="metric-value {cls}">'
+                        f"{_fmt_metric(row['ann_return'] * 100, signed=True, suffix='%')}</span>",
                         unsafe_allow_html=True,
                     )
 
@@ -416,24 +418,26 @@ with tab_map[tab_summary]:
                     cls = "positive" if sharpe >= 1 else ("negative" if sharpe < 0 else "")
                     st.markdown(
                         f":material/speed: **Sharpe**<br>"
-                        f'<span class="metric-value {cls}">{sharpe:.2f}</span>',
+                        f'<span class="metric-value {cls}">{_fmt_metric(sharpe)}</span>',
                         unsafe_allow_html=True,
                     )
 
                 with cols[2]:
                     max_dd = row["max_drawdown"]
-                    cls = "negative" if max_dd < -20 else ("positive" if max_dd > -5 else "")
+                    cls = "negative" if max_dd < -0.20 else ("positive" if max_dd > -0.05 else "")
                     st.markdown(
-                        f":material/trending_down: **Max Drawdown**<br>"
-                        f'<span class="metric-value {cls}">{max_dd:.2f}%</span>',
+                        f":material/trending_down: **Max DD**<br>"
+                        f'<span class="metric-value {cls}">'
+                        f"{_fmt_metric(max_dd * 100, suffix='%')}</span>",
                         unsafe_allow_html=True,
                     )
 
                 with cols[3]:
-                    cls = "positive" if row["win_rate"] >= 50 else "negative"
+                    cls = "positive" if row["win_rate"] >= 0.5 else "negative"
                     st.markdown(
                         f":material/trophy: **Win Rate**<br>"
-                        f'<span class="metric-value {cls}">{row["win_rate"]:.1f}%</span>',
+                        f'<span class="metric-value {cls}">'
+                        f"{_fmt_metric(row['win_rate'] * 100, suffix='%')}</span>",
                         unsafe_allow_html=True,
                     )
 
@@ -445,19 +449,19 @@ with tab_map[tab_summary]:
                     return ""
                 if col == "ann_return":
                     good = val >= 0
-                    intensity = min(abs(val) / 50, 1.0)
+                    intensity = min(abs(val) / 0.5, 1.0)
                 elif col == "ann_volatility":
-                    good = val <= 20
-                    intensity = min(abs(val - 20) / 40, 1.0)
+                    good = val <= 0.20
+                    intensity = min(abs(val - 0.20) / 0.40, 1.0)
                 elif col in ("sharpe_ratio", "sortino_ratio"):
                     good = val >= 0
                     intensity = min(abs(val) / 3, 1.0)
                 elif col == "max_drawdown":
-                    good = val > -10
-                    intensity = min(abs(val) / 50, 1.0)
+                    good = val > -0.10
+                    intensity = min(abs(val) / 0.5, 1.0)
                 elif col == "win_rate":
-                    good = val >= 50
-                    intensity = min(abs(val - 50) / 30, 1.0)
+                    good = val >= 0.5
+                    intensity = min(abs(val - 0.5) / 0.3, 1.0)
                 else:
                     return ""
                 rgb = "0,128,0" if good else "200,30,30"
@@ -471,7 +475,7 @@ with tab_map[tab_summary]:
                     help="Ticker symbol of the instrument.",
                 ),
                 "ann_return": st.column_config.Column(
-                    label="Ann. Return",
+                    label="CAGR",
                     help="Compound annual growth rate (CAGR).",
                 ),
                 "ann_volatility": st.column_config.Column(
@@ -489,7 +493,7 @@ with tab_map[tab_summary]:
                     help="Sortino ratio: like Sharpe but only penalizes downside volatility.",
                 ),
                 "max_drawdown": st.column_config.Column(
-                    label="Max Drawdown",
+                    label="Max DD",
                     help="Largest peak-to-trough decline in cumulative returns.",
                 ),
                 "win_rate": st.column_config.Column(
@@ -519,12 +523,18 @@ with tab_map[tab_summary]:
             styled = stats_df.style
             styled.format(
                 {
-                    "ann_return": "{:+.2f}%",
-                    "ann_volatility": "{:.2f}%",
-                    "sharpe_ratio": "{:.2f}",
-                    "sortino_ratio": "{:.2f}",
-                    "max_drawdown": "{:.2f}%",
-                    "win_rate": "{:.1f}%",
+                    "ann_return": lambda v: (
+                        "" if pd.isna(v) else _fmt_metric(v * 100, signed=True, suffix="%")
+                    ),
+                    "ann_volatility": lambda v: (
+                        "" if pd.isna(v) else _fmt_metric(v * 100, suffix="%")
+                    ),
+                    "sharpe_ratio": lambda v: "" if pd.isna(v) else _fmt_metric(v),
+                    "sortino_ratio": lambda v: "" if pd.isna(v) else _fmt_metric(v),
+                    "max_drawdown": lambda v: (
+                        "" if pd.isna(v) else _fmt_metric(v * 100, suffix="%")
+                    ),
+                    "win_rate": lambda v: "" if pd.isna(v) else _fmt_metric(v * 100, suffix="%"),
                     "total_bars": "{:,.0f}",
                 }
             )

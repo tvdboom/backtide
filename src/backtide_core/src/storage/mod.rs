@@ -20,6 +20,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(query_experiment_strategies, &m)?)?;
     m.add_function(wrap_pyfunction!(query_instruments, &m)?)?;
     m.add_function(wrap_pyfunction!(delete_symbols, &m)?)?;
+    m.add_function(wrap_pyfunction!(delete_experiment, &m)?)?;
 
     parent.add_submodule(&m)?;
 

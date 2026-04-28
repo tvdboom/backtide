@@ -150,7 +150,7 @@ impl OrderRecord {
 ///     All round-trip trades closed during the run.
 ///
 /// orders : list[[OrderRecord]]
-///     All orders the engine processed (filled, cancelled, rejected).
+///     All orders the engine processed (filled, canceled, rejected).
 ///
 /// metrics : dict[str, float]
 ///     Summary metrics (total_return, sharpe, max_drawdown, ...).

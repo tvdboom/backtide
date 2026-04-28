@@ -80,6 +80,11 @@ impl Engine {
     ) -> StorageResult<u64> {
         self.db.delete_symbols(series)
     }
+
+    /// Deletes a single experiment and all its child rows.
+    pub fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64> {
+        self.db.delete_experiment(experiment_id)
+    }
 }
 
 #[cfg(test)]

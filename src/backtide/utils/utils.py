@@ -52,7 +52,7 @@ def _check_dependency(name: str, pypi_name: str | None = None) -> ModuleType:
         ) from None
 
 
-def _format_number(n: float) -> str:
+def _format_number(n: float, decimals: int = 0) -> str:
     """Transform a number to a nicely formatted string.
 
     Parameters
@@ -60,29 +60,33 @@ def _format_number(n: float) -> str:
     n : int | float
         Number to format.
 
+    decimals : int, default=0
+        Number of decimal places to show in the abbreviated form
+        (``k``/``M``/``B``) and in the unabbreviated form for ``|n| < 1000``.
+
     Returns
     -------
     str
         Formatted string.
 
     """
-    if abs(n) >= 10_000_000_000:
-        return f"{n / 1_000_000_000:.0f}B"
-    elif abs(n) >= 1_000_000_000:
-        return f"{n / 1_000_000_000:.1f}B"
-    elif abs(n) >= 10_000_000:
-        return f"{n / 1_000_000:.0f}M"
+    if abs(n) >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.{decimals}f}B"
     elif abs(n) >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    elif abs(n) >= 10_000:
-        return f"{n / 1_000:.0f}k"
+        return f"{n / 1_000_000:.{decimals}f}M"
     elif abs(n) >= 1_000:
-        return f"{n / 1_000:.1f}k"
+        return f"{n / 1_000:.{decimals}f}k"
     else:
-        return f"{n:.0f}"
+        return f"{n:.{decimals}f}"
 
 
-def _format_price(n: float, decimals: int | None = None, currency: str | None = None) -> str:
+def _format_price(
+    n: float,
+    decimals: int | None = None,
+    currency: str | Currency | None = None,
+    *,
+    compact: bool = False,
+) -> str:
     """Format a price using a currency's symbol and placement convention.
 
     Parameters
@@ -92,11 +96,15 @@ def _format_price(n: float, decimals: int | None = None, currency: str | None = 
 
     decimals : int | None, default=None
         Number of decimal places. If None and the currency is recognized, it uses
-        the currency's decimal places. Else it uses 2.
+        the currency's decimal places (non-compact) or 0 (compact). Else it
+        uses 2 (non-compact) or 0 (compact).
 
-    currency : str | None, default=None
+    currency : str | Currency | None, default=None
         Currency code to use for formatting. If None, no currency symbol
         is shown.
+
+    compact : bool, default=False
+        If True, format the numeric part with `_format_number`.
 
     Returns
     -------
@@ -104,20 +112,27 @@ def _format_price(n: float, decimals: int | None = None, currency: str | None = 
         Formatted string.
 
     """
-    dec = 2 if decimals is None else decimals
+    dec = (0 if compact else 2) if decimals is None else decimals
 
     if currency:
-        try:
-            curr = Currency(currency)
-        except ValueError:
-            return f"{n:,.{dec}f}"
+        if not isinstance(currency, Currency):
+            try:
+                currency = Currency(currency)
+            except ValueError:
+                return _format_number(n, decimals=dec) if compact else f"{n:,.{dec}f}"
+
+        if compact:
+            num = _format_number(n, decimals=dec)
+        else:
+            cdec = currency.decimals if decimals is None else dec
+            num = f"{n:,.{cdec}f}"
 
         if cfg.display.currency_prefix:
-            return f"{curr.symbol}{n:,.{curr.decimals if decimals is None else dec}f}"
+            return f"{currency.symbol}{num}"
         else:
-            return f"{n:,.{curr.decimals if decimals is None else dec}f} {curr.symbol}"
+            return f"{num} {currency.symbol}"
 
-    return f"{n:,.{dec}f}"
+    return _format_number(n, decimals=dec) if compact else f"{n:,.{dec}f}"
 
 
 def _make_dummy_bars(

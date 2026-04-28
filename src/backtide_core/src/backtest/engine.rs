@@ -32,9 +32,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ────────────────────────────────────────────────────────────────────────────
 // Public interface
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ────────────────────────────────────────────────────────────────────────────
 
 impl Engine {
     /// Run a single backtest experiment end-to-end.
@@ -65,7 +65,7 @@ impl Engine {
             )));
         }
 
-        // â”€â”€ Phase 1: data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Phase 1: data ───────────────────────────────────────────────
         let pb = verbose.then(|| progress_spinner("Resolving instrument profiles..."));
         let profiles = self.resolve_profiles(
             symbols.clone(),
@@ -86,7 +86,7 @@ impl Engine {
             p.finish_and_clear();
         }
 
-        // â”€â”€ Phase 2: load bars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Phase 2: load bars ──────────────────────────────────────────
         let pb = verbose.then(|| progress_spinner("Loading bars from storage..."));
         let bar_map = self.load_bars(
             &symbols,
@@ -127,7 +127,7 @@ impl Engine {
         // Per-symbol aligned bars indexed by timestamp position.
         let aligned = align_bars(&bar_map, &all_ts, config.engine.empty_bar_policy);
 
-        // â”€â”€ Phase 3: indicators (computed once) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Phase 3: indicators (computed once) ─────────────────────────
         let pb = verbose.then(|| {
             progress_bar(config.indicators.indicators.len() as u64, "Computing indicators...")
         });
@@ -136,7 +136,7 @@ impl Engine {
             p.finish_and_clear();
         }
 
-        // â”€â”€ Phase 4: run strategies in parallel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Phase 4: run strategies in parallel ─────────────────────────
         let strategy_objs = load_strategies(&config.strategy.strategies)?;
 
         let pb = verbose.then(|| {
@@ -215,7 +215,7 @@ impl Engine {
             warnings,
         };
 
-        // â”€â”€ Phase 5: persist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Phase 5: persist ────────────────────────────────────────────
         let pb = verbose.then(|| progress_spinner("Persisting experiment results..."));
         if let Err(e) = self.db.write_experiment(config, &result) {
             warn!("Failed to persist experiment: {e}");
@@ -267,9 +267,9 @@ impl Engine {
     }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ────────────────────────────────────────────────────────────────────────────
 // Helper functions (free)
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ────────────────────────────────────────────────────────────────────────────
 
 fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -367,7 +367,7 @@ fn compute_indicators(
             let bars: Vec<Bar> = row
                 .iter()
                 .map(|b| {
-                    b.clone().unwrap_or_else(|| Bar {
+                    b.clone().unwrap_or(Bar {
                         open_ts: 0,
                         close_ts: 0,
                         open_ts_exchange: 0,
@@ -513,9 +513,9 @@ fn load_strategies(names: &[String]) -> EngineResult<Vec<(String, Py<PyAny>, boo
     .map_err(|e: PyErr| EngineError::Io(std::io::Error::other(e.to_string())))
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ────────────────────────────────────────────────────────────────────────────
 // Per-strategy runner
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ────────────────────────────────────────────────────────────────────────────
 
 /// Execute one strategy through the entire timeline.
 fn run_one_strategy(
@@ -635,9 +635,9 @@ fn run_one_strategy(
         let ts = timeline[bar_index];
         let is_warmup = bar_index < warmup;
 
-        // â”€â”€ 1. Resolve open orders against the *current* bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 1. Resolve open orders against the *current* bar ────────────
         let mut still_open: Vec<Order> = Vec::new();
-        let drained: Vec<Order> = open_orders.drain(..).collect();
+        let drained: Vec<Order> = std::mem::take(&mut open_orders);
         for order in drained {
             // Cancel orders take effect immediately and do not need a price.
             if order.order_type == OrderType::CancelOrder {
@@ -686,7 +686,7 @@ fn run_one_strategy(
 
             let order_ccy = quote_ccy.get(symbol).copied().unwrap_or(base_ccy);
 
-            // â”€â”€ Funds check & settlement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── Funds check & settlement ─────────────────────────────
             if qty > 0 {
                 // BUY: try paying in `order_ccy` first, else convert from base.
                 let needed = notional + commission;
@@ -755,7 +755,7 @@ fn run_one_strategy(
         }
         open_orders = still_open;
 
-        // â”€â”€ 2. Build State + Portfolio + per-symbol view â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 2. Build State + Portfolio + per-symbol view ────────────────
         let state = State {
             timestamp: ts,
             bar_index: bar_index as u64,
@@ -768,7 +768,7 @@ fn run_one_strategy(
             orders: open_orders.clone(),
         };
 
-        // â”€â”€ 3. Strategy.evaluate(...) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 3. Strategy.evaluate(...) ────────────────────────────────────
         if !is_warmup {
             let new_orders = Python::attach(|py| -> PyResult<Vec<Order>> {
                 let data = build_per_symbol_view(py, &cached_data, bar_index)?;
@@ -822,7 +822,7 @@ fn run_one_strategy(
             }
         }
 
-        // â”€â”€ 4. Mark-to-market & equity sample â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 4. Mark-to-market & equity sample ────────────────────────────
         let mut equity = cash.values().sum::<f64>(); // base + foreign treated 1:1 (best-effort)
         for (sym, qty) in &positions {
             if *qty == 0 {
@@ -848,7 +848,7 @@ fn run_one_strategy(
         });
     }
 
-    // â”€â”€ 5. Liquidate remaining positions to compute final PnL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 5. Liquidate remaining positions to compute final PnL ───────────
     if let Some(last_idx) = total_bars.checked_sub(1) {
         for (sym, qty) in positions.clone() {
             if qty == 0 {
@@ -872,8 +872,13 @@ fn run_one_strategy(
         }
     }
 
-    // â”€â”€ 6. Metrics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    let metrics = compute_metrics(cfg.portfolio.initial_cash as f64, &equity_curve, &closed_trades);
+    // ── 6. Metrics ──────────────────────────────────────────────────────
+    let metrics = compute_metrics(
+        cfg.portfolio.initial_cash as f64,
+        cfg.engine.risk_free_rate / 100.0,
+        &equity_curve,
+        &closed_trades,
+    );
 
     StrategyRunResult {
         strategy_id: Uuid::new_v4().simple().to_string()[..16].to_owned(),
@@ -962,42 +967,20 @@ fn close_open_trade_sell(
 
 fn compute_metrics(
     initial_cash: f64,
+    risk_free_rate: f64,
     curve: &[EquitySample],
     trades: &[Trade],
 ) -> HashMap<String, f64> {
     let mut m = HashMap::new();
+
     let final_equity = curve.last().map(|s| s.equity).unwrap_or(initial_cash);
     let total_return = if initial_cash > 0.0 {
         (final_equity - initial_cash) / initial_cash
     } else {
         0.0
     };
-    let max_dd = curve.iter().map(|s| s.drawdown).fold(0.0_f64, f64::min);
 
-    // Daily-style return series for Sharpe.
-    let mut returns: Vec<f64> = Vec::with_capacity(curve.len().saturating_sub(1));
-    for w in curve.windows(2) {
-        if w[0].equity > 0.0 {
-            returns.push((w[1].equity - w[0].equity) / w[0].equity);
-        }
-    }
-    let mean = if returns.is_empty() {
-        0.0
-    } else {
-        returns.iter().sum::<f64>() / returns.len() as f64
-    };
-    let var = if returns.len() > 1 {
-        returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (returns.len() - 1) as f64
-    } else {
-        0.0
-    };
-    let std = var.sqrt();
-    let sharpe = if std > 0.0 {
-        (mean / std) * 252.0_f64.sqrt()
-    } else {
-        0.0
-    };
-
+    // Trade-derived metrics.
     let n_trades = trades.len() as f64;
     let n_wins = trades.iter().filter(|t| t.pnl > 0.0).count() as f64;
     let win_rate = if n_trades > 0.0 {
@@ -1008,10 +991,26 @@ fn compute_metrics(
 
     m.insert("total_return".into(), total_return);
     m.insert("final_equity".into(), final_equity);
-    m.insert("max_drawdown".into(), max_dd);
-    m.insert("sharpe_ratio".into(), sharpe);
+    m.insert("pnl".into(), final_equity - initial_cash);
     m.insert("n_trades".into(), n_trades);
     m.insert("win_rate".into(), win_rate);
+
+    // Annualized stats reuse the shared kernel from `analysis.rs` so that
+    // the analysis page and backtest engine produce identical numbers.
+    let values: Vec<f64> = curve.iter().map(|s| s.equity).collect();
+    let timestamps: Vec<f64> = curve.iter().map(|s| s.timestamp as f64).collect();
+    let stats = crate::analysis::compute_series_stats(&values, &timestamps, risk_free_rate, None);
+
+    let (cagr, ann_vol, sharpe, sortino, max_dd) = match stats {
+        Some(s) => (s.ann_return, s.ann_volatility, s.sharpe, s.sortino, s.max_drawdown),
+        None => (0.0, 0.0, 0.0, 0.0, 0.0),
+    };
+    m.insert("cagr".into(), cagr);
+    m.insert("ann_volatility".into(), ann_vol);
+    m.insert("sharpe_ratio".into(), sharpe);
+    m.insert("sortino_ratio".into(), sortino);
+    m.insert("max_drawdown".into(), max_dd);
+
     m
 }
 
@@ -1069,9 +1068,9 @@ fn build_indicator_view<'py>(
     Ok(out.into_any())
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ────────────────────────────────────────────────────────────────────────────
 // Tests
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -1198,7 +1197,7 @@ mod tests {
             }
 
             // Resolve open orders: simplified copy of run_one_strategy's logic.
-            let drained: Vec<Order> = open_orders.drain(..).collect();
+            let drained: Vec<Order> = std::mem::take(&mut open_orders);
             for order in drained {
                 if order.order_type == OrderType::CancelOrder {
                     open_orders.retain(|o| o.id != order.id);
@@ -1284,7 +1283,7 @@ mod tests {
         }
 
         let metrics =
-            compute_metrics(cfg.portfolio.initial_cash as f64, &equity_curve, &closed_trades);
+            compute_metrics(cfg.portfolio.initial_cash as f64, 0.0, &equity_curve, &closed_trades);
 
         StrategyRunResult {
             strategy_id: "test_id".into(),

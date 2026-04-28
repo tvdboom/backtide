@@ -70,6 +70,168 @@ fn resolve_dt<'py>(py: Python<'py>, df: &Bound<'py, PyAny>) -> PyResult<Bound<'p
 // Pure-Rust statistics kernel
 // ────────────────────────────────────────────────────────────────────────────
 
+/// Annualized statistics for a single value series (price / equity / NAV).
+///
+/// All values are returned as **fractions** (e.g. `0.12` = `12 %`) to keep
+/// the kernel agnostic to display conventions. Callers wanting percentages
+/// must multiply by `100.0`.
+pub struct SeriesStats {
+    /// Annualized return (CAGR).
+    pub ann_return: f64,
+
+    /// Annualized volatility (standard deviation of returns).
+    pub ann_volatility: f64,
+
+    /// Annualized Sharpe ratio.
+    pub sharpe: f64,
+
+    /// Annualized Sortino ratio.
+    pub sortino: f64,
+
+    /// Maximum drawdown (≤ 0).
+    pub max_drawdown: f64,
+
+    /// Fraction of up-bars (returns > 0).
+    pub win_rate: f64,
+}
+
+/// Compute annualized risk/return statistics for a single value series.
+///
+/// Used both by [`compute_statistics`] (analysis page) and by the
+/// backtest engine when summarizing strategy equity curves, so that
+/// these metrics are calculated in exactly one place.
+///
+/// Parameters
+/// ----------
+/// values : &[f64]
+///     Strictly positive value series (prices, equity, NAV, ...). At
+///     least 3 points are required.
+/// timestamps : &[f64]
+///     Unix-second timestamps matching `values`. Used only when
+///     `periods_per_year` is `None`, to estimate the annualization factor
+///     from the bar density.
+/// risk_free_rate : f64
+///     Annualized risk-free rate as a **fraction** (e.g. 0.04 = 4 %).
+/// periods_per_year : Option<usize>
+///     Explicit annualization factor. When `None`, derived from the
+///     series time span.
+pub fn compute_series_stats(
+    values: &[f64],
+    timestamps: &[f64],
+    risk_free_rate: f64,
+    periods_per_year: Option<usize>,
+) -> Option<SeriesStats> {
+    if values.len() < 3 {
+        return None;
+    }
+
+    // Bar-to-bar returns. Skip windows with non-positive base to avoid
+    // divide-by-zero / negative-base nonsense on degenerate series.
+    let returns: Vec<f64> = values
+        .windows(2)
+        .filter_map(|w| {
+            if w[0] > 0.0 {
+                Some(w[1] / w[0] - 1.0)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let n = returns.len();
+    if n < 2 {
+        return None;
+    }
+
+    // Annualization factor.
+    let ann = if let Some(ppy) = periods_per_year {
+        ppy as f64
+    } else {
+        let span =
+            timestamps.last().copied().unwrap_or(0.0) - timestamps.first().copied().unwrap_or(0.0);
+        if span > 0.0 {
+            let years = span / (365.25 * 86_400.0);
+            (n as f64 / years).round().max(1.0)
+        } else {
+            252.0
+        }
+    };
+
+    // CAGR.
+    let total_return = values[values.len() - 1] / values[0];
+    let n_years = n as f64 / ann;
+    let ann_return = if n_years > 0.0 && total_return > 0.0 {
+        let cagr = total_return.powf(1.0 / n_years) - 1.0;
+        if cagr.is_finite() {
+            cagr
+        } else {
+            // For very short periods CAGR overflows; fall back to simple return
+            total_return - 1.0
+        }
+    } else if n_years > 0.0 {
+        -1.0
+    } else {
+        0.0
+    };
+
+    // Mean and std of returns.
+    let mean_ret = returns.iter().sum::<f64>() / n as f64;
+    let variance = returns.iter().map(|r| (r - mean_ret).powi(2)).sum::<f64>() / (n - 1) as f64;
+    let std_ret = variance.sqrt();
+    let ann_volatility = std_ret * ann.sqrt();
+
+    // Sharpe.
+    let excess = mean_ret - risk_free_rate / ann;
+    let sharpe = if std_ret > 0.0 {
+        excess / std_ret * ann.sqrt()
+    } else {
+        0.0
+    };
+
+    // Sortino.
+    let downside: Vec<f64> = returns.iter().copied().filter(|&r| r < 0.0).collect();
+    let sortino = if downside.len() > 1 {
+        let ds_mean = downside.iter().sum::<f64>() / downside.len() as f64;
+        let ds_var = downside.iter().map(|r| (r - ds_mean).powi(2)).sum::<f64>()
+            / (downside.len() - 1) as f64;
+        let ds_std = ds_var.sqrt();
+        if ds_std > 0.0 {
+            excess / ds_std * ann.sqrt()
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+
+    // Max drawdown over the cumulative return path.
+    let mut cum = 1.0_f64;
+    let mut running_max = f64::NEG_INFINITY;
+    let mut max_dd = 0.0_f64;
+    for &r in &returns {
+        cum *= 1.0 + r;
+        if cum > running_max {
+            running_max = cum;
+        }
+        let dd = (cum - running_max) / running_max;
+        if dd < max_dd {
+            max_dd = dd;
+        }
+    }
+
+    // Win rate (fraction of bars with strictly positive return).
+    let wins = returns.iter().filter(|&&r| r > 0.0).count();
+    let win_rate = wins as f64 / n as f64;
+
+    Some(SeriesStats {
+        ann_return,
+        ann_volatility,
+        sharpe,
+        sortino,
+        max_drawdown: max_dd,
+        win_rate,
+    })
+}
+
 /// Per-symbol statistics record computed by Rust.
 struct SymbolStats {
     symbol: String,
@@ -90,114 +252,15 @@ fn compute_single(
     risk_free_rate: f64,
     periods_per_year: Option<usize>,
 ) -> Option<SymbolStats> {
-    if prices.len() < 3 {
-        return None;
-    }
-
-    // Returns (percentage changes)
-    let returns: Vec<f64> = prices.windows(2).map(|w| w[1] / w[0] - 1.0).collect();
-    let n = returns.len();
-    if n < 2 {
-        return None;
-    }
-
-    // Annualization factor
-    let ann = if let Some(ppy) = periods_per_year {
-        ppy as f64
-    } else {
-        // Estimate from the actual observed bar density: bars / years_of_data.
-        // This naturally accounts for weekends, holidays, and market hours,
-        // giving ~252 for daily equity data instead of the incorrect ~365.
-        let time_span = timestamps[timestamps.len() - 1] - timestamps[0];
-        if time_span > 0.0 {
-            let years = time_span / (365.25 * 86400.0);
-            (n as f64 / years).round().max(1.0)
-        } else {
-            252.0
-        }
-    };
-
-    // Annualized return (geometric)
-    let total_return = prices[prices.len() - 1] / prices[0];
-    let n_years = n as f64 / ann;
-    let ann_return = if n_years > 0.0 && total_return > 0.0 {
-        let cagr = total_return.powf(1.0 / n_years) - 1.0;
-        if cagr.is_finite() {
-            cagr * 100.0
-        } else {
-            // For very short periods CAGR overflows; fall back to simple return
-            (total_return - 1.0) * 100.0
-        }
-    } else if n_years > 0.0 {
-        -100.0
-    } else {
-        0.0
-    };
-
-    // Mean and std of returns
-    let mean_ret = returns.iter().sum::<f64>() / n as f64;
-    let variance = returns.iter().map(|r| (r - mean_ret).powi(2)).sum::<f64>() / (n - 1) as f64;
-    let std_ret = variance.sqrt();
-
-    // Annualized volatility
-    let ann_volatility = std_ret * ann.sqrt() * 100.0;
-
-    // Sharpe ratio
-    let excess = mean_ret - risk_free_rate / ann;
-    let sharpe = if std_ret > 0.0 {
-        excess / std_ret * ann.sqrt()
-    } else {
-        0.0
-    };
-
-    // Sortino ratio
-    let downside: Vec<f64> = returns.iter().copied().filter(|&r| r < 0.0).collect();
-    let sortino = if downside.len() > 1 {
-        let ds_mean = downside.iter().sum::<f64>() / downside.len() as f64;
-        let ds_var = downside.iter().map(|r| (r - ds_mean).powi(2)).sum::<f64>()
-            / (downside.len() - 1) as f64;
-        let ds_std = ds_var.sqrt();
-        if ds_std > 0.0 {
-            excess / ds_std * ann.sqrt()
-        } else {
-            0.0
-        }
-    } else {
-        0.0
-    };
-
-    // Max drawdown
-    let mut cumulative = Vec::with_capacity(n);
-    let mut cum = 1.0;
-    for &r in &returns {
-        cum *= 1.0 + r;
-        cumulative.push(cum);
-    }
-    let mut running_max = f64::NEG_INFINITY;
-    let mut max_dd = 0.0_f64;
-    for &c in &cumulative {
-        if c > running_max {
-            running_max = c;
-        }
-        let dd = (c - running_max) / running_max;
-        if dd < max_dd {
-            max_dd = dd;
-        }
-    }
-    let max_drawdown = max_dd * 100.0;
-
-    // Win rate
-    let wins = returns.iter().filter(|&&r| r > 0.0).count();
-    let win_rate = wins as f64 / n as f64 * 100.0;
-
+    let s = compute_series_stats(prices, timestamps, risk_free_rate, periods_per_year)?;
     Some(SymbolStats {
         symbol,
-        ann_return,
-        ann_volatility,
-        sharpe,
-        sortino,
-        max_drawdown,
-        win_rate,
+        ann_return: s.ann_return,
+        ann_volatility: s.ann_volatility,
+        sharpe: s.sharpe,
+        sortino: s.sortino,
+        max_drawdown: s.max_drawdown,
+        win_rate: s.win_rate,
         total_bars: prices.len(),
     })
 }
@@ -386,8 +449,8 @@ mod tests {
 
         assert_eq!(stats.symbol, "AAPL");
         assert_eq!(stats.total_bars, 60);
-        // Every bar is up -> 100% wins
-        assert!((stats.win_rate - 100.0).abs() < 1e-9);
+        // Every bar is up -> 100% wins (1.0 as a fraction)
+        assert!((stats.win_rate - 1.0).abs() < 1e-9);
         // No down day -> sortino is 0 (downside len <= 1)
         assert_eq!(stats.sortino, 0.0);
         // Annualised return must be positive on a strict uptrend
@@ -433,9 +496,9 @@ mod tests {
 
         let stats = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
 
-        // From 120 -> 60 is a 50% drawdown
-        assert!(stats.max_drawdown < -40.0);
-        assert!(stats.max_drawdown >= -100.0);
+        // From 120 -> 60 is a 50% drawdown (-0.5 as a fraction)
+        assert!(stats.max_drawdown < -0.4);
+        assert!(stats.max_drawdown >= -1.0);
     }
 
     // ── compute_single: sortino with downside returns ───────────────────
