@@ -1161,8 +1161,8 @@ st.divider()
 
 running_experiment = st.session_state.get("running_experiment", False)
 
-run_button_slot = st.empty()
-clicked = run_button_slot.button(
+button_slot = st.empty()
+if button_slot.button(
     label="Run experiment",
     key="running_experiment",
     icon=":material/play_circle:",
@@ -1170,11 +1170,9 @@ clicked = run_button_slot.button(
     disabled=not (profiles and start_ts and latest_ts and selected_strat) or running_experiment,
     shortcut="Enter",
     width="stretch",
-)
-
-if clicked:
+):
     # Hide the run button while the experiment is executing.
-    run_button_slot.empty()
+    button_slot.empty()
 
     cfg_str = _build_experiment_config()
     exp_cfg = ExperimentConfig.from_toml(cfg_str)

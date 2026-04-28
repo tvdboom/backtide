@@ -10,7 +10,7 @@ use crate::data::models::interval::Interval;
 use crate::engine::Engine;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
-use pyo3::{pyfunction, Bound, FromPyObject, PyAny, PyResult};
+use pyo3::{pyfunction, Bound, FromPyObject, PyAny, PyResult, Python};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helper functions
@@ -262,11 +262,14 @@ pub fn list_instruments(
 #[pyfunction]
 #[pyo3(signature = (profiles: "list[InstrumentProfile]", start: "int | None"=None, end: "int | None"=None, *, verbose: "bool"=true))]
 pub fn download_bars(
+    py: Python<'_>,
     profiles: Vec<InstrumentProfile>,
     start: Option<u64>,
     end: Option<u64>,
     verbose: bool,
 ) -> PyResult<DownloadResult> {
     let engine = Engine::get()?;
-    Ok(engine.download_bars(&profiles, start, end, verbose)?)
+
+    // Release the GIL so HTTP workers and Streamlit's websocket can run.
+    Ok(py.detach(|| engine.download_bars(&profiles, start, end, verbose))?)
 }

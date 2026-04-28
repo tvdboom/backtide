@@ -223,8 +223,9 @@ st.divider()
 
 downloading = st.session_state.get("downloading", False)
 
-if st.button(
-    label="Downloading..." if downloading else "Download",
+button_slot = st.empty()
+if button_slot.button(
+    label="Download",
     key="downloading",
     icon=":material/get_app:",
     type="primary",
@@ -232,40 +233,55 @@ if st.button(
     shortcut="Enter",
     width="stretch",
 ):
-    try:
-        # Convert date range to Unix timestamps for the download.
-        # When full_history is on, pass None to use the full provider range.
-        if full_history:
-            dl_start = dl_end = None
-        else:
-            dl_start = int(dt.combine(start_ts, dt.min.time(), tzinfo=tz).timestamp())
-            dl_end = int(dt.combine(end_ts, dt.min.time(), tzinfo=tz).timestamp())
+    # Hide the download button while downloading.
+    button_slot.empty()
 
-        with st.spinner("Downloading data..."):
+    with st.spinner(f"Downloading data..."):
+        try:
+            # Convert date range to Unix timestamps for the download.
+            # When full_history is on, pass None to use the full provider range.
+            if full_history:
+                dl_start = dl_end = None
+            else:
+                dl_start = int(dt.combine(start_ts, dt.min.time(), tzinfo=tz).timestamp())
+                dl_end = int(dt.combine(end_ts, dt.min.time(), tzinfo=tz).timestamp())
+
             result = download_bars(profiles, start=dl_start, end=dl_end, verbose=False)
-    except RuntimeError as ex:
-        st.error(f"Download error: {ex}", icon=":material/error:")
-    else:
-        # Invalidate the storage cache so new bars become visible.
-        st.cache_data.clear()
-
-        for warn in result.warnings:
-            st.warning(warn, icon=":material/warning:")
-
-        n_total = result.n_succeeded + result.n_failed
-
-        if result.n_failed and result.n_succeeded:
-            st.success(
-                f"Successfully downloaded {result.n_succeeded} of {n_total} series.",
-                icon=":material/check_circle:",
-            )
-        elif result.n_failed:
-            st.error(
-                f"All {n_total} series had warnings during download.",
-                icon=":material/error:",
-            )
+        except RuntimeError as ex:
+            st.error(f"Download error: {ex}", icon=":material/error:")
         else:
-            st.success(
-                f"Successfully downloaded {result.n_succeeded} series.",
-                icon=":material/check_circle:",
+            # Invalidate the storage cache so new bars become visible.
+            st.cache_data.clear()
+
+            for warn in result.warnings:
+                st.warning(warn, icon=":material/warning:")
+
+            n_total = result.n_succeeded + result.n_failed
+
+            if result.n_failed and result.n_succeeded:
+                st.success(
+                    f"Successfully downloaded {result.n_succeeded} of {n_total} series.",
+                    icon=":material/check_circle:",
+                )
+            elif result.n_failed:
+                st.error(
+                    f"All {n_total} series had warnings during download.",
+                    icon=":material/error:",
+                )
+            else:
+                st.success(
+                    f"Successfully downloaded {result.n_succeeded} series.",
+                    icon=":material/check_circle:",
+                )
+
+            st.button(
+                label="View analysis",
+                icon=":material/assessment:",
+                type="primary",
+                shortcut="Enter",
+                width="stretch",
+                on_click=lambda: st.session_state.update(to_analysis=True),
             )
+
+if st.session_state.pop("to_analysis", None):
+    st.switch_page("analysis.py")
