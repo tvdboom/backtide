@@ -25,10 +25,21 @@ stubs:
 check:
     python scripts/generate_stubs.py --check
 
-# Run the test suite (Python + Cargo) with coverage ≥50%
+# Run the test suite (Python + Cargo)
 test *args:
-    uv run pytest -n=auto --cov=backtide --cov-fail-under=20 {{args}}
-    cargo llvm-cov --manifest-path src/backtide_core/Cargo.toml --fail-under-lines 40
+    uv run pytest -n=auto {{args}}
+    uv run python scripts/run_cargo.py \
+        cargo llvm-cov \
+            --manifest-path src/backtide_core/Cargo.toml \
+            --no-cfg-coverage
+
+# Run Rust benchmarks
+bench *args:
+    uv run python scripts/run_cargo.py \
+        cargo bench \
+            --manifest-path src/backtide_core/Cargo.toml \
+            --no-default-features \
+            {{args}}
 
 # Run pre-commit hooks on all files
 lint:

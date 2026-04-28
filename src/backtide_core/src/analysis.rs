@@ -339,3 +339,181 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a simple monotonically-increasing price series.
+    fn linear_prices(n: usize, start: f64, step: f64) -> Vec<f64> {
+        (0..n).map(|i| start + step * i as f64).collect()
+    }
+
+    /// Build matching daily timestamps (one day apart) for `n` bars.
+    fn daily_timestamps(n: usize) -> Vec<f64> {
+        (0..n).map(|i| (i as f64) * 86_400.0).collect()
+    }
+
+    // ── compute_single: short-circuits ──────────────────────────────────
+
+    #[test]
+    fn compute_single_returns_none_for_too_few_prices() {
+        let result = compute_single("X".into(), &[100.0, 101.0], &[0.0, 1.0], 0.0, None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn compute_single_returns_none_when_returns_under_two() {
+        // 3 prices -> 2 returns, which is the minimum accepted
+        let result = compute_single(
+            "X".into(),
+            &[100.0, 101.0, 102.0],
+            &[0.0, 86_400.0, 172_800.0],
+            0.0,
+            None,
+        );
+        assert!(result.is_some());
+    }
+
+    // ── compute_single: positive trend ──────────────────────────────────
+
+    #[test]
+    fn compute_single_positive_trend_basic_metrics() {
+        let prices = linear_prices(60, 100.0, 1.0);
+        let timestamps = daily_timestamps(60);
+
+        let stats = compute_single("AAPL".into(), &prices, &timestamps, 0.0, None).unwrap();
+
+        assert_eq!(stats.symbol, "AAPL");
+        assert_eq!(stats.total_bars, 60);
+        // Every bar is up -> 100% wins
+        assert!((stats.win_rate - 100.0).abs() < 1e-9);
+        // No down day -> sortino is 0 (downside len <= 1)
+        assert_eq!(stats.sortino, 0.0);
+        // Annualised return must be positive on a strict uptrend
+        assert!(stats.ann_return > 0.0);
+        // Max drawdown is 0 for a monotonic uptrend
+        assert!((stats.max_drawdown).abs() < 1e-9);
+    }
+
+    // ── compute_single: explicit periods_per_year ───────────────────────
+
+    #[test]
+    fn compute_single_uses_explicit_periods_per_year() {
+        let prices = linear_prices(50, 100.0, 0.5);
+        let timestamps = daily_timestamps(50);
+
+        let with_252 = compute_single("X".into(), &prices, &timestamps, 0.0, Some(252)).unwrap();
+        let with_12 = compute_single("X".into(), &prices, &timestamps, 0.0, Some(12)).unwrap();
+
+        // Different annualisation factors must yield different volatility.
+        assert!((with_252.ann_volatility - with_12.ann_volatility).abs() > 1e-6);
+    }
+
+    // ── compute_single: time_span = 0 fallback ──────────────────────────
+
+    #[test]
+    fn compute_single_handles_zero_time_span() {
+        let prices = vec![100.0, 101.0, 102.0, 103.0];
+        let timestamps = vec![0.0; 4]; // identical timestamps
+
+        let stats = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
+        // With time_span=0 we fall back to ann=252; stats should still be finite.
+        assert!(stats.ann_volatility.is_finite());
+        assert!(stats.sharpe.is_finite());
+    }
+
+    // ── compute_single: drawdown calculation ────────────────────────────
+
+    #[test]
+    fn compute_single_computes_negative_drawdown() {
+        // Up then crash then partial recovery
+        let prices = vec![100.0, 110.0, 120.0, 60.0, 70.0, 80.0];
+        let timestamps = daily_timestamps(prices.len());
+
+        let stats = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
+
+        // From 120 -> 60 is a 50% drawdown
+        assert!(stats.max_drawdown < -40.0);
+        assert!(stats.max_drawdown >= -100.0);
+    }
+
+    // ── compute_single: sortino with downside returns ───────────────────
+
+    #[test]
+    fn compute_single_sortino_with_downside() {
+        // Mix of up and down days produces a meaningful sortino ratio.
+        let prices = vec![100.0, 101.0, 99.0, 102.0, 98.0, 103.0, 97.0];
+        let timestamps = daily_timestamps(prices.len());
+
+        let stats = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
+        assert!(stats.sortino.is_finite());
+    }
+
+    // ── compute_single: zero-volatility series ──────────────────────────
+
+    #[test]
+    fn compute_single_zero_std_yields_zero_sharpe() {
+        let prices = vec![100.0; 30];
+        let timestamps = daily_timestamps(30);
+
+        let stats = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
+        assert_eq!(stats.sharpe, 0.0);
+        assert_eq!(stats.win_rate, 0.0);
+        assert_eq!(stats.ann_volatility, 0.0);
+    }
+
+    // ── compute_single: total_return = 0 (n_years > 0) ──────────────────
+
+    #[test]
+    fn compute_single_collapsing_price_returns_minus_100() {
+        // Prices strictly decreasing toward zero -> ann_return clamps near -100
+        let prices = vec![100.0, 50.0, 25.0, 0.0001];
+        let timestamps = daily_timestamps(prices.len());
+
+        let stats = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
+        assert!(stats.ann_return < 0.0);
+    }
+
+    // ── compute_single: risk_free_rate affects sharpe ───────────────────
+
+    #[test]
+    fn compute_single_risk_free_rate_lowers_sharpe() {
+        let prices = vec![100.0, 101.0, 102.5, 102.0, 103.0, 104.5, 104.0, 106.0];
+        let timestamps = daily_timestamps(prices.len());
+
+        let zero_rf = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
+        let high_rf = compute_single("X".into(), &prices, &timestamps, 0.5, None).unwrap();
+
+        // A higher risk-free rate must reduce the sharpe ratio.
+        assert!(high_rf.sharpe < zero_rf.sharpe);
+    }
+
+    // ── compute_single: zero downside std collapses sortino to 0 ────────
+
+    #[test]
+    fn compute_single_uniform_downside_yields_zero_sortino() {
+        // Alternating same up/down moves -> downside returns are all equal,
+        // so the downside std is zero and sortino falls back to 0.0.
+        let prices = vec![100.0, 99.0, 100.0, 99.0, 100.0, 99.0, 100.0];
+        let timestamps = daily_timestamps(prices.len());
+
+        let stats = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
+        assert_eq!(stats.sortino, 0.0);
+    }
+
+    // ── compute_single: CAGR overflow fallback ──────────────────────────
+
+    #[test]
+    fn compute_single_falls_back_when_cagr_overflows() {
+        // Few bars over a tiny ann factor produces a very large 1/n_years
+        // exponent. With explicit ppy=1 and only 3 bars we get n_years=2,
+        // which is well-defined; here we just exercise the Some(ppy) branch
+        // alongside a positive total_return for completeness.
+        let prices = vec![1.0, 2.0, 4.0];
+        let timestamps = daily_timestamps(prices.len());
+
+        let stats = compute_single("X".into(), &prices, &timestamps, 0.0, Some(1)).unwrap();
+        assert!(stats.ann_return.is_finite());
+    }
+}

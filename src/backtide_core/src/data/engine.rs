@@ -889,4 +889,167 @@ mod tests {
             .block_on(async { engine.cache.instrument_cache.get(&"TEST-USD".to_owned()).await });
         assert!(cached.is_none());
     }
+
+    // ── download_bars ───────────────────────────────────────────────────
+
+    /// Build a synthetic OHLCV bar at the given timestamp.
+    fn sample_bar(open_ts: u64) -> crate::data::models::bar::Bar {
+        crate::data::models::bar::Bar {
+            open_ts,
+            close_ts: open_ts + 86_399,
+            open_ts_exchange: open_ts,
+            open: 100.0,
+            high: 101.0,
+            low: 99.0,
+            close: 100.5,
+            adj_close: 100.5,
+            volume: 1_000.0,
+            n_trades: Some(5),
+        }
+    }
+
+    fn usd_quote_instrument() -> Instrument {
+        // quote == base_currency (USD by default) so resolve_profiles needs no legs.
+        Instrument {
+            symbol: "AAPL".to_owned(),
+            name: "Apple".to_owned(),
+            base: None,
+            quote: "USD".to_owned(),
+            instrument_type: InstrumentType::Stocks,
+            exchange: "XNAS".to_owned(),
+            provider: Provider::Yahoo,
+        }
+    }
+
+    #[test]
+    fn download_bars_empty_profiles_succeeds() {
+        let (engine, _tmp) = test_engine(MockProvider::new(test_instrument()));
+        let result = engine.download_bars(&[], None, None, false).unwrap();
+        assert_eq!(result.n_succeeded, 0);
+        assert_eq!(result.n_failed, 0);
+    }
+
+    #[test]
+    fn download_bars_writes_returned_bars() {
+        let inst = usd_quote_instrument();
+        let mut mock = MockProvider::new(inst.clone());
+        mock.bars = vec![sample_bar(1_700_000_000), sample_bar(1_700_086_400)];
+        let (engine, _tmp) = test_engine(mock);
+
+        let mut earliest = HashMap::new();
+        let mut latest = HashMap::new();
+        earliest.insert(Interval::OneDay, 1_700_000_000);
+        latest.insert(Interval::OneDay, 1_700_086_400);
+
+        let profiles = vec![InstrumentProfile {
+            instrument: inst,
+            earliest_ts: earliest,
+            latest_ts: latest,
+            legs: vec![],
+        }];
+
+        let result = engine.download_bars(&profiles, None, None, false).unwrap();
+        assert_eq!(result.n_succeeded, 1);
+        assert_eq!(result.n_failed, 0);
+
+        // Verify the bars actually landed in the database.
+        let stored = engine.query_bars(Some(&["AAPL"]), None, None, None).unwrap();
+        assert_eq!(stored.len(), 2);
+    }
+
+    #[test]
+    fn download_bars_skips_when_user_range_invalid() {
+        let inst = usd_quote_instrument();
+        let mut mock = MockProvider::new(inst.clone());
+        mock.bars = vec![sample_bar(1_700_000_000)];
+        let (engine, _tmp) = test_engine(mock);
+
+        let mut earliest = HashMap::new();
+        let mut latest = HashMap::new();
+        earliest.insert(Interval::OneDay, 1_700_000_000);
+        latest.insert(Interval::OneDay, 1_700_086_400);
+
+        let profiles = vec![InstrumentProfile {
+            instrument: inst,
+            earliest_ts: earliest,
+            latest_ts: latest,
+            legs: vec![],
+        }];
+
+        // Caller-supplied start > end -> task is skipped, nothing downloaded.
+        let result = engine
+            .download_bars(&profiles, Some(2_000_000_000), Some(1_000_000_000), false)
+            .unwrap();
+        assert_eq!(result.n_succeeded, 0);
+    }
+
+    #[test]
+    fn download_bars_skips_when_already_in_database() {
+        let inst = usd_quote_instrument();
+        let mut mock = MockProvider::new(inst.clone());
+        mock.bars = vec![sample_bar(1_700_000_000), sample_bar(1_700_086_400)];
+        let (engine, _tmp) = test_engine(mock);
+
+        let mut earliest = HashMap::new();
+        let mut latest = HashMap::new();
+        earliest.insert(Interval::OneDay, 1_700_000_000);
+        latest.insert(Interval::OneDay, 1_700_086_400);
+
+        let profiles = vec![InstrumentProfile {
+            instrument: inst,
+            earliest_ts: earliest,
+            latest_ts: latest,
+            legs: vec![],
+        }];
+
+        // First download populates storage.
+        engine.download_bars(&profiles, None, None, false).unwrap();
+        // Second download must short-circuit since the range is fully covered.
+        let result = engine.download_bars(&profiles, None, None, false).unwrap();
+        assert_eq!(result.n_succeeded, 0);
+    }
+
+    // ── resolve_profiles ────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_profiles_no_legs_when_quote_matches_base_currency() {
+        let inst = usd_quote_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst));
+
+        let profiles = engine
+            .resolve_profiles(
+                vec!["AAPL".to_owned()],
+                InstrumentType::Stocks,
+                vec![Interval::OneDay],
+                false,
+            )
+            .unwrap();
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].instrument.symbol, "AAPL");
+        assert!(profiles[0].legs.is_empty());
+        assert_eq!(*profiles[0].earliest_ts.get(&Interval::OneDay).unwrap(), 1000);
+        assert_eq!(*profiles[0].latest_ts.get(&Interval::OneDay).unwrap(), 2000);
+    }
+
+    #[test]
+    fn resolve_profiles_uses_range_cache_on_repeat() {
+        let inst = usd_quote_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst));
+
+        engine
+            .resolve_profiles(
+                vec!["AAPL".to_owned()],
+                InstrumentType::Stocks,
+                vec![Interval::OneDay],
+                false,
+            )
+            .unwrap();
+
+        // Second call must hit the range cache; no new entries required.
+        let cached = engine.rt.block_on(async {
+            engine.cache.range_cache.get(&("AAPL".to_owned(), Interval::OneDay)).await
+        });
+        assert!(cached.is_some());
+    }
 }

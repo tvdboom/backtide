@@ -147,7 +147,7 @@ fn extract_ohlcv(
 /// Convert indicator output series into the configured data backend format.
 ///
 /// Each inner `Vec<f64>` is one output series (e.g. upper band, lower band).
-/// The result is shaped as (n_points, n_series) — i.e. rows × columns.
+/// The result is shaped as (n_points, n_series) — i.e. rows x columns.
 /// Single-series indicators return a 1-D array / single-column frame.
 fn to_backend_type(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
     let backend =

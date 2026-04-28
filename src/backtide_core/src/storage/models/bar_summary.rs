@@ -1,4 +1,4 @@
-//! Pre-aggregated summary of a bar group (one row per symbol × interval × provider).
+//! Pre-aggregated summary of a bar group (one row per symbol x interval x provider).
 
 /// Lightweight summary row returned by [`Storage::query_bars_summary`].
 pub struct BarSummary {

@@ -158,3 +158,40 @@ impl Engine {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::runtime::Runtime;
+
+    #[test]
+    fn engine_cache_new_creates_empty_caches() {
+        let cache = EngineCache::new();
+        assert_eq!(cache.instrument_cache.entry_count(), 0);
+        assert_eq!(cache.range_cache.entry_count(), 0);
+    }
+
+    #[test]
+    fn engine_cache_default_matches_new() {
+        let cache = EngineCache::default();
+        assert_eq!(cache.instrument_cache.entry_count(), 0);
+        assert_eq!(cache.range_cache.entry_count(), 0);
+    }
+
+    #[test]
+    fn engine_cache_clear_invalidates_range_entries() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        let key = ("AAPL".to_owned(), Interval::OneDay);
+
+        rt.block_on(async {
+            cache.range_cache.insert(key.clone(), (100, 200)).await;
+            cache.range_cache.run_pending_tasks().await;
+            assert!(cache.range_cache.get(&key).await.is_some());
+
+            cache.clear();
+            cache.range_cache.run_pending_tasks().await;
+            assert!(cache.range_cache.get(&key).await.is_none());
+        });
+    }
+}

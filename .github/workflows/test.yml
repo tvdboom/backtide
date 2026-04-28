@@ -7,7 +7,7 @@ on:
     branches: [master, development]
 
 env:
-  UV_VERSION: "0.11.7"
+  UV_VERSION: "0.11.8"
   PYTHON_VERSION: "3.14"
 
 jobs:

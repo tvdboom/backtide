@@ -131,7 +131,7 @@ fn bench_historical_read_1sym(c: &mut Criterion) {
 
 /// Benchmark [`Storage::query_bars`] read latency across 10 symbols.
 ///
-/// Seeds the database with 10 symbols × 1 000 bars each (10 000 bars
+/// Seeds the database with 10 symbols x 1 000 bars each (10 000 bars
 /// total), then measures how long the full table scan takes.
 fn bench_historical_read_10sym(c: &mut Criterion) {
     let (db, _dir) = fresh_db();

@@ -5,13 +5,13 @@ Description: Unit tests for the analysis module (plots and compute_statistics).
 
 """
 
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import pytest
-from typing import cast
 
 from backtide.analysis import (
     compute_statistics,
@@ -314,7 +314,7 @@ class TestPlotPrice:
 
     def test_missing_column(self, daily_bars):
         """Raise ValueError when a required column is missing."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="requires column"):
             plot_price(daily_bars.drop(columns=["symbol"]), display=None)
 
     def test_currency_in_ylabel(self, daily_bars):
@@ -332,12 +332,13 @@ class TestPlotPrice:
 
     def test_with_band_indicator(self, daily_bars):
         """Overlay a two-column indicator adds band traces."""
-
         ind = MagicMock()
-        ind.compute.return_value = pd.DataFrame({
-            "upper": daily_bars["close"] + 2,
-            "lower": daily_bars["close"] - 2,
-        })
+        ind.compute.return_value = pd.DataFrame(
+            {
+                "upper": daily_bars["close"] + 2,
+                "lower": daily_bars["close"] - 2,
+            }
+        )
         fig = plot_price(daily_bars, indicators={"BB": ind}, display=None)
         # 1 price trace + 2 band traces
         assert len(fig.data) == 3
@@ -363,7 +364,7 @@ class TestPlotCandlestick:
 
     def test_missing_column(self, daily_bars):
         """Raise ValueError when OHLC columns are missing."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="requires column"):
             plot_candlestick(daily_bars.drop(columns=["open"]), display=None)
 
 
@@ -395,7 +396,7 @@ class TestPlotDividends:
 
     def test_missing_column(self, dividend_data):
         """Raise ValueError when 'amount' column is missing."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="requires column"):
             plot_dividends(dividend_data.drop(columns=["amount"]), display=None)
 
     def test_multi_symbol_dividends(self, dividend_data):
@@ -445,7 +446,7 @@ class TestPlotSeasonality:
     """Tests for plot_seasonality."""
 
     def test_daily_year_month(self, daily_bars):
-        """Daily data produces a year × month heatmap."""
+        """Daily data produces a year x month heatmap."""
         fig = plot_seasonality(daily_bars, display=None)
         assert isinstance(fig, go.Figure)
         heatmap = next(t for t in fig.data if isinstance(t, go.Heatmap))
@@ -453,7 +454,7 @@ class TestPlotSeasonality:
         assert any("Jan" in str(x) or "Feb" in str(x) for x in heatmap.x)
 
     def test_intraday_dow_hour(self, intraday_bars):
-        """Intraday data produces a day-of-week × hour heatmap."""
+        """Intraday data produces a day-of-week x hour heatmap."""
         fig = plot_seasonality(intraday_bars, display=None)
         heatmap = next(t for t in fig.data if isinstance(t, go.Heatmap))
         # x-axis labels should be hour format
@@ -517,7 +518,7 @@ class TestPlotVwap:
 
     def test_missing_column(self, daily_bars):
         """Raise ValueError when volume column is missing."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="requires column"):
             plot_vwap(daily_bars.drop(columns=["volume"]), display=None)
 
 
@@ -562,4 +563,3 @@ class TestComputeStatistics:
         result = cast(pd.DataFrame, compute_statistics(daily_bars))
         wr = result.iloc[0]["win_rate"]
         assert 0 <= wr <= 100
-
