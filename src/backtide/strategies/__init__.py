@@ -28,7 +28,6 @@ from backtide.core.backtest import (
     Vcp,
 )
 from backtide.strategies.base import BaseStrategy
-from backtide.strategies.benchmark import Benchmark
 
 # List all built-in strategies
 BUILTIN_STRATEGIES = [

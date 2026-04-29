@@ -6,8 +6,8 @@ Description: Types shared by the package.
 """
 
 from typing import TYPE_CHECKING, TypeAlias
-import pandas as pd
 
+import pandas as pd
 
 if TYPE_CHECKING:
     import polars as pl

@@ -155,7 +155,7 @@ def _resolve_auto_indicators(strats: list[BaseStrategy]) -> list[tuple[str, Base
     return out
 
 
-def _save_strategy(strat: BaseStrategy, name: str, cfg: Config):
+def _save_strategy(strat: Any, name: str, cfg: Config):
     """Pickle a strategy instance to disk."""
     path = Path(cfg.data.storage_path) / "strategies"
     path.mkdir(parents=True, exist_ok=True)

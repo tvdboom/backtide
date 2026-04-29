@@ -14,6 +14,7 @@ use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
+use crate::backtest::strategies::BuyAndHold;
 use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
 use crate::data::models::interval::Interval;
@@ -36,16 +37,27 @@ use uuid::Uuid;
 // Public interface
 // ────────────────────────────────────────────────────────────────────────────
 
+/// Name used for the auto-injected `BuyAndHold` benchmark run inside an
+/// `ExperimentResult.strategies` list. Must stay in sync with the
+/// Python-side ``backtide.backtest.BENCHMARK_STRATEGY_NAME``.
+pub const BENCHMARK_STRATEGY_NAME: &str = "Buy & Hold (Benchmark)";
+
 impl Engine {
     /// Run a single backtest experiment end-to-end.
     ///
     /// Phases:
     /// 1. Resolve & download required data (skipped if already in storage).
+    ///    The configured ``strategy.benchmark`` symbol (if any) is folded
+    ///    into the symbol list so its bars flow through the standard
+    ///    pipeline and become available to every strategy.
     /// 2. Load OHLCV bars for every primary symbol on the chosen interval.
     /// 3. Compute every requested indicator (built-in or custom Python) once
     ///    over the full dataset, in parallel across (symbol, indicator).
     /// 4. Run every selected strategy in parallel, each with its own
-    ///    portfolio, order book and equity log.
+    ///    portfolio, order book and equity log. When a benchmark is
+    ///    configured, a ``BuyAndHold(symbol=benchmark)`` strategy is
+    ///    auto-injected under the name [`BENCHMARK_STRATEGY_NAME`] so
+    ///    alpha can be derived from real backtest results.
     /// 5. Persist the aggregate result (and per-strategy artefacts) to
     ///    DuckDB, then return it to the caller.
     pub fn run_experiment(
@@ -57,7 +69,23 @@ impl Engine {
         let experiment_id = Uuid::new_v4().simple().to_string()[..16].to_owned();
         let mut warnings: Vec<String> = Vec::new();
 
-        let symbols = config.data.symbols.clone();
+        // Persist the source configuration as a TOML file under
+        // `<storage>/experiments/<experiment_id>.toml` *before* the run
+        // starts. Lets the UI/CLI re-open and edit a past experiment.
+        if let Err(e) =
+            persist_experiment_config(&self.config.data.storage_path, &experiment_id, config)
+        {
+            warn!(experiment_id = %experiment_id, "Failed to persist experiment config: {e}");
+            warnings.push(format!("Failed to persist experiment config: {e}"));
+        }
+
+        // Augment the symbol list with the benchmark (if any) so its bars
+        // get downloaded & loaded just like any user symbol.
+        let mut symbols = config.data.symbols.clone();
+        let benchmark = config.strategy.benchmark.trim().to_owned();
+        if !benchmark.is_empty() && !symbols.iter().any(|s| s == &benchmark) {
+            symbols.push(benchmark.clone());
+        }
         if symbols.is_empty() {
             return Err(EngineError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -137,7 +165,21 @@ impl Engine {
         }
 
         // ── Phase 4: run strategies in parallel ─────────────────────────
-        let strategy_objs = load_strategies(&config.strategy.strategies)?;
+        let mut strategy_objs = load_strategies(&config.strategy.strategies)?;
+
+        // Auto-inject a Buy & Hold of the benchmark symbol (if configured)
+        // as a regular strategy, so alpha can be computed from real results.
+        if !benchmark.is_empty() {
+            match Python::attach(|py| -> PyResult<Py<PyAny>> {
+                let bh = BuyAndHold {
+                    symbol: Some(benchmark.clone()),
+                };
+                Ok(Py::new(py, bh)?.into_any())
+            }) {
+                Ok(obj) => strategy_objs.push((BENCHMARK_STRATEGY_NAME.to_owned(), obj, false)),
+                Err(e) => warnings.push(format!("Failed to instantiate benchmark BuyAndHold: {e}")),
+            }
+        }
 
         let pb = verbose.then(|| {
             progress_bar(
@@ -199,6 +241,23 @@ impl Engine {
 
         if let Some(p) = pb {
             p.finish_and_clear();
+        }
+
+        // ── Compute alpha for every non-benchmark run ───────────────────
+        if !benchmark.is_empty() {
+            let bench_total = results
+                .iter()
+                .find(|r| r.strategy_name == BENCHMARK_STRATEGY_NAME)
+                .and_then(|r| r.metrics.get("total_return").copied());
+            if let Some(b) = bench_total {
+                for r in &mut results {
+                    if r.strategy_name == BENCHMARK_STRATEGY_NAME {
+                        continue;
+                    }
+                    let tr = r.metrics.get("total_return").copied().unwrap_or(0.0);
+                    r.metrics.insert("alpha".into(), tr - b);
+                }
+            }
         }
 
         let finished_at = now_secs();
@@ -273,6 +332,22 @@ impl Engine {
 
 fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// Serialise `config` to TOML and write it to
+/// `<storage>/experiments/<experiment_id>.toml`. Creates the parent
+/// directory on first use. Returns any I/O or serialisation error.
+fn persist_experiment_config(
+    storage_path: &std::path::Path,
+    experiment_id: &str,
+    config: &ExperimentConfig,
+) -> Result<(), String> {
+    let dir = storage_path.join("experiments");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create_dir_all: {e}"))?;
+    let path = dir.join(format!("{experiment_id}.toml"));
+    let toml_str = Python::attach(|py| -> PyResult<String> { config.to_toml(py) })
+        .map_err(|e| format!("serialise: {e}"))?;
+    std::fs::write(&path, toml_str).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
 fn parse_iso_date_to_ts(s: &str) -> Option<u64> {

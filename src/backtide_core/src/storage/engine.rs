@@ -82,8 +82,15 @@ impl Engine {
     }
 
     /// Deletes a single experiment and all its child rows.
+    ///
+    /// Also best-effort removes the persisted source config file at
+    /// `<storage>/experiments/<experiment_id>.toml`, if one exists.
     pub fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64> {
-        self.db.delete_experiment(experiment_id)
+        let n = self.db.delete_experiment(experiment_id)?;
+        let path =
+            self.config.data.storage_path.join("experiments").join(format!("{experiment_id}.toml"));
+        let _ = std::fs::remove_file(path);
+        Ok(n)
     }
 }
 

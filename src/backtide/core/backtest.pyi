@@ -47,7 +47,7 @@ __all__ = [
     "State",
     "StochasticOscillator",
     "StrategyExpConfig",
-    StrategyRunResult,
+    "StrategyRunResult",
     "Trade",
     "TripleRsiRotation",
     "TurtleTrading",
@@ -681,6 +681,15 @@ class BuyAndHold:
     benchmark against which all other strategies are compared. Equivalent
     to a passive index investment over the backtest window.
 
+    Parameters
+    ----------
+    symbol : str | None, default=None
+        Optional single ticker to buy and hold. When ``None`` (the
+        default), the strategy equal-weights all symbols visible in the
+        experiment. When set, only the named symbol is bought; this is
+        used internally by ``run_experiment`` to back-test the
+        configured ``strategy.benchmark``.
+
     Attributes
     ----------
     name : str
@@ -696,6 +705,8 @@ class BuyAndHold:
     backtide.strategies:TurtleTrading
 
     """
+
+    symbol: str
 
     def __eq__(self, value, /):
         ...

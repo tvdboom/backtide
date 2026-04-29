@@ -70,17 +70,11 @@ logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").set
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _apply_config_to_state(
-    exp: ExperimentConfig,
-    state: dict[str, Any] | SessionStateProxy,
-):
-    """Write all fields of *exp* into the session *state* dict.
-
-    Writes both the live widget key and the shadow key (``_<key>``) so values
-    survive widget unmounting (e.g. when navigating to another page).
-    """
+def _apply_config_to_state(exp: ExperimentConfig, state: dict[str, Any] | SessionStateProxy):
+    """Write all fields of `exp` into the session state."""
 
     def _set(key: str, value: Any):
+        """Set the widget and its shadow key."""
         state[key] = value
         state[f"_{key}"] = value
 
@@ -238,17 +232,13 @@ def _build_experiment_config() -> str:
 
 def _on_config_upload():
     """Set the experiment config based on an uploaded file."""
-    upload = st.session_state.get("config_upload")
-
-    if upload is None:
-        return
-
-    try:
-        exp = _parse_config_upload(upload)
-        _apply_config_to_state(exp, st.session_state)
-        st.session_state["_import_success"] = f"Loaded configuration from `{upload.name}`."
-    except Exception as ex:  # noqa: BLE001
-        st.session_state["_import_error"] = f"Failed to parse file: {ex}"
+    if upload := st.session_state.get("config_upload"):
+        try:
+            exp = _parse_config_upload(upload)
+            _apply_config_to_state(exp, st.session_state)
+            st.session_state["_import_success"] = f"Loaded configuration from `{upload.name}`."
+        except Exception as ex:  # noqa: BLE001
+            st.session_state["_import_error"] = f"Failed to parse file: {ex}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -257,6 +247,20 @@ def _on_config_upload():
 
 cfg = get_config()
 tz = _get_timezone(cfg.display.timezone)
+
+# A pending config can be injected by another page to pre-fill the form.
+if pending := st.session_state.pop("_pending_experiment_config", None):
+    try:
+        _apply_config_to_state(pending, st.session_state)
+    except Exception as _ex:  # noqa: BLE001
+        st.session_state["_import_error"] = f"Failed to apply configuration: {_ex}"
+    else:
+        st.session_state["_import_success"] = (
+            f"Loaded configuration from experiment **{st.session_state.experiment_name}**."
+        )
+
+    # Force a fresh experiment_id so the imported run isn't confused with the original.
+    st.session_state.pop("experiment_id", None)
 
 # Single source of truth for all default widget values.
 exp: ExperimentConfig = _default("config", ExperimentConfig())
@@ -679,7 +683,7 @@ with tab4:
     )
 
     err_benchmark = None
-    if default := _default_benchmark(base_currency, instrument_type, all_instruments):
+    if default := _default_benchmark(base_currency, instrument_type, list(all_instruments)):
         # Benchmarks for an equity experiment may be either a stock or an ETF
         if instrument_type.is_equity:
             if instrument_type == InstrumentType.Stocks:
@@ -715,9 +719,11 @@ with tab4:
             accept_new_options=not _default("use_storage", fallback=False),
             on_change=lambda k=key: _persist(k),
             help=(
-                "Symbol used as a passive (buy-and-hold) baseline. The benchmark is "
-                "executed as a separate strategy over the same date range and used to "
-                "compute alpha (excess return)."
+                "Symbol used as a passive (buy-and-hold) baseline. Its bars are "
+                "downloaded alongside the selected symbols and a ``BuyAndHold`` "
+                "strategy on this symbol is auto-injected into the experiment, "
+                "from which the alpha (excess return) of every other strategy "
+                "is computed."
             ),
         )
 

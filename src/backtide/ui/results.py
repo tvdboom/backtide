@@ -6,11 +6,13 @@ Description: Backtest results page.
 """
 
 from datetime import datetime as dt
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
 import streamlit as st
 
+from backtide.backtest import BENCHMARK_STRATEGY_NAME, ExperimentConfig
 from backtide.config import get_config
 from backtide.storage import (
     delete_experiment,
@@ -116,12 +118,7 @@ def _colored_metric(container, label: str, value: str, tone: str = ""):
 
 
 def _split_benchmark(runs: list[StrategyRunResult]) -> tuple[list, StrategyRunResult | None]:
-    """Split *runs* into (user_runs, benchmark_run).
-
-    The benchmark run, if present, is the one whose ``strategy_name`` matches
-    the deterministic on-disk name used by
-    :func:`backtide.backtest.utils._inject_benchmark_strategy`.
-    """
+    """Split `runs` into (user_runs, benchmark_run)."""
     bench: StrategyRunResult | None = None
     user: list[StrategyRunResult] = []
     for run in runs:
@@ -138,9 +135,9 @@ def _render_strategy_summary(
 ):
     """Render compact summary metrics for a single strategy run."""
     st.markdown(f"**:material/psychology: {run.strategy_name}**")
-    show_alpha = benchmark is not None and run is not benchmark
+    show_alpha = benchmark and run is not benchmark
     if show_alpha:
-        mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([1, 1, 1, 1, 1, 1.2, 1])
+        mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([1, 1, 1, 1, 1, 1, 1.2])
     else:
         mc1, mc2, mc3, mc4, mc5, mc6 = st.columns([1, 1, 1, 1, 1, 1.2])
 
@@ -171,9 +168,18 @@ def _render_strategy_summary(
         _fmt_pct(cagr, signed=True),
         _tone(cagr),
     )
+    if show_alpha and benchmark:
+        bench_total_return = float(benchmark.metrics.get("total_return", 0.0) or 0.0)
+        alpha = float(run.metrics.get("total_return", 0.0) or 0.0) - bench_total_return
+        _colored_metric(
+            mc4,
+            ":material/compare_arrows: Alpha",
+            _fmt_pct(alpha, signed=True),
+            _tone(alpha),
+        )
     # Sharpe: >1 is good, <0 is bad, in-between is neutral.
     _colored_metric(
-        mc4,
+        mc5,
         ":material/speed: Sharpe",
         _fmt_metric(sharpe),
         _tone(sharpe, good_above=1.0, bad_below=0.0),
@@ -181,7 +187,7 @@ def _render_strategy_summary(
     # Max drawdown: any non-zero drawdown is bad.
     dd_tone = "red" if max_dd and not pd.isna(max_dd) else ""
     _colored_metric(
-        mc5,
+        mc6,
         ":material/trending_down: Max DD",
         _fmt_pct(max_dd),
         dd_tone,
@@ -196,20 +202,10 @@ def _render_strategy_summary(
     else:
         wr_str = wr_pct
     _colored_metric(
-        mc6,
+        mc7,
         ":material/swap_vert: Trades (w/r)",
         f"{n_trades} ({wr_str})",
     )
-
-    if show_alpha:
-        bench_total_return = float(benchmark.metrics.get("total_return", 0.0) or 0.0)
-        alpha = float(run.metrics.get("total_return", 0.0) or 0.0) - bench_total_return
-        _colored_metric(
-            mc7,
-            ":material/compare_arrows: Alpha",
-            _fmt_pct(alpha, signed=True),
-            _tone(alpha),
-        )
 
 
 def _render_experiment_metrics(row: pd.Series):
@@ -478,7 +474,7 @@ for _, row in df.iterrows():
     icon = _status_icon(row)
 
     with st.container(border=True):
-        col1, col2, col3 = st.columns([6, 2, 0.7])
+        col1, col2, col3, col4 = st.columns([6, 2, 0.7, 0.7], gap="xxsmall")
 
         col1.markdown(f"##### {icon}&nbsp;{name}{_status_badge(row)}", unsafe_allow_html=True)
         _render_tags(row["tags"], container=col1)
@@ -493,7 +489,31 @@ for _, row in df.iterrows():
             st.session_state["selected_experiment"] = row.to_dict()
             st.rerun()
 
+        cfg_path = Path(cfg.data.storage_path) / "experiments" / f"{exp_id}.toml"
+        export_disabled = not cfg_path.is_file()
         if col3.button(
+            "",
+            key=f"export_{exp_id}",
+            icon=":material/upload:",
+            type="secondary",
+            width="stretch",
+            disabled=export_disabled,
+            help=(
+                "Open this experiment's configuration in the Experiment page."
+                if not export_disabled
+                else "No saved configuration found for this experiment."
+            ),
+        ):
+            try:
+                exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
+            except Exception as ex:  # noqa: BLE001
+                st.session_state["_delete_error"] = f"Failed to load configuration: {ex}"
+                st.rerun()
+            else:
+                st.session_state["_pending_experiment_config"] = exp_cfg
+                st.switch_page("experiment.py")
+
+        if col4.button(
             "",
             key=f"delete_{exp_id}",
             icon=":material/delete:",

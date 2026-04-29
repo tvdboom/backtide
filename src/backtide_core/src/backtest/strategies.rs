@@ -645,6 +645,15 @@ impl Strategy for BollingerMeanReversion {
 /// benchmark against which all other strategies are compared. Equivalent
 /// to a passive index investment over the backtest window.
 ///
+/// Parameters
+/// ----------
+/// symbol : str | None, default=None
+///     Optional single ticker to buy and hold. When ``None`` (the
+///     default), the strategy equal-weights all symbols visible in the
+///     experiment. When set, only the named symbol is bought; this is
+///     used internally by ``run_experiment`` to back-test the
+///     configured ``strategy.benchmark``.
+///
 /// Attributes
 /// ----------
 /// name : str
@@ -658,20 +667,27 @@ impl Strategy for BollingerMeanReversion {
 /// backtide.strategies:Momentum
 /// backtide.strategies:SmaNaive
 /// backtide.strategies:TurtleTrading
-#[pyclass(skip_from_py_object, module = "backtide.strategies")]
-#[derive(Clone, Debug)]
-pub struct BuyAndHold;
+#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[derive(Clone, Debug, Default)]
+pub struct BuyAndHold {
+    /// Optional single symbol to buy. When ``None``, equal-weights all
+    /// available symbols.
+    pub symbol: Option<String>,
+}
 
 #[pymethods]
 impl BuyAndHold {
     #[new]
-    fn new() -> Self {
-        Self
+    #[pyo3(signature = (symbol=None))]
+    fn new(symbol: Option<String>) -> Self {
+        Self {
+            symbol,
+        }
     }
 
-    fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, ())> {
+    fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (Option<String>,))> {
         let cls = py.get_type::<Self>().into_any();
-        Ok((cls, ()))
+        Ok((cls, (self.symbol.clone(),)))
     }
 }
 
@@ -698,6 +714,23 @@ impl Strategy for BuyAndHold {
         if closes.is_empty() {
             return Vec::new();
         }
+
+        // If a single symbol is configured, only buy that one (and only
+        // if its data is actually present in the per-symbol view).
+        if let Some(target) = &self.symbol {
+            let row = match closes.iter().find(|(s, _)| s == target) {
+                Some(r) => r,
+                None => return Vec::new(),
+            };
+            let px = match row.1.last() {
+                Some(&p) => p,
+                None => return Vec::new(),
+            };
+            return buy_order(target, portfolio_cash(portfolio), px)
+                .map(|o| vec![o])
+                .unwrap_or_default();
+        }
+
         // Equal-weight: divide all available cash across the selected symbols.
         let per = portfolio_cash(portfolio) / closes.len() as f64;
         let mut orders = Vec::new();
