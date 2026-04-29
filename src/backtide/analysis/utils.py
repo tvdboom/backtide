@@ -8,7 +8,7 @@ Description: Shared plotting utilities for consistent figure styling.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeAlias, overload
+from typing import Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -16,15 +16,8 @@ import plotly.graph_objects as go
 from backtide.core.config import get_config
 from backtide.core.data import Currency
 from backtide.ui.utils import _get_timezone
+from backtide.utils.types import DataFrameLike
 from backtide.utils.utils import _ts_to_datetime
-
-if TYPE_CHECKING:
-    import polars as pl
-
-    DataFrameLike: TypeAlias = pd.DataFrame | pl.DataFrame
-else:
-    DataFrameLike: TypeAlias = pd.DataFrame
-
 
 cfg = get_config()
 

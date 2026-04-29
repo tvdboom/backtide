@@ -599,6 +599,7 @@ class Exchange:
     name: str
     yahoo_code: str
 
+    ARCX: ClassVar[Exchange]
     BVMF: ClassVar[Exchange]
     XADS: ClassVar[Exchange]
     XAMS: ClassVar[Exchange]

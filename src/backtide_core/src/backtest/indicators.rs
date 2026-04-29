@@ -312,7 +312,7 @@ pub struct AverageDirectionalIndex {
 impl AverageDirectionalIndex {
     #[new]
     #[pyo3(signature = (period=14))]
-    fn new(period: usize) -> Self {
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }
@@ -426,7 +426,7 @@ pub struct AverageTrueRange {
 impl AverageTrueRange {
     #[new]
     #[pyo3(signature = (period=14))]
-    fn new(period: usize) -> Self {
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }
@@ -505,7 +505,7 @@ pub struct BollingerBands {
 impl BollingerBands {
     #[new]
     #[pyo3(signature = (period=20, std_dev=2.0))]
-    fn new(period: usize, std_dev: f64) -> Self {
+    pub fn new(period: usize, std_dev: f64) -> Self {
         Self {
             period,
             std_dev,
@@ -589,7 +589,7 @@ pub struct CommodityChannelIndex {
 impl CommodityChannelIndex {
     #[new]
     #[pyo3(signature = (period=20))]
-    fn new(period: usize) -> Self {
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }
@@ -672,7 +672,7 @@ pub struct ExponentialMovingAverage {
 impl ExponentialMovingAverage {
     #[new]
     #[pyo3(signature = (period=14))]
-    fn new(period: usize) -> Self {
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }
@@ -755,7 +755,7 @@ pub struct MovingAverageConvergenceDivergence {
 impl MovingAverageConvergenceDivergence {
     #[new]
     #[pyo3(signature = (fast_period=12, slow_period=26, signal_period=9))]
-    fn new(fast_period: usize, slow_period: usize, signal_period: usize) -> Self {
+    pub fn new(fast_period: usize, slow_period: usize, signal_period: usize) -> Self {
         Self {
             fast_period,
             slow_period,
@@ -820,13 +820,13 @@ impl Indicator for MovingAverageConvergenceDivergence {
 /// backtide.indicators:RelativeStrengthIndex
 /// backtide.indicators:VolumeWeightedAveragePrice
 #[pyclass(skip_from_py_object, module = "backtide.indicators")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct OnBalanceVolume;
 
 #[pymethods]
 impl OnBalanceVolume {
     #[new]
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self
     }
 
@@ -901,7 +901,7 @@ pub struct RelativeStrengthIndex {
 impl RelativeStrengthIndex {
     #[new]
     #[pyo3(signature = (period=14))]
-    fn new(period: usize) -> Self {
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }
@@ -994,7 +994,7 @@ pub struct SimpleMovingAverage {
 impl SimpleMovingAverage {
     #[new]
     #[pyo3(signature = (period=14))]
-    fn new(period: usize) -> Self {
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }
@@ -1071,7 +1071,7 @@ pub struct StochasticOscillator {
 impl StochasticOscillator {
     #[new]
     #[pyo3(signature = (k_period=14, d_period=3))]
-    fn new(k_period: usize, d_period: usize) -> Self {
+    pub fn new(k_period: usize, d_period: usize) -> Self {
         Self {
             k_period,
             d_period,
@@ -1141,13 +1141,13 @@ impl Indicator for StochasticOscillator {
 /// backtide.indicators:SimpleMovingAverage
 /// backtide.indicators:WeightedMovingAverage
 #[pyclass(skip_from_py_object, module = "backtide.indicators")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct VolumeWeightedAveragePrice;
 
 #[pymethods]
 impl VolumeWeightedAveragePrice {
     #[new]
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self
     }
 
@@ -1224,7 +1224,7 @@ pub struct WeightedMovingAverage {
 impl WeightedMovingAverage {
     #[new]
     #[pyo3(signature = (period=14))]
-    fn new(period: usize) -> Self {
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }

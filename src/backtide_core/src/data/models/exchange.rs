@@ -52,6 +52,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 #[strum(ascii_case_insensitive)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum Exchange {
+    ARCX,
     BVMF,
     XADS,
     XAMS,
@@ -122,6 +123,7 @@ impl Exchange {
         use Currency::*;
         use Exchange::*;
         match self {
+            ARCX => ("NYSE Arca", USA, "New York", "PCX", USD),
             BVMF => ("B3", BRA, "São Paulo", "SAO", BRL),
             XADS => ("Abu Dhabi Securities Exchange", ARE, "Abu Dhabi", "AD", AED),
             XAMS => ("Euronext Amsterdam", NLD, "Amsterdam", "AMS", Currency::EUR),

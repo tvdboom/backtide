@@ -47,7 +47,7 @@ __all__ = [
     "State",
     "StochasticOscillator",
     "StrategyExpConfig",
-    "StrategyRunResult",
+    StrategyRunResult,
     "Trade",
     "TripleRsiRotation",
     "TurtleTrading",
@@ -158,6 +158,21 @@ class AdaptiveRsi:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class AlphaRsiPro:
     """Advanced Relative Strength Index with adaptive overbought/oversold levels.
@@ -251,6 +266,21 @@ class AlphaRsiPro:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 
@@ -627,6 +657,21 @@ class BollingerMeanReversion:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class BuyAndHold:
     """Passive baseline that buys once and holds indefinitely.
@@ -707,6 +752,21 @@ class BuyAndHold:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 
@@ -1170,6 +1230,21 @@ class DoubleTop:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class EmptyBarPolicy:
     """How to handle bars with no trading activity.
@@ -1255,9 +1330,6 @@ class EngineExpConfig:
     risk_free_rate : float, default=0.0
         Annualised risk-free rate for metrics.
 
-    benchmark : str, default=""
-        Optional benchmark ticker symbol.
-
     exclusive_orders : bool, default=False
         Cancel pending orders when a new order is submitted.
 
@@ -1279,7 +1351,6 @@ class EngineExpConfig:
 
     """
 
-    benchmark: str
     empty_bar_policy: str | EmptyBarPolicy
     exclusive_orders: bool
     random_seed: int | None
@@ -1507,7 +1578,7 @@ class ExperimentConfig:
         Initial cash, base currency and starting positions.
 
     strategy : [StrategyExpConfig]
-        Strategies to use in this experiment.
+        Strategies and benchmark to use in this experiment.
 
     indicators : [IndicatorExpConfig]
         Indicators to use in this experiment.
@@ -1516,7 +1587,7 @@ class ExperimentConfig:
         Commission, slippage, order execution, margin and short-selling.
 
     engine : [EngineExpConfig]
-        Warmup, timing, benchmark and data-handling policies.
+        Warmup, timing and data-handling policies.
 
     See Also
     --------
@@ -1927,6 +1998,21 @@ class HybridAlphaRsi:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class IndicatorExpConfig:
     """Indicator settings for an experiment.
@@ -2083,6 +2169,21 @@ class Macd:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class Momentum:
     """Trend-following strategy driven by short-term price momentum.
@@ -2174,6 +2275,21 @@ class Momentum:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 
@@ -2376,6 +2492,21 @@ class MultiBollingerRotation:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 
@@ -2954,6 +3085,21 @@ class RiskAverse:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class Roc:
     """Rate of Change momentum strategy.
@@ -3041,6 +3187,21 @@ class Roc:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 
@@ -3138,6 +3299,21 @@ class RocRotation:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 
@@ -3239,6 +3415,21 @@ class Rsi:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class Rsrs:
     """Resistance Support Relative Strength trend-detection strategy.
@@ -3327,6 +3518,21 @@ class Rsrs:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 
@@ -3425,6 +3631,21 @@ class RsrsRotation:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 
@@ -3608,6 +3829,21 @@ class SmaCrossover:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class SmaNaive:
     """Naive single Simple Moving Average trend-following strategy.
@@ -3696,6 +3932,21 @@ class SmaNaive:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 
@@ -3868,6 +4119,10 @@ class StrategyExpConfig:
 
     Attributes
     ----------
+    benchmark : str
+        Benchmark ticker symbol used with a passive Buy & Hold experiment as
+        a side-car alongside the selected strategies and used to compute alpha.
+
     strategies : list[str], default=[]
         Names of the strategies to use in this experiment. Each name must
         match a stored strategy.
@@ -3884,6 +4139,7 @@ class StrategyExpConfig:
 
     """
 
+    benchmark: str
     strategies: list[str]
 
     def __eq__(self, value, /):
@@ -4139,6 +4395,21 @@ class TripleRsiRotation:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class TurtleTrading:
     """Classic channel-breakout trend-following system with ATR-based position sizing.
@@ -4237,6 +4508,21 @@ class TurtleTrading:
             The orders to place this tick.
 
         """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
+
+        """
 
 class Vcp:
     """Volatility Contraction Pattern breakout strategy.
@@ -4329,6 +4615,21 @@ class Vcp:
         -------
         list[[Order]]
             The orders to place this tick.
+
+        """
+    def required_indicators(self) -> list:
+        """Indicators that must be computed up-front for this
+        strategy.
+
+        Returns a list of indicator instances, already
+        parameterised with this strategy's current settings,
+        that the engine will auto-include before the simulation
+        starts.
+
+        Returns
+        -------
+        list
+            The required indicator instances.
 
         """
 

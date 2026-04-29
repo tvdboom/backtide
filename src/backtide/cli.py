@@ -9,11 +9,14 @@ import json
 from pathlib import Path
 
 import click
-import yaml
 from streamlit.web.bootstrap import run
+import yaml
 
+from backtide.backtest import ExperimentConfig
+from backtide.backtest import run_experiment as run_backtest
 from backtide.core.config import get_config
 from backtide.core.utils import init_logging
+from backtide.data import download_bars, resolve_profiles
 
 
 @click.group()
@@ -146,8 +149,6 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
         Show a progress bar while downloading.
 
     """
-    from backtide.data import download_bars, resolve_profiles
-
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
 
@@ -184,7 +185,7 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
     show_default=True,
     help="Show a progress bar while the experiment is running.",
 )
-def run_experiment_cli(config_file: Path, log_level: str, verbose: bool):
+def run_experiment(config_file: Path, log_level: str, *, verbose: bool):
     """Run a backtest experiment from a configuration file.
 
     Parameters
@@ -199,8 +200,6 @@ def run_experiment_cli(config_file: Path, log_level: str, verbose: bool):
         Show a progress bar while the experiment is running.
 
     """
-    from backtide.backtest import ExperimentConfig, run_experiment
-
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
 
@@ -218,7 +217,7 @@ def run_experiment_cli(config_file: Path, log_level: str, verbose: bool):
         )
 
     click.echo(f"🚀  Running experiment from {config_file.name}...")
-    result = run_experiment(exp_cfg, verbose=verbose)
+    result = run_backtest(exp_cfg, verbose=verbose)
 
     n = len(result.strategies)
     if result.status == "completed" and not result.warnings:

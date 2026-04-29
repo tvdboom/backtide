@@ -6,6 +6,7 @@ Description: Utility functions for the UI.
 """
 
 import base64
+from collections.abc import Sequence
 from datetime import date
 from datetime import datetime as dt
 from pathlib import Path
@@ -45,16 +46,36 @@ from backtide.utils.utils import _to_list, _to_pandas
 _CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
 
 # Default benchmark per base currency for stocks/ETF experiments.
-# Crypto and forex are handled separately in `_default_benchmark`.
-BENCHMARK_BY_CURRENCY: dict[str, str] = {
-    "USD": "SPY",
-    "EUR": "VWCE.DE",
-    "GBP": "ISF.L",
-    "JPY": "1306.T",
-    "CHF": "CSSPX.SW",
-    "CAD": "XIC.TO",
-    "AUD": "VAS.AX",
-    "HKD": "2800.HK",
+# Each ticker is the most liquid broad-market ETF in its home market and
+# denominated in the matching currency, so a backtest's equity curve is
+# directly comparable to the local index without FX conversion.
+BENCHMARK_BY_CURRENCY = {
+    Currency.AUD: "VAS.AX",  # ASX 300
+    Currency.BRL: "BOVA11.SA",  # Ibovespa
+    Currency.CAD: "XIC.TO",  # S&P/TSX Capped Composite
+    Currency.CHF: "CSSPX.SW",  # S&P 500 (CHF-listed)
+    Currency.CNY: "510300.SS",  # CSI 300 (Shanghai)
+    Currency.DKK: "DKIGI.CO",  # OMX Copenhagen 25
+    Currency.EUR: "EXW1.DE",  # Euro Stoxx 50
+    Currency.GBP: "ISF.L",  # FTSE 100
+    Currency.HKD: "2800.HK",  # Hang Seng
+    Currency.IDR: "XIIT.JK",  # IDX30
+    Currency.ILS: "TA35.TA",  # TA-35
+    Currency.INR: "NIFTYBEES.NS",  # NIFTY 50
+    Currency.JPY: "1306.T",  # TOPIX
+    Currency.KRW: "069500.KS",  # KOSPI 200 (KODEX 200)
+    Currency.MXN: "NAFTRAC.MX",  # S&P/BMV IPC
+    Currency.MYR: "FBMKLCI-EA.KL",  # FTSE Bursa Malaysia KLCI
+    Currency.NOK: "OBXEDNB.OL",  # OBX Oslo
+    Currency.NZD: "FNZ.NZ",  # S&P/NZX 50
+    Currency.PLN: "ETFW20L.WA",  # WIG20
+    Currency.SEK: "XACT-OMXS30.ST",  # OMX Stockholm 30
+    Currency.SGD: "ES3.SI",  # Straits Times Index
+    Currency.THB: "TDEX.BK",  # SET 50
+    Currency.TRY: "DJIST.IS",  # BIST 30
+    Currency.TWD: "0050.TW",  # Taiwan 50
+    Currency.USD: "SPY",  # S&P 500
+    Currency.ZAR: "STX40.JO",  # FTSE/JSE Top 40
 }
 
 _SUMMARY_CSS = """
@@ -117,6 +138,30 @@ def _clear_state(*keys: str):
 def _default(key: str, fallback: Any = None) -> Any:
     """Return the persisted shadow value for *key*, or *fallback*."""
     return st.session_state.get(f"_{key}", fallback)
+
+
+def _default_benchmark(
+    base_currency: Currency,
+    instrument_type: InstrumentType,
+    available_symbols: Sequence[str],
+) -> str | None:
+    """Return the default benchmark symbol for the given context.
+
+    - Forex: returns `None` (no benchmark since base-currency growth is flat).
+    - Crypto: `BTC-{base_currency}` if available, else `BTC-USD`.
+    - Stocks/ETF: looks up `BENCHMARK_BY_CURRENCY`, falling back to `"SPY"`.
+
+    """
+    if instrument_type == InstrumentType.Forex:
+        return None
+
+    if instrument_type == InstrumentType.Crypto:
+        if f"BTC-{base_currency}" in available_symbols:
+            return f"BTC-{base_currency}"
+        else:
+            return "BTC-USD"
+
+    return BENCHMARK_BY_CURRENCY.get(base_currency, "SPY")
 
 
 def _fmt_number(n: float) -> str:
@@ -269,32 +314,6 @@ def _persist(*keys: str):
     for k in keys:
         if k in st.session_state:
             st.session_state[f"_{k}"] = st.session_state[k]
-
-
-def _default_benchmark(
-    base_currency: Any,
-    instrument_type: InstrumentType,
-    available_symbols: dict[str, Instrument] | None = None,
-) -> str | None:
-    """Return the default benchmark symbol for the given context.
-
-    - Forex: returns ``None`` (no benchmark, since base-currency growth is flat).
-    - Crypto: ``BTC-{base_currency}`` if available, else ``BTC-USD``.
-    - Stocks/ETF: looks up `BENCHMARK_BY_CURRENCY`, falling back to ``"SPY"``.
-
-    """
-    if instrument_type == InstrumentType.Forex:
-        return None
-
-    base = str(base_currency)
-
-    if instrument_type == InstrumentType.Crypto:
-        candidate = f"BTC-{base}"
-        if available_symbols and candidate in available_symbols:
-            return candidate
-        return "BTC-USD"
-
-    return BENCHMARK_BY_CURRENCY.get(base, "SPY")
 
 
 @st.cache_data(show_spinner="Loading stored data...")

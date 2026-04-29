@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import streamlit as st
 
-from backtide.backtest.utils import _load_benchmark_sidecar
 from backtide.config import get_config
 from backtide.storage import (
     delete_experiment,
@@ -116,10 +115,30 @@ def _colored_metric(container, label: str, value: str, tone: str = ""):
     container.metric(label, f":{tone}[{value}]" if tone else value)
 
 
-def _render_strategy_summary(run: StrategyRunResult, benchmark: dict | None = None):
+def _split_benchmark(runs: list[StrategyRunResult]) -> tuple[list, StrategyRunResult | None]:
+    """Split *runs* into (user_runs, benchmark_run).
+
+    The benchmark run, if present, is the one whose ``strategy_name`` matches
+    the deterministic on-disk name used by
+    :func:`backtide.backtest.utils._inject_benchmark_strategy`.
+    """
+    bench: StrategyRunResult | None = None
+    user: list[StrategyRunResult] = []
+    for run in runs:
+        if run.strategy_name == BENCHMARK_STRATEGY_NAME and bench is None:
+            bench = run
+        else:
+            user.append(run)
+    return user, bench
+
+
+def _render_strategy_summary(
+    run: StrategyRunResult,
+    benchmark: StrategyRunResult | None = None,
+):
     """Render compact summary metrics for a single strategy run."""
     st.markdown(f"**:material/psychology: {run.strategy_name}**")
-    show_alpha = bool(benchmark and benchmark.get("alpha_per_strategy"))
+    show_alpha = benchmark is not None and run is not benchmark
     if show_alpha:
         mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([1, 1, 1, 1, 1, 1.2, 1])
     else:
@@ -183,9 +202,8 @@ def _render_strategy_summary(run: StrategyRunResult, benchmark: dict | None = No
     )
 
     if show_alpha:
-        alpha = float(
-            (benchmark.get("alpha_per_strategy") or {}).get(run.strategy_name, 0.0) or 0.0
-        )
+        bench_total_return = float(benchmark.metrics.get("total_return", 0.0) or 0.0)
+        alpha = float(run.metrics.get("total_return", 0.0) or 0.0) - bench_total_return
         _colored_metric(
             mc7,
             ":material/compare_arrows: Alpha",
@@ -317,17 +335,17 @@ def _render_full_analysis(row: pd.Series):
 
     _render_experiment_metrics(row)
 
-    benchmark = _load_benchmark_sidecar(cfg, row["id"])
-    if benchmark:
-        st.caption(
-            f":material/compare_arrows: Benchmark: **{benchmark.get('symbol', '?')}** "
-            f"(buy & hold) — return "
-            f"{_fmt_pct(benchmark.get('total_return', 0.0), signed=True)}"
-        )
-
-    if not (runs := query_experiment_strategies(row["id"])):
+    if not (all_runs := query_experiment_strategies(row["id"])):
         st.info("No strategy runs found for this experiment.")
         return
+
+    runs, benchmark = _split_benchmark(list(all_runs))
+    if benchmark is not None:
+        bench_total = float(benchmark.metrics.get("total_return", 0.0) or 0.0)
+        st.caption(
+            ":material/compare_arrows: Benchmark (buy & hold) — return "
+            f"{_fmt_pct(bench_total, signed=True)}"
+        )
 
     tabs = st.tabs([run.strategy_name for run in runs])
     for tab, run in zip(tabs, runs, strict=True):
@@ -345,20 +363,19 @@ def _render_full_analysis(row: pd.Series):
                         for s in run.equity_curve
                     ]
                 )
-                if benchmark and benchmark.get("equity_curve") and run.equity_curve:
+                if benchmark is not None and benchmark.equity_curve and run.equity_curve:
                     # Rescale benchmark curve to match the strategy's starting equity so
                     # the two are visually comparable on the same axis.
-                    bench_pts = benchmark["equity_curve"]
-                    base_bench = float(bench_pts[0]["equity"]) or 1.0
+                    base_bench = float(benchmark.equity_curve[0].equity) or 1.0
                     base_strat = float(run.equity_curve[0].equity) or 1.0
                     factor = base_strat / base_bench
                     bench_df = pd.DataFrame(
                         [
                             {
-                                "timestamp": dt.fromtimestamp(int(p["timestamp"])),
-                                "benchmark": float(p["equity"]) * factor,
+                                "timestamp": dt.fromtimestamp(int(s.timestamp)),
+                                "benchmark": float(s.equity) * factor,
                             }
-                            for p in bench_pts
+                            for s in benchmark.equity_curve
                         ]
                     )
                     merged = pd.merge_asof(
@@ -517,8 +534,8 @@ for _, row in df.iterrows():
         if is_open:
             st.divider()
 
-            row_benchmark = _load_benchmark_sidecar(cfg, exp_id)
-            for i, run in enumerate(query_experiment_strategies(exp_id)):
+            runs, row_benchmark = _split_benchmark(list(query_experiment_strategies(exp_id)))
+            for i, run in enumerate(runs):
                 if i > 0:
                     st.markdown("<div style='margin-top:1.25rem'></div>", unsafe_allow_html=True)
                 _render_strategy_summary(run, benchmark=row_benchmark)

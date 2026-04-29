@@ -236,7 +236,7 @@ if button_slot.button(
     # Hide the download button while downloading.
     button_slot.empty()
 
-    with st.spinner(f"Downloading data..."):
+    with st.spinner("Downloading data..."):
         try:
             # Convert date range to Unix timestamps for the download.
             # When full_history is on, pass None to use the full provider range.

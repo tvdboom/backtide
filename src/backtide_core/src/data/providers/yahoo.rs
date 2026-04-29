@@ -590,8 +590,8 @@ impl DataProvider for YahooFinance {
 
                 // If unspecified, select default major exchanges.
                 let exchanges = exchanges.unwrap_or(vec![
-                    XAMS, XASX, XETR, XHKG, XJPX, XKRX, XLON, XMAD, XNAS, XNSE, XNYS, XPAR, XSES,
-                    XSHG, XSHE, XSWX,
+                    ARCX, XAMS, XASX, XETR, XHKG, XJPX, XKRX, XLON, XMAD, XNAS, XNSE, XNYS, XPAR,
+                    XSES, XSHG, XSHE, XSWX,
                 ]);
 
                 let limit_per_ex = limit / exchanges.len();

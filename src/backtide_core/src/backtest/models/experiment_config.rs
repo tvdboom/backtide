@@ -303,7 +303,7 @@ impl PortfolioExpConfig {
 /// strategies : list[str], default=[]
 ///     Names of the strategies to use in this experiment. Each name must
 ///     match a stored strategy.
-/// 
+///
 /// See Also
 /// --------
 /// - backtide.backtest:DataExpConfig

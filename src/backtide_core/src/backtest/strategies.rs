@@ -1,6 +1,10 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyType};
 
+use crate::backtest::indicators::{
+    AverageTrueRange, BollingerBands, MovingAverageConvergenceDivergence, RelativeStrengthIndex,
+    SimpleMovingAverage,
+};
 use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
@@ -38,6 +42,14 @@ pub trait Strategy {
         _state: &State,
     ) -> Vec<Order> {
         Vec::new()
+    }
+
+    /// Indicators that must be computed up-front for this strategy.
+    ///
+    /// The default returns an empty list, suitable for strategies that
+    /// don't rely on any pre-computed indicator.
+    fn required_indicators_inner(&self, _py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(Vec::new())
     }
 }
 
@@ -297,7 +309,30 @@ macro_rules! strategy_pymethods {
                 _indicators: &Bound<'py, PyAny>,
             ) -> PyResult<Vec<Order>> {
                 let closes = extract_closes(data)?;
-                Ok(<$ty as Strategy>::decide_inner(self, _py, &closes, _indicators, portfolio, state))
+                Ok(<$ty as Strategy>::decide_inner(
+                    self,
+                    _py,
+                    &closes,
+                    _indicators,
+                    portfolio,
+                    state,
+                ))
+            }
+
+            /// Indicators that must be computed up-front for this
+            /// strategy.
+            ///
+            /// Returns a list of indicator instances, already
+            /// parameterised with this strategy's current settings,
+            /// that the engine will auto-include before the simulation
+            /// starts.
+            ///
+            /// Returns
+            /// -------
+            /// list
+            ///     The required indicator instances.
+            fn required_indicators(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+                <$ty as Strategy>::required_indicators_inner(self, py)
             }
 
             /// Return a debug representation.
@@ -405,6 +440,10 @@ impl Strategy for AdaptiveRsi {
         }
         orders
     }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(py, RelativeStrengthIndex::new(self.min_period))?.into_any()])
+    }
 }
 
 /// Advanced Relative Strength Index with adaptive overbought/oversold levels.
@@ -490,6 +529,10 @@ impl Strategy for AlphaRsiPro {
         }
         orders
     }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(py, RelativeStrengthIndex::new(self.period))?.into_any()])
+    }
 }
 
 /// Mean-reversion strategy using Bollinger Band boundaries.
@@ -563,10 +606,7 @@ impl Strategy for BollingerMeanReversion {
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let bb_name = auto_indicator_name(
-            "BB",
-            &[fmt_arg(self.period), fmt_arg(self.std_dev)],
-        );
+        let bb_name = auto_indicator_name("BB", &[fmt_arg(self.period), fmt_arg(self.std_dev)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
@@ -591,6 +631,10 @@ impl Strategy for BollingerMeanReversion {
             }
         }
         orders
+    }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(py, BollingerBands::new(self.period, self.std_dev))?.into_any()])
     }
 }
 
@@ -721,7 +765,6 @@ impl Strategy for DoubleTop {
     const DESCRIPTION: &'static str =
         "Buys on a breakout after a double top pattern, with trend and volume confirmation.";
     const IS_MULTI_ASSET: bool = false;
-
 }
 
 /// Full-featured Relative Strength Index combining adaptive period, levels, and trend filter.
@@ -817,6 +860,10 @@ impl Strategy for HybridAlphaRsi {
         }
         orders
     }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(py, RelativeStrengthIndex::new(self.min_period))?.into_any()])
+    }
 }
 
 /// Moving Average Convergence Divergence crossover strategy.
@@ -900,11 +947,7 @@ impl Strategy for Macd {
     ) -> Vec<Order> {
         let macd_name = auto_indicator_name(
             "MACD",
-            &[
-                fmt_arg(self.fast_period),
-                fmt_arg(self.slow_period),
-                fmt_arg(self.signal_period),
-            ],
+            &[fmt_arg(self.fast_period), fmt_arg(self.slow_period), fmt_arg(self.signal_period)],
         );
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
@@ -921,6 +964,18 @@ impl Strategy for Macd {
             orders.extend(react_to_signal(sym, macd > signal, last, portfolio, 1.0 / n));
         }
         orders
+    }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(
+            py,
+            MovingAverageConvergenceDivergence::new(
+                self.fast_period,
+                self.slow_period,
+                self.signal_period,
+            ),
+        )?
+        .into_any()])
     }
 }
 
@@ -1019,6 +1074,10 @@ impl Strategy for Momentum {
         }
         orders
     }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(py, SimpleMovingAverage::new(self.ma_period))?.into_any()])
+    }
 }
 
 /// Multi-asset Bollinger Bands breakout rotation strategy.
@@ -1111,10 +1170,7 @@ impl Strategy for MultiBollingerRotation {
         if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
-        let bb_name = auto_indicator_name(
-            "BB",
-            &[fmt_arg(self.period), fmt_arg(self.std_dev)],
-        );
+        let bb_name = auto_indicator_name("BB", &[fmt_arg(self.period), fmt_arg(self.std_dev)]);
         let scores: Vec<(String, f64)> = closes
             .iter()
             .map(|(s, c)| {
@@ -1132,6 +1188,10 @@ impl Strategy for MultiBollingerRotation {
         let last_prices: std::collections::HashMap<String, f64> =
             closes.iter().map(|(s, c)| (s.clone(), *c.last().unwrap_or(&0.0))).collect();
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
+    }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(py, BollingerBands::new(self.period, self.std_dev))?.into_any()])
     }
 }
 
@@ -1195,7 +1255,6 @@ impl Strategy for RiskAverse {
     const NAME: &'static str = "Risk Averse";
     const DESCRIPTION: &'static str = "Buys low-volatility stocks making new highs on high volume.";
     const IS_MULTI_ASSET: bool = false;
-
 }
 
 /// Rate of Change momentum strategy.
@@ -1488,6 +1547,13 @@ impl Strategy for Rsi {
         }
         orders
     }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![
+            Py::new(py, RelativeStrengthIndex::new(self.rsi_period))?.into_any(),
+            Py::new(py, BollingerBands::new(self.bb_period, self.bb_std))?.into_any(),
+        ])
+    }
 }
 
 /// Resistance Support Relative Strength trend-detection strategy.
@@ -1544,7 +1610,6 @@ impl Strategy for Rsrs {
     const DESCRIPTION: &'static str =
         "Uses linear regression of high/low prices to buy on signals of strengthening support.";
     const IS_MULTI_ASSET: bool = false;
-
 }
 
 /// Multi-asset portfolio rotation ranked by Resistance Support Relative Strength.
@@ -1743,6 +1808,13 @@ impl Strategy for SmaCrossover {
         }
         orders
     }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![
+            Py::new(py, SimpleMovingAverage::new(self.fast_period))?.into_any(),
+            Py::new(py, SimpleMovingAverage::new(self.slow_period))?.into_any(),
+        ])
+    }
 }
 
 /// Naive single Simple Moving Average trend-following strategy.
@@ -1823,6 +1895,10 @@ impl Strategy for SmaNaive {
             orders.extend(react_to_signal(sym, last > ma, last, portfolio, 1.0 / n));
         }
         orders
+    }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(py, SimpleMovingAverage::new(self.period))?.into_any()])
     }
 }
 
@@ -1958,6 +2034,14 @@ impl Strategy for TripleRsiRotation {
             closes.iter().map(|(s, c)| (s.clone(), *c.last().unwrap_or(&0.0))).collect();
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
     }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![
+            Py::new(py, RelativeStrengthIndex::new(self.short_period))?.into_any(),
+            Py::new(py, RelativeStrengthIndex::new(self.medium_period))?.into_any(),
+            Py::new(py, RelativeStrengthIndex::new(self.long_period))?.into_any(),
+        ])
+    }
 }
 
 /// Classic channel-breakout trend-following system with ATR-based position sizing.
@@ -2048,14 +2132,10 @@ impl Strategy for TurtleTrading {
                 continue;
             }
             let last = *c.last().unwrap_or(&0.0);
-            let entry_high = c[c.len() - self.entry_period..]
-                .iter()
-                .cloned()
-                .fold(f64::NEG_INFINITY, f64::max);
-            let exit_low = c[c.len() - self.exit_period..]
-                .iter()
-                .cloned()
-                .fold(f64::INFINITY, f64::min);
+            let entry_high =
+                c[c.len() - self.entry_period..].iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let exit_low =
+                c[c.len() - self.exit_period..].iter().cloned().fold(f64::INFINITY, f64::min);
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
             if last >= entry_high && cur <= 0 {
                 if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n_syms, last) {
@@ -2068,6 +2148,10 @@ impl Strategy for TurtleTrading {
             }
         }
         orders
+    }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(py, AverageTrueRange::new(self.atr_period))?.into_any()])
     }
 }
 
@@ -2131,7 +2215,6 @@ impl Strategy for Vcp {
     const NAME: &'static str = "VCP";
     const DESCRIPTION: &'static str = "Buys on breakouts after price and volume volatility have contracted (Volatility Contraction Pattern).";
     const IS_MULTI_ASSET: bool = false;
-
 }
 
 // Apply shared pymethods (alphabetical)

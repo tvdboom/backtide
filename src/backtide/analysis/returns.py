@@ -13,8 +13,9 @@ from typing import Any, overload
 import numpy as np
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import DataFrameLike, _check_columns, _plot, _resolve_dt
+from backtide.analysis.utils import _check_columns, _plot, _resolve_dt
 from backtide.config import get_config
+from backtide.utils.types import DataFrameLike
 from backtide.utils.utils import _to_pandas
 
 cfg = get_config()
