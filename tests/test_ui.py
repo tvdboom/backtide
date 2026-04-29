@@ -189,11 +189,11 @@ class TestClearState:
     """Tests for _clear_state."""
 
     def test_clears_keys(self):
-        """Clear keys sets values to empty lists and removes shadows."""
+        """Clear keys removes both live and shadow values."""
         st.session_state["test_key"] = ["a", "b"]
         st.session_state["_test_key"] = "shadow"
         _clear_state("test_key")
-        assert st.session_state["test_key"] == []
+        assert "test_key" not in st.session_state
         assert "_test_key" not in st.session_state
 
 
@@ -1058,6 +1058,7 @@ class TestApplyConfigToState:
         exp = ExperimentConfig(
             general=GeneralExpConfig(name="applied", tags=["t1"], description="d"),
             strategy=StrategyExpConfig(
+                benchmark="SPY",
                 strategies=["s1"],
             ),
         )

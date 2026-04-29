@@ -22,6 +22,7 @@ from backtide.storage import (
 from backtide.ui.utils import (
     _fmt_duration,
     _fmt_metric,
+    _fmt_period,
     _moment_to_strftime,
     _to_pandas,
 )
@@ -148,7 +149,7 @@ def _render_strategy_summary(run: StrategyRunResult):
     cagr = run.metrics.get("cagr", 0.0)
     alpha = run.metrics.get("alpha", 0.0)
     sharpe = run.metrics.get("sharpe_ratio", 0.0)
-    max_dd = run.metrics.get("max_drawdown", 0.0)
+    max_dd = run.metrics.get("max_dd", 0.0)
 
     # Sharpe is the headline risk-adjusted metric: leads the row.
     _colored_metric(
@@ -202,19 +203,27 @@ def _render_strategy_summary(run: StrategyRunResult):
 
 
 def _status_icon(row: pd.Series) -> str:
-    """Return a Material icon shortcode based on the experiment's status / Sharpe."""
+    """Return a Material icon shortcode based on the experiment's Sharpe ratio."""
     if row["status"] == "failed":
         return ":material/error:"
 
     sharpe = row.get("best_sharpe")
     if sharpe is None or pd.isna(sharpe):
-        return ":material/trending_flat:"
-    elif sharpe >= 1.0:
-        return ":material/trending_up:"
+        return ":material/help:"
     elif sharpe < 0.0:
-        return ":material/trending_down:"
-
-    return ":material/trending_flat:"
+        return ":material/sentiment_very_dissatisfied:"
+    elif sharpe < 0.5:
+        return ":material/sentiment_dissatisfied:"
+    elif sharpe < 1.0:
+        return ":material/sentiment_neutral:"
+    elif sharpe < 1.5:
+        return ":material/sentiment_satisfied:"
+    elif sharpe < 2.0:
+        return ":material/sentiment_very_satisfied:"
+    elif sharpe < 3.0:
+        return ":material/military_tech:"
+    else:
+        return ":material/trophy:"
 
 
 def _status_badge(row: pd.Series) -> str:
@@ -353,11 +362,9 @@ def _render_full_analysis(row: pd.Series):
 
     st.markdown("")
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4 = st.columns([0.8, 1.2, 1, 1])
 
     sharpe = row.get("best_sharpe")
-    if sharpe is None or pd.isna(sharpe):
-        sharpe = 0.0
     _colored_metric(
         c1,
         ":material/military_tech: Best Sharpe",
@@ -365,60 +372,80 @@ def _render_full_analysis(row: pd.Series):
         _tone(sharpe, good_above=1.0, bad_below=0.0),
     )
 
+    _colored_metric(c2, ":material/event: Started at", _fmt_ts(row["started_at"]))
     duration = max(0, int(row["finished_at"]) - int(row["started_at"]))
-    _colored_metric(c2, ":material/timer: Run duration", _fmt_duration(duration))
-    _colored_metric(c3, ":material/event: Started at", _fmt_ts(row["started_at"]))
-    _colored_metric(c4, ":material/event_available: Finished at", _fmt_ts(row["finished_at"]))
+    _colored_metric(c3, ":material/timer: Duration", _fmt_duration(duration))
 
-    # ── Simulation context row (loaded from the persisted config TOML) ──
-    cfg_path = Path(cfg.data.storage_path) / "experiments" / f"{row['id']}.toml"
-    if not cfg_path.is_file():
-        return
+    status = str(row.get("status") or "").lower()
+    if status == "completed":
+        icon, label, tone = ":material/check_circle:", "Succeeded", "green"
+    else:
+        icon, label, tone = ":material/cancel:", "Failed", "red"
+    _colored_metric(c4, f"{icon} Status", label, tone)
 
     try:
+        cfg_path = Path(cfg.data.storage_path) / "experiments" / f"{row['id']}.toml"
         exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
-        return
+        exp_cfg = None
 
-    start = str(exp_cfg.data.start_date) if exp_cfg.data.start_date else None
-    end = str(exp_cfg.data.end_date) if exp_cfg.data.end_date else None
+    runs = query_experiment_strategies(row["id"])
 
-    period_str = "Full history"
-    length_str = "—"
-    if start and end:
-        try:
-            d0 = dt.fromisoformat(start).date()
-            d1 = dt.fromisoformat(end).date()
-        except ValueError:
-            period_str = f"{start} → {end}"
+    start_ts = None
+    end_ts = None
+    for r in runs:
+        if not r.equity_curve:
+            continue
+
+        first = int(r.equity_curve[0].timestamp)
+        last = int(r.equity_curve[-1].timestamp)
+        start_ts = first if start_ts is None else min(start_ts, first)
+        end_ts = last if end_ts is None else max(end_ts, last)
+
+    date_fmt = _moment_to_strftime(cfg.display.date_format)
+    period_str = "?"
+    length_str = "?"
+    if start_ts is not None and end_ts is not None:
+        d0 = dt.fromtimestamp(start_ts).date()
+        d1 = dt.fromtimestamp(end_ts).date()
+        period_str = f"{d0.strftime(date_fmt)} → {d1.strftime(date_fmt)}"
+        length_str = _fmt_period(d0, d1)
+    elif exp_cfg is not None:
+        # Fall back to the requested config range when no equity curves are
+        # available (e.g., a failed experiment with no completed runs).
+        start = str(exp_cfg.data.start_date) if exp_cfg.data.start_date else None
+        end = str(exp_cfg.data.end_date) if exp_cfg.data.end_date else None
+        if start and end:
+            try:
+                d0 = dt.fromisoformat(start).date()
+                d1 = dt.fromisoformat(end).date()
+            except ValueError:
+                period_str = f"{start} → {end}"
+            else:
+                period_str = f"{d0.strftime(date_fmt)} → {d1.strftime(date_fmt)}"
+                length_str = _fmt_period(d0, d1)
+        elif start:
+            period_str = f"from {start}"
+        elif end:
+            period_str = f"until {end}"
         else:
-            date_fmt = _moment_to_strftime(cfg.display.date_format)
-            period_str = f"{d0.strftime(date_fmt)} → {d1.strftime(date_fmt)}"
-            n_days = max(0, (d1 - d0).days)
-            length_str = f"{n_days} day{'s' if n_days != 1 else ''}"
-    elif start:
-        period_str = f"from {start}"
-    elif end:
-        period_str = f"until {end}"
+            period_str = "Full history"
 
-    n_symbols = len(exp_cfg.data.symbols)
-    symbols_str = (
-        ", ".join(exp_cfg.data.symbols[:3])
-        + (f" (+{n_symbols - 3})" if n_symbols > 3 else "")
-        if n_symbols
-        else "—"
-    )
+    if exp_cfg is not None:
+        n_symbols = len(exp_cfg.data.symbols)
+        interval_str = str(exp_cfg.data.interval)
+    else:
+        n_symbols, interval_str = "?", "?"
 
-    c1, c2, c3, c4 = st.columns(4)
-    _colored_metric(c1, ":material/date_range: Period", period_str)
-    _colored_metric(c2, ":material/calendar_month: Length", length_str)
-    _colored_metric(c3, ":material/schedule: Interval", str(exp_cfg.data.interval))
-    _colored_metric(c4, ":material/finance: Symbols", f"{n_symbols} · {symbols_str}")
+    c1, c2, c3 = st.columns([0.8, 2.2, 1])
+    _colored_metric(c1, ":material/finance: Symbols", str(n_symbols))
+    _colored_metric(c2, ":material/date_range: Period", f"{period_str} ({length_str})")
+    _colored_metric(c3, ":material/schedule: Interval", interval_str)
 
     st.markdown("")
 
-    runs = query_experiment_strategies(row["id"])
     tabs = st.tabs([f"**{run.strategy_name}**" for run in runs])
+    _, benchmark = _split_benchmark(runs)
     for tab, run in zip(tabs, runs, strict=True):
         with tab:
             _render_strategy_summary(run)
@@ -615,7 +642,7 @@ for _, row in df.iterrows():
             "<span style='display:inline-block;opacity:0.7;font-size:1.05em;margin-top:-20px'>"
             f":material/calendar_month: {_fmt_ts(row['started_at'])} "
             f"&nbsp;·&nbsp; "
-            f":material/timer: {_fmt_duration(row['finished_at'] - row['started_at'])} "
+            f":material/military_tech: {row['best_sharpe']:.2f} "
             f"&nbsp;·&nbsp; "
             f":material/psychology: {row['n_strategies']} {strategies}"
             "</span>",

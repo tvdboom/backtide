@@ -545,7 +545,7 @@ class TestComputeStatistics:
     def test_expected_columns(self, daily_bars):
         """Result contains the expected metric columns."""
         result = cast(pd.DataFrame, compute_statistics(daily_bars))
-        for col in ("ann_return", "ann_volatility", "sharpe_ratio", "max_drawdown", "win_rate"):
+        for col in ("cagr", "ann_volatility", "sharpe", "max_dd", "win_rate"):
             assert col in result.columns, f"Missing column: {col}"
 
     def test_custom_price_col(self, daily_bars):
@@ -556,7 +556,7 @@ class TestComputeStatistics:
     def test_max_drawdown_non_positive(self, daily_bars):
         """Max drawdown should be <= 0."""
         result = cast(pd.DataFrame, compute_statistics(daily_bars))
-        assert result.iloc[0]["max_drawdown"] <= 0
+        assert result.iloc[0]["max_dd"] <= 0
 
     def test_win_rate_in_range(self, daily_bars):
         """Win rate should be between 0 and 1 (fraction)."""

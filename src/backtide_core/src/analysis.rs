@@ -89,7 +89,7 @@ pub struct SeriesStats {
     pub sortino: f64,
 
     /// Maximum drawdown (≤ 0).
-    pub max_drawdown: f64,
+    pub max_dd: f64,
 
     /// Fraction of up-bars (returns > 0).
     pub win_rate: f64,
@@ -227,7 +227,7 @@ pub fn compute_series_stats(
         ann_volatility,
         sharpe,
         sortino,
-        max_drawdown: max_dd,
+        max_dd: max_dd,
         win_rate,
     })
 }
@@ -235,12 +235,12 @@ pub fn compute_series_stats(
 /// Per-symbol statistics record computed by Rust.
 struct SymbolStats {
     symbol: String,
-    ann_return: f64,
-    ann_volatility: f64,
     sharpe: f64,
-    sortino: f64,
-    max_drawdown: f64,
+    cagr: f64,
+    max_dd: f64,
     win_rate: f64,
+    ann_volatility: f64,
+    sortino: f64,
     total_bars: usize,
 }
 
@@ -255,12 +255,12 @@ fn compute_single(
     let s = compute_series_stats(prices, timestamps, risk_free_rate, periods_per_year)?;
     Some(SymbolStats {
         symbol,
-        ann_return: s.ann_return,
-        ann_volatility: s.ann_volatility,
         sharpe: s.sharpe,
-        sortino: s.sortino,
-        max_drawdown: s.max_drawdown,
+        cagr: s.ann_return,
+        max_dd: s.max_dd,
         win_rate: s.win_rate,
+        ann_volatility: s.ann_volatility,
+        sortino: s.sortino,
         total_bars: prices.len(),
     })
 }
@@ -381,12 +381,12 @@ pub fn compute_statistics<'py>(
 
     let out = PyDict::new(py);
     out.set_item("symbol", PyList::new(py, results.iter().map(|r| &r.symbol))?)?;
-    out.set_item("ann_return", PyList::new(py, results.iter().map(|r| r.ann_return))?)?;
-    out.set_item("ann_volatility", PyList::new(py, results.iter().map(|r| r.ann_volatility))?)?;
-    out.set_item("sharpe_ratio", PyList::new(py, results.iter().map(|r| r.sharpe))?)?;
-    out.set_item("sortino_ratio", PyList::new(py, results.iter().map(|r| r.sortino))?)?;
-    out.set_item("max_drawdown", PyList::new(py, results.iter().map(|r| r.max_drawdown))?)?;
+    out.set_item("sharpe", PyList::new(py, results.iter().map(|r| r.sharpe))?)?;
+    out.set_item("cagr", PyList::new(py, results.iter().map(|r| r.cagr))?)?;
+    out.set_item("max_dd", PyList::new(py, results.iter().map(|r| r.max_dd))?)?;
     out.set_item("win_rate", PyList::new(py, results.iter().map(|r| r.win_rate))?)?;
+    out.set_item("ann_volatility", PyList::new(py, results.iter().map(|r| r.ann_volatility))?)?;
+    out.set_item("sortino", PyList::new(py, results.iter().map(|r| r.sortino))?)?;
     out.set_item("total_bars", PyList::new(py, results.iter().map(|r| r.total_bars))?)?;
 
     dict_to_dataframe(py, &out).map(Bound::unbind)
@@ -454,9 +454,9 @@ mod tests {
         // No down day -> sortino is 0 (downside len <= 1)
         assert_eq!(stats.sortino, 0.0);
         // Annualised return must be positive on a strict uptrend
-        assert!(stats.ann_return > 0.0);
+        assert!(stats.cagr > 0.0);
         // Max drawdown is 0 for a monotonic uptrend
-        assert!((stats.max_drawdown).abs() < 1e-9);
+        assert!((stats.max_dd).abs() < 1e-9);
     }
 
     // ── compute_single: explicit periods_per_year ───────────────────────
@@ -497,8 +497,8 @@ mod tests {
         let stats = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
 
         // From 120 -> 60 is a 50% drawdown (-0.5 as a fraction)
-        assert!(stats.max_drawdown < -0.4);
-        assert!(stats.max_drawdown >= -1.0);
+        assert!(stats.max_dd < -0.4);
+        assert!(stats.max_dd >= -1.0);
     }
 
     // ── compute_single: sortino with downside returns ───────────────────
@@ -530,12 +530,12 @@ mod tests {
 
     #[test]
     fn compute_single_collapsing_price_returns_minus_100() {
-        // Prices strictly decreasing toward zero -> ann_return clamps near -100
+        // Prices strictly decreasing toward zero -> cagr clamps near -100
         let prices = vec![100.0, 50.0, 25.0, 0.0001];
         let timestamps = daily_timestamps(prices.len());
 
         let stats = compute_single("X".into(), &prices, &timestamps, 0.0, None).unwrap();
-        assert!(stats.ann_return < 0.0);
+        assert!(stats.cagr < 0.0);
     }
 
     // ── compute_single: risk_free_rate affects sharpe ───────────────────
@@ -577,6 +577,6 @@ mod tests {
         let timestamps = daily_timestamps(prices.len());
 
         let stats = compute_single("X".into(), &prices, &timestamps, 0.0, Some(1)).unwrap();
-        assert!(stats.ann_return.is_finite());
+        assert!(stats.cagr.is_finite());
     }
 }

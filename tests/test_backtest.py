@@ -319,7 +319,7 @@ class TestRunExperiment:
         cfg = ExperimentConfig(
             general=GeneralExpConfig(name="empty"),
             data=DataExpConfig(symbols=[]),
-            strategy=StrategyExpConfig(strategies=[]),
+            strategy=StrategyExpConfig(benchmark="", strategies=[]),
         )
         with pytest.raises(RuntimeError):
             run_experiment(cfg, verbose=False)
@@ -343,7 +343,7 @@ class TestRunExperiment:
         cfg = ExperimentConfig(
             general=GeneralExpConfig(name="offline"),
             data=DataExpConfig(symbols=["NOPE-XYZ"]),
-            strategy=StrategyExpConfig(strategies=[]),
+            strategy=StrategyExpConfig(benchmark="SPY", strategies=[]),
         )
         # We expect either a clean failed result, or a runtime error from
         # the resolve step; both are acceptable defensive outcomes.

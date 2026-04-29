@@ -44,8 +44,8 @@ class TestDownload:
         )
         mock_result = MagicMock(n_succeeded=1, n_failed=0, warnings=[])
         with (
-            patch("backtide.data.resolve_profiles", return_value=[]),
-            patch("backtide.data.download_bars", return_value=mock_result),
+            patch("backtide.cli.resolve_profiles", return_value=[]),
+            patch("backtide.cli.download_bars", return_value=mock_result),
         ):
             result = runner.invoke(download, ["AAPL"])
             assert result.exit_code == 0
@@ -60,8 +60,8 @@ class TestDownload:
         )
         mock_result = MagicMock(n_succeeded=1, n_failed=1, warnings=["timeout"])
         with (
-            patch("backtide.data.resolve_profiles", return_value=[]),
-            patch("backtide.data.download_bars", return_value=mock_result),
+            patch("backtide.cli.resolve_profiles", return_value=[]),
+            patch("backtide.cli.download_bars", return_value=mock_result),
         ):
             result = runner.invoke(download, ["AAPL", "BAD"])
             assert result.exit_code == 0
@@ -75,8 +75,8 @@ class TestDownload:
         )
         mock_result = MagicMock(n_succeeded=0, n_failed=2, warnings=["err1", "err2"])
         with (
-            patch("backtide.data.resolve_profiles", return_value=[]),
-            patch("backtide.data.download_bars", return_value=mock_result),
+            patch("backtide.cli.resolve_profiles", return_value=[]),
+            patch("backtide.cli.download_bars", return_value=mock_result),
         ):
             result = runner.invoke(download, ["A", "B"])
             assert result.exit_code == 0
@@ -89,8 +89,8 @@ class TestDownload:
         mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
         mock_result = MagicMock(n_succeeded=1, n_failed=0, warnings=[])
         with (
-            patch("backtide.data.resolve_profiles", return_value=[]),
-            patch("backtide.data.download_bars", return_value=mock_result),
+            patch("backtide.cli.resolve_profiles", return_value=[]),
+            patch("backtide.cli.download_bars", return_value=mock_result),
         ):
             result = runner.invoke(download, ["AAPL", "-t", instrument_type])
             assert result.exit_code == 0

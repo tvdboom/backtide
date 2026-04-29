@@ -1084,14 +1084,14 @@ fn compute_metrics(
     let stats = crate::analysis::compute_series_stats(&values, &timestamps, risk_free_rate, None);
 
     let (cagr, ann_vol, sharpe, sortino, max_dd) = match stats {
-        Some(s) => (s.ann_return, s.ann_volatility, s.sharpe, s.sortino, s.max_drawdown),
+        Some(s) => (s.ann_return, s.ann_volatility, s.sharpe, s.sortino, s.max_dd),
         None => (0.0, 0.0, 0.0, 0.0, 0.0),
     };
     m.insert("cagr".into(), cagr);
     m.insert("ann_volatility".into(), ann_vol);
-    m.insert("sharpe_ratio".into(), sharpe);
-    m.insert("sortino_ratio".into(), sortino);
-    m.insert("max_drawdown".into(), max_dd);
+    m.insert("sharpe".into(), sharpe);
+    m.insert("sortino".into(), sortino);
+    m.insert("max_dd".into(), max_dd);
 
     m
 }
@@ -1495,9 +1495,9 @@ mod tests {
             price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
+        assert!(r.metrics.contains_key("sharpe"));
         assert!(r.metrics.contains_key("total_return"));
-        assert!(r.metrics.contains_key("sharpe_ratio"));
-        assert!(r.metrics.contains_key("max_drawdown"));
+        assert!(r.metrics.contains_key("max_dd"));
     }
 
     #[test]

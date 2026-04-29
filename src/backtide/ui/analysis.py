@@ -405,25 +405,25 @@ with tab_map[tab_summary]:
                         )
 
                 with cols[0]:
-                    cls = "positive" if row["ann_return"] >= 0 else "negative"
-                    st.markdown(
-                        f":material/trending_up: **CAGR**<br>"
-                        f'<span class="metric-value {cls}">'
-                        f"{_fmt_metric(row['ann_return'] * 100, signed=True, suffix='%')}</span>",
-                        unsafe_allow_html=True,
-                    )
-
-                with cols[1]:
-                    sharpe = row["sharpe_ratio"]
+                    sharpe = row["sharpe"]
                     cls = "positive" if sharpe >= 1 else ("negative" if sharpe < 0 else "")
                     st.markdown(
-                        f":material/speed: **Sharpe**<br>"
+                        f":material/military_tech: **Sharpe**<br>"
                         f'<span class="metric-value {cls}">{_fmt_metric(sharpe)}</span>',
                         unsafe_allow_html=True,
                     )
 
+                with cols[1]:
+                    cls = "positive" if row["cagr"] >= 0 else "negative"
+                    st.markdown(
+                        f":material/trending_up: **CAGR**<br>"
+                        f'<span class="metric-value {cls}">'
+                        f"{_fmt_metric(row['cagr'] * 100, signed=True, suffix='%')}</span>",
+                        unsafe_allow_html=True,
+                    )
+
                 with cols[2]:
-                    max_dd = row["max_drawdown"]
+                    max_dd = row["max_dd"]
                     cls = "negative" if max_dd < -0.20 else ("positive" if max_dd > -0.05 else "")
                     st.markdown(
                         f":material/trending_down: **Max DD**<br>"
@@ -447,16 +447,16 @@ with tab_map[tab_summary]:
                 """Return a background-color CSS string with intensity."""
                 if pd.isna(val):
                     return ""
-                if col == "ann_return":
+                if col == "cagr":
                     good = val >= 0
                     intensity = min(abs(val) / 0.5, 1.0)
                 elif col == "ann_volatility":
                     good = val <= 0.20
                     intensity = min(abs(val - 0.20) / 0.40, 1.0)
-                elif col in ("sharpe_ratio", "sortino_ratio"):
+                elif col in ("sharpe", "sortino"):
                     good = val >= 0
                     intensity = min(abs(val) / 3, 1.0)
-                elif col == "max_drawdown":
+                elif col == "max_dd":
                     good = val > -0.10
                     intensity = min(abs(val) / 0.5, 1.0)
                 elif col == "win_rate":
@@ -474,31 +474,31 @@ with tab_map[tab_summary]:
                     pinned=True,
                     help="Ticker symbol of the instrument.",
                 ),
-                "ann_return": st.column_config.Column(
-                    label="CAGR",
-                    help="Compound annual growth rate (CAGR).",
-                ),
-                "ann_volatility": st.column_config.Column(
-                    label="Ann. Volatility",
-                    help="Annualized standard deviation of returns.",
-                ),
-                "sharpe_ratio": st.column_config.Column(
+                "sharpe": st.column_config.Column(
                     label="Sharpe",
                     width="small",
                     help="Sharpe ratio: risk-adjusted return per unit of total volatility.",
                 ),
-                "sortino_ratio": st.column_config.Column(
-                    label="Sortino",
-                    width="small",
-                    help="Sortino ratio: like Sharpe but only penalizes downside volatility.",
+                "cagr": st.column_config.Column(
+                    label="CAGR",
+                    help="Compound annual growth rate (CAGR).",
                 ),
-                "max_drawdown": st.column_config.Column(
+                "max_dd": st.column_config.Column(
                     label="Max DD",
                     help="Largest peak-to-trough decline in cumulative returns.",
                 ),
                 "win_rate": st.column_config.Column(
                     label="Win Rate",
                     help="Percentage of periods with a positive return.",
+                ),
+                "ann_volatility": st.column_config.Column(
+                    label="Ann. Volatility",
+                    help="Annualized standard deviation of returns.",
+                ),
+                "sortino": st.column_config.Column(
+                    label="Sortino",
+                    width="small",
+                    help="Sortino ratio: like Sharpe but only penalizes downside volatility.",
                 ),
                 "total_bars": st.column_config.Column(
                     label="Total Bars",
@@ -523,15 +523,15 @@ with tab_map[tab_summary]:
             styled = stats_df.style
             styled.format(
                 {
-                    "ann_return": lambda v: (
+                    "cagr": lambda v: (
                         "" if pd.isna(v) else _fmt_metric(v * 100, signed=True, suffix="%")
                     ),
                     "ann_volatility": lambda v: (
                         "" if pd.isna(v) else _fmt_metric(v * 100, suffix="%")
                     ),
-                    "sharpe_ratio": lambda v: "" if pd.isna(v) else _fmt_metric(v),
-                    "sortino_ratio": lambda v: "" if pd.isna(v) else _fmt_metric(v),
-                    "max_drawdown": lambda v: (
+                    "sharpe": lambda v: "" if pd.isna(v) else _fmt_metric(v),
+                    "sortino": lambda v: "" if pd.isna(v) else _fmt_metric(v),
+                    "max_dd": lambda v: (
                         "" if pd.isna(v) else _fmt_metric(v * 100, suffix="%")
                     ),
                     "win_rate": lambda v: "" if pd.isna(v) else _fmt_metric(v * 100, suffix="%"),
@@ -540,11 +540,11 @@ with tab_map[tab_summary]:
             )
 
             for col in (
-                "ann_return",
+                "cagr",
                 "ann_volatility",
-                "sharpe_ratio",
-                "sortino_ratio",
-                "max_drawdown",
+                "sharpe",
+                "sortino",
+                "max_dd",
                 "win_rate",
             ):
                 styled.map(lambda v, c=col: _metric_bg(v, c), subset=[col])

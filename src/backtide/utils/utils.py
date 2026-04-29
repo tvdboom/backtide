@@ -52,7 +52,7 @@ def _check_dependency(name: str, pypi_name: str | None = None) -> ModuleType:
         ) from None
 
 
-def _format_number(n: float, decimals: int = 0) -> str:
+def _format_number(n: float) -> str:
     """Transform a number to a nicely formatted string.
 
     Parameters
@@ -60,24 +60,26 @@ def _format_number(n: float, decimals: int = 0) -> str:
     n : int | float
         Number to format.
 
-    decimals : int, default=0
-        Number of decimal places to show in the abbreviated form
-        (``k``/``M``/``B``) and in the unabbreviated form for ``|n| < 1000``.
-
     Returns
     -------
     str
         Formatted string.
 
     """
-    if abs(n) >= 1_000_000_000:
-        return f"{n / 1_000_000_000:.{decimals}f}B"
+    if abs(n) >= 10_000_000_000:
+        return f"{int(n / 1_000_000_000)}B"
+    elif abs(n) >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f}B"
+    elif abs(n) >= 10_000_000:
+        return f"{int(n / 1_000_000)}M"
     elif abs(n) >= 1_000_000:
-        return f"{n / 1_000_000:.{decimals}f}M"
+        return f"{n / 1_000_000:.1f}M"
+    elif abs(n) >= 10_000:
+        return f"{int(n / 1_000)}k"
     elif abs(n) >= 1_000:
-        return f"{n / 1_000:.{decimals}f}k"
+        return f"{n / 1_000:.1f}k"
     else:
-        return f"{n:.{decimals}f}"
+        return str(n)
 
 
 def _format_price(
@@ -112,27 +114,26 @@ def _format_price(
         Formatted string.
 
     """
-    dec = (0 if compact else 2) if decimals is None else decimals
+    dec = 2 if decimals is None else decimals
 
     if currency:
         if not isinstance(currency, Currency):
             try:
                 currency = Currency(currency)
             except ValueError:
-                return _format_number(n, decimals=dec) if compact else f"{n:,.{dec}f}"
+                return _format_number(n) if compact else f"{n:,.{dec}f}"
 
         if compact:
-            num = _format_number(n, decimals=dec)
+            num = _format_number(n)
         else:
-            cdec = currency.decimals if decimals is None else dec
-            num = f"{n:,.{cdec}f}"
+            num = f"{n:,.{currency.decimals if decimals is None else dec}f}"
 
         if cfg.display.currency_prefix:
             return f"{currency.symbol}{num}"
         else:
             return f"{num} {currency.symbol}"
 
-    return _format_number(n, decimals=dec) if compact else f"{n:,.{dec}f}"
+    return _format_number(n) if compact else f"{n:,.{dec}f}"
 
 
 def _make_dummy_bars(

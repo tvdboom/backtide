@@ -158,7 +158,7 @@ class TestQueryExperiments:
             "started_at",
             "finished_at",
             "status",
-            "total_return",
+            "best_sharpe",
             "n_strategies",
         ):
             assert col in df.columns

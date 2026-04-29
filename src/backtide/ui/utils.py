@@ -209,6 +209,43 @@ def _fmt_duration(total_seconds: float) -> str:
     return "<1s"
 
 
+def _fmt_period(start: date, end: date) -> str:
+    """Format the span between two dates as a compact string.
+
+    Both endpoints are treated as inclusive. If the span is less than a year,
+    only the day count is returned.
+
+    Parameters
+    ----------
+    start : datetime.date
+        Start of the period.
+
+    end : datetime.date
+        End of the period.
+
+    Returns
+    -------
+    str
+        Compact human-readable representation.
+
+    """
+    n_years = end.year - start.year
+
+    # Adjust if end is before the anniversary
+    anniversary = start.replace(year=start.year + n_years)
+    if anniversary > end:
+        n_years -= 1
+        anniversary = start.replace(year=start.year + n_years)
+
+    # Remaining days after full years (+1 since both endpoints are inclusive)
+    remaining_days = (end - anniversary).days + 1
+
+    if n_years > 0:
+        return f"{n_years}y {remaining_days}d"
+
+    return f"{remaining_days}d"
+
+
 def _get_timezone(tz: str | None) -> ZoneInfo:
     """Return the timezone from config or local."""
     if tz:
@@ -576,21 +613,7 @@ def _draw_cards(
 
             total_rows += rows
 
-            n_years = iv_end.year - iv_start.year
-
-            # Adjust if end is before the anniversary
-            anniversary = iv_start.replace(year=iv_start.year + n_years)
-            if anniversary > iv_end:
-                n_years -= 1
-                anniversary = iv_start.replace(year=iv_start.year + n_years)
-
-            # Remaining days after full years (+1 since both start and end are inclusive)
-            remaining_days = (iv_end - anniversary).days + 1
-
-            if n_years > 0:
-                n_days_str = f"{n_years}y {remaining_days}d"
-            else:
-                n_days_str = f"{remaining_days}d"
+            n_days_str = _fmt_period(iv_start, iv_end)
 
             interval_rows += f"""
                 <div class="interval-row">
