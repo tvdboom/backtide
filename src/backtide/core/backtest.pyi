@@ -684,11 +684,8 @@ class BuyAndHold:
     Parameters
     ----------
     symbol : str | None, default=None
-        Optional single ticker to buy and hold. When ``None`` (the
-        default), the strategy equal-weights all symbols visible in the
-        experiment. When set, only the named symbol is bought; this is
-        used internally by ``run_experiment`` to back-test the
-        configured ``strategy.benchmark``.
+        Optional single ticker to buy and hold. When `None`, the strategy
+        equal-weights all symbols visible in the experiment.
 
     Attributes
     ----------

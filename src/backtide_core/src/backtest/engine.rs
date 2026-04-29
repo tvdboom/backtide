@@ -37,11 +37,6 @@ use uuid::Uuid;
 // Public interface
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Name used for the auto-injected `BuyAndHold` benchmark run inside an
-/// `ExperimentResult.strategies` list. Must stay in sync with the
-/// Python-side ``backtide.backtest.BENCHMARK_STRATEGY_NAME``.
-pub const BENCHMARK_STRATEGY_NAME: &str = "Buy & Hold (Benchmark)";
-
 impl Engine {
     /// Run a single backtest experiment end-to-end.
     ///
@@ -56,8 +51,9 @@ impl Engine {
     /// 4. Run every selected strategy in parallel, each with its own
     ///    portfolio, order book and equity log. When a benchmark is
     ///    configured, a ``BuyAndHold(symbol=benchmark)`` strategy is
-    ///    auto-injected under the name [`BENCHMARK_STRATEGY_NAME`] so
-    ///    alpha can be derived from real backtest results.
+    ///    auto-injected under the name returned by
+    ///    [`benchmark_strategy_name`] so alpha can be derived from real
+    ///    backtest results.
     /// 5. Persist the aggregate result (and per-strategy artefacts) to
     ///    DuckDB, then return it to the caller.
     pub fn run_experiment(
@@ -94,6 +90,7 @@ impl Engine {
         }
 
         // ── Phase 1: data ───────────────────────────────────────────────
+
         let pb = verbose.then(|| progress_spinner("Resolving instrument profiles..."));
         let profiles = self.resolve_profiles(
             symbols.clone(),
@@ -156,6 +153,7 @@ impl Engine {
         let aligned = align_bars(&bar_map, &all_ts, config.engine.empty_bar_policy);
 
         // ── Phase 3: indicators (computed once) ─────────────────────────
+
         let pb = verbose.then(|| {
             progress_bar(config.indicators.indicators.len() as u64, "Computing indicators...")
         });
@@ -165,10 +163,11 @@ impl Engine {
         }
 
         // ── Phase 4: run strategies in parallel ─────────────────────────
+
         let mut strategy_objs = load_strategies(&config.strategy.strategies)?;
 
-        // Auto-inject a Buy & Hold of the benchmark symbol (if configured)
-        // as a regular strategy, so alpha can be computed from real results.
+        // Auto-inject a Buy & Hold of the benchmark symbol as a regular strategy.
+        let benchmark_name = format!("Benchmark ({benchmark})");
         if !benchmark.is_empty() {
             match Python::attach(|py| -> PyResult<Py<PyAny>> {
                 let bh = BuyAndHold {
@@ -176,8 +175,8 @@ impl Engine {
                 };
                 Ok(Py::new(py, bh)?.into_any())
             }) {
-                Ok(obj) => strategy_objs.push((BENCHMARK_STRATEGY_NAME.to_owned(), obj, false)),
-                Err(e) => warnings.push(format!("Failed to instantiate benchmark BuyAndHold: {e}")),
+                Ok(obj) => strategy_objs.push((benchmark_name.clone(), obj, false)),
+                Err(e) => warnings.push(format!("Failed to instantiate benchmark: {e}")),
             }
         }
 
@@ -247,15 +246,23 @@ impl Engine {
         if !benchmark.is_empty() {
             let bench_total = results
                 .iter()
-                .find(|r| r.strategy_name == BENCHMARK_STRATEGY_NAME)
+                .find(|r| r.strategy_name == benchmark_name)
                 .and_then(|r| r.metrics.get("total_return").copied());
             if let Some(b) = bench_total {
                 for r in &mut results {
-                    if r.strategy_name == BENCHMARK_STRATEGY_NAME {
+                    if r.strategy_name == benchmark_name {
                         continue;
                     }
                     let tr = r.metrics.get("total_return").copied().unwrap_or(0.0);
                     r.metrics.insert("alpha".into(), tr - b);
+                }
+            }
+
+            // Ensure the benchmark run is always the first entry in the results.
+            if let Some(idx) = results.iter().position(|r| r.strategy_name == benchmark_name) {
+                if idx != 0 {
+                    let bench = results.remove(idx);
+                    results.insert(0, bench);
                 }
             }
         }

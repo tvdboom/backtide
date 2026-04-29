@@ -28,8 +28,3 @@ from backtide.core.backtest import (
     Trade,
     run_experiment,
 )
-
-#: Name used to identify the auto-injected Buy & Hold benchmark run inside an
-#: ``ExperimentResult.strategies`` list. Must stay in sync with the Rust-side
-#: constant in ``backtide_core/src/backtest/engine.rs``.
-BENCHMARK_STRATEGY_NAME = "Buy & Hold (Benchmark)"

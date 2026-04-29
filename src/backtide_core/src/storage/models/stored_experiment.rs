@@ -13,8 +13,8 @@ pub struct StoredExperiment {
     pub started_at: i64,
     pub finished_at: i64,
     pub status: String,
-    /// Aggregated total return across all strategies in this experiment.
-    pub total_return: Option<f64>,
+    /// Best Sharpe ratio across the user-defined strategies.
+    pub best_sharpe: Option<f64>,
     /// Number of strategies persisted under this experiment.
     pub n_strategies: i64,
 }

@@ -779,8 +779,11 @@ impl Storage for DuckDb {
 
         let mut sql = String::from(
             "SELECT e.id, e.name, e.tags, e.description, e.started_at, e.finished_at, e.status,
-                    (SELECT AVG(CAST(json_extract(metrics, '$.total_return') AS DOUBLE))
-                       FROM experiment_strategies s WHERE s.experiment_id = e.id) AS total_return,
+                    (SELECT MAX(CAST(json_extract(metrics, '$.sharpe_ratio') AS DOUBLE))
+                       FROM experiment_strategies s
+                      WHERE s.experiment_id = e.id
+                        AND NOT regexp_matches(s.strategy_name, '^Benchmark\\s*\\(.+\\)$')
+                    ) AS best_sharpe,
                     (SELECT COUNT(*) FROM experiment_strategies s WHERE s.experiment_id = e.id) AS n_strategies
              FROM experiments e",
         );
@@ -829,7 +832,7 @@ impl Storage for DuckDb {
                     started_at: row.get(4)?,
                     finished_at: row.get(5)?,
                     status: row.get(6)?,
-                    total_return: row.get::<_, Option<f64>>(7)?,
+                    best_sharpe: row.get::<_, Option<f64>>(7)?,
                     n_strategies: row.get(8)?,
                 })
             })?
@@ -847,7 +850,7 @@ impl Storage for DuckDb {
             "SELECT id, strategy_id, strategy_name, metrics
              FROM experiment_strategies
              WHERE experiment_id = ?
-             ORDER BY strategy_id",
+             ORDER BY rowid",
         )?;
         let strats: Vec<(String, String, String, String)> = stmt
             .query_map(params![experiment_id], |row| {

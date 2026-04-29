@@ -13,6 +13,9 @@ DOCS_URL = "https://tvdboom.github.io/backtide"
 # Regex pattern to which tags must comply
 TAG_PATTERN = re.compile(r"^[\s\w-]{1,20}$")
 
+# Regex pattern that matches the benchmark strategy name (e.g. ``Benchmark (EXW1.DE)``).
+BENCHMARK_NAME = re.compile(r"^Benchmark\s\([^()]+\)$")
+
 # Characters forbidden in file names (Windows superset covers all platforms)
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 

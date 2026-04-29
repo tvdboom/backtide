@@ -456,7 +456,7 @@ pub fn query_experiments(
         "started_at"    => |r| r.started_at,
         "finished_at"   => |r| r.finished_at,
         "status"        => |r| &r.status,
-        "total_return"  => |r| r.total_return,
+        "best_sharpe"   => |r| r.best_sharpe,
         "n_strategies"  => |r| r.n_strategies,
     })
 }

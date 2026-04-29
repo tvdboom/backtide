@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import streamlit as st
 
-from backtide.backtest import BENCHMARK_STRATEGY_NAME, ExperimentConfig
+from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
 from backtide.storage import (
     delete_experiment,
@@ -25,6 +25,7 @@ from backtide.ui.utils import (
     _moment_to_strftime,
     _to_pandas,
 )
+from backtide.utils.constants import BENCHMARK_NAME
 from backtide.utils.utils import _format_price
 
 if TYPE_CHECKING:
@@ -78,6 +79,13 @@ st.markdown(
         hr {
             margin: 0.25rem 0 0.85rem 0 !important;
         }
+
+        /* Full-results page experiment title */
+        .experiment-title {
+            text-align: center;
+            font-size: 2em;
+            font-weight: 700;
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -110,90 +118,79 @@ def _tone(value: float | None, *, good_above: float = 0.0, bad_below: float = 0.
 def _colored_metric(container, label: str, value: str, tone: str = ""):
     """Render an `st.metric` with the value tinted using Streamlit's color palette.
 
-    `tone` should be one of Streamlit's color names (e.g. ``"green"``, ``"red"``)
-    or an empty string for the default/neutral color.
+    `tone` should be one of Streamlit's color names (e.g., "green", "red") or an
+     empty string for the default/neutral color.
 
     """
     container.metric(label, f":{tone}[{value}]" if tone else value)
 
 
 def _split_benchmark(runs: list[StrategyRunResult]) -> tuple[list, StrategyRunResult | None]:
-    """Split `runs` into (user_runs, benchmark_run)."""
-    bench: StrategyRunResult | None = None
-    user: list[StrategyRunResult] = []
-    for run in runs:
-        if run.strategy_name == BENCHMARK_STRATEGY_NAME and bench is None:
-            bench = run
-        else:
-            user.append(run)
-    return user, bench
+    """Split `runs` into (user_runs, benchmark_run).
+
+    The benchmark run is identified by a strategy name matching the pattern
+    ``Benchmark(<symbol>)``, regardless of its position in the list.
+
+    """
+    for i, run in enumerate(runs):
+        if BENCHMARK_NAME.match(run.strategy_name):
+            return [*runs[:i], *runs[i + 1:]], run
+
+    return runs, None
 
 
-def _render_strategy_summary(
-    run: StrategyRunResult,
-    benchmark: StrategyRunResult | None = None,
-):
+def _render_strategy_summary(run: StrategyRunResult):
     """Render compact summary metrics for a single strategy run."""
-    st.markdown(f"**:material/psychology: {run.strategy_name}**")
-    show_alpha = benchmark and run is not benchmark
-    if show_alpha:
-        mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([1, 1, 1, 1, 1, 1, 1.2])
-    else:
-        mc1, mc2, mc3, mc4, mc5, mc6 = st.columns([1, 1, 1, 1, 1, 1.2])
+    mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([0.8, 0.8, 1, 1, 1, 1, 1.2])
 
     pnl = run.metrics.get("pnl", 0.0)
     total_return = run.metrics.get("total_return", 0.0)
     cagr = run.metrics.get("cagr", 0.0)
+    alpha = run.metrics.get("alpha", 0.0)
     sharpe = run.metrics.get("sharpe_ratio", 0.0)
     max_dd = run.metrics.get("max_drawdown", 0.0)
 
-    pnl_str = _format_price(pnl, currency=cfg.general.base_currency, compact=True)
-    if pnl >= 0:
-        pnl_str = f"+{pnl_str}"
+    # Sharpe is the headline risk-adjusted metric: leads the row.
     _colored_metric(
         mc1,
-        ":material/payments: PnL",
-        pnl_str,
+        ":material/military_tech: Sharpe",
+        _fmt_metric(sharpe),
+        _tone(sharpe, good_above=1.0, bad_below=0.0),  # >1 good, <0 bad
+    )
+
+    pnl_str = _format_price(pnl, currency=cfg.general.base_currency, compact=True)
+    _colored_metric(
+        mc2,
+        ":material/payments: P&L",
+        f"{'+' if pnl > 0 else ''}{pnl_str}",
         _tone(pnl),
     )
     _colored_metric(
-        mc2,
+        mc3,
         ":material/stacked_line_chart: Return",
         _fmt_pct(total_return, signed=True),
         _tone(total_return),
     )
     _colored_metric(
-        mc3,
+        mc4,
         ":material/trending_up: CAGR",
         _fmt_pct(cagr, signed=True),
         _tone(cagr),
     )
-    if show_alpha and benchmark:
-        bench_total_return = float(benchmark.metrics.get("total_return", 0.0) or 0.0)
-        alpha = float(run.metrics.get("total_return", 0.0) or 0.0) - bench_total_return
-        _colored_metric(
-            mc4,
-            ":material/compare_arrows: Alpha",
-            _fmt_pct(alpha, signed=True),
-            _tone(alpha),
-        )
-    # Sharpe: >1 is good, <0 is bad, in-between is neutral.
     _colored_metric(
         mc5,
-        ":material/speed: Sharpe",
-        _fmt_metric(sharpe),
-        _tone(sharpe, good_above=1.0, bad_below=0.0),
+        ":material/compare_arrows: Alpha",
+        _fmt_pct(alpha, signed=True),
+        _tone(alpha),
     )
-    # Max drawdown: any non-zero drawdown is bad.
-    dd_tone = "red" if max_dd and not pd.isna(max_dd) else ""
     _colored_metric(
         mc6,
         ":material/trending_down: Max DD",
         _fmt_pct(max_dd),
-        dd_tone,
+        "red" if max_dd and not pd.isna(max_dd) else "",  # Any non-zero drawdown is bad.
     )
     n_trades = int(run.metrics.get("n_trades", 0))
-    win_rate = run.metrics.get("win_rate", 0.0) or 0.0
+    win_rate = run.metrics.get("win_rate", 0.0)
     wr_pct = _fmt_metric(win_rate * 100, suffix="%")
     if win_rate > 0.5:
         wr_str = f":green[{wr_pct}]"
@@ -201,40 +198,20 @@ def _render_strategy_summary(
         wr_str = f":red[{wr_pct}]"
     else:
         wr_str = wr_pct
-    _colored_metric(
-        mc7,
-        ":material/swap_vert: Trades (w/r)",
-        f"{n_trades} ({wr_str})",
-    )
-
-
-def _render_experiment_metrics(row: pd.Series):
-    """Render the top-level metrics for an experiment row."""
-    c1, c2 = st.columns(2)
-    total_return = row.get("total_return")
-    if total_return is None or pd.isna(total_return):
-        total_return = 0.0
-    _colored_metric(
-        c1,
-        ":material/stacked_line_chart: Total Return",
-        _fmt_pct(total_return, signed=True),
-        _tone(total_return),
-    )
-    duration = max(0, int(row["finished_at"]) - int(row["started_at"]))
-    _colored_metric(c2, ":material/timer: Duration", _fmt_duration(duration))
+    _colored_metric(mc7, ":material/swap_vert: Trades (w/r)", f"{n_trades} ({wr_str})")
 
 
 def _status_icon(row: pd.Series) -> str:
-    """Return a Material icon shortcode based on the experiment's status / return."""
+    """Return a Material icon shortcode based on the experiment's status / Sharpe."""
     if row["status"] == "failed":
         return ":material/error:"
 
-    total_return = row.get("total_return")
-    if total_return is None or pd.isna(total_return):
+    sharpe = row.get("best_sharpe")
+    if sharpe is None or pd.isna(sharpe):
         return ":material/trending_flat:"
-    elif total_return > 0:
+    elif sharpe >= 1.0:
         return ":material/trending_up:"
-    elif total_return < 0:
+    elif sharpe < 0.0:
         return ":material/trending_down:"
 
     return ":material/trending_flat:"
@@ -244,7 +221,7 @@ def _status_badge(row: pd.Series) -> str:
     """Return a small colored status dot for the experiment."""
     if row["status"] == "failed":
         cls, label = "error", "Failed"
-    elif (tr := row.get("total_return")) is None or pd.isna(tr):
+    elif (s := row.get("best_sharpe")) is None or pd.isna(s):
         cls, label = "warning", "Succeeded with warnings"
     else:
         cls, label = "success", "Succeeded"
@@ -286,6 +263,8 @@ def _confirm_delete_experiment(exp_id: str, name: str):
         else:
             if st.session_state.get("results_expanded") == exp_id:
                 st.session_state.pop("results_expanded", None)
+            if (sel := st.session_state.get("selected_experiment")) and sel.get("id") == exp_id:
+                st.session_state.pop("selected_experiment", None)
             st.session_state["_delete_success"] = name
         st.rerun()
 
@@ -299,57 +278,153 @@ def _render_full_analysis(row: pd.Series):
         The experiment row previously retrieved from `query_experiments`.
 
     """
-    back, title_col = st.columns([1, 5], vertical_alignment="center")
-    if back.button(":material/arrow_back: Back", key="back_to_results", width=150):
-        st.session_state.pop("selected_experiment", None)
-        st.rerun()
+    exp_id = row["id"]
+    name = row["name"] or exp_id
+    cfg_path = Path(cfg.data.storage_path) / "experiments" / f"{exp_id}.toml"
+    export_disabled = not cfg_path.is_file()
 
-    title_col.markdown(
-        f"<h2 style='margin-top:-25px;padding:0;line-height:1'>{row['name'] or row['id']}</h2>",
-        unsafe_allow_html=True,
-    )
+    with st.container(key="full_results_toolbar"):
+        col1, col2, col3, col4, col5 = st.columns([1.2, 5.3, 0.7, 0.7, 0.7], gap="xxsmall")
 
-    _render_tags(row["tags"])
+        if col1.button(
+            ":material/arrow_back: Back",
+            key="back_to_results",
+            width="stretch",
+        ):
+            st.session_state.pop("selected_experiment", None)
+            st.rerun()
 
-    strat_word = "strategy" if row["n_strategies"] == 1 else "strategies"
-    st.markdown(
-        f"""
-        <div style="opacity:0.7;font-size:1.15em;margin-bottom:30px">
-            {_fmt_ts(row["started_at"])}
-            &nbsp;·&nbsp;
-            {row["n_strategies"]} {strat_word}
-            &nbsp;·&nbsp;
-            {row["status"].capitalize()} {_status_badge(row)}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        with col3.popover(
+            "",
+            icon=":material/description:",
+            help=(
+                "Show the experiment description."
+                if row["description"]
+                else "No description for this experiment."
+            ),
+            disabled=not row["description"],
+        ):
+            if row["description"]:
+                st.markdown(f"**{name}**")
+                st.write(row["description"])
 
-    if row["description"]:
-        with st.expander("Description", icon=":material/description:"):
-            st.write(row["description"])
+        if col4.button(
+            "",
+            key=f"export_full_{exp_id}",
+            icon=":material/upload:",
+            type="secondary",
+            width="stretch",
+            disabled=export_disabled,
+            help=(
+                "Open this experiment's configuration in the **Experiment** page."
+                if not export_disabled
+                else "No saved configuration found for this experiment."
+            ),
+        ):
+            try:
+                exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
+            except Exception as ex:  # noqa: BLE001
+                st.session_state["_delete_error"] = f"Failed to load configuration: {ex}"
+                st.rerun()
+            else:
+                st.session_state["_pending_experiment_config"] = exp_cfg
+                st.switch_page("experiment.py")
 
-    _render_experiment_metrics(row)
+        if col5.button(
+            "",
+            key=f"delete_full_{exp_id}",
+            icon=":material/delete:",
+            type="primary",
+            width="stretch",
+            help="Delete this experiment from the database.",
+        ):
+            _confirm_delete_experiment(exp_id, name)
 
-    if not (all_runs := query_experiment_strategies(row["id"])):
-        st.info("No strategy runs found for this experiment.")
-        return
+    st.markdown(f"<div class='experiment-title'>{name}</div>", unsafe_allow_html=True)
 
-    runs, benchmark = _split_benchmark(list(all_runs))
-    if benchmark is not None:
-        bench_total = float(benchmark.metrics.get("total_return", 0.0) or 0.0)
-        st.caption(
-            ":material/compare_arrows: Benchmark (buy & hold) — return "
-            f"{_fmt_pct(bench_total, signed=True)}"
+    if row["tags"]:
+        pills = " ".join(
+            f"<span class='tag-pill'>{t.strip()}</span>" for t in row["tags"].split(",")
+        )
+        st.markdown(
+            f"<div style='text-align:center;margin:0.35rem'>{pills}</div>",
+            unsafe_allow_html=True,
         )
 
-    tabs = st.tabs([run.strategy_name for run in runs])
+    st.markdown("")
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    sharpe = row.get("best_sharpe")
+    if sharpe is None or pd.isna(sharpe):
+        sharpe = 0.0
+    _colored_metric(
+        c1,
+        ":material/military_tech: Best Sharpe",
+        _fmt_metric(sharpe),
+        _tone(sharpe, good_above=1.0, bad_below=0.0),
+    )
+
+    duration = max(0, int(row["finished_at"]) - int(row["started_at"]))
+    _colored_metric(c2, ":material/timer: Run duration", _fmt_duration(duration))
+    _colored_metric(c3, ":material/event: Started at", _fmt_ts(row["started_at"]))
+    _colored_metric(c4, ":material/event_available: Finished at", _fmt_ts(row["finished_at"]))
+
+    # ── Simulation context row (loaded from the persisted config TOML) ──
+    cfg_path = Path(cfg.data.storage_path) / "experiments" / f"{row['id']}.toml"
+    if not cfg_path.is_file():
+        return
+
+    try:
+        exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return
+
+    start = str(exp_cfg.data.start_date) if exp_cfg.data.start_date else None
+    end = str(exp_cfg.data.end_date) if exp_cfg.data.end_date else None
+
+    period_str = "Full history"
+    length_str = "—"
+    if start and end:
+        try:
+            d0 = dt.fromisoformat(start).date()
+            d1 = dt.fromisoformat(end).date()
+        except ValueError:
+            period_str = f"{start} → {end}"
+        else:
+            date_fmt = _moment_to_strftime(cfg.display.date_format)
+            period_str = f"{d0.strftime(date_fmt)} → {d1.strftime(date_fmt)}"
+            n_days = max(0, (d1 - d0).days)
+            length_str = f"{n_days} day{'s' if n_days != 1 else ''}"
+    elif start:
+        period_str = f"from {start}"
+    elif end:
+        period_str = f"until {end}"
+
+    n_symbols = len(exp_cfg.data.symbols)
+    symbols_str = (
+        ", ".join(exp_cfg.data.symbols[:3])
+        + (f" (+{n_symbols - 3})" if n_symbols > 3 else "")
+        if n_symbols
+        else "—"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    _colored_metric(c1, ":material/date_range: Period", period_str)
+    _colored_metric(c2, ":material/calendar_month: Length", length_str)
+    _colored_metric(c3, ":material/schedule: Interval", str(exp_cfg.data.interval))
+    _colored_metric(c4, ":material/finance: Symbols", f"{n_symbols} · {symbols_str}")
+
+    st.markdown("")
+
+    runs = query_experiment_strategies(row["id"])
+    tabs = st.tabs([f"**{run.strategy_name}**" for run in runs])
     for tab, run in zip(tabs, runs, strict=True):
         with tab:
-            _render_strategy_summary(run, benchmark=benchmark)
+            _render_strategy_summary(run)
 
             if run.equity_curve:
-                st.markdown("##### Equity curve")
+                st.markdown("**Equity curve**")
                 eq_df = pd.DataFrame(
                     [
                         {
@@ -411,6 +486,16 @@ def _render_full_analysis(row: pd.Series):
 # ─────────────────────────────────────────────────────────────────────────────
 # Routing
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Another page can request a specific experiment to be opened. We resolve it to
+# a full row here so the rest of this page only deals with `selected_experiment`.
+if sel_id := st.session_state.pop("selected_experiment_id", None):
+    df = _to_pandas(query_experiments(sel_id))
+    if not df.empty:
+        st.session_state["selected_experiment"] = df.iloc[0].to_dict()
+    else:
+        st.session_state.pop("selected_experiment", None)
+        st.error(f"Experiment **{sel_id}** not found.", icon=":material/error:")
 
 selected = st.session_state.get("selected_experiment")
 if selected is not None:
@@ -499,7 +584,7 @@ for _, row in df.iterrows():
             width="stretch",
             disabled=export_disabled,
             help=(
-                "Open this experiment's configuration in the Experiment page."
+                "Open this experiment's configuration in the **Experiment** page."
                 if not export_disabled
                 else "No saved configuration found for this experiment."
             ),
@@ -527,8 +612,7 @@ for _, row in df.iterrows():
 
         strategies = "strategy" if row["n_strategies"] == 1 else "strategies"
         col1.markdown(
-            "<span style='display:inline-block;opacity:0.7;font-size:1.05em;"
-            "margin-top:-20px'>"
+            "<span style='display:inline-block;opacity:0.7;font-size:1.05em;margin-top:-20px'>"
             f":material/calendar_month: {_fmt_ts(row['started_at'])} "
             f"&nbsp;·&nbsp; "
             f":material/timer: {_fmt_duration(row['finished_at'] - row['started_at'])} "
@@ -554,8 +638,8 @@ for _, row in df.iterrows():
         if is_open:
             st.divider()
 
-            runs, row_benchmark = _split_benchmark(list(query_experiment_strategies(exp_id)))
-            for i, run in enumerate(runs):
+            for i, run in enumerate(query_experiment_strategies(exp_id)):
                 if i > 0:
                     st.markdown("<div style='margin-top:1.25rem'></div>", unsafe_allow_html=True)
-                _render_strategy_summary(run, benchmark=row_benchmark)
+                st.markdown(f"**:material/psychology: {run.strategy_name}**")
+                _render_strategy_summary(run)

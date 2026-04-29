@@ -648,11 +648,8 @@ impl Strategy for BollingerMeanReversion {
 /// Parameters
 /// ----------
 /// symbol : str | None, default=None
-///     Optional single ticker to buy and hold. When ``None`` (the
-///     default), the strategy equal-weights all symbols visible in the
-///     experiment. When set, only the named symbol is bought; this is
-///     used internally by ``run_experiment`` to back-test the
-///     configured ``strategy.benchmark``.
+///     Optional single ticker to buy and hold. When `None`, the strategy
+///     equal-weights all symbols visible in the experiment.
 ///
 /// Attributes
 /// ----------
@@ -670,8 +667,7 @@ impl Strategy for BollingerMeanReversion {
 #[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug, Default)]
 pub struct BuyAndHold {
-    /// Optional single symbol to buy. When ``None``, equal-weights all
-    /// available symbols.
+    /// Optional single symbol to buy.
     pub symbol: Option<String>,
 }
 
