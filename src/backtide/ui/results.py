@@ -11,13 +11,19 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import streamlit as st
 
+from backtide.backtest.utils import _load_benchmark_sidecar
 from backtide.config import get_config
 from backtide.storage import (
     delete_experiment,
     query_experiment_strategies,
     query_experiments,
 )
-from backtide.ui.utils import _fmt_duration, _fmt_metric, _moment_to_strftime, _to_pandas
+from backtide.ui.utils import (
+    _fmt_duration,
+    _fmt_metric,
+    _moment_to_strftime,
+    _to_pandas,
+)
 from backtide.utils.utils import _format_price
 
 if TYPE_CHECKING:
@@ -110,10 +116,14 @@ def _colored_metric(container, label: str, value: str, tone: str = ""):
     container.metric(label, f":{tone}[{value}]" if tone else value)
 
 
-def _render_strategy_summary(run: StrategyRunResult):
+def _render_strategy_summary(run: StrategyRunResult, benchmark: dict | None = None):
     """Render compact summary metrics for a single strategy run."""
     st.markdown(f"**:material/psychology: {run.strategy_name}**")
-    mc1, mc2, mc3, mc4, mc5, mc6 = st.columns([1, 1, 1, 1, 1, 1.2])
+    show_alpha = bool(benchmark and benchmark.get("alpha_per_strategy"))
+    if show_alpha:
+        mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([1, 1, 1, 1, 1, 1.2, 1])
+    else:
+        mc1, mc2, mc3, mc4, mc5, mc6 = st.columns([1, 1, 1, 1, 1, 1.2])
 
     pnl = run.metrics.get("pnl", 0.0)
     total_return = run.metrics.get("total_return", 0.0)
@@ -171,6 +181,17 @@ def _render_strategy_summary(run: StrategyRunResult):
         ":material/swap_vert: Trades (w/r)",
         f"{n_trades} ({wr_str})",
     )
+
+    if show_alpha:
+        alpha = float(
+            (benchmark.get("alpha_per_strategy") or {}).get(run.strategy_name, 0.0) or 0.0
+        )
+        _colored_metric(
+            mc7,
+            ":material/compare_arrows: Alpha",
+            _fmt_pct(alpha, signed=True),
+            _tone(alpha),
+        )
 
 
 def _render_experiment_metrics(row: pd.Series):
@@ -296,6 +317,14 @@ def _render_full_analysis(row: pd.Series):
 
     _render_experiment_metrics(row)
 
+    benchmark = _load_benchmark_sidecar(cfg, row["id"])
+    if benchmark:
+        st.caption(
+            f":material/compare_arrows: Benchmark: **{benchmark.get('symbol', '?')}** "
+            f"(buy & hold) — return "
+            f"{_fmt_pct(benchmark.get('total_return', 0.0), signed=True)}"
+        )
+
     if not (runs := query_experiment_strategies(row["id"])):
         st.info("No strategy runs found for this experiment.")
         return
@@ -303,7 +332,7 @@ def _render_full_analysis(row: pd.Series):
     tabs = st.tabs([run.strategy_name for run in runs])
     for tab, run in zip(tabs, runs, strict=True):
         with tab:
-            _render_strategy_summary(run)
+            _render_strategy_summary(run, benchmark=benchmark)
 
             if run.equity_curve:
                 st.markdown("##### Equity curve")
@@ -316,7 +345,34 @@ def _render_full_analysis(row: pd.Series):
                         for s in run.equity_curve
                     ]
                 )
-                st.line_chart(eq_df.set_index("timestamp")["equity"])
+                if benchmark and benchmark.get("equity_curve") and run.equity_curve:
+                    # Rescale benchmark curve to match the strategy's starting equity so
+                    # the two are visually comparable on the same axis.
+                    bench_pts = benchmark["equity_curve"]
+                    base_bench = float(bench_pts[0]["equity"]) or 1.0
+                    base_strat = float(run.equity_curve[0].equity) or 1.0
+                    factor = base_strat / base_bench
+                    bench_df = pd.DataFrame(
+                        [
+                            {
+                                "timestamp": dt.fromtimestamp(int(p["timestamp"])),
+                                "benchmark": float(p["equity"]) * factor,
+                            }
+                            for p in bench_pts
+                        ]
+                    )
+                    merged = pd.merge_asof(
+                        eq_df.sort_values("timestamp"),
+                        bench_df.sort_values("timestamp"),
+                        on="timestamp",
+                        direction="nearest",
+                    )
+                    st.line_chart(
+                        merged.set_index("timestamp")[["equity", "benchmark"]],
+                        color=["#79b8ff", "#f1c40f"],
+                    )
+                else:
+                    st.line_chart(eq_df.set_index("timestamp")["equity"])
 
             if run.trades:
                 st.markdown("##### Trades")
@@ -461,7 +517,8 @@ for _, row in df.iterrows():
         if is_open:
             st.divider()
 
+            row_benchmark = _load_benchmark_sidecar(cfg, exp_id)
             for i, run in enumerate(query_experiment_strategies(exp_id)):
                 if i > 0:
                     st.markdown("<div style='margin-top:1.25rem'></div>", unsafe_allow_html=True)
-                _render_strategy_summary(run)
+                _render_strategy_summary(run, benchmark=row_benchmark)

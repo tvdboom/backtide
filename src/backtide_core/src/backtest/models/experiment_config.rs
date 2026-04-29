@@ -296,10 +296,14 @@ impl PortfolioExpConfig {
 ///
 /// Attributes
 /// ----------
+/// benchmark : str
+///     Benchmark ticker symbol used with a passive Buy & Hold experiment as
+///     a side-car alongside the selected strategies and used to compute alpha.
+///
 /// strategies : list[str], default=[]
 ///     Names of the strategies to use in this experiment. Each name must
 ///     match a stored strategy.
-///
+/// 
 /// See Also
 /// --------
 /// - backtide.backtest:DataExpConfig
@@ -312,7 +316,7 @@ impl PortfolioExpConfig {
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StrategyExpConfig {
-    #[serde(default)]
+    pub benchmark: String,
     pub strategies: Vec<String>,
 }
 
@@ -322,15 +326,19 @@ impl StrategyExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (strategies: "list[str]"=vec![]))]
-    fn new(strategies: Vec<String>) -> Self {
+    #[pyo3(signature = (benchmark: "str", strategies: "list[str]"=vec![]))]
+    fn new(benchmark: &str, strategies: Vec<String>) -> Self {
         Self {
+            benchmark: benchmark.to_owned(),
             strategies,
         }
     }
 
     fn __repr__(&self) -> String {
-        format!("StrategyExpConfig(strategies={:?})", self.strategies)
+        format!(
+            "StrategyExpConfig(benchmark={:?}, strategies={:?})",
+            self.benchmark, self.strategies
+        )
     }
 
     /// Convert to a dictionary.
@@ -626,9 +634,6 @@ impl ExchangeExpConfig {
 /// risk_free_rate : float, default=0.0
 ///     Annualised risk-free rate for metrics.
 ///
-/// benchmark : str, default=""
-///     Optional benchmark ticker symbol.
-///
 /// exclusive_orders : bool, default=False
 ///     Cancel pending orders when a new order is submitted.
 ///
@@ -653,7 +658,6 @@ pub struct EngineExpConfig {
     pub warmup_period: u32,
     pub trade_on_close: bool,
     pub risk_free_rate: f64,
-    pub benchmark: String,
     pub exclusive_orders: bool,
     pub random_seed: Option<u64>,
     pub empty_bar_policy: EmptyBarPolicy,
@@ -665,7 +669,6 @@ impl Default for EngineExpConfig {
             warmup_period: 0,
             trade_on_close: false,
             risk_free_rate: 0.0,
-            benchmark: String::new(),
             exclusive_orders: false,
             random_seed: None,
             empty_bar_policy: EmptyBarPolicy::default(),
@@ -683,7 +686,6 @@ impl EngineExpConfig {
         warmup_period: "int" = 0,
         trade_on_close: "bool" = false,
         risk_free_rate: "float" = 0.0,
-        benchmark: "str" = "",
         exclusive_orders: "bool" = false,
         random_seed: "int | None" = None,
         empty_bar_policy: "str | EmptyBarPolicy" = EmptyBarPolicy::default(),
@@ -692,7 +694,6 @@ impl EngineExpConfig {
         warmup_period: u32,
         trade_on_close: bool,
         risk_free_rate: f64,
-        benchmark: &str,
         exclusive_orders: bool,
         random_seed: Option<u64>,
         empty_bar_policy: EmptyBarPolicy,
@@ -701,7 +702,6 @@ impl EngineExpConfig {
             warmup_period,
             trade_on_close,
             risk_free_rate,
-            benchmark: benchmark.to_owned(),
             exclusive_orders,
             random_seed,
             empty_bar_policy,
@@ -764,7 +764,7 @@ pub struct ExperimentConfigInner {
 ///     Initial cash, base currency and starting positions.
 ///
 /// strategy : [StrategyExpConfig]
-///     Strategies to use in this experiment.
+///     Strategies and benchmark to use in this experiment.
 ///
 /// indicators : [IndicatorExpConfig]
 ///     Indicators to use in this experiment.
@@ -773,7 +773,7 @@ pub struct ExperimentConfigInner {
 ///     Commission, slippage, order execution, margin and short-selling.
 ///
 /// engine : [EngineExpConfig]
-///     Warmup, timing, benchmark and data-handling policies.
+///     Warmup, timing and data-handling policies.
 ///
 /// See Also
 /// --------

@@ -44,6 +44,19 @@ from backtide.utils.utils import _to_list, _to_pandas
 
 _CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
 
+# Default benchmark per base currency for stocks/ETF experiments.
+# Crypto and forex are handled separately in `_default_benchmark`.
+BENCHMARK_BY_CURRENCY: dict[str, str] = {
+    "USD": "SPY",
+    "EUR": "VWCE.DE",
+    "GBP": "ISF.L",
+    "JPY": "1306.T",
+    "CHF": "CSSPX.SW",
+    "CAD": "XIC.TO",
+    "AUD": "VAS.AX",
+    "HKD": "2800.HK",
+}
+
 _SUMMARY_CSS = """
     <style>
         .card-header {
@@ -95,9 +108,9 @@ _SUMMARY_CSS = """
 
 
 def _clear_state(*keys: str):
-    """Remove `keys` from Streamlit's state (including shadow keys)."""
+    """Drop both the live and shadow value for *keys* from Streamlit's state."""
     for k in keys:
-        st.session_state[k] = []
+        st.session_state.pop(k, None)
         st.session_state.pop(f"_{k}", None)
 
 
@@ -256,6 +269,32 @@ def _persist(*keys: str):
     for k in keys:
         if k in st.session_state:
             st.session_state[f"_{k}"] = st.session_state[k]
+
+
+def _default_benchmark(
+    base_currency: Any,
+    instrument_type: InstrumentType,
+    available_symbols: dict[str, Instrument] | None = None,
+) -> str | None:
+    """Return the default benchmark symbol for the given context.
+
+    - Forex: returns ``None`` (no benchmark, since base-currency growth is flat).
+    - Crypto: ``BTC-{base_currency}`` if available, else ``BTC-USD``.
+    - Stocks/ETF: looks up `BENCHMARK_BY_CURRENCY`, falling back to ``"SPY"``.
+
+    """
+    if instrument_type == InstrumentType.Forex:
+        return None
+
+    base = str(base_currency)
+
+    if instrument_type == InstrumentType.Crypto:
+        candidate = f"BTC-{base}"
+        if available_symbols and candidate in available_symbols:
+            return candidate
+        return "BTC-USD"
+
+    return BENCHMARK_BY_CURRENCY.get(base, "SPY")
 
 
 @st.cache_data(show_spinner="Loading stored data...")

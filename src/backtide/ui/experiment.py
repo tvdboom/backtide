@@ -37,11 +37,16 @@ from backtide.core.data import resolve_profiles
 from backtide.data import Currency, InstrumentProfile, InstrumentType
 from backtide.indicators.utils import _get_indicator_label, _load_stored_indicators
 from backtide.storage import query_instruments
-from backtide.strategies.utils import _get_strategy_label, _load_stored_strategies
+from backtide.strategies.utils import (
+    _get_strategy_label,
+    _load_stored_strategies,
+    _resolve_strategy_indicators,
+)
 from backtide.ui.utils import (
     _CARD_CSS,
     _clear_state,
     _default,
+    _default_benchmark,
     _draw_cards,
     _get_instrument_type_description,
     _get_timezone,
@@ -126,12 +131,13 @@ def _apply_config_to_state(
         "warmup_period",
         "trade_on_close",
         "risk_free_rate",
-        "benchmark",
         "exclusive_orders",
         "random_seed",
         "empty_bar_policy",
     ):
         _set(key, getattr(exp.engine, key))
+
+    _set("benchmark", exp.strategy.benchmark)
 
 
 def _build_config_toml(
@@ -144,12 +150,20 @@ def _build_config_toml(
     def _get(key: str, fallback: Any) -> Any:
         """Pull *key* from state, but coerce ``None`` to *fallback*.
 
+        Prefers the live widget key, falling back to the persistent shadow
+        key (``_<key>``) so values survive widget unmounting (e.g. when the
+        relevant tab has not been rendered yet).
+
         Streamlit widgets can yield ``None`` (e.g. when a text widget is empty
         or the key is present but unset), and most of the Rust-backed configs
         reject ``None`` for non-optional fields.
         """
-        v = state.get(key, fallback)
+        v = state.get(key, state.get(f"_{key}", fallback))
         return fallback if v is None else v
+
+    def _opt(key: str) -> Any:
+        """Return the live or shadow value for *key*, or ``None``."""
+        return state.get(key, state.get(f"_{key}"))
 
     cfg = ExperimentConfig(
         general=GeneralExpConfig(
@@ -164,8 +178,8 @@ def _build_config_toml(
                 for s in _get("symbols", defaults.data.symbols)
             ],
             full_history=_get("full_history", defaults.data.full_history),
-            start_date=str(state.get("start_date")) if state.get("start_date") else None,
-            end_date=str(state.get("end_date")) if state.get("end_date") else None,
+            start_date=str(_opt("start_date")) if _opt("start_date") else None,
+            end_date=str(_opt("end_date")) if _opt("end_date") else None,
             interval=_get("interval", defaults.data.interval),
         ),
         portfolio=PortfolioExpConfig(
@@ -173,8 +187,11 @@ def _build_config_toml(
             base_currency=_get("base_currency", defaults.portfolio.base_currency),
             starting_positions=_get("starting_positions", defaults.portfolio.starting_positions),
         ),
-        strategy=StrategyExpConfig(strategies=list(state.get("strategies", []))),
-        indicators=IndicatorExpConfig(indicators=list(state.get("indicators", []))),
+        strategy=StrategyExpConfig(
+            strategies=list(_get("strategies", [])),
+            benchmark=_get("benchmark", defaults.strategy.benchmark),
+        ),
+        indicators=IndicatorExpConfig(indicators=list(_get("indicators", []))),
         exchange=ExchangeExpConfig(
             commission_type=_get("commission_type", defaults.exchange.commission_type),
             commission_pct=_get("commission_pct", defaults.exchange.commission_pct),
@@ -191,17 +208,16 @@ def _build_config_toml(
             borrow_rate=_get("borrow_rate", defaults.exchange.borrow_rate),
             max_position_size=_get("max_position_size", defaults.exchange.max_position_size),
             conversion_mode=_get("conversion_mode", defaults.exchange.conversion_mode),
-            conversion_threshold=state.get("conversion_threshold"),
-            conversion_period=state.get("conversion_period"),
-            conversion_interval=state.get("conversion_interval"),
+            conversion_threshold=_opt("conversion_threshold"),
+            conversion_period=_opt("conversion_period"),
+            conversion_interval=_opt("conversion_interval"),
         ),
         engine=EngineExpConfig(
             warmup_period=_get("warmup_period", defaults.engine.warmup_period),
             trade_on_close=_get("trade_on_close", defaults.engine.trade_on_close),
             risk_free_rate=_get("risk_free_rate", defaults.engine.risk_free_rate),
-            benchmark=_get("benchmark", defaults.engine.benchmark),
             exclusive_orders=_get("exclusive_orders", defaults.engine.exclusive_orders),
-            random_seed=state.get("random_seed"),
+            random_seed=_opt("random_seed"),
             empty_bar_policy=_get("empty_bar_policy", defaults.engine.empty_bar_policy),
         ),
     )
@@ -391,7 +407,10 @@ with tab2:
         options=InstrumentType.variants(),
         default=_default(key, exp.data.instrument_type),
         format_func=lambda x: f"{x.icon()} {x}",
-        on_change=lambda k=key: (_clear_state("symbols", "currency"), _persist(k)),
+        on_change=lambda k=key: (
+            _clear_state("symbols", "currency", "benchmark"),
+            _persist(k),
+        ),
         help="Select the type of financial instrument you want to backtest.",
     )
 
@@ -618,7 +637,7 @@ with tab3:
         key="base_currency",
         options=Currency.variants(),
         index=Currency.variants().index(_default("base_currency", cfg.general.base_currency)),
-        on_change=lambda: _persist("base_currency"),
+        on_change=lambda: (_clear_state("benchmark"), _persist("base_currency")),
         help=(
             "The currency your portfolio is denominated in during the backtest. All trades, "
             "P&L, margin, leverage and position sizing are tracked in this currency. Instrument "
@@ -662,23 +681,47 @@ with tab3:
 with tab4:
     st.caption(
         "Strategies define the trading logic that is evaluated at every interval of the "
-        "simulation. Select one or more saved strategies to include in the experiment. "
-        "You can create predefined (built-in) or custom strategies on the **Strategies** page.",
+        "simulation. Select one or more strategies to include in the experiment. You can "
+        "create predefined (built-in) or custom strategies on the **Strategies** page.",
     )
 
+    if default := _default_benchmark(base_currency, instrument_type, all_instruments):
+        persisted_bench = _default("benchmark", default)
+        bench_options = sorted({*all_instruments.keys(), persisted_bench, default})
+        benchmark = st.selectbox(
+            label="Benchmark",
+            key=(key := "benchmark"),
+            options=bench_options,
+            index=bench_options.index(persisted_bench),
+            format_func=lambda s: (
+                f"{s} - {all_instruments[s].name}"
+                if s in all_instruments and all_instruments[s].instrument_type.is_equity
+                else s
+            ),
+            on_change=lambda k=key: _persist(k),
+            help=(
+                "Symbol used as a passive (buy-and-hold) baseline. The benchmark is "
+                "executed as a separate strategy over the same date range and used to "
+                "compute alpha (excess return)."
+            ),
+        )
+
+    st.write("")
+
+    selected_strats = []
     if stored_strat := _load_stored_strategies(cfg):
-        selected_strat = st.multiselect(
-            label="Saved strategies",
+        selected_strats = st.multiselect(
+            label="Strategies",
             key=(key := "strategies"),
             options=stored_strat,
             default=_default(key, []),
-            placeholder="Select strategies...",
+            placeholder="Select from the saved strategies...",
             on_change=lambda k=key: _persist(k),
             help="Choose which strategies to use in this experiment.",
         )
 
         # Show a summary of selected strategies
-        for name in selected_strat:
+        for name in selected_strats:
             st.caption(_get_strategy_label(name, stored_strat[name]))
     else:
         st.info(
@@ -722,6 +765,16 @@ with tab5:
             "No saved indicators yet. Create an indicator on the **Indicators** page first.",
             icon=":material/info:",
         )
+
+    # Add indicators auto-included by the built-in strategies
+    auto_indicators = _resolve_strategy_indicators(
+        stored_strat[name] for name in (selected_strats or []) if name in stored_strat
+    )
+
+    if auto_indicators:
+        for auto_name, ind, source in auto_indicators:
+            label = _get_indicator_label(auto_name.removeprefix("__auto_"), ind)
+            st.caption(f"{label} · :material/auto_awesome: _injected by strategy **{source}**_")
 
     if st.button("Create a new indicator", icon=":material/add:", type="secondary"):
         st.switch_page("indicators.py")
@@ -1070,7 +1123,7 @@ with tab7:
         )
 
     with st.container(border=True):
-        st.markdown("**Benchmark & metrics**")
+        st.markdown("**Metrics**")
 
         risk_free_rate = st.number_input(
             label="Risk-free rate (%)",
@@ -1084,19 +1137,6 @@ with tab7:
             help=(
                 "Annualized risk-free rate used for computing the Sharpe ratio and other "
                 "risk-adjusted performance metrics."
-            ),
-        )
-
-        benchmark = st.text_input(
-            label="Benchmark symbol",
-            key=(key := "benchmark"),
-            value=_default(key, exp.engine.benchmark or ""),
-            placeholder="e.g. SPY",
-            max_chars=20,
-            on_change=lambda k=key: _persist(k),
-            help=(
-                "Optional benchmark ticker for relative performance comparison. Leave empty "
-                "to skip benchmark tracking."
             ),
         )
 
@@ -1167,7 +1207,7 @@ if button_slot.button(
     key="running_experiment",
     icon=":material/play_circle:",
     type="primary",
-    disabled=not (profiles and start_ts and latest_ts and selected_strat) or running_experiment,
+    disabled=not (profiles and start_ts and latest_ts and selected_strats) or running_experiment,
     shortcut="Enter",
     width="stretch",
 ):
@@ -1176,12 +1216,18 @@ if button_slot.button(
 
     cfg_str = _build_experiment_config()
     exp_cfg = ExperimentConfig.from_toml(cfg_str)
+
     with st.spinner(f"Running experiment **{experiment_name}**..."):
         try:
+            # ``run_experiment`` auto-injects the indicators required by the
+            # selected strategies and runs a Buy & Hold benchmark side-car
+            # whenever ``strategy.benchmark`` is set. Both happen for any
+            # caller — UI, CLI, or Python script.
             result = run_experiment(exp_cfg, verbose=False)
         except Exception as ex:  # noqa: BLE001
             st.error(f"Experiment failed: {ex}", icon=":material/error:")
         else:
+
             n_strats = len(result.strategies)
 
             if result.status == "completed" and not result.warnings:
