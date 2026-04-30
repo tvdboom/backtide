@@ -952,8 +952,7 @@ fn run_one_strategy(
     // benchmark strategy is detected by name and gets a closes view
     // restricted to just the benchmark symbol.
     let benchmark = cfg.strategy.benchmark.trim().to_owned();
-    let is_benchmark_run = !benchmark.is_empty()
-        && name == format!("Benchmark ({benchmark})");
+    let is_benchmark_run = !benchmark.is_empty() && name == format!("Benchmark ({benchmark})");
     let allowed_symbols: std::collections::HashSet<String> = if is_benchmark_run {
         std::iter::once(benchmark.clone()).collect()
     } else {
@@ -1041,9 +1040,7 @@ fn run_one_strategy(
                 // Closure: wrap a flat Vec<f64> into the configured 1-D
                 // container — np.ndarray, pd.Series or pl.Series. Used
                 // for individual indicator output series.
-                let wrap_series = |py: Python<'_>,
-                                   s: &Vec<f64>|
-                 -> PyResult<Py<PyAny>> {
+                let wrap_series = |py: Python<'_>, s: &Vec<f64>| -> PyResult<Py<PyAny>> {
                     let list = PyList::new(py, s)?;
                     let obj: Bound<'_, PyAny> = match df_lib {
                         DataFrameLibrary::Numpy => {
@@ -1137,7 +1134,7 @@ fn run_one_strategy(
         // ── 1. Resolve open orders against the *current* bar ────────────
         let mut still_open: Vec<Order> = Vec::new();
         let drained: Vec<Order> = std::mem::take(&mut open_orders);
-        for order in drained {
+        for mut order in drained {
             // Cancel orders take effect immediately and do not need a price.
             if order.order_type == OrderType::CancelOrder {
                 still_open.retain(|o| o.id != order.id);
@@ -1176,8 +1173,9 @@ fn run_one_strategy(
             };
 
             let qty = order.quantity;
-            let notional = fill_px * qty.unsigned_abs() as f64;
-            let commission = match cfg.exchange.commission_type {
+            let mut filled_qty = qty;
+            let mut notional = fill_px * qty.unsigned_abs() as f64;
+            let mut commission = match cfg.exchange.commission_type {
                 CommissionType::Percentage => notional * cfg.exchange.commission_pct / 100.0,
                 CommissionType::Fixed => cfg.exchange.commission_fixed,
                 CommissionType::PercentagePlusFixed => {
@@ -1191,26 +1189,90 @@ fn run_one_strategy(
             // (sell that flattens an existing long position). Stays `None`
             // for opening fills.
             let mut fill_pnl: Option<f64> = None;
+            // Reason annotation used when we auto-shrink a buy to fit
+            // the available cash.
+            let mut fill_reason = String::new();
 
             // ── Funds check & settlement ─────────────────────────────
             if qty > 0 {
                 // BUY: try paying in `order_ccy` first, else convert from base.
                 let needed = notional + commission;
                 if !try_debit(&mut cash, order_ccy, needed, base_ccy, 1.0) {
-                    warn!(strategy=%name, order_id=%order.id, "Insufficient funds for buy, skipping order.");
-                    order_records.push(OrderRecord {
-                        order: order.clone(),
-                        timestamp: ts,
-                        status: "rejected".into(),
-                        fill_price: None,
-                        reason: "insufficient funds".into(),
-                        commission: 0.0,
-                        pnl: None,
-                    });
-                    continue;
+                    // Auto-shrink the order rather than reject it. Equal-weight
+                    // strategies routinely size the last leg at exactly
+                    // `cash / n_symbols`, which gets pushed fractionally over
+                    // the available cash by slippage + commission. Shrinking
+                    // the qty to whatever fits keeps every leg actually
+                    // tradable instead of mysteriously dropping symbols.
+                    let avail: f64 =
+                        cash.values().copied().filter(|v| v.is_finite() && *v > 0.0).sum();
+                    let pct_part = match cfg.exchange.commission_type {
+                        CommissionType::Percentage | CommissionType::PercentagePlusFixed => {
+                            cfg.exchange.commission_pct / 100.0
+                        },
+                        CommissionType::Fixed => 0.0,
+                    };
+                    let fixed_part = match cfg.exchange.commission_type {
+                        CommissionType::Fixed | CommissionType::PercentagePlusFixed => {
+                            cfg.exchange.commission_fixed
+                        },
+                        CommissionType::Percentage => 0.0,
+                    };
+                    // Solve for largest integer q such that
+                    //   fill_px * q * (1 + pct_part) + fixed_part <= avail.
+                    let denom = fill_px * (1.0 + pct_part);
+                    let max_qty: i64 = if denom > 0.0 && avail > fixed_part {
+                        ((avail - fixed_part) / denom).floor().max(0.0) as i64
+                    } else {
+                        0
+                    };
+                    if max_qty <= 0 {
+                        warn!(
+                            strategy=%name, order_id=%order.id,
+                            "Insufficient funds for buy, skipping order."
+                        );
+                        order_records.push(OrderRecord {
+                            order: order.clone(),
+                            timestamp: ts,
+                            status: "rejected".into(),
+                            fill_price: None,
+                            reason: "insufficient funds".into(),
+                            commission: 0.0,
+                            pnl: None,
+                        });
+                        continue;
+                    }
+                    filled_qty = max_qty.min(qty);
+                    notional = fill_px * filled_qty as f64;
+                    commission = match cfg.exchange.commission_type {
+                        CommissionType::Percentage => {
+                            notional * cfg.exchange.commission_pct / 100.0
+                        },
+                        CommissionType::Fixed => cfg.exchange.commission_fixed,
+                        CommissionType::PercentagePlusFixed => {
+                            notional * cfg.exchange.commission_pct / 100.0
+                                + cfg.exchange.commission_fixed
+                        },
+                    };
+                    let shrunk_needed = notional + commission;
+                    if !try_debit(&mut cash, order_ccy, shrunk_needed, base_ccy, 1.0) {
+                        // Belt-and-braces: should be unreachable given the
+                        // qty solve above, but stay safe under FP edge cases.
+                        order_records.push(OrderRecord {
+                            order: order.clone(),
+                            timestamp: ts,
+                            status: "rejected".into(),
+                            fill_price: None,
+                            reason: "insufficient funds".into(),
+                            commission: 0.0,
+                            pnl: None,
+                        });
+                        continue;
+                    }
+                    fill_reason = "partial: shrunk to fit cash".to_owned();
                 }
-                *positions.entry(symbol.clone()).or_insert(0) += qty;
-                update_open_trade_buy(&mut open_trades, symbol, ts, qty, fill_px);
+                *positions.entry(symbol.clone()).or_insert(0) += filled_qty;
+                update_open_trade_buy(&mut open_trades, symbol, ts, filled_qty, fill_px);
             } else if qty < 0 {
                 let abs_qty = qty.unsigned_abs() as i64;
                 let cur = *positions.get(symbol).unwrap_or(&0);
@@ -1261,12 +1323,18 @@ fn run_one_strategy(
                 fill_pnl = realised_pnl;
             }
 
+            // Reflect the actually-filled quantity on the record so the
+            // UI shows what the engine settled (matters when a buy was
+            // auto-shrunk to fit the available cash).
+            if filled_qty != order.quantity {
+                order.quantity = filled_qty;
+            }
             order_records.push(OrderRecord {
                 order: order.clone(),
                 timestamp: ts,
                 status: "filled".into(),
                 fill_price: Some(fill_px),
-                reason: String::new(),
+                reason: fill_reason,
                 commission,
                 pnl: fill_pnl,
             });

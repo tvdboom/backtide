@@ -9,6 +9,7 @@ from backtide.analysis.candlestick import plot_candlestick
 from backtide.analysis.correlation import plot_correlation
 from backtide.analysis.dividends import plot_dividends
 from backtide.analysis.drawdown import plot_drawdown
+from backtide.analysis.pnl import plot_pnl
 from backtide.analysis.price import plot_price
 from backtide.analysis.returns import plot_returns
 from backtide.analysis.seasonality import plot_seasonality

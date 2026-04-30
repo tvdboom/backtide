@@ -724,11 +724,9 @@ impl Storage for DuckDb {
         if !result.strategies.is_empty() {
             let placeholders =
                 std::iter::repeat_n("?", result.strategies.len()).collect::<Vec<_>>().join(", ");
-            let ids: Vec<&str> =
-                result.strategies.iter().map(|s| s.strategy_id.as_str()).collect();
+            let ids: Vec<&str> = result.strategies.iter().map(|s| s.strategy_id.as_str()).collect();
             for table in ["experiment_equity", "experiment_orders", "experiment_trades"] {
-                let sql =
-                    format!("DELETE FROM {table} WHERE strategy_run_id IN ({placeholders})");
+                let sql = format!("DELETE FROM {table} WHERE strategy_run_id IN ({placeholders})");
                 conn.execute(&sql, params_from_iter(ids.iter()))?;
             }
         }
@@ -801,7 +799,6 @@ impl Storage for DuckDb {
 
         Ok(())
     }
-
 
     fn query_experiments(
         &self,

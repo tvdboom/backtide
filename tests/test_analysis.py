@@ -19,6 +19,7 @@ from backtide.analysis import (
     plot_correlation,
     plot_dividends,
     plot_drawdown,
+    plot_pnl,
     plot_price,
     plot_returns,
     plot_seasonality,
@@ -563,3 +564,87 @@ class TestComputeStatistics:
         result = cast(pd.DataFrame, compute_statistics(daily_bars))
         wr = result.iloc[0]["win_rate"]
         assert 0 <= wr <= 1
+
+
+class _StubSample:
+    """Minimal duck-typed stand-in for `EquitySample`."""
+
+    def __init__(self, ts: int, equity: float):
+        self.timestamp = ts
+        self.equity = equity
+
+
+class _StubRun:
+    """Minimal duck-typed stand-in for `StrategyRunResult`."""
+
+    def __init__(self, name: str, equity: list[float], start: int = 1_700_000_000):
+        self.strategy_name = name
+        # 1-day spacing (in seconds) so the x axis renders sensibly.
+        self.equity_curve = [_StubSample(start + i * 86_400, e) for i, e in enumerate(equity)]
+
+
+class TestPlotPnl:
+    """Tests for plot_pnl."""
+
+    def test_returns_figure(self):
+        """Plotting one strategy returns a figure with one trace."""
+        run = _StubRun("S1", [10_000.0, 10_500.0, 11_000.0])
+        fig = plot_pnl([run], display=None)
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 1
+
+    def test_one_trace_per_strategy(self):
+        """Plotting N strategies yields N traces."""
+        runs = [
+            _StubRun("S1", [10_000.0, 10_500.0, 11_000.0]),
+            _StubRun("S2", [10_000.0, 9_500.0, 9_800.0]),
+            _StubRun("Benchmark (SPY)", [10_000.0, 10_100.0, 10_200.0]),
+        ]
+        fig = plot_pnl(runs, display=None)
+        assert len(fig.data) == 3
+        assert {t.name for t in fig.data} == {"S1", "S2", "Benchmark (SPY)"}
+
+    def test_absolute_pnl_starts_at_zero(self):
+        """Absolute PnL should start at zero for every strategy."""
+        run = _StubRun("S1", [10_000.0, 10_500.0, 11_000.0])
+        fig = plot_pnl([run], display=None)
+        y = np.array(fig.data[0].y, dtype=float)
+        assert y[0] == 0.0
+        assert y[-1] == 1_000.0
+
+    def test_relative_pnl_in_percent(self):
+        """Relative mode plots returns as a percentage of the start equity."""
+        run = _StubRun("S1", [200.0, 220.0, 250.0])
+        fig = plot_pnl([run], relative=True, display=None)
+        y = np.array(fig.data[0].y, dtype=float)
+        assert y[0] == 0.0
+        assert y[-1] == pytest.approx(25.0)  # 250 / 200 - 1 = 25 %
+
+    def test_skips_runs_without_equity(self):
+        """Runs without an equity curve are silently skipped."""
+
+        class _Empty:
+            strategy_name = "empty"
+            equity_curve = []
+
+        run = _StubRun("S1", [10_000.0, 10_100.0])
+        fig = plot_pnl([_Empty(), run], display=None)
+        assert len(fig.data) == 1
+        assert fig.data[0].name == "S1"
+
+    def test_benchmark_drawn_dashed(self):
+        """The auto-injected benchmark run is rendered with a dashed line."""
+        runs = [
+            _StubRun("S1", [10_000.0, 10_500.0]),
+            _StubRun("Benchmark (SPY)", [10_000.0, 10_100.0]),
+        ]
+        fig = plot_pnl(runs, display=None)
+        bench = next(t for t in fig.data if t.name.startswith("Benchmark"))
+        # `line.dash` is None for solid lines and "dash" for the benchmark.
+        assert bench.line.dash == "dash"
+
+    def test_empty_input_returns_figure(self):
+        """An empty `runs` list still returns a figure (with a placeholder)."""
+        fig = plot_pnl([], display=None)
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 0

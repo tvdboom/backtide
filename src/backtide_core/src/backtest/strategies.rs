@@ -102,23 +102,18 @@ pub trait Strategy {
 /// Build a market buy order sized to spend `target_cash` (capped at
 /// `max_position_size%` of equity).
 ///
-/// A small headroom is reserved on top of `target_cash` so the order
-/// survives next-bar slippage *and* exchange commissions. Without this,
-/// equal-weight allocations of the form `cash / n_symbols` (used by
-/// Buy & Hold, SMA Naive, the rotation strategies, …) reliably push the
-/// *last* leg fractionally over the available cash and the engine
-/// rejects it with an "insufficient funds" error — leaving the user
-/// with one symbol traded and the others mysteriously missing.
+/// Strategies size their orders against `portfolio.cash`, but the
+/// actual fill happens on the *next* bar with slippage and commission
+/// applied — so the cost frequently exceeds the requested
+/// `target_cash` by a small margin. The engine handles that by
+/// auto-shrinking the qty at fill time so equal-weight allocations
+/// like `cash / n_symbols` don't lose their last leg to a fractional
+/// overshoot.
 fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
     if price <= 0.0 || target_cash <= 0.0 {
         return None;
     }
-    // Reserve ~1% of the requested budget for slippage + commission.
-    // This is a generous-but-conservative buffer: typical slippage is
-    // a few bps and commission < 0.5%, so 1% comfortably covers both
-    // while still leaving the strategy fully invested in practice.
-    const FEE_HEADROOM: f64 = 0.99;
-    let qty = (target_cash * FEE_HEADROOM / price).floor() as i64;
+    let qty = (target_cash / price).floor() as i64;
     if qty <= 0 {
         return None;
     }
@@ -713,12 +708,6 @@ impl Strategy for BuyAndHold {
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        // One-shot: skip once anything is held *or* still pending fill.
-        let has_position = portfolio.positions.values().any(|q| *q > 0);
-        let has_pending_buy = portfolio.orders.iter().any(|o| o.quantity > 0);
-        if has_position || has_pending_buy {
-            return Vec::new();
-        }
         if closes.is_empty() {
             return Vec::new();
         }
@@ -729,6 +718,12 @@ impl Strategy for BuyAndHold {
         // place a bogus first-bar order at e.g. 1970-01-01 against a
         // symbol that doesn't have any data yet).
         if let Some(target) = &self.symbol {
+            // Skip once anything is held *or* still pending fill.
+            let has_position = portfolio.positions.values().any(|q| *q > 0);
+            let has_pending_buy = portfolio.orders.iter().any(|o| o.quantity > 0);
+            if has_position || has_pending_buy {
+                return Vec::new();
+            }
             let row = match closes.iter().find(|(s, _)| s == target) {
                 Some(r) => r,
                 None => return Vec::new(),
@@ -742,25 +737,37 @@ impl Strategy for BuyAndHold {
                 .unwrap_or_default();
         }
 
-        // Equal-weight: divide all available cash across the selected symbols.
-        // Defer the buy entirely until *every* symbol has a finite first
-        // price, otherwise the budget would be split (and partially
-        // wasted) before some legs are even tradable.
-        let prices: Option<Vec<(&str, f64)>> = closes
-            .iter()
-            .map(|(s, c)| match c.last() {
-                Some(&p) if p.is_finite() && p > 0.0 => Some((s.as_str(), p)),
-                _ => None,
-            })
-            .collect();
-        let prices = match prices {
-            Some(p) if !p.is_empty() => p,
-            _ => return Vec::new(),
-        };
-
-        let per = portfolio_cash(portfolio) / prices.len() as f64;
+        // Equal-weight, staggered entry: enter each symbol as soon as
+        // its history starts, dividing *current* cash by the number of
+        // symbols still needing entry. This preserves the equal-weight
+        // intent across uneven histories — e.g. with two symbols whose
+        // data starts years apart, the first leg gets ~50 % on day one
+        // and the second leg gets the remaining ~50 % on its first
+        // available bar — without forcing the strategy to wait until
+        // *every* symbol becomes tradable (the previous behaviour,
+        // which made the first trade arrive years late).
+        let mut needs_entry: Vec<(&str, f64)> = Vec::new();
+        let mut already_entered = 0usize;
+        for (sym, c) in closes {
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
+            let pending = portfolio.orders.iter().any(|o| &o.symbol == sym && o.quantity > 0);
+            if cur > 0 || pending {
+                already_entered += 1;
+                continue;
+            }
+            let px = match c.last() {
+                Some(&p) if p.is_finite() && p > 0.0 => p,
+                _ => continue,
+            };
+            needs_entry.push((sym.as_str(), px));
+        }
+        if needs_entry.is_empty() {
+            return Vec::new();
+        }
+        let n_remaining = closes.len().saturating_sub(already_entered).max(1);
+        let per = portfolio_cash(portfolio) / n_remaining as f64;
         let mut orders = Vec::new();
-        for (sym, px) in prices {
+        for (sym, px) in needs_entry {
             if let Some(o) = buy_order(sym, per, px) {
                 orders.push(o);
             }

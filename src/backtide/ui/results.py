@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import streamlit as st
 
+from backtide.analysis.pnl import plot_pnl
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
 from backtide.storage import (
@@ -189,7 +190,7 @@ def _render_strategy_summary(run: StrategyRunResult):
     pnl_str = _format_price(pnl, currency=cfg.general.base_currency, compact=True)
     _colored_metric(
         mc2,
-        ":material/payments: P&L",
+        ":material/payments: PnL",
         f"{'+' if pnl > 0 else ''}{pnl_str}",
         _tone(pnl),
     )
@@ -531,6 +532,28 @@ def _render_full_analysis(row: pd.Series):
 
     st.markdown("")
 
+    # Experiment-level PnL chart: one line per strategy.
+    if any(getattr(r, "equity_curve", None) for r in runs):
+        col_a, col_b = st.columns([10, 1])
+        col_a.markdown("##### :material/show_chart: PnL over time")
+        with col_b.popover(":material/tune:", help="PnL chart options."):
+            pnl_relative = st.toggle(
+                label="Relative",
+                key=f"pnl_relative_{exp_id}",
+                value=False,
+                help=(
+                    "Show return as a percentage of starting equity instead "
+                    "of absolute PnL. Useful when strategies have different "
+                    "starting capital."
+                ),
+            )
+        st.plotly_chart(
+            plot_pnl(runs, relative=pnl_relative, display=None),
+            width="stretch",
+        )
+
+    st.markdown("")
+
     tabs = st.tabs([f"**{run.strategy_name}**" for run in runs])
     _, benchmark = _split_benchmark(runs)
     base_ccy = (
@@ -558,45 +581,6 @@ def _render_full_analysis(row: pd.Series):
     for tab, run in zip(tabs, runs, strict=True):
         with tab:
             _render_strategy_summary(run)
-
-            # if run.equity_curve:
-            #     st.markdown("**Equity curve**")
-            #     eq_df = pd.DataFrame(
-            #         [
-            #             {
-            #                 "timestamp": dt.fromtimestamp(s.timestamp),
-            #                 "equity": s.equity,
-            #             }
-            #             for s in run.equity_curve
-            #         ]
-            #     )
-            #     if benchmark is not None and benchmark.equity_curve and run.equity_curve:
-            #         # Rescale benchmark curve to match the strategy's starting equity so
-            #         # the two are visually comparable on the same axis.
-            #         base_bench = float(benchmark.equity_curve[0].equity) or 1.0
-            #         base_strat = float(run.equity_curve[0].equity) or 1.0
-            #         factor = base_strat / base_bench
-            #         bench_df = pd.DataFrame(
-            #             [
-            #                 {
-            #                     "timestamp": dt.fromtimestamp(int(s.timestamp)),
-            #                     "benchmark": float(s.equity) * factor,
-            #                 }
-            #                 for s in benchmark.equity_curve
-            #             ]
-            #         )
-            #         merged = pd.merge_asof(
-            #             eq_df.sort_values("timestamp"),
-            #             bench_df.sort_values("timestamp"),
-            #             on="timestamp",
-            #             direction="nearest",
-            #         )
-            #         st.line_chart(
-            #             merged.set_index("timestamp")[["equity", "benchmark"]],
-            #             color=["#79b8ff", "#f1c40f"],
-            #         )
-            #     else:
-            #         st.line_chart(eq_df.set_index("timestamp")["equity"])
 
             if run.orders:
                 st.markdown("##### Orders")
@@ -637,17 +621,13 @@ def _render_full_analysis(row: pd.Series):
                                 if o.pnl is not None
                                 else "—"
                             ),
-                            "commission": _format_price(
-                                o.commission or 0.0, currency=quote_ccy
-                            ),
+                            "commission": _format_price(o.commission or 0.0, currency=quote_ccy),
                             "status": o.status,
                         }
                     )
                 orders_df = pd.DataFrame(rows)
                 # Most-recent fills first.
-                orders_df = orders_df.sort_values("time", ascending=False).reset_index(
-                    drop=True
-                )
+                orders_df = orders_df.sort_values("time", ascending=False).reset_index(drop=True)
 
                 def _color_side(val: str) -> str:
                     if val == "Buy":
@@ -666,13 +646,10 @@ def _render_full_analysis(row: pd.Series):
                     digits = any(ch.isdigit() for ch in s)
                     if not digits:
                         return ""
-                    return (
-                        "color: #e74c3c;" if is_neg else "color: #2ecc71;"
-                    )
+                    return "color: #e74c3c;" if is_neg else "color: #2ecc71;"
 
-                styled = (
-                    orders_df.style.map(_color_side, subset=["side"])
-                    .map(_color_pnl, subset=["pnl"])
+                styled = orders_df.style.map(_color_side, subset=["side"]).map(
+                    _color_pnl, subset=["pnl"]
                 )
                 column_config = {
                     "logo": st.column_config.ImageColumn(label="", width="small"),

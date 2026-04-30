@@ -87,6 +87,34 @@ Each experiment produces an [`ExperimentResult`] containing one
 | `metrics` | The named scalar metrics described [below](#metrics). |
 | `error` | First fatal exception raised by the strategy, if any. |
 
+
+### Visualising results
+
+The experiment page surfaces an interactive **PnL-over-time** chart between
+the high-level metrics and the per-strategy breakdown. It plots one line per
+strategy on a shared time axis so the user can compare the cumulative
+performance of every strategy at a glance — the auto-injected
+`Benchmark (<SYMBOL>)` run is drawn as a dashed line for easy distinction.
+
+A *Relative* toggle in the chart's options switches between absolute PnL
+(the default) and a percentage return relative to each strategy's starting
+equity. The relative view is most useful when strategies start with very
+different capital allocations.
+
+The same chart is exposed programmatically as [`plot_pnl`][plot_pnl] for
+custom notebooks and reports:
+
+```python
+from backtide.analysis import plot_pnl
+from backtide.storage import query_experiment_strategies, query_experiments
+
+exp = query_experiments()[0]
+runs = query_experiment_strategies(exp.id)
+plot_pnl(runs, relative=True)
+```
+
+[plot_pnl]: ../api/analysis/plot_pnl.md
+
 ### Orders
 
 Every fill, cancellation and rejection produces an [`OrderRecord`]. The relevant
@@ -288,4 +316,3 @@ seed set, two runs of the same `ExperimentConfig` against the same stored bars
 produce identical equity curves, orders and trades. Saving the
 `config.toml` is enough to reproduce the run later — the bars themselves are
 already on disk via [storage].
-

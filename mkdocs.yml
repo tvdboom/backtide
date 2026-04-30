@@ -139,6 +139,7 @@ nav:
             - plot_correlation: api/analysis/plot_correlation.md
             - plot_dividends: api/analysis/plot_dividends.md
             - plot_drawdown: api/analysis/plot_drawdown.md
+            - plot_pnl: api/analysis/plot_pnl.md
             - plot_price: api/analysis/plot_price.md
             - plot_returns: api/analysis/plot_returns.md
             - plot_seasonality: api/analysis/plot_seasonality.md
