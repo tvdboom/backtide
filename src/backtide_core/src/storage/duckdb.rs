@@ -128,6 +128,8 @@ impl Storage for DuckDb {
                 status            VARCHAR NOT NULL,
                 fill_price        DOUBLE,
                 reason            VARCHAR NOT NULL,
+                commission        DOUBLE NOT NULL DEFAULT 0,
+                pnl               DOUBLE,
                 UNIQUE (strategy_run_id, order_id)
             );
 
@@ -144,14 +146,6 @@ impl Storage for DuckDb {
             );
         ",
         )?;
-
-        // Best-effort schema migrations for older databases.
-        // DuckDB ≥ 0.10 supports `ADD COLUMN IF NOT EXISTS`; we ignore the
-        // error if the column already exists (older builds will simply
-        // skip this on subsequent runs).
-        let _ = conn.execute_batch(
-            "ALTER TABLE experiment_strategies ADD COLUMN IF NOT EXISTS error VARCHAR;",
-        );
 
         Ok(())
     }
@@ -668,7 +662,6 @@ impl Storage for DuckDb {
         result: &crate::backtest::models::experiment_result::ExperimentResult,
     ) -> StorageResult<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute_batch("BEGIN TRANSACTION")?;
 
         // Use the inner serializable representation for TOML.
         let inner = crate::backtest::models::experiment_config::ExperimentConfigInner {
@@ -682,6 +675,15 @@ impl Storage for DuckDb {
         };
         let cfg_toml = toml::to_string_pretty(&inner).unwrap_or_default();
         let tags_str = result.tags.join(",");
+
+        // ── Phase 1: parent rows + idempotent cleanup of child rows ─────
+        //
+        // Equity curves / orders / trades for any strategy_run_id we are
+        // about to (re-)insert are wiped in a single statement each, so an
+        // experiment with N strategies costs 3 DELETEs total instead of
+        // 3·N. Wrapped in a transaction with the parent upserts so the
+        // database never observes a half-rewritten experiment.
+        conn.execute_batch("BEGIN TRANSACTION")?;
 
         conn.execute(
             "INSERT OR REPLACE INTO experiments
@@ -700,15 +702,13 @@ impl Storage for DuckDb {
         )?;
 
         for strat in &result.strategies {
-            let run_id = &strat.strategy_id;
             let metrics_str = serde_json::to_string(&strat.metrics).unwrap_or_default();
-
             conn.execute(
                 "INSERT OR REPLACE INTO experiment_strategies
                  (id, experiment_id, strategy_id, strategy_name, metrics, error)
                  VALUES (?, ?, ?, ?, ?, ?)",
                 params![
-                    run_id,
+                    strat.strategy_id,
                     result.experiment_id,
                     strat.strategy_id,
                     strat.strategy_name,
@@ -716,35 +716,53 @@ impl Storage for DuckDb {
                     strat.error,
                 ],
             )?;
+        }
 
-            // Wipe any previous artefacts (idempotent re-runs).
-            conn.execute(
-                "DELETE FROM experiment_equity WHERE strategy_run_id = ?",
-                params![run_id],
-            )?;
-            conn.execute(
-                "DELETE FROM experiment_orders WHERE strategy_run_id = ?",
-                params![run_id],
-            )?;
-            conn.execute(
-                "DELETE FROM experiment_trades WHERE strategy_run_id = ?",
-                params![run_id],
-            )?;
-
-            for s in &strat.equity_curve {
-                conn.execute(
-                    "INSERT INTO experiment_equity (strategy_run_id, ts, equity, cash, drawdown)
-                     VALUES (?, ?, ?, ?, ?)",
-                    params![run_id, s.timestamp, s.equity, s.cash, s.drawdown],
-                )?;
+        // Bulk-delete child rows for every strategy_run_id we are about
+        // to repopulate. Building the IN (?, ?, …) list dynamically keeps
+        // it to a single round trip per child table.
+        if !result.strategies.is_empty() {
+            let placeholders =
+                std::iter::repeat_n("?", result.strategies.len()).collect::<Vec<_>>().join(", ");
+            let ids: Vec<&str> =
+                result.strategies.iter().map(|s| s.strategy_id.as_str()).collect();
+            for table in ["experiment_equity", "experiment_orders", "experiment_trades"] {
+                let sql =
+                    format!("DELETE FROM {table} WHERE strategy_run_id IN ({placeholders})");
+                conn.execute(&sql, params_from_iter(ids.iter()))?;
             }
-            for o in &strat.orders {
-                conn.execute(
-                    "INSERT INTO experiment_orders
-                     (strategy_run_id, order_id, ts, symbol, order_type, quantity, price, status, fill_price, reason)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    params![
-                        run_id,
+        }
+
+        conn.execute_batch("COMMIT")?;
+
+        // ── Phase 2: bulk-append child rows via the DuckDB Appender ─────
+        //
+        // The Appender batches rows into the column store in one shot —
+        // orders of magnitude faster than per-row `INSERT` for the equity
+        // curve / orders / trades, which can run into the tens-of-thousands
+        // of rows on a long backtest.
+        if result.strategies.iter().any(|s| !s.equity_curve.is_empty()) {
+            let mut appender = conn.appender("experiment_equity")?;
+            for strat in &result.strategies {
+                for s in &strat.equity_curve {
+                    appender.append_row(params![
+                        strat.strategy_id,
+                        s.timestamp,
+                        s.equity,
+                        s.cash,
+                        s.drawdown,
+                    ])?;
+                }
+            }
+            appender.flush()?;
+        }
+
+        if result.strategies.iter().any(|s| !s.orders.is_empty()) {
+            let mut appender = conn.appender("experiment_orders")?;
+            for strat in &result.strategies {
+                for o in &strat.orders {
+                    appender.append_row(params![
+                        strat.strategy_id,
                         o.order.id,
                         o.timestamp,
                         o.order.symbol,
@@ -754,16 +772,20 @@ impl Storage for DuckDb {
                         o.status,
                         o.fill_price,
                         o.reason,
-                    ],
-                )?;
+                        o.commission,
+                        o.pnl,
+                    ])?;
+                }
             }
-            for t in &strat.trades {
-                conn.execute(
-                    "INSERT INTO experiment_trades
-                     (strategy_run_id, symbol, quantity, entry_ts, exit_ts, entry_price, exit_price, pnl)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    params![
-                        run_id,
+            appender.flush()?;
+        }
+
+        if result.strategies.iter().any(|s| !s.trades.is_empty()) {
+            let mut appender = conn.appender("experiment_trades")?;
+            for strat in &result.strategies {
+                for t in &strat.trades {
+                    appender.append_row(params![
+                        strat.strategy_id,
                         t.symbol,
                         t.quantity,
                         t.entry_ts,
@@ -771,14 +793,15 @@ impl Storage for DuckDb {
                         t.entry_price,
                         t.exit_price,
                         t.pnl,
-                    ],
-                )?;
+                    ])?;
+                }
             }
+            appender.flush()?;
         }
 
-        conn.execute_batch("COMMIT")?;
         Ok(())
     }
+
 
     fn query_experiments(
         &self,
@@ -896,7 +919,7 @@ impl Storage for DuckDb {
                 .collect::<Result<Vec<_>, _>>()?;
 
             let mut o_stmt = conn.prepare(
-                "SELECT order_id, ts, symbol, order_type, quantity, price, status, fill_price, reason
+                "SELECT order_id, ts, symbol, order_type, quantity, price, status, fill_price, reason, commission, pnl
                  FROM experiment_orders WHERE strategy_run_id = ? ORDER BY ts",
             )?;
             let orders = o_stmt
@@ -915,6 +938,8 @@ impl Storage for DuckDb {
                         status: row.get(6)?,
                         fill_price: row.get(7)?,
                         reason: row.get(8)?,
+                        commission: row.get::<_, Option<f64>>(9)?.unwrap_or(0.0),
+                        pnl: row.get(10)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;

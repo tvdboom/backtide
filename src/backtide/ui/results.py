@@ -18,11 +18,13 @@ from backtide.storage import (
     delete_experiment,
     query_experiment_strategies,
     query_experiments,
+    query_instruments,
 )
 from backtide.ui.utils import (
     _fmt_duration,
     _fmt_metric,
     _fmt_period,
+    _get_logokit_url,
     _moment_to_strftime,
     _to_pandas,
 )
@@ -62,6 +64,11 @@ st.markdown(
             font-size: 1.3em;
         }
 
+        div[data-testid="stPopoverBody"] {
+            width: 50vw !important;
+            max-width: 50vw !important;
+        }
+
         .status-badge {
             display: inline-block;
             width: 12px;
@@ -83,8 +90,9 @@ st.markdown(
 
         /* Full-results page experiment title */
         .experiment-title {
+            margin-top: 20px;
             text-align: center;
-            font-size: 2em;
+            font-size: 2.2em;
             font-weight: 700;
         }
     </style>
@@ -150,7 +158,7 @@ def _render_strategy_summary(run: StrategyRunResult):
         if not run.equity_curve and not run.trades:
             return
 
-    mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([0.8, 0.8, 1, 1, 1, 1, 1.2])
+    mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([0.8, 0.8, 0.9, 0.9, 0.9, 0.9, 1.2])
 
     def _safe(key: str, default: float = 0.0) -> float:
         v = run.metrics.get(key, default)
@@ -320,7 +328,7 @@ def _render_full_analysis(row: pd.Series):
     logs_disabled = not log_path.is_file()
 
     with st.container(key="full_results_toolbar"):
-        col1, _, col3, col4, col5, col6 = st.columns([1.2, 4.6, 0.7, 0.7, 0.7, 0.7], gap="xxsmall")
+        col1, col2, _, col4, col5, col6 = st.columns([1.2, 0.7, 4.6, 0.7, 0.7, 0.7], gap="xxsmall")
 
         if col1.button(
             ":material/arrow_back: Back",
@@ -330,7 +338,39 @@ def _render_full_analysis(row: pd.Series):
             st.session_state.pop("selected_experiment", None)
             st.rerun()
 
-        with col3.popover(
+        with col2.popover(
+            "",
+            icon=":material/article:",
+            disabled=logs_disabled,
+            help=(
+                "Show the engine logs captured for this experiment."
+                if not logs_disabled
+                else "No log file found for this experiment."
+            ),
+        ):
+            try:
+                log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            except OSError as ex:
+                st.markdown(f"**Logs — {name}**")
+                st.error(f"Failed to read log file: {ex}")
+            else:
+                col1, col2 = st.columns([2.4, 1])
+                col1.markdown(f"**Logs — {name}**")
+                col2.download_button(
+                    "Download",
+                    data=log_text,
+                    file_name=f"{name}-logs.txt",
+                    mime="text/plain",
+                    icon=":material/download:",
+                    key=f"logs_{exp_id}",
+                    width="stretch",
+                )
+                if log_text.strip():
+                    st.code(log_text, language="log", line_numbers=True)
+                else:
+                    st.info("Log file is empty.")
+
+        with col4.popover(
             "",
             icon=":material/description:",
             disabled=not row["description"],
@@ -342,36 +382,6 @@ def _render_full_analysis(row: pd.Series):
         ):
             st.markdown(f"**{name}**")
             st.write(row["description"])
-
-        with col4.popover(
-            "",
-            icon=":material/article:",
-            disabled=logs_disabled,
-            width=1200,
-            help=(
-                "Show the engine logs captured for this experiment."
-                if not logs_disabled
-                else "No log file found for this experiment."
-            ),
-        ):
-            st.markdown(f"**Logs — {name}**")
-            try:
-                log_text = log_path.read_text(encoding="utf-8", errors="replace")
-            except OSError as ex:
-                st.error(f"Failed to read log file: {ex}")
-            else:
-                if log_text.strip():
-                    st.code(log_text, language="log", line_numbers=True)
-                else:
-                    st.info("Log file is empty.")
-                st.download_button(
-                    "Download logs.txt",
-                    data=log_text,
-                    file_name=f"{name}-logs.txt",
-                    mime="text/plain",
-                    icon=":material/download:",
-                    key=f"logs_{exp_id}",
-                )
 
         if col5.button(
             "",
@@ -523,68 +533,158 @@ def _render_full_analysis(row: pd.Series):
 
     tabs = st.tabs([f"**{run.strategy_name}**" for run in runs])
     _, benchmark = _split_benchmark(runs)
+    base_ccy = (
+        str(exp_cfg.portfolio.base_currency)
+        if exp_cfg is not None
+        else str(cfg.general.base_currency)
+    )
+    # Map every traded symbol to the currency it actually settled in. The
+    # backtest engine debits each fill from the instrument's quote
+    # currency first (`order_ccy = quote_ccy.get(symbol).unwrap_or(base)`),
+    # so an AAPL fill is paid in USD and an ASML fill in EUR even if the
+    # portfolio's base currency differs. Falling back to the base currency
+    # keeps unknown symbols readable.
+    symbol_to_ccy: dict[str, str] = {}
+    symbol_to_it: dict[str, object] = {}
+    try:
+        for inst in query_instruments():
+            if inst.quote:
+                symbol_to_ccy[inst.symbol] = str(inst.quote)
+            symbol_to_it[inst.symbol] = inst.instrument_type
+    except Exception:  # noqa: BLE001
+        symbol_to_ccy = {}
+        symbol_to_it = {}
+    logokit_key = cfg.display.logokit_api_key
     for tab, run in zip(tabs, runs, strict=True):
         with tab:
             _render_strategy_summary(run)
 
-            if run.equity_curve:
-                st.markdown("**Equity curve**")
-                eq_df = pd.DataFrame(
-                    [
-                        {
-                            "timestamp": dt.fromtimestamp(s.timestamp),
-                            "equity": s.equity,
-                        }
-                        for s in run.equity_curve
-                    ]
-                )
-                if benchmark is not None and benchmark.equity_curve and run.equity_curve:
-                    # Rescale benchmark curve to match the strategy's starting equity so
-                    # the two are visually comparable on the same axis.
-                    base_bench = float(benchmark.equity_curve[0].equity) or 1.0
-                    base_strat = float(run.equity_curve[0].equity) or 1.0
-                    factor = base_strat / base_bench
-                    bench_df = pd.DataFrame(
-                        [
-                            {
-                                "timestamp": dt.fromtimestamp(int(s.timestamp)),
-                                "benchmark": float(s.equity) * factor,
-                            }
-                            for s in benchmark.equity_curve
-                        ]
-                    )
-                    merged = pd.merge_asof(
-                        eq_df.sort_values("timestamp"),
-                        bench_df.sort_values("timestamp"),
-                        on="timestamp",
-                        direction="nearest",
-                    )
-                    st.line_chart(
-                        merged.set_index("timestamp")[["equity", "benchmark"]],
-                        color=["#79b8ff", "#f1c40f"],
-                    )
-                else:
-                    st.line_chart(eq_df.set_index("timestamp")["equity"])
+            # if run.equity_curve:
+            #     st.markdown("**Equity curve**")
+            #     eq_df = pd.DataFrame(
+            #         [
+            #             {
+            #                 "timestamp": dt.fromtimestamp(s.timestamp),
+            #                 "equity": s.equity,
+            #             }
+            #             for s in run.equity_curve
+            #         ]
+            #     )
+            #     if benchmark is not None and benchmark.equity_curve and run.equity_curve:
+            #         # Rescale benchmark curve to match the strategy's starting equity so
+            #         # the two are visually comparable on the same axis.
+            #         base_bench = float(benchmark.equity_curve[0].equity) or 1.0
+            #         base_strat = float(run.equity_curve[0].equity) or 1.0
+            #         factor = base_strat / base_bench
+            #         bench_df = pd.DataFrame(
+            #             [
+            #                 {
+            #                     "timestamp": dt.fromtimestamp(int(s.timestamp)),
+            #                     "benchmark": float(s.equity) * factor,
+            #                 }
+            #                 for s in benchmark.equity_curve
+            #             ]
+            #         )
+            #         merged = pd.merge_asof(
+            #             eq_df.sort_values("timestamp"),
+            #             bench_df.sort_values("timestamp"),
+            #             on="timestamp",
+            #             direction="nearest",
+            #         )
+            #         st.line_chart(
+            #             merged.set_index("timestamp")[["equity", "benchmark"]],
+            #             color=["#79b8ff", "#f1c40f"],
+            #         )
+            #     else:
+            #         st.line_chart(eq_df.set_index("timestamp")["equity"])
 
-            if run.trades:
-                st.markdown("##### Trades")
-                trades_df = pd.DataFrame(
-                    [
+            if run.orders:
+                st.markdown("##### Orders")
+                rows = []
+                for o in run.orders:
+                    qty = int(o.order.quantity)
+                    side = "Buy" if qty > 0 else ("Sell" if qty < 0 else "—")
+                    px = o.fill_price if o.fill_price is not None else o.order.price
+                    # Settle each fill in the instrument's quote currency
+                    # (matches what the engine actually debited / credited).
+                    quote_ccy = symbol_to_ccy.get(o.order.symbol, base_ccy)
+                    abs_qty = abs(qty)
+                    total = (px * abs_qty) if px is not None else None
+                    # Build an image URL for the symbol's logo (logokit).
+                    # Empty string keeps the cell blank when no key is set
+                    # or the instrument type is unknown.
+                    logo = ""
+                    if logokit_key and (it := symbol_to_it.get(o.order.symbol)) is not None:
+                        try:
+                            logo = _get_logokit_url(o.order.symbol, it, logokit_key)
+                        except Exception:  # noqa: BLE001
+                            logo = ""
+                    rows.append(
                         {
-                            "symbol": t.symbol,
-                            "qty": t.quantity,
-                            "entry": dt.fromtimestamp(t.entry_ts),
-                            "exit": dt.fromtimestamp(t.exit_ts),
-                            "entry_price": t.entry_price,
-                            "exit_price": t.exit_price,
-                            "pnl": t.pnl,
+                            "logo": logo,
+                            "time": dt.fromtimestamp(o.timestamp),
+                            "symbol": o.order.symbol,
+                            "type": str(o.order.order_type),
+                            "side": side,
+                            "qty": abs_qty,
+                            "price": (
+                                _format_price(total, currency=quote_ccy)
+                                if total is not None
+                                else "—"
+                            ),
+                            "pnl": (
+                                _format_price(o.pnl, currency=quote_ccy)
+                                if o.pnl is not None
+                                else "—"
+                            ),
+                            "commission": _format_price(
+                                o.commission or 0.0, currency=quote_ccy
+                            ),
+                            "status": o.status,
                         }
-                        for t in run.trades
-                    ]
+                    )
+                orders_df = pd.DataFrame(rows)
+                # Most-recent fills first.
+                orders_df = orders_df.sort_values("time", ascending=False).reset_index(
+                    drop=True
                 )
-                st.dataframe(trades_df, hide_index=True, width="stretch")
+
+                def _color_side(val: str) -> str:
+                    if val == "Buy":
+                        return "color: #2ecc71; font-weight: 600;"
+                    if val == "Sell":
+                        return "color: #e74c3c; font-weight: 600;"
+                    return ""
+
+                def _color_pnl(val: str) -> str:
+                    if not val:
+                        return ""
+                    # Parse the leading sign-bearing number out of the
+                    # formatted string (handles "$-12.34", "-12.34 €", etc.)
+                    s = val.replace(",", "")
+                    is_neg = "-" in s
+                    digits = any(ch.isdigit() for ch in s)
+                    if not digits:
+                        return ""
+                    return (
+                        "color: #e74c3c;" if is_neg else "color: #2ecc71;"
+                    )
+
+                styled = (
+                    orders_df.style.map(_color_side, subset=["side"])
+                    .map(_color_pnl, subset=["pnl"])
+                )
+                column_config = {
+                    "logo": st.column_config.ImageColumn(label="", width="small"),
+                }
+                st.dataframe(
+                    styled,
+                    hide_index=True,
+                    width="stretch",
+                    column_config=column_config,
+                )
             else:
-                st.caption("No closed trades.")
+                st.caption("No orders.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

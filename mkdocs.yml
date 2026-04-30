@@ -116,6 +116,7 @@ nav:
     - User guide:
         - Nomenclature: user_guide/nomenclature.md
         - Application: user_guide/application.md
+        - Experiment: user_guide/experiment.md
         - Data: user_guide/data.md
         - Storage: user_guide/storage.md
         - Indicators: user_guide/indicators.md

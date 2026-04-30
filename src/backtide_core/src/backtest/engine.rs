@@ -29,7 +29,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn, Span};
 use uuid::Uuid;
 
@@ -62,6 +62,7 @@ impl Engine {
         verbose: bool,
     ) -> EngineResult<ExperimentResult> {
         let started_at = now_secs();
+        let started_instant = Instant::now();
         let experiment_id = Uuid::new_v4().simple().to_string()[..16].to_owned();
         let mut warnings: Vec<String> = Vec::new();
 
@@ -128,10 +129,7 @@ impl Engine {
         }
         if symbols.is_empty() {
             warn!("Experiment has no symbols — aborting.");
-            return Err(EngineError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Experiment has no symbols.",
-            )));
+            return Err(EngineError::Experiment("Experiment has no symbols.".to_owned()));
         }
 
         // ── Phase 1: data ───────────────────────────────────────────────
@@ -210,7 +208,7 @@ impl Engine {
                 name: config.general.name.clone(),
                 tags: config.general.tags.clone(),
                 started_at,
-                finished_at: now_secs(),
+                finished_at: started_at + started_instant.elapsed().as_secs() as i64,
                 status: "failed".into(),
                 strategies: Vec::new(),
                 warnings,
@@ -508,7 +506,7 @@ impl Engine {
             }
         }
 
-        let finished_at = now_secs();
+        let finished_at = started_at + started_instant.elapsed().as_secs() as i64;
         // Surface per-strategy failures: log each one and roll the
         // experiment status up to "failed" if any strategy errored out.
         let n_failed = results.iter().filter(|r| r.error.is_some()).count();
@@ -551,7 +549,7 @@ impl Engine {
             );
         }
 
-        let result = ExperimentResult {
+        let mut result = ExperimentResult {
             experiment_id: experiment_id.clone(),
             name: config.general.name.clone(),
             tags: config.general.tags.clone(),
@@ -565,21 +563,27 @@ impl Engine {
         // ── Phase 5: persist ────────────────────────────────────────────
         info!("Phase 5: persisting experiment to DuckDB...");
         let pb = verbose.then(|| progress_spinner("Persisting experiment results..."));
+        // Refresh finished_at right before the upsert so it reflects every
+        // bit of work done up to the persist (logging / status roll-up
+        // included), then write everything in a single transaction.
+        result.finished_at = started_at + started_instant.elapsed().as_secs() as i64;
+        let persist_start = Instant::now();
         if let Err(e) = self.db.write_experiment(config, &result) {
             warn!("Failed to persist experiment: {e}");
         } else {
-            info!("Experiment persisted successfully.");
+            info!("Experiment persisted successfully in {:?}.", persist_start.elapsed());
         }
         if let Some(p) = pb {
             p.finish_and_clear();
         }
 
         info!(
-            "Experiment {} finished with status={} ({} strategies, {} warnings).",
+            "Experiment {} finished with status={} ({} strategies, {} warnings) in {:?}.",
             experiment_id,
             result.status,
             result.strategies.len(),
-            result.warnings.len()
+            result.warnings.len(),
+            started_instant.elapsed(),
         );
         Ok(result)
     }
@@ -938,6 +942,24 @@ fn run_one_strategy(
     let total_bars: usize = aligned.values().map(|v| v.len()).next().unwrap_or(0);
     let warmup = cfg.engine.warmup_period as usize;
 
+    // Each strategy may only "see" the symbols the user explicitly
+    // selected in the data tab. The benchmark symbol is folded into the
+    // global symbol list (and downloaded / aligned) so its bars are
+    // available for the auto-injected `Benchmark (...)` strategy and so
+    // the engine can value any benchmark-only positions, but it must
+    // *not* be visible to user strategies — otherwise SMA Crossover &
+    // friends would silently trade the benchmark too. The auto-injected
+    // benchmark strategy is detected by name and gets a closes view
+    // restricted to just the benchmark symbol.
+    let benchmark = cfg.strategy.benchmark.trim().to_owned();
+    let is_benchmark_run = !benchmark.is_empty()
+        && name == format!("Benchmark ({benchmark})");
+    let allowed_symbols: std::collections::HashSet<String> = if is_benchmark_run {
+        std::iter::once(benchmark.clone()).collect()
+    } else {
+        symbols.iter().cloned().collect()
+    };
+
     // First fatal error encountered during the run, if any. Recorded on
     // the result so the UI can flag the strategy as failed and surface
     // the message — the rest of the experiment continues.
@@ -976,9 +998,12 @@ fn run_one_strategy(
         Python::attach(|py| BuiltinStrategy::try_from_py(py, &strategy));
 
     // Pre-extract per-symbol close arrays once. Pure Rust, dense, ready
-    // to be sliced as `&closes_full[sym][..=bar_index]` per bar.
+    // to be sliced as `&closes_full[sym][..=bar_index]` per bar. Filtered
+    // to only the symbols this strategy is allowed to trade (see
+    // `allowed_symbols` above).
     let mut closes_full: Vec<(String, Vec<f64>)> = aligned
         .iter()
+        .filter(|(s, _)| allowed_symbols.contains(s.as_str()))
         .map(|(s, row)| {
             let v: Vec<f64> =
                 row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.close)).collect();
@@ -988,10 +1013,14 @@ fn run_one_strategy(
     // Stable order (matches HashMap iteration would otherwise be random).
     closes_full.sort_by(|a, b| a.0.cmp(&b.0));
 
-    // Pre-build per-symbol full DataFrames and per-indicator full numpy arrays
+    // Pre-build per-symbol full DataFrames and per-indicator full series
     // for the *Python* path only. Built-in strategies don't need these and we
     // skip the GIL-heavy pre-build entirely. For custom strategies this turns
-    // the loop from O(n^2) Python work into O(n) cheap iloc slice views.
+    // the loop from O(n^2) Python work into O(n) cheap slice views.
+    //
+    // The container types follow the user's `cfg.data.dataframe_library`
+    // setting (numpy / pandas / polars) so custom strategies receive
+    // exactly the data shape they configured.
     let (cached_data, cached_indicators) = if builtin.is_some() {
         (HashMap::new(), HashMap::new())
     } else {
@@ -1000,12 +1029,42 @@ fn run_one_strategy(
                 HashMap<String, Py<PyAny>>,
                 HashMap<String, HashMap<String, Vec<Py<PyAny>>>>,
             )> {
-                let pd = py.import("pandas")?;
-                let np = py.import("numpy")?;
+                use crate::config::interface::Config as GlobalConfig;
+                use crate::config::models::dataframe_library::DataFrameLibrary;
+                use crate::utils::dataframe::dict_to_dataframe;
+
+                // Read once: every wrapping decision below uses this.
+                let df_lib = GlobalConfig::get()
+                    .map(|c| c.data.dataframe_library)
+                    .unwrap_or(DataFrameLibrary::Pandas);
+
+                // Closure: wrap a flat Vec<f64> into the configured 1-D
+                // container — np.ndarray, pd.Series or pl.Series. Used
+                // for individual indicator output series.
+                let wrap_series = |py: Python<'_>,
+                                   s: &Vec<f64>|
+                 -> PyResult<Py<PyAny>> {
+                    let list = PyList::new(py, s)?;
+                    let obj: Bound<'_, PyAny> = match df_lib {
+                        DataFrameLibrary::Numpy => {
+                            py.import("numpy")?.call_method1("asarray", (list,))?
+                        },
+                        DataFrameLibrary::Pandas => {
+                            py.import("pandas")?.call_method1("Series", (list,))?
+                        },
+                        DataFrameLibrary::Polars => {
+                            py.import("polars")?.call_method1("Series", (list,))?
+                        },
+                    };
+                    Ok(obj.unbind())
+                };
 
                 let mut data_full: HashMap<String, Py<PyAny>> =
                     HashMap::with_capacity(aligned.len());
                 for (sym, row) in aligned {
+                    if !allowed_symbols.contains(sym.as_str()) {
+                        continue;
+                    }
                     let dict = PyDict::new(py);
                     dict.set_item(
                         "open",
@@ -1042,7 +1101,7 @@ fn run_one_strategy(
                             row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.volume)),
                         )?,
                     )?;
-                    let df = pd.call_method1("DataFrame", (dict,))?;
+                    let df = dict_to_dataframe(py, &dict)?;
                     data_full.insert(sym.clone(), df.unbind());
                 }
 
@@ -1054,8 +1113,7 @@ fn run_one_strategy(
                     for (sym, series) in per_sym {
                         let mut arrs: Vec<Py<PyAny>> = Vec::with_capacity(series.len());
                         for s in series {
-                            let arr = np.call_method1("asarray", (PyList::new(py, s)?,))?;
-                            arrs.push(arr.unbind());
+                            arrs.push(wrap_series(py, s)?);
                         }
                         by_sym.insert(sym.clone(), arrs);
                     }
@@ -1089,6 +1147,8 @@ fn run_one_strategy(
                     status: "cancelled".into(),
                     fill_price: None,
                     reason: "cancel".into(),
+                    commission: 0.0,
+                    pnl: None,
                 });
                 continue;
             }
@@ -1127,6 +1187,11 @@ fn run_one_strategy(
 
             let order_ccy = quote_ccy.get(symbol).copied().unwrap_or(base_ccy);
 
+            // Realised PnL recorded on the OrderRecord for closing fills
+            // (sell that flattens an existing long position). Stays `None`
+            // for opening fills.
+            let mut fill_pnl: Option<f64> = None;
+
             // ── Funds check & settlement ─────────────────────────────
             if qty > 0 {
                 // BUY: try paying in `order_ccy` first, else convert from base.
@@ -1139,6 +1204,8 @@ fn run_one_strategy(
                         status: "rejected".into(),
                         fill_price: None,
                         reason: "insufficient funds".into(),
+                        commission: 0.0,
+                        pnl: None,
                     });
                     continue;
                 }
@@ -1155,6 +1222,8 @@ fn run_one_strategy(
                         status: "rejected".into(),
                         fill_price: None,
                         reason: "short selling disabled".into(),
+                        commission: 0.0,
+                        pnl: None,
                     });
                     continue;
                 }
@@ -1169,21 +1238,27 @@ fn run_one_strategy(
                         status: "rejected".into(),
                         fill_price: None,
                         reason: "cannot pay commission".into(),
+                        commission: 0.0,
+                        pnl: None,
                     });
                     continue;
                 }
                 let pos_entry = positions.entry(symbol.clone()).or_insert(0);
                 *pos_entry -= abs_qty;
-                if let Some(t) = close_open_trade_sell(
+                let realised_pnl = close_open_trade_sell(
                     &mut open_trades,
                     symbol,
                     ts,
                     abs_qty,
                     fill_px,
                     commission,
-                ) {
+                )
+                .map(|t| {
+                    let pnl = t.pnl;
                     closed_trades.push(t);
-                }
+                    pnl
+                });
+                fill_pnl = realised_pnl;
             }
 
             order_records.push(OrderRecord {
@@ -1192,6 +1267,8 @@ fn run_one_strategy(
                 status: "filled".into(),
                 fill_price: Some(fill_px),
                 reason: String::new(),
+                commission,
+                pnl: fill_pnl,
             });
         }
         open_orders = still_open;
@@ -1241,6 +1318,8 @@ fn run_one_strategy(
                                 status: "cancelled".into(),
                                 fill_price: None,
                                 reason: "exclusive_orders".into(),
+                                commission: 0.0,
+                                pnl: None,
                             });
                         }
                         open_orders.clear();
@@ -1261,6 +1340,8 @@ fn run_one_strategy(
                                 status: "rejected".into(),
                                 fill_price: None,
                                 reason: "order type not allowed".into(),
+                                commission: 0.0,
+                                pnl: None,
                             });
                             return false;
                         }
@@ -1481,11 +1562,12 @@ fn build_per_symbol_view<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let out = PyDict::new(py);
     let end = idx + 1;
+    let slice = pyo3::types::PySlice::new(py, 0, end as isize, 1);
     for (sym, df) in cached {
-        let bound = df.bind(py);
-        let iloc = bound.getattr("iloc")?;
-        let slice = pyo3::types::PySlice::new(py, 0, end as isize, 1);
-        let sliced = iloc.get_item(slice)?;
+        // ``df[0:end]`` works uniformly for pandas DataFrame, polars
+        // DataFrame and 2-D numpy ndarray (all do positional row
+        // slicing), so no library-specific branching is required.
+        let sliced = df.bind(py).get_item(&slice)?;
         out.set_item(sym, sliced)?;
     }
     Ok(out.into_any())
@@ -1662,6 +1744,8 @@ mod tests {
                         status: "cancelled".into(),
                         fill_price: None,
                         reason: "cancel".into(),
+                        commission: 0.0,
+                        pnl: None,
                     });
                     continue;
                 }
@@ -1685,6 +1769,8 @@ mod tests {
                             status: "rejected".into(),
                             fill_price: None,
                             reason: "insufficient funds".into(),
+                            commission: 0.0,
+                            pnl: None,
                         });
                         continue;
                     }
@@ -1711,6 +1797,8 @@ mod tests {
                     status: "filled".into(),
                     fill_price: Some(fill_px),
                     reason: String::new(),
+                    commission: 0.0,
+                    pnl: None,
                 });
             }
 

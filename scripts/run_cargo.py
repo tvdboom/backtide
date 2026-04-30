@@ -86,8 +86,12 @@ def main(argv: list[str]) -> int:
             if candidate and os.path.isdir(candidate):
                 _prepend(env, "PATH", candidate)
     else:
-        if libdir := sysconfig.get_config_vars("LIBDIR"):
-            _prepend(env, "LD_LIBRARY_PATH", libdir)
+        # `get_config_vars(*names)` returns a *list* of values; iterating it
+        # directly would prepend a Python repr (e.g. "['/.../lib']") to
+        # `LD_LIBRARY_PATH`, which the loader silently ignores.
+        for libdir in sysconfig.get_config_vars("LIBDIR", "LIBPL"):
+            if libdir and os.path.isdir(libdir):
+                _prepend(env, "LD_LIBRARY_PATH", libdir)
 
     try:
         return subprocess.call(argv, env=env)

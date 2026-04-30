@@ -87,7 +87,17 @@ where
             let mut msg = MessageVisitor(String::new());
             event.record(&mut msg);
 
-            let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
+            let now = chrono::Utc::now();
+            let tz = crate::config::interface::Config::get()
+                .ok()
+                .and_then(|c| c.display.timezone.as_deref())
+                .and_then(|s| s.trim().parse::<chrono_tz::Tz>().ok());
+            let ts = match tz {
+                Some(tz) => now.with_timezone(&tz).format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string(),
+                None => {
+                    now.with_timezone(&chrono::Local).format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string()
+                },
+            };
             let meta = event.metadata();
             if let Ok(mut f) = log.0.lock() {
                 let _ = writeln!(

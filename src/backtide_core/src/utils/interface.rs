@@ -1,5 +1,6 @@
 //! Python interface for the engine's utilities.
 
+use crate::config::interface::Config;
 use crate::config::models::log_level::LogLevel;
 use crate::engine::Engine;
 use crate::utils::experiment_log::ExperimentFileLayer;
@@ -7,6 +8,8 @@ use pyo3::prelude::*;
 use std::sync::OnceLock;
 use tracing::info;
 use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 // ────────────────────────────────────────────────────────────────────────────
@@ -15,6 +18,31 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 /// Process-wide lock to set the tracing.
 static TRACING: OnceLock<()> = OnceLock::new();
+
+/// `tracing_subscriber` time formatter that prints timestamps in the
+/// timezone declared in `config.display.timezone`, or the system local
+/// timezone when that field is unset / unparseable.
+struct TzTime;
+
+impl FormatTime for TzTime {
+    fn format_time(&self, w: &mut Writer<'_>) -> std::fmt::Result {
+        let now = chrono::Utc::now();
+        let tz = Config::get()
+            .ok()
+            .and_then(|c| c.display.timezone.as_deref())
+            .and_then(|s| s.trim().parse::<chrono_tz::Tz>().ok());
+        match tz {
+            Some(tz) => {
+                write!(w, "{}", now.with_timezone(&tz).format("%Y-%m-%dT%H:%M:%S%.3f%:z"))
+            },
+            None => write!(
+                w,
+                "{}",
+                now.with_timezone(&chrono::Local).format("%Y-%m-%dT%H:%M:%S%.3f%:z")
+            ),
+        }
+    }
+}
 
 pub fn init_logging_with_level(level: LogLevel) {
     TRACING.get_or_init(|| {
@@ -27,6 +55,7 @@ pub fn init_logging_with_level(level: LogLevel) {
         tracing_subscriber::registry()
             .with(
                 fmt::layer()
+                    .with_timer(TzTime)
                     .with_target(true)
                     .with_thread_ids(true)
                     .with_file(true)

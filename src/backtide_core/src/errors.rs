@@ -18,6 +18,10 @@ pub enum EngineError {
     #[error("{0}")]
     Data(#[from] DataError),
 
+    /// An error while running an experiment.
+    #[error("{0}")]
+    Experiment(String),
+
     /// A filesystem or I/O operation failed.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

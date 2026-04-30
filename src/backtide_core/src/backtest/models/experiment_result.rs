@@ -110,6 +110,16 @@ impl Trade {
 ///
 /// reason : str
 ///     Human-readable note (rejection / cancellation reason).
+///
+/// commission : float
+///     Commission charged on the fill, in the order's quote currency.
+///     Zero for non-filled orders.
+///
+/// pnl : float | None
+///     Realised profit & loss attributable to this order, in the base
+///     currency, after commission. Populated only on closing fills
+///     (sell that flattens / reduces an existing long, or buy-to-cover);
+///     `None` for opening fills, cancellations and rejections.
 #[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OrderRecord {
@@ -118,6 +128,10 @@ pub struct OrderRecord {
     pub status: String,
     pub fill_price: Option<f64>,
     pub reason: String,
+    #[serde(default)]
+    pub commission: f64,
+    #[serde(default)]
+    pub pnl: Option<f64>,
 }
 
 #[pymethods]

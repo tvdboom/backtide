@@ -101,11 +101,24 @@ pub trait Strategy {
 
 /// Build a market buy order sized to spend `target_cash` (capped at
 /// `max_position_size%` of equity).
+///
+/// A small headroom is reserved on top of `target_cash` so the order
+/// survives next-bar slippage *and* exchange commissions. Without this,
+/// equal-weight allocations of the form `cash / n_symbols` (used by
+/// Buy & Hold, SMA Naive, the rotation strategies, …) reliably push the
+/// *last* leg fractionally over the available cash and the engine
+/// rejects it with an "insufficient funds" error — leaving the user
+/// with one symbol traded and the others mysteriously missing.
 fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
     if price <= 0.0 || target_cash <= 0.0 {
         return None;
     }
-    let qty = (target_cash / price).floor() as i64;
+    // Reserve ~1% of the requested budget for slippage + commission.
+    // This is a generous-but-conservative buffer: typical slippage is
+    // a few bps and commission < 0.5%, so 1% comfortably covers both
+    // while still leaving the strategy fully invested in practice.
+    const FEE_HEADROOM: f64 = 0.99;
+    let qty = (target_cash * FEE_HEADROOM / price).floor() as i64;
     if qty <= 0 {
         return None;
     }
