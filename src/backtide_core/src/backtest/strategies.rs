@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyType};
+use pyo3::types::PyType;
+use std::collections::HashMap;
 
 use crate::backtest::indicators::{
     AverageTrueRange, BollingerBands, MovingAverageConvergenceDivergence, RelativeStrengthIndex,
@@ -9,6 +10,52 @@ use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
+
+/// Cheap, pure-Rust indicator-snapshot view passed to strategies on each
+/// bar. The engine pre-computes every auto-injected indicator into a
+/// `name -> symbol -> Vec<output_series>` map (each output series is
+/// dense, indexed by bar). [`IndicatorView::value`] / [`last`] read the
+/// value(s) at the current bar without touching Python at all, which is
+/// ~100x faster than the previous `arr[-1]` lookup through the GIL.
+pub struct IndicatorView<'a> {
+    /// Full per-(name, symbol) outputs computed once over the whole timeline.
+    pub data: &'a HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
+
+    /// Bar position the strategy currently sees (index into each output series).
+    pub bar_index: usize,
+}
+
+impl<'a> IndicatorView<'a> {
+    pub fn new(
+        data: &'a HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
+        bar_index: usize,
+    ) -> Self {
+        Self {
+            data,
+            bar_index,
+        }
+    }
+
+    /// Last value(s) of the indicator named `name` for `symbol`. Returns
+    /// one `f64` per output series (e.g. 2 for Bollinger Bands' upper /
+    /// lower bands; 1 for SMA / RSI / ATR). Returns `None` when the
+    /// indicator hasn't been computed for this symbol.
+    pub fn last(&self, name: &str, symbol: &str) -> Option<Vec<f64>> {
+        let per_sym = self.data.get(name)?;
+        let series = per_sym.get(symbol)?;
+        let mut out = Vec::with_capacity(series.len());
+        for s in series {
+            out.push(*s.get(self.bar_index)?);
+        }
+        (!out.is_empty()).then_some(out)
+    }
+
+    /// Convenience wrapper for single-output indicators. Returns `None`
+    /// when the indicator is missing or its current value is non-finite.
+    pub fn value(&self, name: &str, symbol: &str) -> Option<f64> {
+        self.last(name, symbol).and_then(|v| v.into_iter().next()).filter(|x| x.is_finite())
+    }
+}
 
 /// Trait for all built-in strategies.
 pub trait Strategy {
@@ -24,20 +71,19 @@ pub trait Strategy {
     /// Decide which orders to place on the current bar.
     ///
     /// Receives:
-    /// - `closes`: per-symbol close vectors up to (and including) the current bar.
-    /// - `indicators`: the engine-built `dict[str, dict[str, np.ndarray | list[np.ndarray]]]`
-    ///   view of every auto-included indicator (see ``STRATEGY_INDICATORS``)
-    ///   sliced up to the current bar. Strategies should read precomputed
-    ///   values via [`auto_indicator_last`] / [`auto_indicator_value`] rather
-    ///   than recomputing them locally.
+    /// - `closes`: per-symbol close slices, each truncated to `[..=bar_index]`
+    ///   (so `closes[i].1.last()` is always the *current* bar's close).
+    /// - `indicators`: see [`IndicatorView`]. Strategies should read
+    ///   precomputed values via `indicators.value(name, symbol)` /
+    ///   `indicators.last(name, symbol)` rather than recomputing them
+    ///   locally.
     ///
     /// The default returns no orders, letting passive strategies opt out
     /// without boilerplate.
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        _closes: &[(String, Vec<f64>)],
-        _indicators: &Bound<'py, PyAny>,
+        _closes: &[(String, &[f64])],
+        _indicators: &IndicatorView<'_>,
         _portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -51,29 +97,6 @@ pub trait Strategy {
     fn required_indicators_inner(&self, _py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
         Ok(Vec::new())
     }
-}
-
-/// Per-symbol close vector extracted from the engine's `data` payload.
-fn extract_closes(data: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Vec<f64>)>> {
-    let mut out: Vec<(String, Vec<f64>)> = Vec::new();
-    if let Ok(dict) = data.cast::<PyDict>() {
-        for (k, v) in dict.iter() {
-            let symbol: String = k.extract()?;
-            let closes: Vec<f64> = if let Ok(s) = v.get_item("close") {
-                s.extract::<Vec<f64>>()
-                    .or_else(|_| {
-                        s.getattr("values")
-                            .and_then(|x| x.extract::<Vec<f64>>())
-                            .or_else(|_| s.call_method0("to_numpy")?.extract::<Vec<f64>>())
-                    })
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            out.push((symbol, closes));
-        }
-    }
-    Ok(out)
 }
 
 /// Build a market buy order sized to spend `target_cash` (capped at
@@ -136,6 +159,41 @@ fn react_to_signal(
         }
     }
     Vec::new()
+}
+
+/// Linear regression slope of `series` against the index ``0..len``.
+/// Returns `(slope, mean_y)`. Returns `None` when the input is empty
+/// or has zero variance on the x axis.
+fn linreg_slope(series: &[f64]) -> Option<(f64, f64)> {
+    let m = series.len() as f64;
+    if m < 2.0 {
+        return None;
+    }
+    let mean_x = (m - 1.0) / 2.0;
+    let mean_y = series.iter().sum::<f64>() / m;
+    let mut num = 0.0;
+    let mut den = 0.0;
+    for (i, &y) in series.iter().enumerate() {
+        let dx = i as f64 - mean_x;
+        num += dx * (y - mean_y);
+        den += dx * dx;
+    }
+    if den == 0.0 {
+        return None;
+    }
+    Some((num / den, mean_y))
+}
+
+/// Sample standard deviation of `series`. Returns `None` for short inputs.
+#[allow(dead_code)]
+fn stddev(series: &[f64]) -> Option<f64> {
+    if series.len() < 2 {
+        return None;
+    }
+    let m = series.len() as f64;
+    let mean = series.iter().sum::<f64>() / m;
+    let var = series.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (m - 1.0);
+    Some(var.sqrt())
 }
 
 /// Top-K rotation across symbols. Closes positions not in the top, then
@@ -204,54 +262,14 @@ fn auto_indicator_name(acronym: &str, args: &[String]) -> String {
     format!("__auto_{acronym}_{sanitized}")
 }
 
-/// Look up the last value(s) of a precomputed indicator from the engine's
-/// per-tick view dict for *symbol*.
+/// Shared pymethods macro for all strategy structs.
 ///
-/// The engine builds `indicators[name][symbol]` as either a single 1-D numpy
-/// array (single-output indicators like SMA / RSI / ATR) or a list of 1-D
-/// arrays (multi-output indicators like Bollinger Bands or MACD). This helper
-/// hides that shape difference and returns one `f64` per output series, in
-/// order. Returns `None` if no matching indicator/symbol is present.
-fn auto_indicator_last<'py>(
-    indicators: &Bound<'py, PyAny>,
-    name: &str,
-    symbol: &str,
-) -> Option<Vec<f64>> {
-    use pyo3::types::{PyDict, PyList};
-
-    let dict = indicators.cast::<PyDict>().ok()?;
-    let per_sym = dict.get_item(name).ok().flatten()?;
-    let per_sym = per_sym.cast::<PyDict>().ok()?;
-    let value = per_sym.get_item(symbol).ok().flatten()?;
-
-    if let Ok(list) = value.cast::<PyList>() {
-        let mut out = Vec::with_capacity(list.len());
-        for arr in list.iter() {
-            let v = arr.get_item(-1isize).ok()?;
-            out.push(v.extract::<f64>().ok()?);
-        }
-        return (!out.is_empty()).then_some(out);
-    }
-
-    let v = value.get_item(-1isize).ok()?;
-    v.extract::<f64>().ok().map(|x| vec![x])
-}
-
-/// Convenience wrapper for single-output indicators (SMA / RSI / ATR / …).
-/// Returns `None` if the indicator is missing or its last value is non-finite.
-fn auto_indicator_value<'py>(
-    indicators: &Bound<'py, PyAny>,
-    name: &str,
-    symbol: &str,
-) -> Option<f64> {
-    auto_indicator_last(indicators, name, symbol)
-        .and_then(|v| v.into_iter().next())
-        .filter(|x| x.is_finite())
-}
-
-/// Shared pymethods macro for all strategy structs. The `evaluate`
-/// implementation is provided per-struct via the `__evaluate_orders__`
-/// associated method (defaults to no orders).
+/// Each built-in strategy carries pure-Rust trading logic (the
+/// [`Strategy::decide`] trait method); the engine dispatches to that
+/// directly via [`BuiltinStrategy`], without going through the Python
+/// interpreter on the hot path. This macro therefore only exposes the
+/// metadata + factory bits the Python side actually uses (name,
+/// description, parameter introspection, required indicators, repr).
 macro_rules! strategy_pymethods {
     ($ty:ident) => {
         #[pymethods]
@@ -277,46 +295,6 @@ macro_rules! strategy_pymethods {
             #[classattr]
             fn is_multi_asset() -> bool {
                 <$ty as Strategy>::IS_MULTI_ASSET
-            }
-
-            /// Evaluate the strategy and return orders.
-            ///
-            /// Parameters
-            /// ----------
-            /// data : np.array | pd.DataFrame | pl.DataFrame
-            ///     Historical OHLCV data available up to the current bar.
-            ///
-            /// portfolio : [Portfolio]
-            ///     Current portfolio holdings (cash, positions and open orders).
-            ///
-            /// state : [State]
-            ///     Current simulation state.
-            ///
-            /// indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            ///     Indicators calculated on the historical data. None if no
-            ///     indicators were selected.
-            ///
-            /// Returns
-            /// -------
-            /// list[[Order]]
-            ///     The orders to place this tick.
-            fn evaluate<'py>(
-                &self,
-                _py: Python<'py>,
-                data: &Bound<'py, PyAny>,
-                portfolio: &Portfolio,
-                state: &State,
-                _indicators: &Bound<'py, PyAny>,
-            ) -> PyResult<Vec<Order>> {
-                let closes = extract_closes(data)?;
-                Ok(<$ty as Strategy>::decide_inner(
-                    self,
-                    _py,
-                    &closes,
-                    _indicators,
-                    portfolio,
-                    state,
-                ))
             }
 
             /// Indicators that must be computed up-front for this
@@ -409,11 +387,10 @@ impl Strategy for AdaptiveRsi {
         "RSI with dynamic period that adapts to market volatility and cycles.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -422,7 +399,7 @@ impl Strategy for AdaptiveRsi {
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
-            let r = match auto_indicator_value(indicators, &rsi_name, sym) {
+            let r = match indicators.value(&rsi_name, sym) {
                 Some(v) => v,
                 None => continue,
             };
@@ -508,11 +485,10 @@ impl Strategy for AlphaRsiPro {
     const DESCRIPTION: &'static str = "Advanced RSI with adaptive overbought/oversold levels based on volatility and trend bias filtering.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -520,12 +496,37 @@ impl Strategy for AlphaRsiPro {
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
-            let r = match auto_indicator_value(indicators, &rsi_name, sym) {
+            let r = match indicators.value(&rsi_name, sym) {
                 Some(v) => v,
                 None => continue,
             };
+            if c.len() <= self.vol_window {
+                continue;
+            }
             let last = *c.last().unwrap_or(&0.0);
-            orders.extend(react_to_signal(sym, r < 35.0, last, portfolio, 1.0 / n));
+
+            // Trend bias over `vol_window`: shifts both thresholds so buys
+            // fire earlier in uptrends and sells fire earlier in downtrends.
+            let prev = c[c.len() - 1 - self.vol_window];
+            let trend_bias = if prev > 0.0 {
+                (last - prev) / prev
+            } else {
+                0.0
+            };
+            let shift = (80.0 * trend_bias).clamp(-20.0, 20.0);
+            let oversold = (30.0 + shift).clamp(15.0, 50.0);
+            let overbought = (70.0 + shift).clamp(50.0, 85.0);
+
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
+            if r < oversold && cur <= 0 {
+                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                    orders.push(o);
+                }
+            } else if r > overbought && cur > 0 {
+                if let Some(o) = sell_order(sym, cur) {
+                    orders.push(o);
+                }
+            }
         }
         orders
     }
@@ -598,11 +599,10 @@ impl Strategy for BollingerMeanReversion {
         "A mean-reversion strategy that buys at the lower band and sells at the upper band.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -610,7 +610,7 @@ impl Strategy for BollingerMeanReversion {
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
-            let parts = match auto_indicator_last(indicators, &bb_name, sym) {
+            let parts = match indicators.last(&bb_name, sym) {
                 Some(v) if v.len() >= 2 => v,
                 _ => continue,
             };
@@ -693,11 +693,10 @@ impl Strategy for BuyAndHold {
         "Buys on the first day and holds to the end. A baseline for performance comparison.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        _indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        _indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -712,15 +711,18 @@ impl Strategy for BuyAndHold {
         }
 
         // If a single symbol is configured, only buy that one (and only
-        // if its data is actually present in the per-symbol view).
+        // once its history has actually started — until then the engine's
+        // empty-bar policy reports NaN for the close, which would make us
+        // place a bogus first-bar order at e.g. 1970-01-01 against a
+        // symbol that doesn't have any data yet).
         if let Some(target) = &self.symbol {
             let row = match closes.iter().find(|(s, _)| s == target) {
                 Some(r) => r,
                 None => return Vec::new(),
             };
             let px = match row.1.last() {
-                Some(&p) => p,
-                None => return Vec::new(),
+                Some(&p) if p.is_finite() && p > 0.0 => p,
+                _ => return Vec::new(),
             };
             return buy_order(target, portfolio_cash(portfolio), px)
                 .map(|o| vec![o])
@@ -728,13 +730,26 @@ impl Strategy for BuyAndHold {
         }
 
         // Equal-weight: divide all available cash across the selected symbols.
-        let per = portfolio_cash(portfolio) / closes.len() as f64;
+        // Defer the buy entirely until *every* symbol has a finite first
+        // price, otherwise the budget would be split (and partially
+        // wasted) before some legs are even tradable.
+        let prices: Option<Vec<(&str, f64)>> = closes
+            .iter()
+            .map(|(s, c)| match c.last() {
+                Some(&p) if p.is_finite() && p > 0.0 => Some((s.as_str(), p)),
+                _ => None,
+            })
+            .collect();
+        let prices = match prices {
+            Some(p) if !p.is_empty() => p,
+            _ => return Vec::new(),
+        };
+
+        let per = portfolio_cash(portfolio) / prices.len() as f64;
         let mut orders = Vec::new();
-        for (sym, c) in closes {
-            if let Some(&px) = c.last() {
-                if let Some(o) = buy_order(sym, per, px) {
-                    orders.push(o);
-                }
+        for (sym, px) in prices {
+            if let Some(o) = buy_order(sym, per, px) {
+                orders.push(o);
             }
         }
         orders
@@ -794,6 +809,57 @@ impl Strategy for DoubleTop {
     const DESCRIPTION: &'static str =
         "Buys on a breakout after a double top pattern, with trend and volume confirmation.";
     const IS_MULTI_ASSET: bool = false;
+
+    fn decide(
+        &self,
+        closes: &[(String, &[f64])],
+        _indicators: &IndicatorView<'_>,
+        portfolio: &Portfolio,
+        _state: &State,
+    ) -> Vec<Order> {
+        let n = closes.len().max(1) as f64;
+        let mut orders = Vec::new();
+        for (sym, c) in closes {
+            if c.len() < self.lookback + 2 {
+                continue;
+            }
+            let win = &c[c.len() - self.lookback..];
+
+            // Find local maxima with a simple 3-bar criterion.
+            let mut peaks: Vec<(usize, f64)> = Vec::new();
+            for i in 1..win.len() - 1 {
+                if win[i] > win[i - 1] && win[i] >= win[i + 1] {
+                    peaks.push((i, win[i]));
+                }
+            }
+            if peaks.len() < 2 {
+                continue;
+            }
+
+            let p1 = peaks[peaks.len() - 2];
+            let p2 = peaks[peaks.len() - 1];
+            let resistance = p1.1.max(p2.1);
+            let neckline = win[p1.0..=p2.0].iter().cloned().fold(f64::INFINITY, f64::min);
+
+            // Two consecutive peaks at "roughly the same level" (within 3%).
+            let level_match = resistance > 0.0 && (p1.1 - p2.1).abs() / resistance < 0.03;
+
+            let last = *c.last().unwrap_or(&0.0);
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
+
+            if level_match && last > resistance && cur <= 0 {
+                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                    orders.push(o);
+                }
+            } else if cur > 0 && last < neckline {
+                // Pattern invalidated: bail out.
+                if let Some(o) = sell_order(sym, cur) {
+                    orders.push(o);
+                }
+            }
+        }
+        orders
+    }
 }
 
 /// Full-featured Relative Strength Index combining adaptive period, levels, and trend filter.
@@ -867,31 +933,70 @@ impl Strategy for HybridAlphaRsi {
     const DESCRIPTION: &'static str = "Most sophisticated RSI variant combining adaptive period, adaptive levels, and trend confirmation.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        // Auto-included RSI uses ``min_period`` (see STRATEGY_INDICATORS).
-        let rsi_name = auto_indicator_name("RSI", &[fmt_arg(self.min_period)]);
+        let rsi_short = auto_indicator_name("RSI", &[fmt_arg(self.min_period)]);
+        let rsi_long = auto_indicator_name("RSI", &[fmt_arg(self.max_period)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
-            let r = match auto_indicator_value(indicators, &rsi_name, sym) {
+            let r_s = match indicators.value(&rsi_short, sym) {
                 Some(v) => v,
                 None => continue,
             };
+            let r_l = match indicators.value(&rsi_long, sym) {
+                Some(v) => v,
+                None => continue,
+            };
+            if c.len() <= self.vol_window {
+                continue;
+            }
             let last = *c.last().unwrap_or(&0.0);
-            orders.extend(react_to_signal(sym, r < 30.0, last, portfolio, 1.0 / n));
+
+            // Adaptive period proxy: blend short and long RSIs.
+            let r = 0.5 * (r_s + r_l);
+
+            // Adaptive thresholds shifted by the trend bias over `vol_window`.
+            let prev = c[c.len() - 1 - self.vol_window];
+            let trend_bias = if prev > 0.0 {
+                (last - prev) / prev
+            } else {
+                0.0
+            };
+            let shift = (80.0 * trend_bias).clamp(-20.0, 20.0);
+            let oversold = (30.0 + shift).clamp(15.0, 50.0);
+            let overbought = (70.0 + shift).clamp(50.0, 85.0);
+
+            // Trend confirmation: only go long while price is above its
+            // ``vol_window``-bar mean (a lightweight MA filter).
+            let recent = &c[c.len() - self.vol_window..];
+            let mean = recent.iter().sum::<f64>() / recent.len() as f64;
+            let in_uptrend = last > mean;
+
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
+            if r < oversold && in_uptrend && cur <= 0 {
+                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                    orders.push(o);
+                }
+            } else if (r > overbought || !in_uptrend) && cur > 0 {
+                if let Some(o) = sell_order(sym, cur) {
+                    orders.push(o);
+                }
+            }
         }
         orders
     }
 
     fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
-        Ok(vec![Py::new(py, RelativeStrengthIndex::new(self.min_period))?.into_any()])
+        Ok(vec![
+            Py::new(py, RelativeStrengthIndex::new(self.min_period))?.into_any(),
+            Py::new(py, RelativeStrengthIndex::new(self.max_period))?.into_any(),
+        ])
     }
 }
 
@@ -966,11 +1071,10 @@ impl Strategy for Macd {
     const DESCRIPTION: &'static str = "Buys on a MACD golden cross and sells on a death cross.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -981,7 +1085,7 @@ impl Strategy for Macd {
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
-            let parts = match auto_indicator_last(indicators, &macd_name, sym) {
+            let parts = match indicators.last(&macd_name, sym) {
                 Some(v) if v.len() >= 2 => v,
                 _ => continue,
             };
@@ -1069,11 +1173,10 @@ impl Strategy for Momentum {
         "Buys when momentum turns positive, sells when price falls below a trend-filtering MA.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -1086,7 +1189,7 @@ impl Strategy for Momentum {
             if c.len() <= self.period {
                 continue;
             }
-            let ma = match auto_indicator_value(indicators, &sma_name, sym) {
+            let ma = match indicators.value(&sma_name, sym) {
                 Some(v) => v,
                 None => continue,
             };
@@ -1188,11 +1291,10 @@ impl Strategy for MultiBollingerRotation {
         "A breakout rotation strategy that buys stocks crossing above their upper Bollinger Band.";
     const IS_MULTI_ASSET: bool = true;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         state: &State,
     ) -> Vec<Order> {
@@ -1204,7 +1306,7 @@ impl Strategy for MultiBollingerRotation {
             .iter()
             .map(|(s, c)| {
                 let last = *c.last().unwrap_or(&0.0);
-                let score = match auto_indicator_last(indicators, &bb_name, s) {
+                let score = match indicators.last(&bb_name, s) {
                     Some(v) if v.len() >= 2 && v[0].is_finite() && v[1].is_finite() => {
                         // Score by deviation above the band midpoint.
                         last - 0.5 * (v[0] + v[1])
@@ -1284,6 +1386,55 @@ impl Strategy for RiskAverse {
     const NAME: &'static str = "Risk Averse";
     const DESCRIPTION: &'static str = "Buys low-volatility stocks making new highs on high volume.";
     const IS_MULTI_ASSET: bool = false;
+
+    fn decide(
+        &self,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
+        portfolio: &Portfolio,
+        _state: &State,
+    ) -> Vec<Order> {
+        let atr_name = auto_indicator_name("ATR", &[fmt_arg(self.vol_period)]);
+        let n = closes.len().max(1) as f64;
+        let mut orders = Vec::new();
+        for (sym, c) in closes {
+            if c.len() <= self.breakout_period {
+                continue;
+            }
+            let last = *c.last().unwrap_or(&0.0);
+            if last <= 0.0 {
+                continue;
+            }
+
+            // Donchian-style breakout window (excluding the current bar).
+            let win = &c[c.len() - 1 - self.breakout_period..c.len() - 1];
+            let high = win.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let low = win.iter().cloned().fold(f64::INFINITY, f64::min);
+
+            // Low-volatility filter via auto-included ATR (ATR / price < 4%).
+            let atr = match indicators.value(&atr_name, sym) {
+                Some(v) => v,
+                None => continue,
+            };
+            let low_vol = atr.is_finite() && atr / last < 0.04;
+
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
+            if low_vol && last >= high && cur <= 0 {
+                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                    orders.push(o);
+                }
+            } else if cur > 0 && last <= low {
+                if let Some(o) = sell_order(sym, cur) {
+                    orders.push(o);
+                }
+            }
+        }
+        orders
+    }
+
+    fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(vec![Py::new(py, AverageTrueRange::new(self.vol_period))?.into_any()])
+    }
 }
 
 /// Rate of Change momentum strategy.
@@ -1340,11 +1491,10 @@ impl Strategy for Roc {
         "A simple momentum strategy that buys on a high Rate of Change and sells on a low one.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        _indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        _indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -1438,11 +1588,10 @@ impl Strategy for RocRotation {
         "Periodically rotates into the top K stocks with the highest Rate of Change (momentum).";
     const IS_MULTI_ASSET: bool = true;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        _indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        _indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         state: &State,
     ) -> Vec<Order> {
@@ -1544,31 +1693,36 @@ impl Strategy for Rsi {
     const DESCRIPTION: &'static str = "Combines RSI and Bollinger Bands. Buys when RSI is oversold and price is below the lower band.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
         let rsi_name = auto_indicator_name("RSI", &[fmt_arg(self.rsi_period)]);
+        let bb_name = auto_indicator_name("BB", &[fmt_arg(self.bb_period), fmt_arg(self.bb_std)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
-            let r = match auto_indicator_value(indicators, &rsi_name, sym) {
+            let r = match indicators.value(&rsi_name, sym) {
                 Some(v) => v,
                 None => continue,
             };
+            let bb = match indicators.last(&bb_name, sym) {
+                Some(v) if v.len() >= 2 && v[0].is_finite() && v[1].is_finite() => v,
+                _ => continue,
+            };
+            let (upper, lower) = (bb[0], bb[1]);
             let last = *c.last().unwrap_or(&0.0);
-            // Buy when oversold (<30), sell when overbought (>70).
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
-            if r < 30.0 && cur <= 0 {
+            // Dual confirmation: oversold RSI + price at/below lower band.
+            if r < 30.0 && last <= lower && cur <= 0 {
                 let cash = portfolio_cash(portfolio);
                 if let Some(o) = buy_order(sym, cash / n, last) {
                     orders.push(o);
                 }
-            } else if r > 70.0 && cur > 0 {
+            } else if (r > 70.0 || last >= upper) && cur > 0 {
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);
                 }
@@ -1639,6 +1793,37 @@ impl Strategy for Rsrs {
     const DESCRIPTION: &'static str =
         "Uses linear regression of high/low prices to buy on signals of strengthening support.";
     const IS_MULTI_ASSET: bool = false;
+
+    fn decide(
+        &self,
+        closes: &[(String, &[f64])],
+        _indicators: &IndicatorView<'_>,
+        portfolio: &Portfolio,
+        _state: &State,
+    ) -> Vec<Order> {
+        let n = closes.len().max(1) as f64;
+        let mut orders = Vec::new();
+        for (sym, c) in closes {
+            if c.len() < self.period {
+                continue;
+            }
+            let win = &c[c.len() - self.period..];
+            let (slope, mean_y) = match linreg_slope(win) {
+                Some(v) => v,
+                None => continue,
+            };
+            if mean_y <= 0.0 {
+                continue;
+            }
+            // Normalised slope: rise per bar relative to mean price.
+            let strength = slope / mean_y;
+            let last = *c.last().unwrap_or(&0.0);
+            // ``> 0`` would whipsaw constantly; require a sustained ascent.
+            let signal_long = strength > 0.001 && last > mean_y;
+            orders.extend(react_to_signal(sym, signal_long, last, portfolio, 1.0 / n));
+        }
+        orders
+    }
 }
 
 /// Multi-asset portfolio rotation ranked by Resistance Support Relative Strength.
@@ -1713,29 +1898,26 @@ impl Strategy for RsrsRotation {
         "Periodically rotates into stocks with high RSRS indicator values (strong support).";
     const IS_MULTI_ASSET: bool = true;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        _indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        _indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         state: &State,
     ) -> Vec<Order> {
         if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
-        // Without a registered RSRS indicator we approximate strength via
-        // simple rate-of-change over the lookback period.
+        // Rank by the normalised regression slope of recent closes (RSRS proxy).
         let period = self.period;
         let scores: Vec<(String, f64)> = closes
             .iter()
             .map(|(s, c)| {
-                let score = if c.len() > period {
-                    let prev = c[c.len() - 1 - period];
-                    if prev > 0.0 {
-                        (*c.last().unwrap_or(&0.0) - prev) / prev * 100.0
-                    } else {
-                        f64::NAN
+                let score = if c.len() >= period {
+                    let win = &c[c.len() - period..];
+                    match linreg_slope(win) {
+                        Some((slope, mean_y)) if mean_y > 0.0 => slope / mean_y,
+                        _ => f64::NAN,
                     }
                 } else {
                     f64::NAN
@@ -1811,11 +1993,10 @@ impl Strategy for SmaCrossover {
         "Buys on a golden cross (fast MA over slow MA), sells on a death cross.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -1824,11 +2005,11 @@ impl Strategy for SmaCrossover {
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
-            let fast = match auto_indicator_value(indicators, &fast_name, sym) {
+            let fast = match indicators.value(&fast_name, sym) {
                 Some(v) => v,
                 None => continue,
             };
-            let slow = match auto_indicator_value(indicators, &slow_name, sym) {
+            let slow = match indicators.value(&slow_name, sym) {
                 Some(v) => v,
                 None => continue,
             };
@@ -1901,11 +2082,10 @@ impl Strategy for SmaNaive {
         "Buys when price is above a moving average, sells when below.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -1917,7 +2097,7 @@ impl Strategy for SmaNaive {
                 Some(&v) => v,
                 None => continue,
             };
-            let ma = match auto_indicator_value(indicators, &name, sym) {
+            let ma = match indicators.value(&name, sym) {
                 Some(v) => v,
                 None => continue,
             };
@@ -2032,11 +2212,10 @@ impl Strategy for TripleRsiRotation {
         "Rotates stocks based on a combination of long, medium, and short-term RSI signals.";
     const IS_MULTI_ASSET: bool = true;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         state: &State,
     ) -> Vec<Order> {
@@ -2049,9 +2228,9 @@ impl Strategy for TripleRsiRotation {
         let scores: Vec<(String, f64)> = closes
             .iter()
             .map(|(s, _c)| {
-                let r1 = auto_indicator_value(indicators, &short_name, s);
-                let r2 = auto_indicator_value(indicators, &medium_name, s);
-                let r3 = auto_indicator_value(indicators, &long_name, s);
+                let r1 = indicators.value(&short_name, s);
+                let r2 = indicators.value(&medium_name, s);
+                let r3 = indicators.value(&long_name, s);
                 let score = match (r1, r2, r3) {
                     (Some(a), Some(b), Some(c)) => (a + b + c) / 3.0,
                     _ => f64::NAN,
@@ -2144,11 +2323,10 @@ impl Strategy for TurtleTrading {
     const DESCRIPTION: &'static str = "A classic trend-following strategy that buys on breakouts and sells on breakdowns, using ATR for position sizing.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide_inner<'py>(
+    fn decide(
         &self,
-        _py: Python<'py>,
-        closes: &[(String, Vec<f64>)],
-        _indicators: &Bound<'py, PyAny>,
+        closes: &[(String, &[f64])],
+        _indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
@@ -2244,6 +2422,63 @@ impl Strategy for Vcp {
     const NAME: &'static str = "VCP";
     const DESCRIPTION: &'static str = "Buys on breakouts after price and volume volatility have contracted (Volatility Contraction Pattern).";
     const IS_MULTI_ASSET: bool = false;
+
+    fn decide(
+        &self,
+        closes: &[(String, &[f64])],
+        _indicators: &IndicatorView<'_>,
+        portfolio: &Portfolio,
+        _state: &State,
+    ) -> Vec<Order> {
+        let n = closes.len().max(1) as f64;
+        let mut orders = Vec::new();
+        for (sym, c) in closes {
+            if self.contractions < 2 || c.len() < self.lookback {
+                continue;
+            }
+            let win = &c[c.len() - self.lookback..];
+            let seg_len = win.len() / self.contractions;
+            if seg_len < 2 {
+                continue;
+            }
+
+            // Walk through `contractions` consecutive segments and verify that
+            // each segment's range is strictly tighter than the previous one.
+            let mut prev_range = f64::INFINITY;
+            let mut ok = true;
+            let mut ceiling = f64::NEG_INFINITY;
+            for k in 0..self.contractions {
+                let seg = &win[k * seg_len..(k + 1) * seg_len];
+                let hi = seg.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let lo = seg.iter().cloned().fold(f64::INFINITY, f64::min);
+                let r = hi - lo;
+                if !r.is_finite() || r >= prev_range {
+                    ok = false;
+                    break;
+                }
+                prev_range = r;
+                ceiling = hi;
+            }
+            if !ok || !ceiling.is_finite() {
+                continue;
+            }
+
+            let last = *c.last().unwrap_or(&0.0);
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
+
+            if last > ceiling && cur <= 0 {
+                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                    orders.push(o);
+                }
+            } else if cur > 0 && last < ceiling * 0.92 {
+                // Stop-out 8% below the breakout ceiling.
+                if let Some(o) = sell_order(sym, cur) {
+                    orders.push(o);
+                }
+            }
+        }
+        orders
+    }
 }
 
 // Apply shared pymethods (alphabetical)
@@ -2267,3 +2502,118 @@ strategy_pymethods!(SmaNaive);
 strategy_pymethods!(TripleRsiRotation);
 strategy_pymethods!(TurtleTrading);
 strategy_pymethods!(Vcp);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Built-in strategy dispatch (Rust fast path)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Owned, GIL-free copy of any built-in strategy.
+///
+/// The engine does the Python downcast **once** at the start of a run
+/// (not per bar) via [`BuiltinStrategy::try_from_py`], then calls
+/// [`BuiltinStrategy::decide`] on every bar in pure Rust. This is the
+/// difference between ~20 s and ~50 ms for a multi-year backtest with
+/// SMA Crossover / BB Mean Reversion: no GIL acquisition per bar, no
+/// pandas slice rebuild, no `Vec<f64>` round-trips through `extract`.
+#[derive(Clone, Debug)]
+pub enum BuiltinStrategy {
+    AdaptiveRsi(AdaptiveRsi),
+    AlphaRsiPro(AlphaRsiPro),
+    BollingerMeanReversion(BollingerMeanReversion),
+    BuyAndHold(BuyAndHold),
+    DoubleTop(DoubleTop),
+    HybridAlphaRsi(HybridAlphaRsi),
+    Macd(Macd),
+    Momentum(Momentum),
+    MultiBollingerRotation(MultiBollingerRotation),
+    RiskAverse(RiskAverse),
+    Roc(Roc),
+    RocRotation(RocRotation),
+    Rsi(Rsi),
+    Rsrs(Rsrs),
+    RsrsRotation(RsrsRotation),
+    SmaCrossover(SmaCrossover),
+    SmaNaive(SmaNaive),
+    TripleRsiRotation(TripleRsiRotation),
+    TurtleTrading(TurtleTrading),
+    Vcp(Vcp),
+}
+
+impl BuiltinStrategy {
+    /// Try to clone an owned [`BuiltinStrategy`] out of a Python object.
+    /// Returns `None` for custom (Python-defined) strategies.
+    pub fn try_from_py(py: Python<'_>, obj: &Py<PyAny>) -> Option<Self> {
+        let bound = obj.bind(py);
+        macro_rules! try_dispatch {
+            ($($variant:ident => $t:ty),* $(,)?) => {
+                $(
+                    if let Ok(b) = bound.cast::<$t>() {
+                        return Some(BuiltinStrategy::$variant(b.borrow().clone()));
+                    }
+                )*
+            };
+        }
+        try_dispatch!(
+            AdaptiveRsi => AdaptiveRsi,
+            AlphaRsiPro => AlphaRsiPro,
+            BollingerMeanReversion => BollingerMeanReversion,
+            BuyAndHold => BuyAndHold,
+            DoubleTop => DoubleTop,
+            HybridAlphaRsi => HybridAlphaRsi,
+            Macd => Macd,
+            Momentum => Momentum,
+            MultiBollingerRotation => MultiBollingerRotation,
+            RiskAverse => RiskAverse,
+            Roc => Roc,
+            RocRotation => RocRotation,
+            Rsi => Rsi,
+            Rsrs => Rsrs,
+            RsrsRotation => RsrsRotation,
+            SmaCrossover => SmaCrossover,
+            SmaNaive => SmaNaive,
+            TripleRsiRotation => TripleRsiRotation,
+            TurtleTrading => TurtleTrading,
+            Vcp => Vcp,
+        );
+        None
+    }
+
+    /// Pure-Rust dispatch to the underlying strategy's [`Strategy::decide`].
+    pub fn decide(
+        &self,
+        closes: &[(String, &[f64])],
+        indicators: &IndicatorView<'_>,
+        portfolio: &Portfolio,
+        state: &State,
+    ) -> Vec<Order> {
+        macro_rules! delegate {
+            ($($variant:ident),* $(,)?) => {
+                match self {
+                    $(BuiltinStrategy::$variant(s) => s.decide(closes, indicators, portfolio, state),)*
+                }
+            };
+        }
+        delegate!(
+            AdaptiveRsi,
+            AlphaRsiPro,
+            BollingerMeanReversion,
+            BuyAndHold,
+            DoubleTop,
+            HybridAlphaRsi,
+            Macd,
+            Momentum,
+            MultiBollingerRotation,
+            RiskAverse,
+            Roc,
+            RocRotation,
+            Rsi,
+            Rsrs,
+            RsrsRotation,
+            SmaCrossover,
+            SmaNaive,
+            TripleRsiRotation,
+            TurtleTrading,
+            Vcp,
+        )
+    }
+}

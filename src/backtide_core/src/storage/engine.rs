@@ -83,13 +83,19 @@ impl Engine {
 
     /// Deletes a single experiment and all its child rows.
     ///
-    /// Also best-effort removes the persisted source config file at
-    /// `<storage>/experiments/<experiment_id>.toml`, if one exists.
+    /// Also best-effort removes the persisted artefacts at:
+    ///
+    /// * `<storage>/experiments/<experiment_id>/`  — logs & misc
+    /// * `<storage>/strategies/<experiment_id>/`   — saved config
     pub fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64> {
         let n = self.db.delete_experiment(experiment_id)?;
-        let path =
-            self.config.data.storage_path.join("experiments").join(format!("{experiment_id}.toml"));
-        let _ = std::fs::remove_file(path);
+        let storage = &self.config.data.storage_path;
+
+        let exp_dir = storage.join("experiments").join(experiment_id);
+        let _ = std::fs::remove_dir_all(&exp_dir);
+        let strat_dir = storage.join("strategies").join(experiment_id);
+        let _ = std::fs::remove_dir_all(&strat_dir);
+
         Ok(n)
     }
 }

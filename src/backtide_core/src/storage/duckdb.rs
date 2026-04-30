@@ -99,11 +99,12 @@ impl Storage for DuckDb {
             );
 
             CREATE TABLE IF NOT EXISTS experiment_strategies (
-                id                VARCHAR PRIMARY KEY,
+                id                VARCHAR NOT NULL,
                 experiment_id     VARCHAR NOT NULL,
                 strategy_id       VARCHAR NOT NULL,
                 strategy_name     VARCHAR NOT NULL,
                 metrics           VARCHAR NOT NULL,
+                error             VARCHAR,
                 UNIQUE (experiment_id, strategy_id)
             );
 
@@ -113,7 +114,7 @@ impl Storage for DuckDb {
                 equity            DOUBLE NOT NULL,
                 cash              DOUBLE NOT NULL,
                 drawdown          DOUBLE NOT NULL,
-                PRIMARY KEY (strategy_run_id, ts)
+                UNIQUE (strategy_run_id, ts)
             );
 
             CREATE TABLE IF NOT EXISTS experiment_orders (
@@ -127,7 +128,7 @@ impl Storage for DuckDb {
                 status            VARCHAR NOT NULL,
                 fill_price        DOUBLE,
                 reason            VARCHAR NOT NULL,
-                PRIMARY KEY (strategy_run_id, order_id)
+                UNIQUE (strategy_run_id, order_id)
             );
 
             CREATE TABLE IF NOT EXISTS experiment_trades (
@@ -139,10 +140,18 @@ impl Storage for DuckDb {
                 entry_price       DOUBLE NOT NULL,
                 exit_price        DOUBLE NOT NULL,
                 pnl               DOUBLE NOT NULL,
-                PRIMARY KEY (strategy_run_id, symbol, entry_ts, exit_ts)
+                UNIQUE (strategy_run_id, symbol, entry_ts, exit_ts)
             );
         ",
         )?;
+
+        // Best-effort schema migrations for older databases.
+        // DuckDB ≥ 0.10 supports `ADD COLUMN IF NOT EXISTS`; we ignore the
+        // error if the column already exists (older builds will simply
+        // skip this on subsequent runs).
+        let _ = conn.execute_batch(
+            "ALTER TABLE experiment_strategies ADD COLUMN IF NOT EXISTS error VARCHAR;",
+        );
 
         Ok(())
     }
@@ -696,13 +705,15 @@ impl Storage for DuckDb {
 
             conn.execute(
                 "INSERT OR REPLACE INTO experiment_strategies
-                 (id, experiment_id, strategy_id, strategy_name, metrics) VALUES (?, ?, ?, ?, ?)",
+                 (id, experiment_id, strategy_id, strategy_name, metrics, error)
+                 VALUES (?, ?, ?, ?, ?, ?)",
                 params![
                     run_id,
                     result.experiment_id,
                     strat.strategy_id,
                     strat.strategy_name,
-                    metrics_str
+                    metrics_str,
+                    strat.error,
                 ],
             )?;
 
@@ -779,7 +790,7 @@ impl Storage for DuckDb {
 
         let mut sql = String::from(
             "SELECT e.id, e.name, e.tags, e.description, e.started_at, e.finished_at, e.status,
-                    (SELECT MAX(CAST(json_extract(metrics, '$.sharpe_ratio') AS DOUBLE))
+                    (SELECT MAX(CAST(json_extract(metrics, '$.sharpe') AS DOUBLE))
                        FROM experiment_strategies s
                       WHERE s.experiment_id = e.id
                         AND NOT regexp_matches(s.strategy_name, '^Benchmark\\s*\\(.+\\)$')
@@ -847,24 +858,25 @@ impl Storage for DuckDb {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
-            "SELECT id, strategy_id, strategy_name, metrics
+            "SELECT id, strategy_id, strategy_name, metrics, error
              FROM experiment_strategies
              WHERE experiment_id = ?
              ORDER BY rowid",
         )?;
-        let strats: Vec<(String, String, String, String)> = stmt
+        let strats: Vec<(String, String, String, String, Option<String>)> = stmt
             .query_map(params![experiment_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut out = Vec::with_capacity(strats.len());
-        for (run_id, strategy_id, name, metrics_str) in strats {
+        for (run_id, strategy_id, name, metrics_str, error) in strats {
             let metrics: HashMap<String, f64> =
                 serde_json::from_str(&metrics_str).unwrap_or_default();
 
@@ -932,6 +944,7 @@ impl Storage for DuckDb {
                 trades,
                 orders,
                 metrics,
+                error,
             });
         }
 

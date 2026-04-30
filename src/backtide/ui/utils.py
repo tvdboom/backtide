@@ -176,21 +176,19 @@ def _fmt_number(n: float) -> str:
         return str(n)
 
 
-def _adaptive_decimals(value: float) -> int:
-    """Return decimal precision based on magnitude."""
-    a = abs(value)
-    if a >= 100:
-        return 0
-    if a >= 10:
-        return 1
-    return 2
-
-
-def _fmt_metric(value: float, *, signed: bool = False, suffix: str = "") -> str:
+def _fmt_metric(value: float | None, *, signed: bool = False, suffix: str = "") -> str:
     """Format a numeric metric with magnitude-adaptive decimals."""
-    d = _adaptive_decimals(value)
-    sign = "+" if signed else ""
-    return f"{value:{sign}.{d}f}{suffix}"
+    if value is None or pd.isna(value):
+        return "--"
+
+    if abs(value) >= 100:
+        d = 0
+    elif abs(value) >= 10:
+        d = 1
+    else:
+        d = 2
+
+    return f"{value:{'+' if signed else ''}.{d}f}{suffix}"
 
 
 def _fmt_duration(total_seconds: float) -> str:

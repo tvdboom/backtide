@@ -36,6 +36,42 @@ orders = strategy.evaluate(data, portfolio, state, indicators)
 
 <br>
 
+## Auto-injected indicators
+
+Most built-in strategies depend on a handful of indicators (e.g., SMA Crossover
+needs two SMAs, BB Mean Reversion needs Bollinger Bands, etc...). To save you from
+having to add those manually on every experiment, the engine auto-injects them for
+you.
+
+Auto-injected indicators behave exactly like user-selected ones — they are
+computed once over the full dataset before the simulation starts and are then
+sliced per bar for the strategy. They are de-duplicated across strategies, so
+two strategies asking for the same `SMA(20)` only compute it once.
+
+You don't need to think about this for built-in strategies. For [custom strategies](#custom-strategies),
+you can declare auto-included indicators yourself by overriding the `required_indicators`
+method on your subclass:
+
+```python
+from backtide.indicators import SimpleMovingAverage
+from backtide.strategies import BaseStrategy
+
+
+class MyStrategy(BaseStrategy):
+    def __init__(self, period=20):
+        self.period = period
+
+    def required_indicators(self):
+        return [SimpleMovingAverage(self.period)]
+
+    def evaluate(self, data, portfolio, state, indicators):
+        # Read the auto-injected SMA via its deterministic key.
+        sma_name = f"__auto_SMA_{self.period}"
+        ...
+```
+
+<br>
+
 ## Custom strategies
 
 You can create your own strategies by subclassing `BaseStrategy`. Custom

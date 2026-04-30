@@ -135,21 +135,40 @@ def _split_benchmark(runs: list[StrategyRunResult]) -> tuple[list, StrategyRunRe
     """
     for i, run in enumerate(runs):
         if BENCHMARK_NAME.match(run.strategy_name):
-            return [*runs[:i], *runs[i + 1:]], run
+            return [*runs[:i], *runs[i + 1 :]], run
 
     return runs, None
 
 
 def _render_strategy_summary(run: StrategyRunResult):
     """Render compact summary metrics for a single strategy run."""
+    if err := getattr(run, "error", None):
+        st.error(
+            f"**{run.strategy_name}** failed during execution:\n\n```\n{err}\n```",
+            icon=":material/error:",
+        )
+        if not run.equity_curve and not run.trades:
+            return
+
     mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([0.8, 0.8, 1, 1, 1, 1, 1.2])
 
-    pnl = run.metrics.get("pnl", 0.0)
-    total_return = run.metrics.get("total_return", 0.0)
-    cagr = run.metrics.get("cagr", 0.0)
-    alpha = run.metrics.get("alpha", 0.0)
-    sharpe = run.metrics.get("sharpe_ratio", 0.0)
-    max_dd = run.metrics.get("max_dd", 0.0)
+    def _safe(key: str, default: float = 0.0) -> float:
+        v = run.metrics.get(key, default)
+        if v is None:
+            return default
+        try:
+            if v != v:  # NaN
+                return default
+        except TypeError:
+            return default
+        return float(v)
+
+    pnl = _safe("pnl")
+    total_return = _safe("total_return")
+    cagr = _safe("cagr")
+    alpha = _safe("alpha")
+    sharpe = _safe("sharpe")
+    max_dd = _safe("max_dd")
 
     # Sharpe is the headline risk-adjusted metric: leads the row.
     _colored_metric(
@@ -204,8 +223,11 @@ def _render_strategy_summary(run: StrategyRunResult):
 
 def _status_icon(row: pd.Series) -> str:
     """Return a Material icon shortcode based on the experiment's Sharpe ratio."""
-    if row["status"] == "failed":
+    status = row.get("status")
+    if status == "failed":
         return ":material/error:"
+    if status == "partial":
+        return ":material/warning:"
 
     sharpe = row.get("best_sharpe")
     if sharpe is None or pd.isna(sharpe):
@@ -228,8 +250,11 @@ def _status_icon(row: pd.Series) -> str:
 
 def _status_badge(row: pd.Series) -> str:
     """Return a small colored status dot for the experiment."""
-    if row["status"] == "failed":
+    status = row.get("status")
+    if status == "failed":
         cls, label = "error", "Failed"
+    elif status == "partial":
+        cls, label = "warning", "Some strategies failed"
     elif (s := row.get("best_sharpe")) is None or pd.isna(s):
         cls, label = "warning", "Succeeded with warnings"
     else:
@@ -289,11 +314,13 @@ def _render_full_analysis(row: pd.Series):
     """
     exp_id = row["id"]
     name = row["name"] or exp_id
-    cfg_path = Path(cfg.data.storage_path) / "experiments" / f"{exp_id}.toml"
+    cfg_path = Path(cfg.data.storage_path) / "experiments" / exp_id / "config.toml"
+    log_path = Path(cfg.data.storage_path) / "experiments" / exp_id / "logs.txt"
     export_disabled = not cfg_path.is_file()
+    logs_disabled = not log_path.is_file()
 
     with st.container(key="full_results_toolbar"):
-        col1, col2, col3, col4, col5 = st.columns([1.2, 5.3, 0.7, 0.7, 0.7], gap="xxsmall")
+        col1, _, col3, col4, col5, col6 = st.columns([1.2, 4.6, 0.7, 0.7, 0.7, 0.7], gap="xxsmall")
 
         if col1.button(
             ":material/arrow_back: Back",
@@ -306,18 +333,47 @@ def _render_full_analysis(row: pd.Series):
         with col3.popover(
             "",
             icon=":material/description:",
+            disabled=not row["description"],
             help=(
                 "Show the experiment description."
                 if row["description"]
                 else "No description for this experiment."
             ),
-            disabled=not row["description"],
         ):
-            if row["description"]:
-                st.markdown(f"**{name}**")
-                st.write(row["description"])
+            st.markdown(f"**{name}**")
+            st.write(row["description"])
 
-        if col4.button(
+        with col4.popover(
+            "",
+            icon=":material/article:",
+            disabled=logs_disabled,
+            width=1200,
+            help=(
+                "Show the engine logs captured for this experiment."
+                if not logs_disabled
+                else "No log file found for this experiment."
+            ),
+        ):
+            st.markdown(f"**Logs — {name}**")
+            try:
+                log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            except OSError as ex:
+                st.error(f"Failed to read log file: {ex}")
+            else:
+                if log_text.strip():
+                    st.code(log_text, language="log", line_numbers=True)
+                else:
+                    st.info("Log file is empty.")
+                st.download_button(
+                    "Download logs.txt",
+                    data=log_text,
+                    file_name=f"{name}-logs.txt",
+                    mime="text/plain",
+                    icon=":material/download:",
+                    key=f"logs_{exp_id}",
+                )
+
+        if col5.button(
             "",
             key=f"export_full_{exp_id}",
             icon=":material/upload:",
@@ -339,7 +395,7 @@ def _render_full_analysis(row: pd.Series):
                 st.session_state["_pending_experiment_config"] = exp_cfg
                 st.switch_page("experiment.py")
 
-        if col5.button(
+        if col6.button(
             "",
             key=f"delete_full_{exp_id}",
             icon=":material/delete:",
@@ -379,17 +435,38 @@ def _render_full_analysis(row: pd.Series):
     status = str(row.get("status") or "").lower()
     if status == "completed":
         icon, label, tone = ":material/check_circle:", "Succeeded", "green"
+    elif status == "partial":
+        icon, label, tone = ":material/warning:", "Partial", "orange"
     else:
         icon, label, tone = ":material/cancel:", "Failed", "red"
     _colored_metric(c4, f"{icon} Status", label, tone)
 
     try:
-        cfg_path = Path(cfg.data.storage_path) / "experiments" / f"{row['id']}.toml"
+        cfg_path = Path(cfg.data.storage_path) / "experiments" / row["id"] / "config.toml"
         exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         exp_cfg = None
 
     runs = query_experiment_strategies(row["id"])
+
+    # Aggregate failure banner: if one or more strategies raised an
+    # exception during the run, surface a single summary up-front so the
+    # user immediately understands why some/all metrics may be missing.
+    failed_runs = [r for r in runs if getattr(r, "error", None)]
+    if failed_runs:
+        names = ", ".join(f"**{r.strategy_name}**" for r in failed_runs)
+        if len(failed_runs) == len(runs):
+            st.error(
+                f"All {len(runs)} strategies failed during execution: {names}. "
+                "See the per-strategy tabs below (or the logs popover) for the raised errors.",
+                icon=":material/error:",
+            )
+        else:
+            st.warning(
+                f"{len(failed_runs)} of {len(runs)} strategies failed during execution: "
+                f"{names}. The remaining strategies completed successfully.",
+                icon=":material/warning:",
+            )
 
     start_ts = None
     end_ts = None
@@ -601,7 +678,7 @@ for _, row in df.iterrows():
             st.session_state["selected_experiment"] = row.to_dict()
             st.rerun()
 
-        cfg_path = Path(cfg.data.storage_path) / "experiments" / f"{exp_id}.toml"
+        cfg_path = Path(cfg.data.storage_path) / "experiments" / exp_id / "config.toml"
         export_disabled = not cfg_path.is_file()
         if col3.button(
             "",
@@ -638,11 +715,13 @@ for _, row in df.iterrows():
         col1, col2 = st.columns([3, 1], vertical_alignment="center")
 
         strategies = "strategy" if row["n_strategies"] == 1 else "strategies"
+        best = row["best_sharpe"]
+        best_str = f"{best:.2f}" if best is not None and not pd.isna(best) else "—"
         col1.markdown(
             "<span style='display:inline-block;opacity:0.7;font-size:1.05em;margin-top:-20px'>"
             f":material/calendar_month: {_fmt_ts(row['started_at'])} "
             f"&nbsp;·&nbsp; "
-            f":material/military_tech: {row['best_sharpe']:.2f} "
+            f":material/military_tech: {best_str} "
             f"&nbsp;·&nbsp; "
             f":material/psychology: {row['n_strategies']} {strategies}"
             "</span>",

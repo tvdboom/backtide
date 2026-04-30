@@ -154,6 +154,14 @@ impl OrderRecord {
 ///
 /// metrics : dict[str, float]
 ///     Summary metrics (total_return, sharpe, max_drawdown, ...).
+///
+/// error : str | None
+///     ``None`` on success. Otherwise the first error raised by the
+///     strategy during the run (e.g. an exception thrown by
+///     ``evaluate(...)``). Strategies that fail still produce a result
+///     row so the rest of the experiment isn't lost — the engine simply
+///     records the error and reports the experiment status as
+///     ``"failed"``.
 #[pyclass(get_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StrategyRunResult {
@@ -164,6 +172,8 @@ pub struct StrategyRunResult {
     pub trades: Vec<Trade>,
     pub orders: Vec<OrderRecord>,
     pub metrics: HashMap<String, f64>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[pymethods]
@@ -173,11 +183,12 @@ impl StrategyRunResult {
 
     fn __repr__(&self) -> String {
         format!(
-            "StrategyRunResult(id={:?}, strategy={:?}, n_bars={}, n_trades={})",
+            "StrategyRunResult(id={:?}, strategy={:?}, n_bars={}, n_trades={}, error={:?})",
             self.strategy_id,
             self.strategy_name,
             self.equity_curve.len(),
             self.trades.len(),
+            self.error,
         )
     }
 }

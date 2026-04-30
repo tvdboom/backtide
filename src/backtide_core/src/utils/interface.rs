@@ -2,9 +2,11 @@
 
 use crate::config::models::log_level::LogLevel;
 use crate::engine::Engine;
+use crate::utils::experiment_log::ExperimentFileLayer;
 use pyo3::prelude::*;
 use std::sync::OnceLock;
 use tracing::info;
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 // ────────────────────────────────────────────────────────────────────────────
@@ -16,19 +18,30 @@ static TRACING: OnceLock<()> = OnceLock::new();
 
 pub fn init_logging_with_level(level: LogLevel) {
     TRACING.get_or_init(|| {
+        // The user-facing console layer honours the configured log level.
+        let console_filter = EnvFilter::new(format!(
+            "{},h2=warn,hyper=warn,hyper_util=warn,reqwest=warn,cookie_store=warn",
+            level.to_string().to_lowercase()
+        ));
+
         tracing_subscriber::registry()
-            .with(EnvFilter::new(format!(
-                "{},h2=warn,hyper=warn,hyper_util=warn,reqwest=warn,cookie_store=warn",
-                level.to_string().to_lowercase()
-            )))
             .with(
                 fmt::layer()
                     .with_target(true)
                     .with_thread_ids(true)
                     .with_file(true)
                     .with_line_number(true)
-                    .compact(),
+                    .compact()
+                    .with_filter(console_filter),
             )
+            // Mirrors events emitted inside an "experiment" span to a
+            // per-experiment `logs.txt` file. We attach a *separate*,
+            // permissive filter (DEBUG+) so the experiment log is always
+            // captured in full regardless of the user-facing log level —
+            // otherwise a `log_level = "warn"` config would suppress the
+            // INFO-level experiment span entirely and no file would ever
+            // be opened.
+            .with(ExperimentFileLayer.with_filter(LevelFilter::DEBUG))
             .init();
 
         info!("Backtide logging level set to: {level}.");

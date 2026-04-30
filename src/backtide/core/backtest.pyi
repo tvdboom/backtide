@@ -134,30 +134,6 @@ class AdaptiveRsi:
             The description.
 
         """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
-
-        """
     def required_indicators(self) -> list:
         """Indicators that must be computed up-front for this
         strategy.
@@ -242,30 +218,6 @@ class AlphaRsiPro:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -633,30 +585,6 @@ class BollingerMeanReversion:
             The description.
 
         """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
-
-        """
     def required_indicators(self) -> list:
         """Indicators that must be computed up-front for this
         strategy.
@@ -736,30 +664,6 @@ class BuyAndHold:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -1212,30 +1116,6 @@ class DoubleTop:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -1982,30 +1862,6 @@ class HybridAlphaRsi:
             The description.
 
         """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
-
-        """
     def required_indicators(self) -> list:
         """Indicators that must be computed up-front for this
         strategy.
@@ -2153,30 +2009,6 @@ class Macd:
             The description.
 
         """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
-
-        """
     def required_indicators(self) -> list:
         """Indicators that must be computed up-front for this
         strategy.
@@ -2259,30 +2091,6 @@ class Momentum:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -2476,30 +2284,6 @@ class MultiBollingerRotation:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -3069,30 +2853,6 @@ class RiskAverse:
             The description.
 
         """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
-
-        """
     def required_indicators(self) -> list:
         """Indicators that must be computed up-front for this
         strategy.
@@ -3171,30 +2931,6 @@ class Roc:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -3283,30 +3019,6 @@ class RocRotation:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -3399,30 +3111,6 @@ class Rsi:
             The description.
 
         """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
-
-        """
     def required_indicators(self) -> list:
         """Indicators that must be computed up-front for this
         strategy.
@@ -3502,30 +3190,6 @@ class Rsrs:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -3615,30 +3279,6 @@ class RsrsRotation:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -3813,30 +3453,6 @@ class SmaCrossover:
             The description.
 
         """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
-
-        """
     def required_indicators(self) -> list:
         """Indicators that must be computed up-front for this
         strategy.
@@ -3916,30 +3532,6 @@ class SmaNaive:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:
@@ -4205,9 +3797,18 @@ class StrategyRunResult:
     metrics : dict[str, float]
         Summary metrics (total_return, sharpe, max_drawdown, ...).
 
+    error : str | None
+        ``None`` on success. Otherwise the first error raised by the
+        strategy during the run (e.g. an exception thrown by
+        ``evaluate(...)``). Strategies that fail still produce a result
+        row so the rest of the experiment isn't lost — the engine simply
+        records the error and reports the experiment status as
+        ``"failed"``.
+
     """
 
     equity_curve: list[EquitySample]
+    error: str | None
     metrics: dict[str, float]
     orders: list[OrderRecord]
     strategy_id: str
@@ -4379,30 +3980,6 @@ class TripleRsiRotation:
             The description.
 
         """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
-
-        """
     def required_indicators(self) -> list:
         """Indicators that must be computed up-front for this
         strategy.
@@ -4492,30 +4069,6 @@ class TurtleTrading:
             The description.
 
         """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
-
-        """
     def required_indicators(self) -> list:
         """Indicators that must be computed up-front for this
         strategy.
@@ -4599,30 +4152,6 @@ class Vcp:
         -------
         str
             The description.
-
-        """
-    def evaluate(self, data, portfolio, state, _indicators) -> list[Order]:
-        """Evaluate the strategy and return orders.
-
-        Parameters
-        ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
-
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
-
-        state : [State]
-            Current simulation state.
-
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Indicators calculated on the historical data. None if no
-            indicators were selected.
-
-        Returns
-        -------
-        list[[Order]]
-            The orders to place this tick.
 
         """
     def required_indicators(self) -> list:

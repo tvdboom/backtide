@@ -227,7 +227,7 @@ pub fn compute_series_stats(
         ann_volatility,
         sharpe,
         sortino,
-        max_dd: max_dd,
+        max_dd,
         win_rate,
     })
 }

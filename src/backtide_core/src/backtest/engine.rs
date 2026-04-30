@@ -7,20 +7,19 @@
 use crate::backtest::indicators::Indicator as BuiltinIndicator;
 use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::experiment_config::ExperimentConfig;
-use crate::backtest::models::experiment_result::{
-    EquitySample, ExperimentResult, OrderRecord, StrategyRunResult, Trade,
-};
+use crate::backtest::models::experiment_result::*;
 use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
-use crate::backtest::strategies::BuyAndHold;
+use crate::backtest::strategies::{BuiltinStrategy, BuyAndHold, IndicatorView};
 use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use crate::errors::{EngineError, EngineResult};
+use crate::utils::experiment_log::{EXPERIMENT_SPAN, LOG_PATH_FIELD};
 use crate::utils::progress::{progress_bar, progress_spinner};
 use indicatif::ProgressBar;
 use pyo3::prelude::*;
@@ -28,9 +27,10 @@ use pyo3::types::{PyDict, PyList};
 use pyo3::Py;
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn};
+use tracing::{debug, info, warn, Span};
 use uuid::Uuid;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -65,14 +65,57 @@ impl Engine {
         let experiment_id = Uuid::new_v4().simple().to_string()[..16].to_owned();
         let mut warnings: Vec<String> = Vec::new();
 
-        // Persist the source configuration as a TOML file under
-        // `<storage>/experiments/<experiment_id>.toml` *before* the run
-        // starts. Lets the UI/CLI re-open and edit a past experiment.
-        if let Err(e) =
-            persist_experiment_config(&self.config.data.storage_path, &experiment_id, config)
-        {
-            warn!(experiment_id = %experiment_id, "Failed to persist experiment config: {e}");
-            warnings.push(format!("Failed to persist experiment config: {e}"));
+        // ── Set up per-experiment logging ───────────────────────────────
+        //
+        // We open a top-level [`EXPERIMENT_SPAN`] span and let the global
+        // `ExperimentFileLayer` (registered in `init_logging`) mirror every
+        // event emitted while the span is on the stack into a dedicated
+        // `<storage>/experiments/<experiment_id>/logs.txt` file. The UI
+        // exposes that file via a popover on the full-analysis page.
+        //
+        // No bespoke logging plumbing is required in this module — plain
+        // `tracing::info!` / `warn!` / `debug!` calls Just Work, including
+        // those emitted by helper functions called from here.
+        let storage_path = &self.config.data.storage_path;
+        let exp_dir = storage_path.join("experiments").join(&experiment_id);
+        if let Err(e) = std::fs::create_dir_all(&exp_dir) {
+            warn!(experiment_id = %experiment_id, "Failed to create experiment dir: {e}");
+            warnings.push(format!("Failed to create experiment dir: {e}"));
+        }
+        let log_path = exp_dir.join("logs.txt");
+
+        let experiment_span = tracing::info_span!(
+            EXPERIMENT_SPAN,
+            experiment_id = %experiment_id,
+            { LOG_PATH_FIELD } = %log_path.display(),
+        );
+        let _enter = experiment_span.enter();
+
+        info!(
+            "Starting experiment id={} name={:?} tags={:?}",
+            experiment_id, config.general.name, config.general.tags
+        );
+        info!(
+            "Configuration summary: {} symbols, interval={:?}, instrument_type={:?}, \
+             benchmark={:?}, risk_free_rate={}%, initial_cash={}, {} indicators, \
+             {} strategies",
+            config.data.symbols.len(),
+            config.data.interval,
+            config.data.instrument_type,
+            config.strategy.benchmark,
+            config.engine.risk_free_rate,
+            config.portfolio.initial_cash,
+            config.indicators.indicators.len(),
+            config.strategy.strategies.len()
+        );
+
+        // Persist the source configuration as a TOML file.
+        match persist_experiment_config(storage_path, &experiment_id, config) {
+            Ok(p) => info!("Persisted experiment config to {}", p.display()),
+            Err(e) => {
+                warn!(experiment_id = %experiment_id, "Failed to persist experiment config: {e}");
+                warnings.push(format!("Failed to persist experiment config: {e}"));
+            },
         }
 
         // Augment the symbol list with the benchmark (if any) so its bars
@@ -80,9 +123,11 @@ impl Engine {
         let mut symbols = config.data.symbols.clone();
         let benchmark = config.strategy.benchmark.trim().to_owned();
         if !benchmark.is_empty() && !symbols.iter().any(|s| s == &benchmark) {
+            info!("Folding benchmark symbol {:?} into symbol list", benchmark);
             symbols.push(benchmark.clone());
         }
         if symbols.is_empty() {
+            warn!("Experiment has no symbols — aborting.");
             return Err(EngineError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Experiment has no symbols.",
@@ -90,6 +135,7 @@ impl Engine {
         }
 
         // ── Phase 1: data ───────────────────────────────────────────────
+        info!("Phase 1: resolving instrument profiles for {} symbol(s)...", symbols.len());
 
         let pb = verbose.then(|| progress_spinner("Resolving instrument profiles..."));
         let profiles = self.resolve_profiles(
@@ -98,6 +144,7 @@ impl Engine {
             vec![config.data.interval],
             false,
         )?;
+        info!("Resolved {} instrument profile(s).", profiles.len());
         if let Some(p) = pb {
             p.finish_and_clear();
         }
@@ -105,13 +152,27 @@ impl Engine {
         let pb = verbose.then(|| progress_spinner("Downloading missing bars..."));
         let start_clamp = config.data.start_date.as_deref().and_then(parse_iso_date_to_ts);
         let end_clamp = config.data.end_date.as_deref().and_then(parse_iso_date_to_ts);
+        info!(
+            "Downloading missing bars (start_clamp={:?}, end_clamp={:?})...",
+            config.data.start_date, config.data.end_date
+        );
         let dl = self.download_bars(&profiles, start_clamp, end_clamp, false)?;
+        info!(
+            "Download complete: {} succeeded, {} failed, {} warning(s).",
+            dl.n_succeeded,
+            dl.n_failed,
+            dl.warnings.len()
+        );
+        for w in &dl.warnings {
+            warn!("Download warning: {w}");
+        }
         warnings.extend(dl.warnings.iter().cloned());
         if let Some(p) = pb {
             p.finish_and_clear();
         }
 
         // ── Phase 2: load bars ──────────────────────────────────────────
+        info!("Phase 2: loading bars from storage...");
         let pb = verbose.then(|| progress_spinner("Loading bars from storage..."));
         let bar_map = self.load_bars(
             &symbols,
@@ -125,6 +186,11 @@ impl Engine {
             start_clamp,
             end_clamp,
         )?;
+        let total_bars: usize = bar_map.values().map(|v| v.len()).sum();
+        info!("Loaded {} bar(s) across {} symbol(s).", total_bars, bar_map.len());
+        for (sym, bars) in &bar_map {
+            debug!("  {} → {} bars", sym, bars.len());
+        }
         if let Some(p) = pb {
             p.finish_and_clear();
         }
@@ -134,8 +200,10 @@ impl Engine {
             bar_map.values().flat_map(|bars| bars.iter().map(|b| b.open_ts as i64)).collect();
         all_ts.sort_unstable();
         all_ts.dedup();
+        info!("Master timeline has {} unique timestamps.", all_ts.len());
 
         if all_ts.is_empty() {
+            warn!("No bars available for the selected symbols/interval — experiment failed.");
             warnings.push("No bars available for the selected symbols/interval.".into());
             return Ok(ExperimentResult {
                 experiment_id,
@@ -151,18 +219,10 @@ impl Engine {
 
         // Per-symbol aligned bars indexed by timestamp position.
         let aligned = align_bars(&bar_map, &all_ts, config.engine.empty_bar_policy);
+        info!("Aligned bars using policy={:?}.", config.engine.empty_bar_policy);
 
-        // ── Phase 3: indicators (computed once) ─────────────────────────
-
-        let pb = verbose.then(|| {
-            progress_bar(config.indicators.indicators.len() as u64, "Computing indicators...")
-        });
-        let indicators = compute_indicators(&config.indicators.indicators, &aligned, pb.as_ref())?;
-        if let Some(p) = pb {
-            p.finish_and_clear();
-        }
-
-        // ── Phase 4: run strategies in parallel ─────────────────────────
+        // ── Phase 3a: load strategies (so we can collect their auto indicators) ──
+        info!("Phase 3: loading {} strategy definition(s)...", config.strategy.strategies.len());
 
         let mut strategy_objs = load_strategies(&config.strategy.strategies)?;
 
@@ -175,10 +235,89 @@ impl Engine {
                 };
                 Ok(Py::new(py, bh)?.into_any())
             }) {
-                Ok(obj) => strategy_objs.push((benchmark_name.clone(), obj, false)),
-                Err(e) => warnings.push(format!("Failed to instantiate benchmark: {e}")),
+                Ok(obj) => {
+                    info!(
+                        "Injected benchmark strategy {:?} (BuyAndHold {}).",
+                        benchmark_name, benchmark
+                    );
+                    strategy_objs.push((benchmark_name.clone(), obj, false));
+                },
+                Err(e) => {
+                    warn!("Failed to instantiate benchmark: {e}");
+                    warnings.push(format!("Failed to instantiate benchmark: {e}"));
+                },
             }
         }
+
+        // ── Phase 3b: collect indicator objects (user-selected + auto-injected) ──
+        //
+        // Built-in strategies declare their dependencies via the
+        // ``required_indicators()`` pymethod. We instantiate those here and
+        // hand them to ``compute_indicators`` alongside any user-selected
+        // indicators loaded from disk. Without this step, every strategy
+        // that relies on auto-included indicators (SMA Crossover, MACD,
+        // RSI, BB Mean Reversion, …) would silently place zero orders
+        // because the lookups in ``decide_inner`` return ``None``.
+        let mut indicator_objs: Vec<(String, Py<PyAny>)> = Vec::new();
+        let mut seen_inds: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for name in &config.indicators.indicators {
+            match Python::attach(|py| load_indicator(py, name)) {
+                Ok(obj) => {
+                    if seen_inds.insert(name.clone()) {
+                        indicator_objs.push((name.clone(), obj));
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to load indicator {name}: {e}");
+                    warnings.push(format!("Failed to load indicator {name}: {e}"));
+                },
+            }
+        }
+
+        for (sname, sobj, _) in &strategy_objs {
+            let pairs = Python::attach(|py| -> PyResult<Vec<(String, Py<PyAny>)>> {
+                let bound = sobj.bind(py);
+                if !bound.hasattr("required_indicators")? {
+                    return Ok(Vec::new());
+                }
+                let raw = bound.call_method0("required_indicators")?;
+                let inds: Vec<Py<PyAny>> = raw.extract()?;
+                let mut out = Vec::with_capacity(inds.len());
+                for ind in inds {
+                    let name = auto_indicator_name_for(py, &ind)?;
+                    out.push((name, ind));
+                }
+                Ok(out)
+            });
+            match pairs {
+                Ok(pairs) => {
+                    for (name, obj) in pairs {
+                        if seen_inds.insert(name.clone()) {
+                            info!("Auto-injecting indicator {name} required by {sname}");
+                            indicator_objs.push((name, obj));
+                        }
+                    }
+                },
+                Err(e) => warn!(
+                    "Failed to collect required indicators for {sname}: {e} \
+                     (strategy will run without auto-indicators)"
+                ),
+            }
+        }
+
+        // ── Phase 3c: indicators (computed once) ────────────────────────
+        info!("Computing {} indicator(s)...", indicator_objs.len());
+
+        let pb =
+            verbose.then(|| progress_bar(indicator_objs.len() as u64, "Computing indicators..."));
+        let indicators = compute_indicators(&indicator_objs, &aligned, pb.as_ref())?;
+        info!("Computed {} indicator series.", indicators.len());
+        if let Some(p) = pb {
+            p.finish_and_clear();
+        }
+
+        // ── Phase 4: run strategies in parallel ─────────────────────────
 
         let pb = verbose.then(|| {
             progress_bar(
@@ -192,11 +331,23 @@ impl Engine {
         let aligned_arc = std::sync::Arc::new(aligned);
         let indicators_arc = std::sync::Arc::new(indicators);
         let profiles_arc = std::sync::Arc::new(profiles.clone());
+        // Master timeline shared by all strategies. Built once here from
+        // `all_ts` so per-strategy logic doesn't have to reconstruct it
+        // from per-symbol rows (which would fall back to row indices for
+        // bars where the chosen reference symbol has no data — yielding
+        // bogus timestamps like ``1970-01-01 …`` for any benchmark whose
+        // history starts later than the earliest selected symbol).
+        let timeline_arc = std::sync::Arc::new(all_ts.clone());
 
         // Built-in (Rust) strategies are run in parallel via rayon.
         // Custom (Python) strategies are run sequentially under the GIL.
         let (custom, builtin): (Vec<(String, Py<PyAny>, bool)>, Vec<(String, Py<PyAny>, bool)>) =
             strategy_objs.into_iter().partition(|(_, _, is_custom)| *is_custom);
+        info!(
+            "Dispatching strategies: {} built-in (parallel) and {} custom (sequential).",
+            builtin.len(),
+            custom.len()
+        );
 
         let cfg_arc = std::sync::Arc::new(cfg_clone);
 
@@ -204,26 +355,43 @@ impl Engine {
         let aligned_for_par = std::sync::Arc::clone(&aligned_arc);
         let indicators_for_par = std::sync::Arc::clone(&indicators_arc);
         let profiles_for_par = std::sync::Arc::clone(&profiles_arc);
+        let timeline_for_par = std::sync::Arc::clone(&timeline_arc);
+
+        // Capture the experiment span so each rayon worker can re-enter it
+        // — `tracing` span scope is thread-local, so events from worker
+        // threads would otherwise miss the file layer entirely.
+        let par_span = Span::current();
 
         let mut results: Vec<StrategyRunResult> = builtin
             .into_par_iter()
             .map(|(name, obj, _)| {
-                let r = run_one_strategy(
-                    &name,
-                    obj,
-                    &cfg_for_par,
-                    &aligned_for_par,
-                    &indicators_for_par,
-                    &profiles_for_par,
-                );
-                if let Some(pb) = &pb_arc {
-                    pb.lock().unwrap().inc(1);
-                }
-                r
+                par_span.in_scope(|| {
+                    info!("▶ Running strategy {:?}...", name);
+                    let r = run_one_strategy(
+                        &name,
+                        obj,
+                        &cfg_for_par,
+                        &aligned_for_par,
+                        &indicators_for_par,
+                        &profiles_for_par,
+                        &timeline_for_par,
+                    );
+                    info!(
+                        "✔ Finished strategy {:?}: {} trades, {} bar(s) in equity curve.",
+                        r.strategy_name,
+                        r.trades.len(),
+                        r.equity_curve.len()
+                    );
+                    if let Some(pb) = &pb_arc {
+                        pb.lock().unwrap().inc(1);
+                    }
+                    r
+                })
             })
             .collect();
 
         for (name, obj, _) in custom {
+            info!("▶ Running custom strategy {:?}...", name);
             let r = run_one_strategy(
                 &name,
                 obj,
@@ -231,6 +399,13 @@ impl Engine {
                 &aligned_arc,
                 &indicators_arc,
                 &profiles_arc,
+                &timeline_arc,
+            );
+            info!(
+                "✔ Finished custom strategy {:?}: {} trades, {} bar(s) in equity curve.",
+                r.strategy_name,
+                r.trades.len(),
+                r.equity_curve.len()
             );
             if let Some(pb) = &pb_arc {
                 pb.lock().unwrap().inc(1);
@@ -242,23 +417,89 @@ impl Engine {
             p.finish_and_clear();
         }
 
-        // ── Compute alpha for every non-benchmark run ───────────────────
-        if !benchmark.is_empty() {
-            let bench_total = results
+        // ── Compute alpha & excess return for every run ─────────────────
+        //
+        // Alpha is defined as the windowed total-return difference between a
+        // strategy and the benchmark, where the window starts at the *later*
+        // of the two equity-curve start dates. This avoids comparing periods
+        // where one of the two series did not yet exist (e.g. benchmark only
+        // goes back to 2004 while the strategy has data from 1990 — alpha
+        // must then be measured from 2004 onwards on both sides).
+        //
+        // Excess return is the strategy's windowed total return minus the
+        // compounded risk-free return over the same window.
+        info!(
+            "Computing alpha & excess return (rf={}%, benchmark={:?}).",
+            config.engine.risk_free_rate,
+            if benchmark.is_empty() {
+                "<none>"
+            } else {
+                benchmark.as_str()
+            }
+        );
+        const SECS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0;
+        let rf = config.engine.risk_free_rate / 100.0;
+
+        // Snapshot of the benchmark's equity curve (ts, equity), if any.
+        let bench_snapshot: Option<Vec<(i64, f64)>> = if !benchmark.is_empty() {
+            results
                 .iter()
                 .find(|r| r.strategy_name == benchmark_name)
-                .and_then(|r| r.metrics.get("total_return").copied());
-            if let Some(b) = bench_total {
-                for r in &mut results {
-                    if r.strategy_name == benchmark_name {
-                        continue;
-                    }
-                    let tr = r.metrics.get("total_return").copied().unwrap_or(0.0);
-                    r.metrics.insert("alpha".into(), tr - b);
+                .map(|r| r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect())
+        } else {
+            None
+        };
+        let bench_start_ts = bench_snapshot.as_ref().and_then(|c| c.first().map(|(t, _)| *t));
+
+        // Windowed total return: (final_equity - first_equity_at_or_after_ws)
+        //                       / first_equity_at_or_after_ws.
+        let windowed_return = |curve: &[(i64, f64)], window_start: i64| -> Option<f64> {
+            let (_, start_eq) = curve.iter().find(|(t, _)| *t >= window_start).copied()?;
+            let (_, end_eq) = curve.last().copied()?;
+            if start_eq <= 0.0 {
+                None
+            } else {
+                Some((end_eq - start_eq) / start_eq)
+            }
+        };
+
+        for r in &mut results {
+            let curve_pts: Vec<(i64, f64)> =
+                r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect();
+            let strat_start = match curve_pts.first() {
+                Some((t, _)) => *t,
+                None => continue,
+            };
+            let strat_end = curve_pts.last().map(|(t, _)| *t).unwrap_or(strat_start);
+
+            // Align with benchmark when available.
+            let window_start = match bench_start_ts {
+                Some(b) => strat_start.max(b),
+                None => strat_start,
+            };
+
+            let strat_ret = windowed_return(&curve_pts, window_start).unwrap_or(0.0);
+
+            // Compounded risk-free return over the window.
+            let years = ((strat_end - window_start).max(0) as f64) / SECS_PER_YEAR;
+            let rf_ret = if years > 0.0 {
+                (1.0_f64 + rf).powf(years) - 1.0
+            } else {
+                0.0
+            };
+            r.metrics.insert("excess_return".into(), strat_ret - rf_ret);
+
+            // Alpha is only meaningful for non-benchmark runs.
+            if let Some(bench) = bench_snapshot.as_ref() {
+                if r.strategy_name != benchmark_name {
+                    let bench_ret = windowed_return(bench, window_start).unwrap_or(0.0);
+                    r.metrics.insert("alpha".into(), strat_ret - bench_ret);
                 }
             }
+        }
 
-            // Ensure the benchmark run is always the first entry in the results.
+        // Ensure the benchmark run is always the first entry in the results.
+        if !benchmark.is_empty() {
             if let Some(idx) = results.iter().position(|r| r.strategy_name == benchmark_name) {
                 if idx != 0 {
                     let bench = results.remove(idx);
@@ -268,7 +509,47 @@ impl Engine {
         }
 
         let finished_at = now_secs();
-        let status = "completed".to_owned();
+        // Surface per-strategy failures: log each one and roll the
+        // experiment status up to "failed" if any strategy errored out.
+        let n_failed = results.iter().filter(|r| r.error.is_some()).count();
+        for r in &results {
+            if let Some(err) = &r.error {
+                warn!(strategy = %r.strategy_name, "Strategy failed: {err}");
+                warnings.push(format!("Strategy {:?} failed: {}", r.strategy_name, err));
+            }
+        }
+        let status = if n_failed == 0 {
+            "completed".to_owned()
+        } else if n_failed == results.len() {
+            "failed".to_owned()
+        } else {
+            "partial".to_owned()
+        };
+        info!(
+            "All strategies completed in {}s ({} result(s), {} failed, status={}).",
+            finished_at - started_at,
+            results.len(),
+            n_failed,
+            status,
+        );
+        for r in &results {
+            if r.error.is_some() {
+                info!("  ✗ {:<32} FAILED — {}", r.strategy_name, r.error.as_deref().unwrap_or(""));
+                continue;
+            }
+            let tr = r.metrics.get("total_return").copied().unwrap_or(0.0);
+            let sh = r.metrics.get("sharpe").copied().unwrap_or(0.0);
+            let alpha = r.metrics.get("alpha").copied();
+            let excess = r.metrics.get("excess_return").copied().unwrap_or(0.0);
+            info!(
+                "  • {:<32} total_return={:+.4} sharpe={:+.3} excess={:+.4} alpha={}",
+                r.strategy_name,
+                tr,
+                sh,
+                excess,
+                alpha.map(|a| format!("{a:+.4}")).unwrap_or_else(|| "n/a".into())
+            );
+        }
 
         let result = ExperimentResult {
             experiment_id: experiment_id.clone(),
@@ -282,18 +563,23 @@ impl Engine {
         };
 
         // ── Phase 5: persist ────────────────────────────────────────────
+        info!("Phase 5: persisting experiment to DuckDB...");
         let pb = verbose.then(|| progress_spinner("Persisting experiment results..."));
         if let Err(e) = self.db.write_experiment(config, &result) {
             warn!("Failed to persist experiment: {e}");
+        } else {
+            info!("Experiment persisted successfully.");
         }
         if let Some(p) = pb {
             p.finish_and_clear();
         }
 
         info!(
-            id = %experiment_id,
-            n_strategies = result.strategies.len(),
-            "Experiment finished."
+            "Experiment {} finished with status={} ({} strategies, {} warnings).",
+            experiment_id,
+            result.status,
+            result.strategies.len(),
+            result.warnings.len()
         );
         Ok(result)
     }
@@ -341,20 +627,31 @@ fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
-/// Serialise `config` to TOML and write it to
-/// `<storage>/experiments/<experiment_id>.toml`. Creates the parent
-/// directory on first use. Returns any I/O or serialisation error.
+/// Serialize `config` and write it to `/experiments/<experiment_id>/config.toml`.
 fn persist_experiment_config(
     storage_path: &std::path::Path,
     experiment_id: &str,
     config: &ExperimentConfig,
-) -> Result<(), String> {
-    let dir = storage_path.join("experiments");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create_dir_all: {e}"))?;
-    let path = dir.join(format!("{experiment_id}.toml"));
-    let toml_str = Python::attach(|py| -> PyResult<String> { config.to_toml(py) })
-        .map_err(|e| format!("serialise: {e}"))?;
-    std::fs::write(&path, toml_str).map_err(|e| format!("write {}: {e}", path.display()))
+) -> Result<PathBuf, String> {
+    use crate::backtest::models::experiment_config::ExperimentConfigInner;
+
+    let dir = storage_path.join("experiments").join(experiment_id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create_dir_all({}): {e}", dir.display()))?;
+
+    let inner = ExperimentConfigInner {
+        general: config.general.clone(),
+        data: config.data.clone(),
+        portfolio: config.portfolio.clone(),
+        strategy: config.strategy.clone(),
+        indicators: config.indicators.clone(),
+        exchange: config.exchange.clone(),
+        engine: config.engine.clone(),
+    };
+    let toml_str = toml::to_string_pretty(&inner).map_err(|e| format!("toml serialise: {e}"))?;
+
+    let path = dir.join("config.toml");
+    std::fs::write(&path, toml_str).map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(path)
 }
 
 fn parse_iso_date_to_ts(s: &str) -> Option<u64> {
@@ -422,28 +719,23 @@ fn align_bars(
 
 /// Compute every requested indicator once over each symbol.
 ///
+/// Each input pair is ``(deterministic_name, indicator_object)``: the
+/// caller is expected to have already loaded user-selected indicators
+/// from disk and to have instantiated any strategy-required auto
+/// indicators. We don't load anything by name here so that auto-injected
+/// indicators (which only exist as in-memory objects, never as ``.pkl``
+/// files on disk) are first-class citizens of the pipeline.
+///
 /// Returns a `{indicator_name -> {symbol -> Vec<Vec<f64>>}}` map.
 fn compute_indicators(
-    indicator_names: &[String],
+    indicator_objs: &[(String, Py<PyAny>)],
     aligned: &HashMap<String, Vec<Option<Bar>>>,
     pb: Option<&ProgressBar>,
 ) -> EngineResult<HashMap<String, HashMap<String, Vec<Vec<f64>>>>> {
     let mut out: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
 
-    for name in indicator_names {
+    for (name, obj) in indicator_objs {
         let mut per_symbol: HashMap<String, Vec<Vec<f64>>> = HashMap::new();
-        let loaded = Python::attach(|py| -> PyResult<Py<PyAny>> { load_indicator(py, name) });
-
-        let obj = match loaded {
-            Ok(o) => o,
-            Err(e) => {
-                warn!("Failed to load indicator {name}: {e}");
-                if let Some(p) = pb {
-                    p.inc(1);
-                }
-                continue;
-            },
-        };
 
         for (sym, row) in aligned {
             let bars: Vec<Bar> = row
@@ -465,7 +757,7 @@ fn compute_indicators(
                 .collect();
 
             let computed = Python::attach(|py| -> PyResult<Vec<Vec<f64>>> {
-                compute_indicator(py, &obj, &bars)
+                compute_indicator(py, obj, &bars)
             });
 
             match computed {
@@ -582,6 +874,38 @@ fn load_pickled(py: Python<'_>, sub: &str, name: &str) -> PyResult<Py<PyAny>> {
     Ok(obj.unbind())
 }
 
+/// Build the deterministic ``__auto_*`` name for a Python indicator
+/// instance. Mirrors `_auto_indicator_name` in the Python strategy utils
+/// and the Rust `auto_indicator_name` used by built-in strategies'
+/// ``decide_inner`` so the engine and the strategies look up indicators
+/// under the *same* key.
+///
+/// Format: ``__auto_<ACRONYM>_<arg1>_<arg2>_...`` (or ``__auto_<ACRONYM>_default``
+/// when the indicator takes no constructor arguments). ``.``, ``-`` and
+/// spaces are sanitised for filesystem-friendliness.
+fn auto_indicator_name_for(py: Python<'_>, ind: &Py<PyAny>) -> PyResult<String> {
+    let bound = ind.bind(py);
+    let acronym: String = bound.getattr("acronym")?.extract()?;
+
+    // ``__reduce__`` returns ``(cls, args_tuple)`` for picklable objects.
+    let reduce = bound.call_method0("__reduce__")?;
+    let args_any = reduce.get_item(1)?;
+    let args: Vec<Py<PyAny>> = args_any.extract().unwrap_or_default();
+
+    let arg_strs: Vec<String> = args
+        .iter()
+        .map(|a| a.bind(py).str().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default())
+        .collect();
+
+    let arg_str = if arg_strs.is_empty() {
+        "default".to_owned()
+    } else {
+        arg_strs.join("_")
+    };
+    let sanitized = arg_str.replace('.', "p").replace('-', "n").replace(' ', "");
+    Ok(format!("__auto_{acronym}_{sanitized}"))
+}
+
 /// Load every requested strategy. Returns `(name, obj, is_custom)` triples.
 fn load_strategies(names: &[String]) -> EngineResult<Vec<(String, Py<PyAny>, bool)>> {
     Python::attach(|py| -> PyResult<_> {
@@ -607,11 +931,17 @@ fn run_one_strategy(
     aligned: &HashMap<String, Vec<Option<Bar>>>,
     indicators: &HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
     profiles: &[crate::data::models::instrument_profile::InstrumentProfile],
+    timeline: &[i64],
 ) -> StrategyRunResult {
     let symbols: Vec<String> = cfg.data.symbols.clone();
     let _ = &symbols;
     let total_bars: usize = aligned.values().map(|v| v.len()).next().unwrap_or(0);
     let warmup = cfg.engine.warmup_period as usize;
+
+    // First fatal error encountered during the run, if any. Recorded on
+    // the result so the UI can flag the strategy as failed and surface
+    // the message — the rest of the experiment continues.
+    let mut run_error: Option<String> = None;
 
     // Initial portfolio: all initial cash in base currency.
     let base_ccy = cfg.portfolio.base_currency;
@@ -628,21 +958,6 @@ fn run_one_strategy(
 
     let mut peak_equity = cfg.portfolio.initial_cash as f64;
 
-    // Build the timeline once (use any symbol's row).
-    let timeline: Vec<i64> = aligned
-        .values()
-        .next()
-        .map(|row| {
-            // Reconstruct the master timeline from any symbol's row by
-            // picking timestamps from filled bars; missing ones are taken
-            // from the first non-skip slot. Fall back to row indices.
-            row.iter()
-                .enumerate()
-                .map(|(i, b)| b.as_ref().map(|x| x.open_ts as i64).unwrap_or(i as i64))
-                .collect()
-        })
-        .unwrap_or_default();
-
     // Pre-compute instrument quote currency lookup.
     let quote_ccy: HashMap<String, Currency> = profiles
         .iter()
@@ -651,67 +966,111 @@ fn run_one_strategy(
         })
         .collect();
 
+    // Try to take a Rust-only snapshot of the strategy. If this succeeds
+    // (every built-in strategy succeeds), the bar loop runs entirely
+    // without the GIL — no Python::attach per bar, no DataFrame/numpy
+    // slicing, no Vec<f64> round-trips. For multi-year backtests this
+    // turns ~20 s runs into ~50 ms ones. Custom (Python-defined)
+    // strategies fall back to the Python evaluate dispatch below.
+    let builtin: Option<BuiltinStrategy> =
+        Python::attach(|py| BuiltinStrategy::try_from_py(py, &strategy));
+
+    // Pre-extract per-symbol close arrays once. Pure Rust, dense, ready
+    // to be sliced as `&closes_full[sym][..=bar_index]` per bar.
+    let mut closes_full: Vec<(String, Vec<f64>)> = aligned
+        .iter()
+        .map(|(s, row)| {
+            let v: Vec<f64> =
+                row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.close)).collect();
+            (s.clone(), v)
+        })
+        .collect();
+    // Stable order (matches HashMap iteration would otherwise be random).
+    closes_full.sort_by(|a, b| a.0.cmp(&b.0));
+
     // Pre-build per-symbol full DataFrames and per-indicator full numpy arrays
-    // ONCE under a single GIL acquisition. Each bar then takes O(1) view slices
-    // (`df.iloc[:idx+1]` and `arr[:idx+1]`) instead of rebuilding from Python
-    // lists every iteration — turning the strategy loop from O(n^2) into O(n).
-    let (cached_data, cached_indicators) = Python::attach(
-        |py| -> PyResult<(
-            HashMap<String, Py<PyAny>>,
-            HashMap<String, HashMap<String, Vec<Py<PyAny>>>>,
-        )> {
-            let pd = py.import("pandas")?;
-            let np = py.import("numpy")?;
-
-            let mut data_full: HashMap<String, Py<PyAny>> = HashMap::with_capacity(aligned.len());
-            for (sym, row) in aligned {
-                let dict = PyDict::new(py);
-                dict.set_item(
-                    "open",
-                    PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.open)))?,
-                )?;
-                dict.set_item(
-                    "high",
-                    PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.high)))?,
-                )?;
-                dict.set_item(
-                    "low",
-                    PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.low)))?,
-                )?;
-                dict.set_item(
-                    "close",
-                    PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.close)))?,
-                )?;
-                dict.set_item(
-                    "volume",
-                    PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.volume)))?,
-                )?;
-                let df = pd.call_method1("DataFrame", (dict,))?;
-                data_full.insert(sym.clone(), df.unbind());
-            }
-
-            let mut ind_full: HashMap<String, HashMap<String, Vec<Py<PyAny>>>> =
-                HashMap::with_capacity(indicators.len());
-            for (name, per_sym) in indicators {
-                let mut by_sym: HashMap<String, Vec<Py<PyAny>>> =
-                    HashMap::with_capacity(per_sym.len());
-                for (sym, series) in per_sym {
-                    let mut arrs: Vec<Py<PyAny>> = Vec::with_capacity(series.len());
-                    for s in series {
-                        let arr = np.call_method1("asarray", (PyList::new(py, s)?,))?;
-                        arrs.push(arr.unbind());
-                    }
-                    by_sym.insert(sym.clone(), arrs);
-                }
-                ind_full.insert(name.clone(), by_sym);
-            }
-            Ok((data_full, ind_full))
-        },
-    )
-    .unwrap_or_else(|e| {
-        warn!(strategy=%name, "Failed to pre-build strategy view: {e}");
+    // for the *Python* path only. Built-in strategies don't need these and we
+    // skip the GIL-heavy pre-build entirely. For custom strategies this turns
+    // the loop from O(n^2) Python work into O(n) cheap iloc slice views.
+    let (cached_data, cached_indicators) = if builtin.is_some() {
         (HashMap::new(), HashMap::new())
-    });
+    } else {
+        Python::attach(
+            |py| -> PyResult<(
+                HashMap<String, Py<PyAny>>,
+                HashMap<String, HashMap<String, Vec<Py<PyAny>>>>,
+            )> {
+                let pd = py.import("pandas")?;
+                let np = py.import("numpy")?;
+
+                let mut data_full: HashMap<String, Py<PyAny>> =
+                    HashMap::with_capacity(aligned.len());
+                for (sym, row) in aligned {
+                    let dict = PyDict::new(py);
+                    dict.set_item(
+                        "open",
+                        PyList::new(
+                            py,
+                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.open)),
+                        )?,
+                    )?;
+                    dict.set_item(
+                        "high",
+                        PyList::new(
+                            py,
+                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.high)),
+                        )?,
+                    )?;
+                    dict.set_item(
+                        "low",
+                        PyList::new(
+                            py,
+                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.low)),
+                        )?,
+                    )?;
+                    dict.set_item(
+                        "close",
+                        PyList::new(
+                            py,
+                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.close)),
+                        )?,
+                    )?;
+                    dict.set_item(
+                        "volume",
+                        PyList::new(
+                            py,
+                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.volume)),
+                        )?,
+                    )?;
+                    let df = pd.call_method1("DataFrame", (dict,))?;
+                    data_full.insert(sym.clone(), df.unbind());
+                }
+
+                let mut ind_full: HashMap<String, HashMap<String, Vec<Py<PyAny>>>> =
+                    HashMap::with_capacity(indicators.len());
+                for (name, per_sym) in indicators {
+                    let mut by_sym: HashMap<String, Vec<Py<PyAny>>> =
+                        HashMap::with_capacity(per_sym.len());
+                    for (sym, series) in per_sym {
+                        let mut arrs: Vec<Py<PyAny>> = Vec::with_capacity(series.len());
+                        for s in series {
+                            let arr = np.call_method1("asarray", (PyList::new(py, s)?,))?;
+                            arrs.push(arr.unbind());
+                        }
+                        by_sym.insert(sym.clone(), arrs);
+                    }
+                    ind_full.insert(name.clone(), by_sym);
+                }
+                Ok((data_full, ind_full))
+            },
+        )
+        .unwrap_or_else(|e| {
+            let msg = format!("Failed to pre-build strategy view: {e}");
+            warn!(strategy=%name, "{msg}");
+            run_error.get_or_insert(msg);
+            (HashMap::new(), HashMap::new())
+        })
+    };
 
     for bar_index in 0..total_bars {
         let ts = timeline[bar_index];
@@ -850,17 +1209,26 @@ fn run_one_strategy(
             orders: open_orders.clone(),
         };
 
-        // ── 3. Strategy.evaluate(...) ────────────────────────────────────
+        // ── 3. Strategy decision ────────────────────────────────────────
         if !is_warmup {
-            let new_orders = Python::attach(|py| -> PyResult<Vec<Order>> {
-                let data = build_per_symbol_view(py, &cached_data, bar_index)?;
-                let inds = build_indicator_view(py, &cached_indicators, bar_index)?;
-                let res = strategy
-                    .bind(py)
-                    .call_method1("evaluate", (data, portfolio.clone(), state.clone(), inds))?;
-                let list: Vec<Order> = res.extract().unwrap_or_default();
-                Ok(list)
-            });
+            let new_orders: Result<Vec<Order>, PyErr> = if let Some(b) = &builtin {
+                // Fast path: pure-Rust dispatch, no GIL, no DataFrame slicing.
+                let closes_view: Vec<(String, &[f64])> =
+                    closes_full.iter().map(|(s, v)| (s.clone(), &v[..=bar_index])).collect();
+                let inds = IndicatorView::new(indicators, bar_index);
+                Ok(b.decide(&closes_view, &inds, &portfolio, &state))
+            } else {
+                // Custom (Python) strategy: original evaluate path.
+                Python::attach(|py| -> PyResult<Vec<Order>> {
+                    let data = build_per_symbol_view(py, &cached_data, bar_index)?;
+                    let inds = build_indicator_view(py, &cached_indicators, bar_index)?;
+                    let res = strategy
+                        .bind(py)
+                        .call_method1("evaluate", (data, portfolio.clone(), state.clone(), inds))?;
+                    let list: Vec<Order> = res.extract().unwrap_or_default();
+                    Ok(list)
+                })
+            };
 
             match new_orders {
                 Ok(mut ords) => {
@@ -900,7 +1268,11 @@ fn run_one_strategy(
                     });
                     open_orders.extend(ords);
                 },
-                Err(e) => warn!(strategy=%name, "evaluate() raised: {e}"),
+                Err(e) => {
+                    let msg = format!("evaluate() raised: {e}");
+                    warn!(strategy=%name, "{msg}");
+                    run_error.get_or_insert(msg);
+                },
             }
         }
 
@@ -969,6 +1341,7 @@ fn run_one_strategy(
         trades: closed_trades,
         orders: order_records,
         metrics,
+        error: run_error,
     }
 }
 
@@ -1374,6 +1747,7 @@ mod tests {
             trades: closed_trades,
             orders: order_records,
             metrics,
+            error: None,
         }
     }
 

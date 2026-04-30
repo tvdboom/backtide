@@ -531,9 +531,7 @@ with tab_map[tab_summary]:
                     ),
                     "sharpe": lambda v: "" if pd.isna(v) else _fmt_metric(v),
                     "sortino": lambda v: "" if pd.isna(v) else _fmt_metric(v),
-                    "max_dd": lambda v: (
-                        "" if pd.isna(v) else _fmt_metric(v * 100, suffix="%")
-                    ),
+                    "max_dd": lambda v: "" if pd.isna(v) else _fmt_metric(v * 100, suffix="%"),
                     "win_rate": lambda v: "" if pd.isna(v) else _fmt_metric(v * 100, suffix="%"),
                     "total_bars": "{:,.0f}",
                 }

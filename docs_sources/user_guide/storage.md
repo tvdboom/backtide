@@ -67,3 +67,25 @@ The **Experiment** page also offers a *Use stored data* toggle. When enabled,
 the backtest draws exclusively from the local database without downloading
 new data — the available date range is determined entirely by what has already
 been stored.
+
+<br>
+
+## Layout on disk
+
+Underneath `storage_path` (default `.backtide/`) the application keeps a
+handful of subdirectories alongside the DuckDB file. The DuckDB file stores
+market data and experiment results; the subdirectories store user-defined
+artifacts (strategies, indicators, configs, logs).
+
+```text
+.backtide/
+├── database.duckdb          # OHLCV bars, dividends, instruments, experiment results
+├── strategies/
+│   └── <name>.pkl           # One pickled strategy instance per saved strategy
+├── indicators/
+│   └── <name>.pkl           # One pickled indicator instance per saved indicator
+└── experiments/
+    └── <experiment_id>/
+        ├── config.toml      # Exact configuration the run was launched with
+        └── logs.txt         # Full per-experiment engine log (info + debug)
+```
