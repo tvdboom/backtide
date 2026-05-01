@@ -115,6 +115,24 @@ plot_pnl(runs, normalize=True)
 
 [plot_pnl]: ../api/analysis/plot_pnl.md
 
+In the **Results** page the same set of plots is rendered in a tabbed
+container right below the PnL chart. The available tabs (alphabetical
+order) are:
+
+| Tab | Function | Multi-run? |
+|---|---|---|
+| MAE / MFE | [`plot_mae_mfe`](../api/analysis/plot_mae_mfe.md) | single |
+| PnL histogram | [`plot_pnl_histogram`](../api/analysis/plot_pnl_histogram.md) | multi |
+| Position size | [`plot_position_size`](../api/analysis/plot_position_size.md) | single |
+| Price | [`plot_price`](../api/analysis/plot_price.md) (with `strategy_run=`) | single |
+| Rolling returns | [`plot_rolling_returns`](../api/analysis/plot_rolling_returns.md) | multi |
+| Rolling Sharpe | [`plot_rolling_sharpe`](../api/analysis/plot_rolling_sharpe.md) | multi |
+| Trade duration | [`plot_trade_duration`](../api/analysis/plot_trade_duration.md) | multi |
+| Trade PnL | [`plot_trade_pnl`](../api/analysis/plot_trade_pnl.md) | multi |
+
+Tabs are rendered lazily (only the active tab's plot is computed) and
+the single-run tabs include a strategy selector at the top.
+
 ### Orders
 
 Every fill, cancellation and rejection produces an [`OrderRecord`]. The relevant

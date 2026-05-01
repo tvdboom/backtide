@@ -3797,6 +3797,12 @@ class StrategyRunResult:
     metrics : dict[str, float]
         Summary metrics (total_return, sharpe, max_drawdown, ...).
 
+    base_currency : [Currency]
+        The portfolio's base (accounting) currency for this run. Equity,
+        PnL and drawdown values stored on the run are denominated in this
+        currency. Captured from the `ExperimentConfig` so analysis tools
+        don't need to look the experiment config up to label axes.
+
     error : str | None
         ``None`` on success. Otherwise the first error raised by the
         strategy during the run (e.g. an exception thrown by
@@ -3820,6 +3826,7 @@ class StrategyRunResult:
     strategy_id: str
     strategy_name: str
     trades: list[Trade]
+    base_currency: Currency
 
     def __eq__(self, value, /):
         ...

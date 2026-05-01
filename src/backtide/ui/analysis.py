@@ -231,7 +231,6 @@ if bars.empty:
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 
-# All possible tab labels (used as canonical keys)
 tab_summary = ":material/analytics: Summary"
 tab_candlestick = ":material/candlestick_chart: Candlestick"
 tab_correlation = ":material/grid_on: Correlation"
@@ -279,7 +278,7 @@ TAB_LABELS = [t for t in all_labels if t not in excluded]
 
 tabs = st.tabs(
     TAB_LABELS,
-    key=(key := "plot_tabs"),
+    key=(key := "plot_tabs_analysis"),
     default=_default(key),
     on_change=lambda k=key: _persist(k),
 )
@@ -288,7 +287,7 @@ tabs = st.tabs(
 tab_map = dict(zip(TAB_LABELS, tabs, strict=True))
 
 # Determine active tab index for lazy rendering
-active_tab = st.session_state.get("plot_tabs", TAB_LABELS[0])
+active_tab = st.session_state.get(key, TAB_LABELS[0])
 
 # Add currency column from instruments
 bars["currency"] = bars["symbol"].map(lambda s: str(all_i[s].quote) if s in all_i else None)

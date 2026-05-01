@@ -577,37 +577,54 @@ class _StubSample:
 class _StubRun:
     """Minimal duck-typed stand-in for `StrategyRunResult`."""
 
-    def __init__(self, name: str, equity: list[float], start: int = 1_700_000_000):
+    def __init__(
+        self,
+        name: str,
+        equity: list[float],
+        start: int = 1_700_000_000,
+        trades: list | None = None,
+        orders: list | None = None,
+    ):
         self.strategy_name = name
         # 1-day spacing (in seconds) so the x axis renders sensibly.
         self.equity_curve = [_StubSample(start + i * 86_400, e) for i, e in enumerate(equity)]
+        self.trades = trades or []
+        self.orders = orders or []
 
 
 class TestPlotPnl:
     """Tests for plot_pnl."""
 
     def test_returns_figure(self):
-        """Plotting one strategy returns a figure with one trace."""
+        """Plotting one strategy returns a figure with one trace (no drawdown)."""
         run = _StubRun("S1", [10_000.0, 10_500.0, 11_000.0])
-        fig = plot_pnl([run], display=None)
+        fig = plot_pnl([run], drawdown=False, display=None)
         assert isinstance(fig, go.Figure)
         assert len(fig.data) == 1
 
+    def test_drawdown_default_adds_subplot(self):
+        """`drawdown=True` (default) yields two traces per run on two rows."""
+        run = _StubRun("S1", [10_000.0, 10_500.0, 11_000.0])
+        fig = plot_pnl([run], display=None)
+        assert len(fig.data) == 2  # PnL + drawdown
+        # Subplots: yaxis2 must exist for the drawdown panel.
+        assert fig.layout.yaxis2 is not None
+
     def test_one_trace_per_strategy(self):
-        """Plotting N strategies yields N traces."""
+        """Plotting N strategies yields N traces (no drawdown)."""
         runs = [
             _StubRun("S1", [10_000.0, 10_500.0, 11_000.0]),
             _StubRun("S2", [10_000.0, 9_500.0, 9_800.0]),
             _StubRun("Benchmark (SPY)", [10_000.0, 10_100.0, 10_200.0]),
         ]
-        fig = plot_pnl(runs, display=None)
+        fig = plot_pnl(runs, drawdown=False, display=None)
         assert len(fig.data) == 3
         assert {t.name for t in fig.data} == {"S1", "S2", "Benchmark (SPY)"}
 
     def test_absolute_pnl_starts_at_zero(self):
         """Absolute PnL should start at zero for every strategy."""
         run = _StubRun("S1", [10_000.0, 10_500.0, 11_000.0])
-        fig = plot_pnl([run], display=None)
+        fig = plot_pnl([run], drawdown=False, display=None)
         y = np.array(fig.data[0].y, dtype=float)
         assert y[0] == 0.0
         assert y[-1] == 1_000.0
@@ -615,7 +632,7 @@ class TestPlotPnl:
     def test_relative_pnl_in_percent(self):
         """Relative mode plots returns as a percentage of the start equity."""
         run = _StubRun("S1", [200.0, 220.0, 250.0])
-        fig = plot_pnl([run], normalize=True, display=None)
+        fig = plot_pnl([run], normalize=True, drawdown=False, display=None)
         y = np.array(fig.data[0].y, dtype=float)
         assert y[0] == 0.0
         assert y[-1] == pytest.approx(25.0)  # 250 / 200 - 1 = 25 %
@@ -625,10 +642,10 @@ class TestPlotPnl:
 
         class _Empty:
             strategy_name = "empty"
-            equity_curve = []
+            equity_curve = None
 
         run = _StubRun("S1", [10_000.0, 10_100.0])
-        fig = plot_pnl([_Empty(), run], display=None)
+        fig = plot_pnl([_Empty(), run], drawdown=False, display=None)
         assert len(fig.data) == 1
         assert fig.data[0].name == "S1"
 
@@ -638,13 +655,278 @@ class TestPlotPnl:
             _StubRun("S1", [10_000.0, 10_500.0]),
             _StubRun("Benchmark (SPY)", [10_000.0, 10_100.0]),
         ]
-        fig = plot_pnl(runs, display=None)
+        fig = plot_pnl(runs, drawdown=False, display=None)
         bench = next(t for t in fig.data if t.name.startswith("Benchmark"))
         # `line.dash` is None for solid lines and "dash" for the benchmark.
         assert bench.line.dash == "dash"
 
     def test_empty_input_returns_figure(self):
         """An empty `runs` list still returns a figure (with a placeholder)."""
-        fig = plot_pnl([], display=None)
+        fig = plot_pnl([], drawdown=False, display=None)
         assert isinstance(fig, go.Figure)
         assert len(fig.data) == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stubs for trade-/order-aware plot tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _StubTrade:
+    """Minimal duck-typed stand-in for `Trade`."""
+
+    def __init__(
+        self,
+        symbol: str,
+        entry_ts: int,
+        exit_ts: int,
+        entry_price: float,
+        exit_price: float,
+        quantity: int,
+        pnl: float,
+    ):
+        self.symbol = symbol
+        self.entry_ts = entry_ts
+        self.exit_ts = exit_ts
+        self.entry_price = entry_price
+        self.exit_price = exit_price
+        self.quantity = quantity
+        self.pnl = pnl
+
+
+class _StubOrder:
+    """Minimal duck-typed stand-in for `Order`."""
+
+    def __init__(self, symbol: str, quantity: int):
+        self.symbol = symbol
+        self.quantity = quantity
+
+
+class _StubOrderRecord:
+    """Minimal duck-typed stand-in for `OrderRecord`."""
+
+    def __init__(self, symbol: str, quantity: int, ts: int, status: str = "filled"):
+        self.order = _StubOrder(symbol, quantity)
+        self.timestamp = ts
+        self.status = status
+
+
+def _make_run_with_trades(
+    name: str = "S1",
+    pnls: tuple[float, ...] = (50.0, -30.0, 20.0, -10.0),
+) -> _StubRun:
+    """Build a `_StubRun` with synthetic trades and matching orders."""
+    base = 1_700_000_000
+    trades = [
+        _StubTrade(
+            symbol="AAPL",
+            entry_ts=base + i * 86_400,
+            exit_ts=base + (i + 1) * 86_400,
+            entry_price=100.0,
+            exit_price=100.0 + p / 10,
+            quantity=10 if i % 2 == 0 else -10,
+            pnl=p,
+        )
+        for i, p in enumerate(pnls)
+    ]
+    orders = []
+    for i, t in enumerate(trades):
+        orders.append(_StubOrderRecord("AAPL", t.quantity, t.entry_ts))
+        orders.append(_StubOrderRecord("AAPL", -t.quantity, t.exit_ts))
+        if i == 0:
+            orders.append(_StubOrderRecord("MSFT", 5, t.entry_ts + 1_000))
+    return _StubRun(
+        name,
+        [10_000.0 + sum(pnls[: i + 1]) for i in range(len(pnls))],
+        trades=trades,
+        orders=orders,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — new strategy-result plots
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestPlotRollingReturns:
+    """Tests for plot_rolling_returns."""
+
+    def test_returns_figure(self):
+        """Builds one rolling-return trace per run."""
+        from backtide.analysis import plot_rolling_returns
+
+        run = _StubRun("S1", [100.0 + i for i in range(50)])
+        fig = plot_rolling_returns([run], window=10, display=None)
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 1
+
+    def test_skips_short_runs(self):
+        """Runs with fewer samples than `window` are silently skipped."""
+        from backtide.analysis import plot_rolling_returns
+
+        short = _StubRun("S1", [100.0, 101.0, 102.0])
+        fig = plot_rolling_returns([short], window=30, display=None)
+        # No traces, but a figure with the placeholder annotation.
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 0
+
+
+class TestPlotRollingSharpe:
+    """Tests for plot_rolling_sharpe."""
+
+    def test_returns_figure(self):
+        """Computes a rolling-Sharpe trace from a noisy equity curve."""
+        from backtide.analysis import plot_rolling_sharpe
+
+        rng = np.random.default_rng(0)
+        equity = list(np.cumprod(1 + rng.normal(0.001, 0.01, 200)) * 1_000)
+        run = _StubRun("S1", equity)
+        fig = plot_rolling_sharpe([run], window=30, display=None)
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 1
+
+
+class TestPlotPnlHistogram:
+    """Tests for plot_pnl_histogram."""
+
+    def test_one_histogram_per_run(self):
+        """Renders one histogram trace per run, named after the strategy."""
+        from backtide.analysis import plot_pnl_histogram
+
+        a = _make_run_with_trades("A")
+        b = _make_run_with_trades("B", pnls=(10.0, 20.0, -5.0))
+        fig = plot_pnl_histogram([a, b], display=None)
+        assert len(fig.data) == 2
+        assert {t.name for t in fig.data} == {"A", "B"}
+
+    def test_empty_input(self):
+        """Returns an empty figure when no runs are passed."""
+        from backtide.analysis import plot_pnl_histogram
+
+        fig = plot_pnl_histogram([], display=None)
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 0
+
+
+class TestPlotTradePnl:
+    """Tests for plot_trade_pnl."""
+
+    def test_one_scatter_per_run(self):
+        """Renders one scatter trace per run in marker mode."""
+        from backtide.analysis import plot_trade_pnl
+
+        a = _make_run_with_trades("A")
+        b = _make_run_with_trades("B")
+        fig = plot_trade_pnl([a, b], display=None)
+        assert len(fig.data) == 2
+        for trace in fig.data:
+            assert trace.mode == "markers"
+
+
+class TestPlotTradeDuration:
+    """Tests for plot_trade_duration."""
+
+    def test_returns_figure(self):
+        """Builds a duration-histogram trace from the run's trades."""
+        from backtide.analysis import plot_trade_duration
+
+        a = _make_run_with_trades("A")
+        fig = plot_trade_duration([a], display=None)
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 1
+
+    def test_no_trades(self):
+        """Produces a blank figure when the run has no trades."""
+        from backtide.analysis import plot_trade_duration
+
+        empty = _StubRun("Empty", [10_000.0])
+        fig = plot_trade_duration([empty], display=None)
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) == 0
+
+
+class TestPlotPositionSize:
+    """Tests for plot_position_size."""
+
+    def test_one_trace_per_symbol(self):
+        """Reconstructs one cumulative-position trace per traded symbol."""
+        from backtide.analysis import plot_position_size
+
+        run = _make_run_with_trades("S1")
+        fig = plot_position_size(run, display=None)
+        # Two symbols traded (AAPL, MSFT).
+        names = {t.name for t in fig.data}
+        assert "AAPL" in names
+        assert "MSFT" in names
+
+    def test_no_orders(self):
+        """Returns a blank figure when the run has no filled orders."""
+        from backtide.analysis import plot_position_size
+
+        run = _StubRun("Empty", [10_000.0])
+        fig = plot_position_size(run, display=None)
+        assert isinstance(fig, go.Figure)
+        # No trace traces, just the y=0 reference line annotation/shape.
+        assert all(t.mode != "lines" or t.name == "" for t in fig.data) or len(fig.data) == 0
+
+
+class TestPlotMaeMfe:
+    """Tests for plot_mae_mfe."""
+
+    def test_uses_query_bars_and_classifies_winners(self, monkeypatch):
+        """Uses query_bars to compute MAE/MFE and splits winners from losers."""
+        from backtide.analysis import plot_mae_mfe
+
+        # Synthetic bar data covering both trades' time windows.
+        run = _make_run_with_trades("S1", pnls=(50.0, -30.0))
+        bars = pd.DataFrame(
+            {
+                "open_ts": [t.entry_ts for t in run.trades] + [t.exit_ts for t in run.trades],
+                "high": [110.0, 105.0, 110.0, 105.0],
+                "low": [95.0, 90.0, 95.0, 90.0],
+            }
+        )
+        monkeypatch.setattr(
+            "backtide.analysis.mae_mfe.query_bars",
+            lambda **_: bars,
+        )
+        fig = plot_mae_mfe(run, display=None)
+        names = {t.name for t in fig.data}
+        # Diagonal reference line plus both winner and loser scatters.
+        assert "MFE = MAE" in names
+        assert "Winners" in names
+        assert "Losers" in names
+
+    def test_no_trades(self):
+        """Returns an empty figure when the run has no trades."""
+        from backtide.analysis import plot_mae_mfe
+
+        empty = _StubRun("Empty", [10_000.0])
+        fig = plot_mae_mfe(empty, display=None)
+        assert isinstance(fig, go.Figure)
+
+
+class TestPlotPriceWithStrategyRun:
+    """Tests for entry/exit marker overlays on plot_price."""
+
+    def test_overlays_trade_markers(self, daily_bars):
+        """Overlays entry/exit markers on top of the price chart."""
+        run = _make_run_with_trades("S1", pnls=(10.0, -5.0))
+        # All trades on AAPL, which is the only symbol in `daily_bars`.
+        # Re-anchor trade timestamps inside the bar window.
+        ts_first = int(daily_bars["open_ts"].iloc[0])
+        for i, t in enumerate(run.trades):
+            t.entry_ts = ts_first + i * 86_400
+            t.exit_ts = ts_first + (i + 1) * 86_400
+
+        fig = plot_price(daily_bars, run=run, display=None)
+        names = {t.name for t in fig.data}
+        # At minimum, we expect long/short entry and win/loss exit traces.
+        assert any(n.startswith(("Long entry", "Short entry")) for n in names)
+        assert any(n.startswith("Exit") for n in names)
+
+    def test_without_strategy_run_unchanged(self, daily_bars):
+        """Baseline plot_price behaviour is unchanged when strategy_run is None."""
+        # Baseline behaviour: only the price line trace.
+        fig = plot_price(daily_bars, display=None)
+        assert len(fig.data) == 1

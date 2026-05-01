@@ -1,0 +1,195 @@
+"""Backtide.
+
+Author: Mavs
+Description: Module containing the rolling Sharpe-ratio chart.
+
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, overload
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot
+from backtide.config import get_config
+
+if TYPE_CHECKING:
+    from backtide.backtest import StrategyRunResult
+
+cfg = get_config()
+
+
+@overload
+def plot_rolling_sharpe(
+    runs: list[StrategyRunResult],
+    *,
+    window: int = ...,
+    periods_per_year: int = ...,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: None = ...,
+) -> go.Figure: ...
+@overload
+def plot_rolling_sharpe(
+    runs: list[StrategyRunResult],
+    *,
+    window: int = ...,
+    periods_per_year: int = ...,
+    title: str | dict[str, Any] | None = ...,
+    legend: str | dict[str, Any] | None = ...,
+    figsize: tuple[int, int] | None = ...,
+    filename: str | Path | None = ...,
+    display: bool = ...,
+) -> None: ...
+
+
+def plot_rolling_sharpe(
+    runs: StrategyRunResult | list[StrategyRunResult],
+    *,
+    window: int = 60,
+    periods_per_year: int = 252,
+    title: str | dict[str, Any] | None = None,
+    legend: str | dict[str, Any] | None = "upper left",
+    figsize: tuple[int, int] | None = (900, 600),
+    filename: str | Path | None = None,
+    display: bool | None = True,
+) -> go.Figure | None:
+    """Create a rolling Sharpe-ratio chart for one or more strategy runs.
+
+    Each line plots the trailing-`window` Sharpe ratio annualised by
+    `periods_per_year`. Useful to spot when a strategy's risk-adjusted
+    edge erodes or strengthens over time.
+
+    Parameters
+    ----------
+    runs : [StrategyRunResult] | list[[StrategyRunResult]]
+        The per-strategy results to plot.
+
+    window : int, default=60
+        Number of equity samples used in the trailing Sharpe window.
+
+    periods_per_year : int, default=252
+        Annualisation factor. Use ~252 for daily, ~52 for weekly,
+        ~12 for monthly, ~365 for crypto-daily.
+
+    title : str | dict | None, default=None
+        Title for the plot.
+
+        - If None, no title is shown.
+        - If str, text for the title.
+        - If dict, [title configuration][parameters].
+
+    legend : str | dict | None, default="upper left"
+        Legend for the plot. See the [user guide][parameters] for an extended
+        description of the choices.
+
+        * If None: No legend is shown.
+        * If str: Position to display the legend.
+        * If dict: Legend configuration.
+
+    figsize : tuple[int, int] | None, default=(900, 600)
+        Figure's size in pixels, format as (x, y).
+
+    filename : str | Path | None, default=None
+        Save the plot using this name. The type of the file depends on the
+        provided name (`.html`, `.png`, `.pdf`, etc...). If `filename` has no
+        file type, the plot is saved as `.html`. If `None`, the plot isn't saved.
+
+    display : bool | None, default=True
+        Whether to render the plot. If `None`, it returns the figure.
+
+    Returns
+    -------
+    go.Figure | None
+        The Plotly figure object. Only returned if `display=None`.
+
+    See Also
+    --------
+    - backtide.analysis:plot_pnl
+    - backtide.analysis:plot_rolling_returns
+    - backtide.backtest:StrategyRunResult
+
+    Examples
+    --------
+    ```pycon
+    from backtide.analysis import plot_rolling_sharpe
+    from backtide.storage import query_experiments, query_strategy_runs
+
+    exp = query_experiments()[0]
+    runs = query_strategy_runs(exp.id)
+    plot_rolling_sharpe(runs, window=90)
+    ```
+
+    """
+    fig = go.Figure()
+    scale = float(np.sqrt(periods_per_year))
+    plotted = 0
+    for idx, run in enumerate(runs):
+        curve = getattr(run, "equity_curve", None)
+        if not curve or len(curve) <= window:
+            continue
+
+        equity = pd.Series(
+            [float(s.equity) for s in curve],
+            index=pd.to_datetime([s.timestamp for s in curve], unit="s"),
+        )
+        rets = equity.pct_change()
+        roll = rets.rolling(window)
+        sharpe = (roll.mean() / roll.std()) * scale
+        sharpe = sharpe.replace([np.inf, -np.inf], np.nan).dropna()
+        if sharpe.empty:
+            continue
+
+        is_benchmark = _is_benchmark(run.strategy_name)
+        if is_benchmark:
+            line: dict[str, Any] = BENCHMARK_LINE
+        else:
+            color = cfg.plots.palette[idx % len(cfg.plots.palette)]
+            line = {"color": color, "width": 2}
+
+        fig.add_trace(
+            go.Scatter(
+                x=sharpe.index,
+                y=sharpe.values,
+                mode="lines",
+                name=run.strategy_name,
+                line=line,
+                showlegend=not is_benchmark,
+                hovertemplate=(
+                    "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d}<br>"
+                    "Sharpe: %{y:+.2f}<extra></extra>"
+                ),
+            )
+        )
+        plotted += 1
+
+    if plotted == 0:
+        fig.add_annotation(
+            text="Not enough equity data to compute rolling Sharpe.",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+        )
+
+    fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="rgba(128,128,128,0.6)")
+    fig.add_hline(y=1, line_width=1, line_dash="dash", line_color="rgba(46,204,113,0.4)")
+
+    return _plot(
+        fig,
+        title=title,
+        legend=legend,
+        xlabel="Date",
+        ylabel=f"Rolling Sharpe ({window})",
+        figsize=figsize,
+        filename=filename,
+        display=display,
+    )
+

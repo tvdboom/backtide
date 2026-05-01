@@ -1,7 +1,7 @@
-# query_strategy_runs
----------------------
+﻿# plot_position_size
+---------
 
-:: backtide.storage:query_strategy_runs
+:: backtide.analysis:plot_position_size
     :: signature
     :: head
     :: table:
@@ -14,3 +14,4 @@
 ## Example
 
 :: examples
+

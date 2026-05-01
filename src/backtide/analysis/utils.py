@@ -16,10 +16,73 @@ import plotly.graph_objects as go
 from backtide.core.config import get_config
 from backtide.core.data import Currency
 from backtide.ui.utils import _get_timezone
+from backtide.utils.constants import BENCHMARK_NAME
 from backtide.utils.types import DataFrameLike
 from backtide.utils.utils import _ts_to_datetime
 
+
 cfg = get_config()
+
+# Gray dashed style used to render the auto-injected benchmark consistently
+# across plots that compare strategies to the benchmark.
+BENCHMARK_LINE: dict[str, Any] = {
+    "color": "rgba(128,128,128,0.7)",
+    "width": 2,
+    "dash": "dash",
+}
+
+
+def _is_benchmark(name: str) -> bool:
+    """Return True if `name` matches the auto-injected benchmark naming."""
+    return bool(BENCHMARK_NAME.match(name))
+
+
+def _resolve_currency(currency: str | Currency | None) -> Currency | None:
+    """Resolve a currency input into a `Currency`, falling back to the config.
+
+    `None` resolves to `cfg.general.base_currency`. Strings are coerced via
+    the `Currency` constructor; unknown codes return `None`.
+
+    """
+    if currency is None:
+        currency = cfg.general.base_currency
+    if isinstance(currency, Currency):
+        return currency
+    try:
+        return Currency(currency)
+    except (ValueError, KeyError):
+        return None
+
+
+def _resolve_run_currency(
+    currency: str | Currency | None,
+    runs: Any,
+) -> Currency | None:
+    """Resolve the currency to use for a multi-run plot.
+
+    Resolution order:
+
+    1. An explicit `currency` argument from the caller (string or
+       `Currency`).
+    2. The first run's `base_currency` attribute, populated by the engine
+       from `ExperimentConfig.portfolio.base_currency`. This makes plots
+       label themselves correctly without callers needing to know the
+       experiment's configuration.
+    3. `cfg.general.base_currency` as a last-resort fallback.
+
+    `runs` may be a single run or an iterable of runs.
+
+    """
+    if currency is not None:
+        return _resolve_currency(currency)
+
+    candidates = runs if isinstance(runs, (list, tuple)) else [runs]
+    for run in candidates:
+        if (ccy := getattr(run, "base_currency", None)) is not None:
+            return _resolve_currency(ccy)
+
+    return _resolve_currency(None)
+
 
 
 def _resolve_dt(data: pd.DataFrame) -> pd.DataFrame:

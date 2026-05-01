@@ -1490,6 +1490,7 @@ fn run_one_strategy(
         trades: closed_trades,
         orders: order_records,
         metrics,
+        base_currency: cfg.portfolio.base_currency,
         error: run_error,
     }
 }
@@ -1903,6 +1904,7 @@ mod tests {
             trades: closed_trades,
             orders: order_records,
             metrics,
+            base_currency: cfg.portfolio.base_currency,
             error: None,
         }
     }

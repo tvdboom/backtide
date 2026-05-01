@@ -104,6 +104,7 @@ impl Storage for DuckDb {
                 strategy_id       VARCHAR NOT NULL,
                 strategy_name     VARCHAR NOT NULL,
                 metrics           VARCHAR NOT NULL,
+                base_currency     VARCHAR,
                 error             VARCHAR,
                 UNIQUE (experiment_id, strategy_id)
             );
@@ -145,6 +146,13 @@ impl Storage for DuckDb {
                 UNIQUE (run_id, symbol, entry_ts, exit_ts)
             );
         ",
+        )?;
+
+        // ── Migrations ──────────────────────────────────────────────────
+        // Idempotent column additions for databases created before a given
+        // schema field existed. DuckDB supports `ADD COLUMN IF NOT EXISTS`.
+        conn.execute_batch(
+            "ALTER TABLE experiment_strategies ADD COLUMN IF NOT EXISTS base_currency VARCHAR;",
         )?;
 
         Ok(())
@@ -705,14 +713,15 @@ impl Storage for DuckDb {
             let metrics_str = serde_json::to_string(&strat.metrics).unwrap_or_default();
             conn.execute(
                 "INSERT OR REPLACE INTO experiment_strategies
-                 (id, experiment_id, strategy_id, strategy_name, metrics, error)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                 (id, experiment_id, strategy_id, strategy_name, metrics, base_currency, error)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
                 params![
                     strat.strategy_id,
                     result.experiment_id,
                     strat.strategy_id,
                     strat.strategy_name,
                     metrics_str,
+                    strat.base_currency.to_string(),
                     strat.error,
                 ],
             )?;
@@ -871,19 +880,16 @@ impl Storage for DuckDb {
         Ok(rows)
     }
 
-    fn query_strategy_runs(
-        &self,
-        experiment_id: &str,
-    ) -> StorageResult<Vec<StrategyRunResult>> {
+    fn query_strategy_runs(&self, experiment_id: &str) -> StorageResult<Vec<StrategyRunResult>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
-            "SELECT id, strategy_id, strategy_name, metrics, error
+            "SELECT id, strategy_id, strategy_name, metrics, base_currency, error
              FROM experiment_strategies
              WHERE experiment_id = ?
              ORDER BY rowid",
         )?;
-        let strats: Vec<(String, String, String, String, Option<String>)> = stmt
+        let strats: Vec<(String, String, String, String, Option<String>, Option<String>)> = stmt
             .query_map(params![experiment_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -891,14 +897,19 @@ impl Storage for DuckDb {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut out = Vec::with_capacity(strats.len());
-        for (run_id, strategy_id, name, metrics_str, error) in strats {
+        for (run_id, strategy_id, name, metrics_str, base_ccy_str, error) in strats {
             let metrics: HashMap<String, f64> =
                 serde_json::from_str(&metrics_str).unwrap_or_default();
+            let base_currency = base_ccy_str
+                .as_deref()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_default();
 
             let mut eq_stmt = conn.prepare(
                 "SELECT ts, equity, cash, drawdown FROM experiment_equity
@@ -966,6 +977,7 @@ impl Storage for DuckDb {
                 trades,
                 orders,
                 metrics,
+                base_currency,
                 error,
             });
         }

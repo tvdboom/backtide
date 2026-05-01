@@ -11,8 +11,6 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import streamlit as st
-
-from backtide.analysis.pnl import plot_pnl
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
 from backtide.storage import (
@@ -21,15 +19,24 @@ from backtide.storage import (
     query_instruments,
     query_strategy_runs,
 )
+from backtide.analysis import (
+        plot_pnl,
+        plot_pnl_histogram,
+        plot_rolling_returns,
+        plot_rolling_sharpe,
+        plot_trade_duration,
+        plot_trade_pnl,
+    )
 from backtide.ui.utils import (
+    _default,
     _fmt_duration,
     _fmt_metric,
     _fmt_period,
     _get_logokit_url,
     _moment_to_strftime,
+    _persist,
     _to_pandas,
 )
-from backtide.utils.constants import BENCHMARK_NAME
 from backtide.utils.utils import _format_price
 
 if TYPE_CHECKING:
@@ -133,20 +140,6 @@ def _colored_metric(container, label: str, value: str, tone: str = ""):
 
     """
     container.metric(label, f":{tone}[{value}]" if tone else value)
-
-
-def _split_benchmark(runs: list[StrategyRunResult]) -> tuple[list, StrategyRunResult | None]:
-    """Split `runs` into (user_runs, benchmark_run).
-
-    The benchmark run is identified by a strategy name matching the pattern
-    ``Benchmark(<symbol>)``, regardless of its position in the list.
-
-    """
-    for i, run in enumerate(runs):
-        if BENCHMARK_NAME.match(run.strategy_name):
-            return [*runs[:i], *runs[i + 1 :]], run
-
-    return runs, None
 
 
 def _render_strategy_summary(run: StrategyRunResult):
@@ -310,6 +303,145 @@ def _confirm_delete_experiment(exp_id: str, name: str):
                 st.session_state.pop("selected_experiment", None)
             st.session_state["_delete_success"] = name
         st.rerun()
+
+
+def _render_analysis_tabs(
+    runs: list[StrategyRunResult],
+    exp_cfg: ExperimentConfig | None,
+) -> None:
+    """Render the experiment-level (multi-run) analysis-plot tabs.
+
+    Only plots that overlay every strategy on the same axes are rendered
+    here. Single-run plots (MAE/MFE, Position size, Price) live inside
+    each per-strategy tab so they can use the strategy as their context
+    rather than an extra widget. The PnL tab is the first/default tab;
+    the rest follow alphabetically.
+
+    """
+    if not runs:
+        return
+
+    all_labels = [
+        ":material/payments: PnL",
+        ":material/bar_chart: PnL histogram",
+        ":material/stacked_line_chart: Rolling returns",
+        ":material/military_tech: Rolling Sharpe",
+        ":material/timer: Trade duration",
+        ":material/swap_vert: Trade PnL",
+    ]
+    tabs = st.tabs(
+        all_labels,
+        key=(key := "plot_tabs_results"),
+        default=_default(key),
+        on_change=lambda k=key: _persist(k),
+    )
+
+    # Build a lookup from label → tab widget for safe indexing
+    tab_map = dict(zip(all_labels, tabs, strict=True))
+
+    # Determine active tab index for lazy rendering
+    active_tab = st.session_state.get(key, all_labels[0])
+
+    # Currency labels are now resolved by each plot from the runs' own
+    # `base_currency` attribute (set by the engine), so we no longer need
+    # to pass `currency=...` here.
+
+    with tab_map[all_labels[0]]:
+        if active_tab == all_labels[0]:
+            st.plotly_chart(plot_pnl(runs, display=None), width="stretch")
+
+    with tab_map[all_labels[1]]:
+        if active_tab == all_labels[1]:
+            st.plotly_chart(plot_pnl_histogram(runs, display=None), width="stretch")
+
+    with tab_map[all_labels[2]]:
+        if active_tab == all_labels[2]:
+            st.plotly_chart(plot_rolling_returns(runs, display=None), width="stretch")
+
+    with tab_map[all_labels[3]]:
+        if active_tab == all_labels[3]:
+            st.plotly_chart(plot_rolling_sharpe(runs, display=None), width="stretch")
+
+    with tab_map[all_labels[4]]:
+        if active_tab == all_labels[4]:
+            st.plotly_chart(plot_trade_duration(runs, display=None), width="stretch")
+
+    with tab_map[all_labels[5]]:
+        if active_tab == all_labels[5]:
+            st.plotly_chart(plot_trade_pnl(runs, display=None), width="stretch")
+
+
+def _render_strategy_plots(
+    run: StrategyRunResult,
+    exp_cfg: ExperimentConfig | None,
+) -> None:
+    """Render per-strategy plot tabs (MAE/MFE, Position size, Price).
+
+    These plots take a single `StrategyRunResult` as input, so the
+    surrounding strategy tab provides the context — no extra strategy
+    selector is needed. Tabs are ordered alphabetically.
+
+    """
+    from backtide.analysis import plot_mae_mfe, plot_position_size, plot_price
+    from backtide.storage import query_bars
+
+    interval = str(exp_cfg.data.interval) if exp_cfg is not None else None
+
+    labels = [
+        ":material/compare_arrows: MAE / MFE",
+        ":material/inventory: Position size",
+        ":material/show_chart: Price",
+    ]
+    # Use a per-strategy key so each tab group remembers its active selection.
+    key = f"plot_tabs_strategy_{run.strategy_name}"
+    tabs = st.tabs(
+        labels,
+        key=key,
+        default=_default(key),
+        on_change=lambda k=key: _persist(k),
+    )
+    label_to_tab = dict(zip(labels, tabs, strict=True))
+    active_tab = st.session_state.get(key, labels[0])
+
+    with label_to_tab[labels[0]]:
+        if active_tab == labels[0]:
+            st.plotly_chart(
+                plot_mae_mfe(run, interval=interval, display=None),
+                width="stretch",
+            )
+
+    with label_to_tab[labels[1]]:
+        if active_tab == labels[1]:
+            st.plotly_chart(plot_position_size(run, display=None), width="stretch")
+
+    with label_to_tab[labels[2]]:
+        if active_tab == labels[2]:
+            # Determine the symbols actually traded by this run; fall back to
+            # the experiment's configured universe so the user can still load
+            # a chart for a non-traded benchmark.
+            traded = sorted({getattr(t, "symbol", "") for t in (run.trades or [])})
+            if not traded and exp_cfg is not None:
+                traded = list(exp_cfg.data.symbols)
+            if not traded:
+                st.info("No symbols available for this run.")
+            else:
+                sym = st.selectbox(
+                    "Symbol",
+                    traded,
+                    key=f"strat_price_sym_{run.strategy_name}",
+                )
+                try:
+                    df = query_bars(symbol=sym, interval=interval)
+                except Exception as exc:  # noqa: BLE001
+                    st.warning(f"Could not load bars for {sym}: {exc}")
+                else:
+                    if df is None or len(df) == 0:
+                        st.info(f"No price data available for {sym}.")
+                    else:
+                        st.plotly_chart(
+                            plot_price(df, run=run, display=None),
+                            width="stretch",
+                        )
 
 
 def _render_full_analysis(row: pd.Series):
@@ -532,21 +664,12 @@ def _render_full_analysis(row: pd.Series):
 
     st.markdown("")
 
-    # Experiment-level PnL chart: one line per strategy.
-    if any(getattr(r, "equity_curve", None) for r in runs):
-        col_a, col_b = st.columns([10, 1])
-        col_a.markdown("##### :material/show_chart: PnL over time")
-        st.plotly_chart(plot_pnl(runs, display=None), width="stretch")
+
+    _render_analysis_tabs(runs, exp_cfg)
 
     st.markdown("")
 
     tabs = st.tabs([f"**{run.strategy_name}**" for run in runs])
-    _, benchmark = _split_benchmark(runs)
-    base_ccy = (
-        str(exp_cfg.portfolio.base_currency)
-        if exp_cfg is not None
-        else str(cfg.general.base_currency)
-    )
     # Map every traded symbol to the currency it actually settled in. The
     # backtest engine debits each fill from the instrument's quote
     # currency first (`order_ccy = quote_ccy.get(symbol).unwrap_or(base)`),
@@ -567,6 +690,16 @@ def _render_full_analysis(row: pd.Series):
     for tab, run in zip(tabs, runs, strict=True):
         with tab:
             _render_strategy_summary(run)
+
+            # Per-strategy plots between metrics and orders.
+            st.markdown("")
+            _render_strategy_plots(run, exp_cfg)
+            st.markdown("")
+
+            # Each run carries its own base currency (set by the engine
+            # from `ExperimentConfig.portfolio.base_currency`); use it as
+            # the fallback for symbols whose quote currency is unknown.
+            base_ccy = str(getattr(run, "base_currency", None) or cfg.general.base_currency)
 
             if run.orders:
                 st.markdown("##### Orders")

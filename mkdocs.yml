@@ -139,10 +139,17 @@ nav:
             - plot_correlation: api/analysis/plot_correlation.md
             - plot_dividends: api/analysis/plot_dividends.md
             - plot_drawdown: api/analysis/plot_drawdown.md
+            - plot_mae_mfe: api/analysis/plot_mae_mfe.md
             - plot_pnl: api/analysis/plot_pnl.md
+            - plot_pnl_histogram: api/analysis/plot_pnl_histogram.md
+            - plot_position_size: api/analysis/plot_position_size.md
             - plot_price: api/analysis/plot_price.md
             - plot_returns: api/analysis/plot_returns.md
+            - plot_rolling_returns: api/analysis/plot_rolling_returns.md
+            - plot_rolling_sharpe: api/analysis/plot_rolling_sharpe.md
             - plot_seasonality: api/analysis/plot_seasonality.md
+            - plot_trade_duration: api/analysis/plot_trade_duration.md
+            - plot_trade_pnl: api/analysis/plot_trade_pnl.md
             - plot_volatility: api/analysis/plot_volatility.md
             - plot_volume: api/analysis/plot_volume.md
             - plot_vwap: api/analysis/plot_vwap.md

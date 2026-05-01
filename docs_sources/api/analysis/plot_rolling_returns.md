@@ -1,7 +1,7 @@
-# query_strategy_runs
----------------------
+﻿# plot_rolling_returns
+---------
 
-:: backtide.storage:query_strategy_runs
+:: backtide.analysis:plot_rolling_returns
     :: signature
     :: head
     :: table:
@@ -14,3 +14,4 @@
 ## Example
 
 :: examples
+

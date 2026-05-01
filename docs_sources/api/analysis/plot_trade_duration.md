@@ -1,7 +1,7 @@
-# query_strategy_runs
----------------------
+﻿# plot_trade_duration
+---------
 
-:: backtide.storage:query_strategy_runs
+:: backtide.analysis:plot_trade_duration
     :: signature
     :: head
     :: table:
@@ -14,3 +14,4 @@
 ## Example
 
 :: examples
+
