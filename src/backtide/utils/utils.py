@@ -122,6 +122,7 @@ def _format_price(
 
     """
     dec = 2 if decimals is None else decimals
+    sign = "+" if signed and n > 0 else ""
 
     if currency:
         if not isinstance(currency, Currency):
@@ -136,11 +137,11 @@ def _format_price(
             num = f"{n:,.{currency.decimals if decimals is None else dec}f}"
 
         if cfg.display.currency_prefix:
-            return f"{currency.symbol}{num}"
+            return f"{sign}{currency.symbol}{num}"
         else:
-            return f"{num} {currency.symbol}"
+            return f"{sign}{num} {currency.symbol}"
 
-    return f"{'+' if signed and n > 0 else ''}{_format_number(n) if compact else f'{n:,.{dec}f}'}"
+    return f"{sign}{_format_number(n) if compact else f'{n:,.{dec}f}'}"
 
 
 def _make_dummy_bars(

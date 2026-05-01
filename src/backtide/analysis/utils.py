@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     import pandas as pd
     import plotly.graph_objects as go
 
+    from backtide.core.backtest import RunResult
     from backtide.utils.types import DataFrameLike
 
 
@@ -34,54 +35,21 @@ BENCHMARK_LINE: dict[str, Any] = {
 }
 
 
-def _is_benchmark(name: str) -> bool:
-    """Return True if `name` matches the auto-injected benchmark naming."""
-    return bool(BENCHMARK_NAME.match(name))
+def _is_benchmark(run: RunResult) -> bool:
+    """Whether this run is the benchmark run or not."""
+    return bool(BENCHMARK_NAME.match(run.strategy_name))
 
 
-def _resolve_currency(currency: str | Currency | None) -> Currency | None:
-    """Resolve a currency input into a `Currency`, falling back to the config.
-
-    `None` resolves to `cfg.general.base_currency`. Strings are coerced via
-    the `Currency` constructor; unknown codes return `None`.
-
-    """
-    if currency is None:
-        currency = cfg.general.base_currency
-
-    if isinstance(currency, Currency):
-        return currency
-
-    try:
-        return Currency(currency)
-    except (ValueError, KeyError):
-        return None
-
-
-def _resolve_run_currency(
-    currency: str | Currency | None,
-    runs: Any,
-) -> Currency | None:
+def _resolve_runs_currency(runs: list[RunResult]) -> Currency | None:
     """Resolve the currency to use for a multi-run plot.
 
-    Resolution order:
-
-    1. An explicit `currency` argument from the caller (string or `Currency`).
-    2. The first run's `base_currency` attribute.
-    3. `cfg.general.base_currency` as a last-resort fallback.
-
-    `runs` may be a single run or an iterable of runs.
+    If all runs share the same base currency, return it, else return `None`.
 
     """
-    if currency is not None:
-        return _resolve_currency(currency)
+    if len(ccy := {run.base_currency for run in runs}) == 1:
+        return ccy.pop()
 
-    candidates = runs if isinstance(runs, (list, tuple)) else [runs]
-    for run in candidates:
-        if (ccy := getattr(run, "base_currency", None)) is not None:
-            return _resolve_currency(ccy)
-
-    return _resolve_currency(None)
+    return None
 
 
 def _resolve_dt(data: pd.DataFrame) -> pd.DataFrame:

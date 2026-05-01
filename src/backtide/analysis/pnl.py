@@ -7,13 +7,14 @@ Description: Module containing the PnL chart function.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot, _resolve_run_currency
+from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot, _resolve_runs_currency
 from backtide.config import get_config
 from backtide.utils.utils import _format_price, _to_list
 
@@ -21,18 +22,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from backtide.backtest import RunResult
-    from backtide.core.data import Currency
+
 
 cfg = get_config()
 
 
 @overload
 def plot_pnl(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     normalize: bool = ...,
     drawdown: bool = ...,
-    currency: str | Currency | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -41,11 +41,10 @@ def plot_pnl(
 ) -> go.Figure: ...
 @overload
 def plot_pnl(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     normalize: bool = ...,
     drawdown: bool = ...,
-    currency: str | Currency | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -55,11 +54,10 @@ def plot_pnl(
 
 
 def plot_pnl(
-    runs: RunResult | list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     normalize: bool = False,
     drawdown: bool = True,
-    currency: str | Currency | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] | None = (900, 600),
@@ -91,12 +89,6 @@ def plot_pnl(
         Whether to render a drawdown panel underneath the PnL curve. When
         True, the figure has two stacked rows (PnL on top, drawdown below)
         sharing the same x-axis. Set to False for a single-panel chart.
-
-    currency : str | [Currency] | None, default=None
-        Currency used to format the y-axis label and hover tooltips. When
-        `None`, the run's own `base_currency` (set by the engine from
-        `ExperimentConfig.portfolio.base_currency`) is used. Pass an
-        explicit value to override. Ignored when `normalize=True`.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -131,9 +123,9 @@ def plot_pnl(
 
     See Also
     --------
+    - backtide.analysis:plot_pnl_histogram
     - backtide.analysis:plot_rolling_returns
     - backtide.analysis:plot_trade_pnl
-    - backtide.backtest:RunResult
 
     Examples
     --------
@@ -155,7 +147,8 @@ def plot_pnl(
     if not runs:
         raise ValueError("Parameter runs cannot be empty.")
 
-    ccy = None if normalize else _resolve_run_currency(currency, runs)
+    runs = _to_list(runs)
+    ccy = None if normalize else _resolve_runs_currency(runs)
 
     if drawdown:
         fig = make_subplots(
@@ -168,7 +161,7 @@ def plot_pnl(
     else:
         fig = go.Figure()
 
-    for idx, run in enumerate(_to_list(runs)):
+    for idx, run in enumerate(runs):
         if not (curve := getattr(run, "equity_curve", None)):
             continue
 
@@ -183,11 +176,10 @@ def plot_pnl(
         else:
             y = [e - base for e in equity]
 
-        if is_benchmark := _is_benchmark(run.strategy_name):
+        if is_benchmark := _is_benchmark(run):
             line = BENCHMARK_LINE
         else:
-            color = cfg.plots.palette[idx % len(cfg.plots.palette)]
-            line = {"color": color, "width": 2}
+            line = {"color": cfg.plots.palette[idx % len(cfg.plots.palette)], "width": 2}
 
         equity_trace = go.Scatter(
             x=ts,

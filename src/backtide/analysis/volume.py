@@ -12,13 +12,13 @@ from typing import TYPE_CHECKING, Any, overload
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import (
-    DataFrameLike,
     _check_columns,
     _get_currency_symbol,
     _plot,
     _resolve_dt,
 )
 from backtide.config import get_config
+from backtide.utils.types import DataFrameLike
 from backtide.utils.utils import _format_price, _to_pandas
 
 if TYPE_CHECKING:
@@ -129,7 +129,7 @@ def plot_volume(
     _check_columns(data, ["symbol", "volume", "dt"], "plot_volume")
 
     fig = go.Figure()
-    currency = _get_currency_symbol(data)
+    ccy = _get_currency_symbol(data)
 
     for idx, symbol in enumerate(data["symbol"].unique()):
         subset = data[data["symbol"] == symbol]
@@ -161,7 +161,7 @@ def plot_volume(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Volume ({currency.symbol})" if currency else "Volume",
+        ylabel=f"Volume ({ccy.symbol})" if ccy else "Volume",
         figsize=figsize,
         filename=filename,
         display=display,

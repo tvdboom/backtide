@@ -7,6 +7,7 @@ Description: Module containing the rolling Sharpe-ratio chart.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload
 
 import numpy as np
@@ -26,7 +27,7 @@ cfg = get_config()
 
 @overload
 def plot_rolling_sharpe(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     window: int = ...,
     periods_per_year: int = ...,
@@ -38,7 +39,7 @@ def plot_rolling_sharpe(
 ) -> go.Figure: ...
 @overload
 def plot_rolling_sharpe(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     window: int = ...,
     periods_per_year: int = ...,
@@ -51,7 +52,7 @@ def plot_rolling_sharpe(
 
 
 def plot_rolling_sharpe(
-    runs: RunResult | list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     window: int = 60,
     periods_per_year: int = 252,

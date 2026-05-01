@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, overload
 import pandas as pd
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import _plot, _resolve_run_currency
+from backtide.analysis.utils import _plot, _resolve_runs_currency
 from backtide.storage import query_bars
 from backtide.utils.utils import _format_price
 
@@ -134,7 +134,7 @@ def plot_mae_mfe(
 
     """
     fig = go.Figure()
-    ccy = _resolve_run_currency(currency, run)
+    ccy = _resolve_runs_currency(run)
     xlabel = f"MAE per share ({ccy.symbol})" if ccy else "MAE per share"
     ylabel = f"MFE per share ({ccy.symbol})" if ccy else "MFE per share"
 

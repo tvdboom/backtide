@@ -12,13 +12,13 @@ from typing import TYPE_CHECKING, Any, overload
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import (
-    DataFrameLike,
     _check_columns,
     _get_currency_symbol,
     _plot,
     _resolve_dt,
 )
 from backtide.config import get_config
+from backtide.utils.types import DataFrameLike
 from backtide.utils.utils import _to_pandas
 
 if TYPE_CHECKING:
@@ -123,7 +123,7 @@ def plot_dividends(
     _check_columns(data, ["symbol", "dt", "amount"], "plot_dividends")
 
     fig = go.Figure()
-    currency = _get_currency_symbol(data)
+    ccy = _get_currency_symbol(data)
 
     for idx, symbol in enumerate(data["symbol"].unique()):
         subset = data[data["symbol"] == symbol].sort_values("dt")
@@ -160,7 +160,7 @@ def plot_dividends(
         title=title,
         legend=legend,
         xlabel="Ex-Dividend Date",
-        ylabel=f"Dividend ({currency.symbol})" if currency else "Dividend",
+        ylabel=f"Dividend ({ccy.symbol})" if ccy else "Dividend",
         figsize=figsize,
         filename=filename,
         display=display,

@@ -12,13 +12,13 @@ from typing import TYPE_CHECKING, Any, overload
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import (
-    DataFrameLike,
     _check_columns,
     _get_currency_symbol,
     _plot,
     _resolve_dt,
 )
 from backtide.config import get_config
+from backtide.utils.types import DataFrameLike
 from backtide.utils.utils import _format_price, _to_pandas
 
 if TYPE_CHECKING:
@@ -124,7 +124,7 @@ def plot_vwap(
     _check_columns(data, ["symbol", "dt", "high", "low", "close", "volume"], "plot_vwap")
 
     fig = go.Figure()
-    currency = _get_currency_symbol(data)
+    ccy = _get_currency_symbol(data)
     intraday = data["dt"].dt.date.duplicated(keep=False).any()
 
     for idx, symbol in enumerate(data["symbol"].unique()):
@@ -184,7 +184,7 @@ def plot_vwap(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Price ({currency.symbol})" if currency else "Price",
+        ylabel=f"Price ({ccy.symbol})" if ccy else "Price",
         figsize=figsize,
         filename=filename,
         display=display,

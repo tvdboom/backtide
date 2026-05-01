@@ -7,6 +7,7 @@ Description: Module containing the trade-duration histogram chart.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numpy as np
@@ -41,7 +42,7 @@ def _pick_unit(median_seconds: float) -> str:
 
 @overload
 def plot_trade_duration(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     bins: int = ...,
     unit: UnitName = ...,
@@ -53,7 +54,7 @@ def plot_trade_duration(
 ) -> go.Figure: ...
 @overload
 def plot_trade_duration(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     bins: int = ...,
     unit: UnitName = ...,
@@ -66,7 +67,7 @@ def plot_trade_duration(
 
 
 def plot_trade_duration(
-    runs: RunResult | list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     bins: int = 40,
     unit: UnitName = "auto",

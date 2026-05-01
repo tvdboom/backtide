@@ -7,12 +7,13 @@ Description: Module containing the per-trade PnL scatter chart.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import _is_benchmark, _plot, _resolve_run_currency
+from backtide.analysis.utils import _is_benchmark, _plot, _resolve_runs_currency
 from backtide.config import get_config
 from backtide.utils.utils import _format_price
 
@@ -27,7 +28,7 @@ cfg = get_config()
 
 @overload
 def plot_trade_pnl(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     currency: str | Currency | None = ...,
     title: str | dict[str, Any] | None = ...,
@@ -38,7 +39,7 @@ def plot_trade_pnl(
 ) -> go.Figure: ...
 @overload
 def plot_trade_pnl(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     currency: str | Currency | None = ...,
     title: str | dict[str, Any] | None = ...,
@@ -50,7 +51,7 @@ def plot_trade_pnl(
 
 
 def plot_trade_pnl(
-    runs: RunResult | list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
     currency: str | Currency | None = None,
     title: str | dict[str, Any] | None = None,
@@ -124,7 +125,7 @@ def plot_trade_pnl(
     ```
 
     """
-    ccy = _resolve_run_currency(currency, runs)
+    ccy = _resolve_runs_currency(runs)
     fig = go.Figure()
     plotted = 0
     for idx, run in enumerate(runs):

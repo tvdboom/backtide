@@ -126,9 +126,9 @@ def plot_returns(
 
     fig = go.Figure()
 
-    # Collect per-symbol returns first so we can derive a shared, robust
-    # x-axis range that crops extreme outliers (which would otherwise compress
-    # the bulk of the distribution into a single bin).
+    # Collect per-symbol returns first so we can derive a shared x-axis range
+    # that crops extreme outliers (which would otherwise compress the bulk of
+    # the distribution into a single bin).
     series_by_symbol = {}
     for symbol in data["symbol"].unique():
         subset = data[data["symbol"] == symbol].sort_values("dt")

@@ -7,23 +7,23 @@ Description: Module containing the price line chart function.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import (
-    DataFrameLike,
     _check_columns,
     _get_currency_symbol,
     _plot,
     _resolve_dt,
 )
 from backtide.config import get_config
+from backtide.utils.types import DataFrameLike
 from backtide.utils.utils import _format_price, _to_list, _to_pandas
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
     from backtide.backtest import RunResult
@@ -101,11 +101,10 @@ def plot_price(
         (used in the legend) to an indicator instance.
 
     run : [RunResult] | None, default=None
-        When provided, overlays entry/exit markers from the strategy run's
-        trades on top of the price line. Triangles mark entries (up for
-        long, down for short) and crosses mark exits (green for winners,
-        red for losers). Trades whose symbols are not present in `data`
-        are silently skipped.
+        When provided, overlays entry/exit markers from the run's trades on top
+        of the price line. Triangles mark entries (up for long, down for short)
+        and crosses mark exits (green for winners, red for losers). Trades whose
+        symbols are not present in `data` are silently skipped.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -169,7 +168,7 @@ def plot_price(
     _check_columns(data, ["symbol", price_col, "dt"], "plot_price")
 
     fig = go.Figure()
-    currency = _get_currency_symbol(data)
+    ccy = getattr(run, "base_currency", None) or _get_currency_symbol(data)
 
     ind_dict = None
     if indicators is not None:
@@ -208,11 +207,15 @@ def plot_price(
                     fig.add_trace(
                         go.Scatter(
                             x=subset["dt"],
-                            y=values.iloc[:, 0],
+                            y=(y := values.iloc[:, 0]),
                             mode="lines",
                             line={"color": f"rgba{color[3:-1]}, 0.7)", "width": 1.5},
                             name=name,
                             legendgroup=symbol,
+                            customdata=[_format_price(v, currency=ccy) for v in y],
+                            hovertemplate=(
+                                f"%{{x}}<br>{name}: %{{customdata}}<extra>{symbol}</extra>"
+                            ),
                         )
                     )
                 else:
@@ -220,22 +223,30 @@ def plot_price(
                         [
                             go.Scatter(
                                 x=subset["dt"],
-                                y=values.iloc[:, 0],
+                                y=(y := values.iloc[:, 0]),
                                 mode="lines",
                                 line={"width": 1, "color": color},
-                                hovertemplate="%{y}<extra>upper bound</extra>",
+                                customdata=[_format_price(v, currency=ccy) for v in y],
+                                hovertemplate=(
+                                    f"%{{x}}<br>{name} (upper): %{{customdata}}"
+                                    f"<extra>{symbol}</extra>"
+                                ),
                                 name=name,
                                 legendgroup=symbol,
                                 showlegend=False,
                             ),
                             go.Scatter(
                                 x=subset["dt"],
-                                y=values.iloc[:, 1],
+                                y=(y := values.iloc[:, 1]),
                                 mode="lines",
                                 line={"width": 1, "color": color},
                                 fill="tonexty",
                                 fillcolor=f"rgba{color[3:-1]}, 0.2)",
-                                hovertemplate="%{y}<extra>lower bound</extra>",
+                                customdata=[_format_price(v, currency=ccy) for v in y],
+                                hovertemplate=(
+                                    f"%{{x}}<br>{name} (lower): %{{customdata}}"
+                                    f"<extra>{symbol}</extra>"
+                                ),
                                 name=name,
                                 legendgroup=symbol,
                                 showlegend=True,
@@ -244,49 +255,41 @@ def plot_price(
                     )
 
     if run:
-        long_x: list[Any] = []
-        long_y: list[float] = []
-        short_x: list[Any] = []
-        short_y: list[float] = []
-        win_x: list[Any] = []
-        win_y: list[float] = []
-        loss_x: list[Any] = []
-        loss_y: list[float] = []
-        long_text: list[str] = []
-        short_text: list[str] = []
-        win_text: list[str] = []
-        loss_text: list[str] = []
 
+        def _hover_data(sym: str, px: float, qty: int, pnl: float) -> tuple[str, str, str, str]:
+            """Convert the data for the hovertemplate to nicely formatted strings."""
+            return (
+                _format_price(px, currency=ccy),
+                f"{qty:+,}",
+                _format_price(pnl, signed=True, currency=ccy),
+                sym,
+            )
+
+        long_x, long_y, short_x, short_y = [], [], [], []
+        win_x, win_y, loss_x, loss_y = [], [], [], []
+        long_data, short_data, win_data, loss_data = [], [], [], []
         for t in getattr(run, "trades", []):
-            sym = str(getattr(t, "symbol", ""))
+            sym = str(t.symbol)
             if sym not in symbols:
                 continue
 
-            entry_dt = pd.to_datetime(int(t.entry_ts), unit="s")
-            exit_dt = pd.to_datetime(int(t.exit_ts), unit="s")
-            entry_price = float(t.entry_price)
-            exit_price = float(t.exit_price)
-            qty = int(getattr(t, "quantity", 0))
-            pnl = float(t.pnl)
-            label = f"{sym}<br>Qty: {qty:+,}<br>PnL: {pnl:+,.2f}"
-
-            if qty >= 0:
-                long_x.append(entry_dt)
-                long_y.append(entry_price)
-                long_text.append(label)
+            if t.quantity >= 0:
+                long_x.append(pd.to_datetime(t.entry_ts, unit="s"))
+                long_y.append(t.entry_price)
+                long_data.append(_hover_data(sym, t.entry_price, t.quantity, t.pnl))
             else:
-                short_x.append(entry_dt)
-                short_y.append(entry_price)
-                short_text.append(label)
+                short_x.append(pd.to_datetime(t.entry_ts, unit="s"))
+                short_y.append(t.entry_price)
+                short_data.append(_hover_data(sym, t.entry_price, t.quantity, t.pnl))
 
-            if pnl >= 0:
-                win_x.append(exit_dt)
-                win_y.append(exit_price)
-                win_text.append(label)
+            if t.pnl >= 0:
+                win_x.append(pd.to_datetime(t.exit_ts, unit="s"))
+                win_y.append(t.exit_price)
+                win_data.append(_hover_data(sym, t.exit_price, t.quantity, t.pnl))
             else:
-                loss_x.append(exit_dt)
-                loss_y.append(exit_price)
-                loss_text.append(label)
+                loss_x.append(pd.to_datetime(t.exit_ts, unit="s"))
+                loss_y.append(t.exit_price)
+                loss_data.append(_hover_data(sym, t.exit_price, t.quantity, t.pnl))
 
         if long_x:
             fig.add_trace(
@@ -297,10 +300,15 @@ def plot_price(
                     name="Long entry",
                     marker={"symbol": "triangle-up", "color": "#2ecc71", "size": 11},
                     legendgroup="trades",
-                    customdata=long_text,
-                    hovertemplate="%{customdata}<extra>long entry</extra>",
+                    customdata=long_data,
+                    hovertemplate=(
+                        "%{x}<br>Price: %{customdata[0]}<br>Qty: %{customdata[1]}"
+                        "<extra>%{customdata[3]}</extra>"
+                    ),
+                    showlegend=False,
                 )
             )
+
         if short_x:
             fig.add_trace(
                 go.Scatter(
@@ -310,10 +318,15 @@ def plot_price(
                     name="Short entry",
                     marker={"symbol": "triangle-down", "color": "#3498db", "size": 11},
                     legendgroup="trades",
-                    customdata=short_text,
-                    hovertemplate="%{customdata}<extra>short entry</extra>",
+                    customdata=short_data,
+                    hovertemplate=(
+                        "%{x}<br>Price: %{customdata[0]}<br>Qty: %{customdata[1]}"
+                        "<extra>%{customdata[3]}</extra>"
+                    ),
+                    showlegend=False,
                 )
             )
+
         if win_x:
             fig.add_trace(
                 go.Scatter(
@@ -323,10 +336,16 @@ def plot_price(
                     name="Exit (win)",
                     marker={"symbol": "x", "color": "#27ae60", "size": 10, "line": {"width": 2}},
                     legendgroup="trades",
-                    customdata=win_text,
-                    hovertemplate="%{customdata}<extra>exit</extra>",
+                    customdata=win_data,
+                    hovertemplate=(
+                        "%{x}<br>Price: %{customdata[0]}<br>"
+                        "Qty: %{customdata[1]}<br>PnL: %{customdata[2]}"
+                        "<extra>%{customdata[3]}</extra>"
+                    ),
+                    showlegend=False,
                 )
             )
+
         if loss_x:
             fig.add_trace(
                 go.Scatter(
@@ -336,8 +355,13 @@ def plot_price(
                     name="Exit (loss)",
                     marker={"symbol": "x", "color": "#e74c3c", "size": 10, "line": {"width": 2}},
                     legendgroup="trades",
-                    customdata=loss_text,
-                    hovertemplate="%{customdata}<extra>exit</extra>",
+                    customdata=loss_data,
+                    hovertemplate=(
+                        "%{x}<br>Price: %{customdata[0]}<br>"
+                        "Qty: %{customdata[1]}<br>PnL: %{customdata[2]}"
+                        "<extra>%{customdata[3]}</extra>"
+                    ),
+                    showlegend=False,
                 )
             )
 
@@ -347,7 +371,7 @@ def plot_price(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Price ({currency.symbol})" if currency else "Price",
+        ylabel=f"Price ({ccy.symbol})" if ccy else "Price",
         figsize=figsize,
         filename=filename,
         display=display,

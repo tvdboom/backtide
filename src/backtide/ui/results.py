@@ -191,7 +191,7 @@ def _render_strategy_summary(run: RunResult):
     _colored_metric(
         mc5,
         ":material/compare_arrows: Alpha",
-        "--" if _is_benchmark(run.strategy_name) else _fmt_pct(alpha, signed=True),
+        "--" if _is_benchmark(run) else _fmt_pct(alpha, signed=True),
         _tone(alpha),
     )
     _colored_metric(
@@ -333,69 +333,97 @@ def _render_analysis_tabs(runs: list[RunResult]):
 
     with tab_map[all_labels[0]]:
         if active_tab == all_labels[0]:
-            c1, c2 = st.columns([10, 1])
-            c1.caption("Cumulative profit and loss over time for each strategy.")
-            with c2.popover(":material/tune:", help="PnL chart options"):
-                st.toggle(
+            col1, col2 = st.columns([10, 1])
+
+            col1.caption("Cumulative profit and loss over time for each strategy.")
+
+            with col2.popover(":material/tune:", help="PnL chart options"):
+                normalize = st.toggle(
                     "Normalize",
-                    key="results_pnl_normalize",
-                    value=_default("results_pnl_normalize", fallback=False),
-                    on_change=lambda: _persist("results_pnl_normalize"),
+                    key=(key := "results_pnl_normalize"),
+                    value=_default(key, fallback=False),
+                    on_change=lambda k=key: _persist(k),
                     help="Show PnL and drawdown in percentage terms.",
                 )
-                st.toggle(
+                drawdown = st.toggle(
                     "Show drawdown",
-                    key="results_pnl_drawdown",
-                    value=_default("results_pnl_drawdown", fallback=True),
-                    on_change=lambda: _persist("results_pnl_drawdown"),
+                    key=(key := "results_pnl_drawdown"),
+                    value=_default(key, fallback=True),
+                    on_change=lambda k=key: _persist(k),
                     help="Show a second panel with strategy drawdown.",
                 )
+
             st.plotly_chart(
-                plot_pnl(
-                    runs,
-                    normalize=bool(st.session_state.get("results_pnl_normalize", False)),
-                    drawdown=bool(st.session_state.get("results_pnl_drawdown", True)),
-                    display=None,
-                ),
+                plot_pnl(runs, normalize=normalize, drawdown=drawdown, display=None),
                 width="stretch",
             )
 
     with tab_map[all_labels[1]]:
         if active_tab == all_labels[1]:
-            c1, c2 = st.columns([10, 1])
-            c1.caption("Distribution of realized trade PnL across strategies.")
-            with c2.popover(":material/tune:"):
-                st.caption("No options available for this plot.")
-            st.plotly_chart(plot_pnl_histogram(runs, display=None), width="stretch")
+            vol1, c2 = st.columns([10, 1])
+            vol1.caption("Distribution of realized trade PnL across strategies.")
+            with c2.popover(":material/tune:", help="PnL histogram options"):
+                set_bins = st.toggle(
+                    "Set bins",
+                    key=(key := "results_pnl_histogram_set_bins"),
+                    value=_default(key, fallback=False),
+                    on_change=lambda k=key: _persist(k),
+                    help="Enable a custom number of histogram bins.",
+                )
+                if set_bins:
+                    bins = st.slider(
+                        "Bins",
+                        min_value=5,
+                        max_value=100,
+                        step=1,
+                        key=(key := "results_pnl_histogram_bins"),
+                        value=_default(key, fallback=40),
+                        on_change=lambda k=key: _persist(k),
+                        help="Set the number of histogram bins.",
+                    )
+                else:
+                    bins = None
+
+            st.plotly_chart(plot_pnl_histogram(runs, bins=bins, display=None), width="stretch")
 
     with tab_map[all_labels[2]]:
         if active_tab == all_labels[2]:
-            c1, c2 = st.columns([10, 1])
-            c1.caption("Rolling return trend to compare momentum over time.")
-            with c2.popover(":material/tune:"):
-                st.caption("No options available for this plot.")
-            st.plotly_chart(plot_rolling_returns(runs, display=None), width="stretch")
+            col1, col2 = st.columns([10, 1])
+            col1.caption("Rolling return trend to compare momentum over time.")
+            with col2.popover(":material/tune:", help="Rolling returns options"):
+                window = st.slider(
+                    "Window",
+                    min_value=2,
+                    max_value=252,
+                    step=1,
+                    key=(key := "results_rolling_returns_window"),
+                    value=_default(key, fallback=30),
+                    on_change=lambda k=key: _persist(k),
+                    help="Number of bars used for the rolling return window.",
+                )
+
+            st.plotly_chart(plot_rolling_returns(runs, window=int(window), display=None), width="stretch")
 
     with tab_map[all_labels[3]]:
         if active_tab == all_labels[3]:
-            c1, c2 = st.columns([10, 1])
-            c1.caption("Rolling Sharpe ratio showing risk-adjusted performance.")
+            vol1, c2 = st.columns([10, 1])
+            vol1.caption("Rolling Sharpe ratio showing risk-adjusted performance.")
             with c2.popover(":material/tune:"):
                 st.caption("No options available for this plot.")
             st.plotly_chart(plot_rolling_sharpe(runs, display=None), width="stretch")
 
     with tab_map[all_labels[4]]:
         if active_tab == all_labels[4]:
-            c1, c2 = st.columns([10, 1])
-            c1.caption("Distribution of trade holding periods.")
+            vol1, c2 = st.columns([10, 1])
+            vol1.caption("Distribution of trade holding periods.")
             with c2.popover(":material/tune:"):
                 st.caption("No options available for this plot.")
             st.plotly_chart(plot_trade_duration(runs, display=None), width="stretch")
 
     with tab_map[all_labels[5]]:
         if active_tab == all_labels[5]:
-            c1, c2 = st.columns([10, 1])
-            c1.caption("Per-trade PnL profile for each strategy.")
+            vol1, c2 = st.columns([10, 1])
+            vol1.caption("Per-trade PnL profile for each strategy.")
             with c2.popover(":material/tune:"):
                 st.caption("No options available for this plot.")
             st.plotly_chart(plot_trade_pnl(runs, display=None), width="stretch")
@@ -634,11 +662,7 @@ def _render_full_analysis(row: pd.Series):
 
     runs = query_strategy_runs(row["id"])
 
-    # Aggregate failure banner: if one or more strategies raised an
-    # exception during the run, surface a single summary up-front so the
-    # user immediately understands why some/all metrics may be missing.
-    failed_runs = [r for r in runs if getattr(r, "error", None)]
-    if failed_runs:
+    if failed_runs := [r for r in runs if getattr(r, "error", None)]:
         names = ", ".join(f"**{r.strategy_name}**" for r in failed_runs)
         if len(failed_runs) == len(runs):
             st.error(
@@ -706,122 +730,108 @@ def _render_full_analysis(row: pd.Series):
 
     st.markdown("")
 
-    _render_analysis_tabs(runs, exp_cfg)
+    _render_analysis_tabs(runs)
 
     st.markdown("")
 
-    tabs = st.tabs([f"**{run.strategy_name}**" for run in runs])
-    # Map every traded symbol to the currency it actually settled in. The
-    # backtest engine debits each fill from the instrument's quote
-    # currency first (`order_ccy = quote_ccy.get(symbol).unwrap_or(base)`),
-    # so an AAPL fill is paid in USD and an ASML fill in EUR even if the
-    # portfolio's base currency differs. Falling back to the base currency
-    # keeps unknown symbols readable.
+    tabs = st.tabs(
+        [f"**{run.strategy_name}**" for run in runs],
+        key=(key := "full_results_strategy_tabs"),
+        default=_default(key),
+        on_change=lambda k=key: _persist(k),
+    )
+
+    # Map every traded symbol to the currency it actually settled in.
     symbol_to_ccy: dict[str, str] = {}
     symbol_to_it: dict[str, object] = {}
-    try:
-        for inst in query_instruments():
-            if inst.quote:
-                symbol_to_ccy[inst.symbol] = str(inst.quote)
-            symbol_to_it[inst.symbol] = inst.instrument_type
-    except Exception:  # noqa: BLE001
-        symbol_to_ccy = {}
-        symbol_to_it = {}
+    for inst in query_instruments():
+        if inst.quote:
+            symbol_to_ccy[inst.symbol] = str(inst.quote)
+        symbol_to_it[inst.symbol] = inst.instrument_type
+
     logokit_key = cfg.display.logokit_api_key
+
     for tab, run in zip(tabs, runs, strict=True):
         with tab:
             _render_strategy_summary(run)
 
-            # Per-strategy plots between metrics and orders.
             st.markdown("")
             _render_strategy_plots(run, exp_cfg)
             st.markdown("")
 
-            # Each run carries its own base currency (set by the engine
-            # from `ExperimentConfig.portfolio.base_currency`); use it as
-            # the fallback for symbols whose quote currency is unknown.
-            base_ccy = str(getattr(run, "base_currency", None) or cfg.general.base_currency)
+            st.markdown("##### Orders")
 
-            if run.orders:
-                st.markdown("##### Orders")
-                rows = []
-                for o in run.orders:
-                    qty = int(o.order.quantity)
-                    side = "Buy" if qty > 0 else ("Sell" if qty < 0 else "—")
-                    px = o.fill_price if o.fill_price is not None else o.order.price
-                    # Settle each fill in the instrument's quote currency
-                    # (matches what the engine actually debited / credited).
-                    quote_ccy = symbol_to_ccy.get(o.order.symbol, base_ccy)
-                    abs_qty = abs(qty)
-                    total = (px * abs_qty) if px is not None else None
-                    # Build an image URL for the symbol's logo (logokit).
-                    # Empty string keeps the cell blank when no key is set
-                    # or the instrument type is unknown.
-                    logo = ""
-                    if logokit_key and (it := symbol_to_it.get(o.order.symbol)) is not None:
-                        try:
-                            logo = _get_logokit_url(o.order.symbol, it, logokit_key)
-                        except Exception:  # noqa: BLE001
-                            logo = ""
-                    rows.append(
-                        {
-                            "logo": logo,
-                            "time": dt.fromtimestamp(o.timestamp),
-                            "symbol": o.order.symbol,
-                            "type": str(o.order.order_type),
-                            "side": side,
-                            "qty": abs_qty,
-                            "price": (
-                                _format_price(total, currency=quote_ccy)
-                                if total is not None
-                                else "—"
-                            ),
-                            "pnl": (
-                                _format_price(o.pnl, currency=quote_ccy)
-                                if o.pnl is not None
-                                else "—"
-                            ),
-                            "commission": _format_price(o.commission or 0.0, currency=quote_ccy),
-                            "status": o.status,
-                        }
-                    )
-                orders_df = pd.DataFrame(rows)
-                # Most-recent fills first.
-                orders_df = orders_df.sort_values("time", ascending=False).reset_index(drop=True)
+            if not run.orders:
+                st.warning("The strategy didn't execute any orders.", icon=":material/warning:")
 
-                def _color_side(val: str) -> str:
-                    if val == "Buy":
-                        return "color: #2ecc71; font-weight: 600;"
-                    if val == "Sell":
-                        return "color: #e74c3c; font-weight: 600;"
+            rows = []
+            for o in run.orders:
+                qty = o.order.quantity
+                side = "Buy" if qty > 0 else ("Sell" if qty < 0 else "—")
+                px = o.fill_price if o.fill_price is not None else o.order.price
+
+                # Settle each fill in the instrument's quote currency
+                # (matches what the engine actually debited / credited).
+                quote_ccy = symbol_to_ccy.get(o.order.symbol, run.base_currency)
+
+                total = (px * abs(qty)) if px is not None else None
+
+                rows.append(
+                    {
+                        "Datetime": dt.fromtimestamp(o.timestamp),
+                        "Symbol": o.order.symbol,
+                        "Type": str(o.order.order_type),
+                        "Side": side,
+                        "Qty": abs(qty),
+                        "Price": (
+                            _format_price(total, currency=quote_ccy) if total is not None else "—"
+                        ),
+                        "PnL": (
+                            _format_price(o.pnl, currency=quote_ccy) if o.pnl is not None else "—"
+                        ),
+                        "Commission": _format_price(o.commission or 0.0, currency=quote_ccy),
+                    }
+                )
+
+            df = pd.DataFrame(rows).sort_values("Datetime", ascending=False).reset_index(drop=True)
+
+            if logokit_key:
+                df.insert(
+                    0,
+                    "Logo",
+                    df.apply(
+                        lambda row: _get_logokit_url(
+                            row["Symbol"], symbol_to_it[row["Symbol"]], logokit_key
+                        ),
+                        axis=1,
+                    ),
+                )
+
+            def _color_side(val: str) -> str:
+                if val == "Buy":
+                    return "color: #2ecc71; font-weight: 600;"
+                if val == "Sell":
+                    return "color: #e74c3c; font-weight: 600;"
+                return ""
+
+            def _color_pnl(val: str | None) -> str:
+                if not val:
                     return ""
+                s = val.replace(",", "")
+                if not any(ch.isdigit() for ch in s):
+                    return ""
+                return "color: #e74c3c;" if "-" in s else "color: #2ecc71;"
 
-                def _color_pnl(val: str) -> str:
-                    if not val:
-                        return ""
-                    # Parse the leading sign-bearing number out of the
-                    # formatted string (handles "$-12.34", "-12.34 €", etc.)
-                    s = val.replace(",", "")
-                    is_neg = "-" in s
-                    digits = any(ch.isdigit() for ch in s)
-                    if not digits:
-                        return ""
-                    return "color: #e74c3c;" if is_neg else "color: #2ecc71;"
+            column_config = {}
+            if logokit_key:
+                column_config["Logo"] = st.column_config.ImageColumn(label="", width="small")
 
-                styled = orders_df.style.map(_color_side, subset=["side"]).map(
-                    _color_pnl, subset=["pnl"]
-                )
-                column_config = {
-                    "logo": st.column_config.ImageColumn(label="", width="small"),
-                }
-                st.dataframe(
-                    styled,
-                    hide_index=True,
-                    width="stretch",
-                    column_config=column_config,
-                )
-            else:
-                st.caption("No orders.")
+            st.dataframe(
+                df.style.map(_color_side, subset=["Side"]).map(_color_pnl, subset=["PnL"]),
+                width="stretch",
+                column_config=column_config,
+                hide_index=True,
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

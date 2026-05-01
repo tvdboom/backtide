@@ -7,28 +7,29 @@ Description: Module containing the trade PnL histogram chart.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload
 
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import _is_benchmark, _plot, _resolve_run_currency
+from backtide.analysis.utils import _is_benchmark, _plot, _resolve_runs_currency
 from backtide.config import get_config
+from backtide.utils.utils import _format_price, _to_list
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from backtide.backtest import RunResult
-    from backtide.core.data import Currency
+
 
 cfg = get_config()
 
 
 @overload
 def plot_pnl_histogram(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
-    bins: int = ...,
-    currency: str | Currency | None = ...,
+    bins: int | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -37,10 +38,9 @@ def plot_pnl_histogram(
 ) -> go.Figure: ...
 @overload
 def plot_pnl_histogram(
-    runs: list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
-    bins: int = ...,
-    currency: str | Currency | None = ...,
+    bins: int | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -50,10 +50,9 @@ def plot_pnl_histogram(
 
 
 def plot_pnl_histogram(
-    runs: RunResult | list[RunResult],
+    runs: RunResult | Sequence[RunResult],
     *,
-    bins: int = 40,
-    currency: str | Currency | None = None,
+    bins: int | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper right",
     figsize: tuple[int, int] | None = (900, 600),
@@ -62,22 +61,17 @@ def plot_pnl_histogram(
 ) -> go.Figure | None:
     """Create a histogram of per-trade PnL for one or more strategy runs.
 
-    Each strategy gets its own translucent histogram overlaid on the same
-    axes, so the shape and skew of the trade-PnL distribution can be
-    compared at a glance.
+    Each strategy plots its own histogram overlaid on the same axes, so the
+    shape and skew of the trade-PnL distribution can be easily compared.
 
     Parameters
     ----------
     runs : [RunResult] | list[[RunResult]]
-        The per-strategy results to plot. Runs without trades are skipped.
+        The per-strategy results to plot.
 
-    bins : int, default=40
-        Number of histogram bins.
-
-    currency : str | [Currency] | None, default=None
-        Currency used to label the PnL axis. When `None`, the run's own
-        `base_currency` (set by the engine from
-        `ExperimentConfig.portfolio.base_currency`) is used.
+    bins : int | None, default=None
+        Number of histogram bins. If `None`, Plotly's default binning algorithm
+        is used.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -128,44 +122,27 @@ def plot_pnl_histogram(
     ```
 
     """
-    ccy = _resolve_run_currency(currency, runs)
-    sym = ccy.symbol if ccy else ""
+    if not runs:
+        raise ValueError("Parameter runs cannot be empty.")
+
+    runs = _to_list(runs)
+    ccy = _resolve_runs_currency(runs)
+
     fig = go.Figure()
-    plotted = 0
     for idx, run in enumerate(runs):
-        # Per-trade view; the benchmark has no real trades, skip it.
-        if _is_benchmark(run.strategy_name):
-            continue
-        trades = getattr(run, "trades", None) or []
-        if not trades:
+        if _is_benchmark(run) or not run.trades:
             continue
 
-        pnls = [float(t.pnl) for t in trades]
-        color = cfg.plots.palette[idx % len(cfg.plots.palette)]
         fig.add_trace(
             go.Histogram(
-                x=pnls,
+                x=(x := [t.pnl for t in run.trades]),
                 nbinsx=bins,
                 name=run.strategy_name,
-                marker_color=color,
+                marker_color=cfg.plots.palette[idx % len(cfg.plots.palette)],
                 opacity=0.55,
-                hovertemplate=(
-                    "<b>%{fullData.name}</b><br>"
-                    f"PnL: %{{x:+,.2f}} {sym}<br>"
-                    "Trades: %{y}<extra></extra>"
-                ),
+                customdata=[_format_price(v, signed=True, currency=ccy) for v in x],
+                hovertemplate="Trades: %{y}<br>PnL: %{customdata}<extra>%{fullData.name}</extra>",
             )
-        )
-        plotted += 1
-
-    if plotted == 0:
-        fig.add_annotation(
-            text="No trades to plot.",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
         )
 
     fig.update_layout(barmode="overlay")
