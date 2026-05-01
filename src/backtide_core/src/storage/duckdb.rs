@@ -109,16 +109,16 @@ impl Storage for DuckDb {
             );
 
             CREATE TABLE IF NOT EXISTS experiment_equity (
-                strategy_run_id   VARCHAR NOT NULL,
+                run_id            VARCHAR NOT NULL,
                 ts                BIGINT NOT NULL,
                 equity            DOUBLE NOT NULL,
                 cash              DOUBLE NOT NULL,
                 drawdown          DOUBLE NOT NULL,
-                UNIQUE (strategy_run_id, ts)
+                UNIQUE (run_id, ts)
             );
 
             CREATE TABLE IF NOT EXISTS experiment_orders (
-                strategy_run_id   VARCHAR NOT NULL,
+                run_id            VARCHAR NOT NULL,
                 order_id          VARCHAR NOT NULL,
                 ts                BIGINT NOT NULL,
                 symbol            VARCHAR NOT NULL,
@@ -130,11 +130,11 @@ impl Storage for DuckDb {
                 reason            VARCHAR NOT NULL,
                 commission        DOUBLE NOT NULL DEFAULT 0,
                 pnl               DOUBLE,
-                UNIQUE (strategy_run_id, order_id)
+                UNIQUE (run_id, order_id)
             );
 
             CREATE TABLE IF NOT EXISTS experiment_trades (
-                strategy_run_id   VARCHAR NOT NULL,
+                run_id            VARCHAR NOT NULL,
                 symbol            VARCHAR NOT NULL,
                 quantity          BIGINT NOT NULL,
                 entry_ts          BIGINT NOT NULL,
@@ -142,7 +142,7 @@ impl Storage for DuckDb {
                 entry_price       DOUBLE NOT NULL,
                 exit_price        DOUBLE NOT NULL,
                 pnl               DOUBLE NOT NULL,
-                UNIQUE (strategy_run_id, symbol, entry_ts, exit_ts)
+                UNIQUE (run_id, symbol, entry_ts, exit_ts)
             );
         ",
         )?;
@@ -678,7 +678,7 @@ impl Storage for DuckDb {
 
         // ── Phase 1: parent rows + idempotent cleanup of child rows ─────
         //
-        // Equity curves / orders / trades for any strategy_run_id we are
+        // Equity curves / orders / trades for any run_id we are
         // about to (re-)insert are wiped in a single statement each, so an
         // experiment with N strategies costs 3 DELETEs total instead of
         // 3·N. Wrapped in a transaction with the parent upserts so the
@@ -718,7 +718,7 @@ impl Storage for DuckDb {
             )?;
         }
 
-        // Bulk-delete child rows for every strategy_run_id we are about
+        // Bulk-delete child rows for every run_id we are about
         // to repopulate. Building the IN (?, ?, …) list dynamically keeps
         // it to a single round trip per child table.
         if !result.strategies.is_empty() {
@@ -726,7 +726,7 @@ impl Storage for DuckDb {
                 std::iter::repeat_n("?", result.strategies.len()).collect::<Vec<_>>().join(", ");
             let ids: Vec<&str> = result.strategies.iter().map(|s| s.strategy_id.as_str()).collect();
             for table in ["experiment_equity", "experiment_orders", "experiment_trades"] {
-                let sql = format!("DELETE FROM {table} WHERE strategy_run_id IN ({placeholders})");
+                let sql = format!("DELETE FROM {table} WHERE run_id IN ({placeholders})");
                 conn.execute(&sql, params_from_iter(ids.iter()))?;
             }
         }
@@ -871,7 +871,7 @@ impl Storage for DuckDb {
         Ok(rows)
     }
 
-    fn query_experiment_strategies(
+    fn query_strategy_runs(
         &self,
         experiment_id: &str,
     ) -> StorageResult<Vec<StrategyRunResult>> {
@@ -902,7 +902,7 @@ impl Storage for DuckDb {
 
             let mut eq_stmt = conn.prepare(
                 "SELECT ts, equity, cash, drawdown FROM experiment_equity
-                 WHERE strategy_run_id = ? ORDER BY ts",
+                 WHERE run_id = ? ORDER BY ts",
             )?;
             let equity_curve = eq_stmt
                 .query_map(params![run_id], |row| {
@@ -917,7 +917,7 @@ impl Storage for DuckDb {
 
             let mut o_stmt = conn.prepare(
                 "SELECT order_id, ts, symbol, order_type, quantity, price, status, fill_price, reason, commission, pnl
-                 FROM experiment_orders WHERE strategy_run_id = ? ORDER BY ts",
+                 FROM experiment_orders WHERE run_id = ? ORDER BY ts",
             )?;
             let orders = o_stmt
                 .query_map(params![run_id], |row| {
@@ -943,7 +943,7 @@ impl Storage for DuckDb {
 
             let mut t_stmt = conn.prepare(
                 "SELECT symbol, quantity, entry_ts, exit_ts, entry_price, exit_price, pnl
-                 FROM experiment_trades WHERE strategy_run_id = ? ORDER BY entry_ts",
+                 FROM experiment_trades WHERE run_id = ? ORDER BY entry_ts",
             )?;
             let trades = t_stmt
                 .query_map(params![run_id], |row| {
@@ -979,17 +979,17 @@ impl Storage for DuckDb {
 
         // Delete dependent rows first (no FK cascade in DuckDB).
         conn.execute(
-            "DELETE FROM experiment_equity WHERE strategy_run_id IN
+            "DELETE FROM experiment_equity WHERE run_id IN
                 (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
             params![experiment_id],
         )?;
         conn.execute(
-            "DELETE FROM experiment_orders WHERE strategy_run_id IN
+            "DELETE FROM experiment_orders WHERE run_id IN
                 (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
             params![experiment_id],
         )?;
         conn.execute(
-            "DELETE FROM experiment_trades WHERE strategy_run_id IN
+            "DELETE FROM experiment_trades WHERE run_id IN
                 (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
             params![experiment_id],
         )?;

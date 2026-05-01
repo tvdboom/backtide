@@ -15,6 +15,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// See Also
 /// --------
 /// - backtide.data:Bar
+/// - backtide.data:Instrument
 /// - backtide.data:Interval
 #[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.backtest")]
 #[derive(

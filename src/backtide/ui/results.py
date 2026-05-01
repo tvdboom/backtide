@@ -17,9 +17,9 @@ from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
 from backtide.storage import (
     delete_experiment,
-    query_experiment_strategies,
     query_experiments,
     query_instruments,
+    query_strategy_runs,
 )
 from backtide.ui.utils import (
     _fmt_duration,
@@ -458,7 +458,7 @@ def _render_full_analysis(row: pd.Series):
     except Exception:  # noqa: BLE001
         exp_cfg = None
 
-    runs = query_experiment_strategies(row["id"])
+    runs = query_strategy_runs(row["id"])
 
     # Aggregate failure banner: if one or more strategies raised an
     # exception during the run, surface a single summary up-front so the
@@ -536,21 +536,7 @@ def _render_full_analysis(row: pd.Series):
     if any(getattr(r, "equity_curve", None) for r in runs):
         col_a, col_b = st.columns([10, 1])
         col_a.markdown("##### :material/show_chart: PnL over time")
-        with col_b.popover(":material/tune:", help="PnL chart options."):
-            pnl_relative = st.toggle(
-                label="Relative",
-                key=f"pnl_relative_{exp_id}",
-                value=False,
-                help=(
-                    "Show return as a percentage of starting equity instead "
-                    "of absolute PnL. Useful when strategies have different "
-                    "starting capital."
-                ),
-            )
-        st.plotly_chart(
-            plot_pnl(runs, relative=pnl_relative, display=None),
-            width="stretch",
-        )
+        st.plotly_chart(plot_pnl(runs, display=None), width="stretch")
 
     st.markdown("")
 
@@ -821,7 +807,7 @@ for _, row in df.iterrows():
         if is_open:
             st.divider()
 
-            for i, run in enumerate(query_experiment_strategies(exp_id)):
+            for i, run in enumerate(query_strategy_runs(exp_id)):
                 if i > 0:
                     st.markdown("<div style='margin-top:1.25rem'></div>", unsafe_allow_html=True)
                 st.markdown(f"**:material/psychology: {run.strategy_name}**")

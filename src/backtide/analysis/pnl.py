@@ -27,7 +27,7 @@ cfg = get_config()
 def plot_pnl(
     runs: list[StrategyRunResult],
     *,
-    relative: bool = ...,
+    normalize: bool = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -38,7 +38,7 @@ def plot_pnl(
 def plot_pnl(
     runs: list[StrategyRunResult],
     *,
-    relative: bool = ...,
+    normalize: bool = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -48,42 +48,32 @@ def plot_pnl(
 
 
 def plot_pnl(
-    runs: list[StrategyRunResult],
+    runs: StrategyRunResult | list[StrategyRunResult],
     *,
-    relative: bool = False,
+    normalize: bool = False,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] | None = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
-    """Create a PnL-over-time chart for an experiment.
+    """Create a PnL-over-time chart for one or more strategy runs.
 
-    Plots one line per strategy run, sharing a common time axis. Each
-    line starts at zero and tracks the running profit & loss (current
-    equity minus the strategy's starting equity). When `relative=True`,
-    PnL is normalised to a percentage of the starting equity instead,
-    which makes strategies with very different initial capital
-    visually comparable.
-
-    Useful as the headline visual for an experiment: at a glance the
-    user sees which strategy compounds best, how each one drawdowns,
-    and how the user strategies stack up against the benchmark.
+    Each line tracks a strategy's running profit & loss (current equity minus
+    the starting equity) in the base currency. When `normalize=True`, PnL is
+    normalized to a percentage of the starting equity instead, which makes
+    strategies with different initial cash visually comparable.
 
     Parameters
     ----------
-    runs : list[[StrategyRunResult]]
+    runs : [StrategyRunResult] | list[[StrategyRunResult]]
         The per-strategy results to plot, typically obtained from
-        `query_experiment_strategies` or directly from
-        `ExperimentResult.strategies`. Runs without an equity curve
-        (e.g. failed strategies) are silently skipped.
+        `query_strategy_runs` or directly from [`ExperimentResult`].
 
-    relative : bool, default=False
-        - If False, plot absolute PnL (`equity - initial_equity`) in the
-          base currency.
+    normalize : bool, default=False
+        - If False, plot absolute PnL (`equity - initial_equity`).
         - If True, plot relative PnL (`(equity / initial_equity - 1) * 100`)
-          as a percentage. Lets strategies with different starting
-          capitals share a single y-axis.
+          as a percentage.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -119,17 +109,17 @@ def plot_pnl(
     See Also
     --------
     - backtide.analysis:plot_drawdown
-    - backtide.storage:query_experiment_strategies
+    - backtide.storage:query_strategy_runs
     - backtide.backtest:StrategyRunResult
 
     Examples
     --------
     ```pycon
     from backtide.analysis import plot_pnl
-    from backtide.storage import query_experiment_strategies, query_experiments
+    from backtide.storage import query_strategy_runs, query_experiments
 
     exp = query_experiments()[0]
-    runs = query_experiment_strategies(exp.id)
+    runs = query_strategy_runs(exp.id)
     plot_pnl(runs, relative=True)
     ```
 
@@ -147,7 +137,7 @@ def plot_pnl(
         if base == 0.0:
             continue
 
-        if relative:
+        if normalize:
             y = [(e / base - 1.0) * 100.0 for e in equity]
         else:
             y = [e - base for e in equity]
@@ -169,7 +159,7 @@ def plot_pnl(
                 line=line,
                 hovertemplate=(
                     "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d}<br>"
-                    + ("%{y:+.2f}%" if relative else "%{y:+,.2f}")
+                    + ("%{y:+.2f}%" if normalize else "%{y:+,.2f}")
                     + "<extra></extra>"
                 ),
             )
@@ -197,7 +187,7 @@ def plot_pnl(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel="Return (%)" if relative else "PnL",
+        ylabel="Return (%)" if normalize else "PnL",
         figsize=figsize,
         filename=filename,
         display=display,

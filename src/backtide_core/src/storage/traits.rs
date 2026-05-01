@@ -85,7 +85,7 @@ pub trait Storage: Send + Sync {
     ) -> StorageResult<Vec<StoredExperiment>>;
 
     /// Load every persisted [`StrategyRunResult`] for a given experiment.
-    fn query_experiment_strategies(
+    fn query_strategy_runs(
         &self,
         experiment_id: &str,
     ) -> StorageResult<Vec<crate::backtest::models::experiment_result::StrategyRunResult>>;

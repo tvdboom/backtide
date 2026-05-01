@@ -153,7 +153,7 @@ nav:
             - query_bars: api/storage/query_bars.md
             - query_bars_summary: api/storage/query_bars_summary.md
             - query_dividends: api/storage/query_dividends.md
-            - query_experiment_strategies: api/storage/query_experiment_strategies.md
+            - query_strategy_runs: api/storage/query_strategy_runs.md
             - query_experiments: api/storage/query_experiments.md
             - query_instruments: api/storage/query_instruments.md
         - models:

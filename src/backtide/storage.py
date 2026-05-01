@@ -11,7 +11,7 @@ from backtide.core.storage import (
     query_bars,
     query_bars_summary,
     query_dividends,
-    query_experiment_strategies,
     query_experiments,
     query_instruments,
+    query_strategy_runs,
 )

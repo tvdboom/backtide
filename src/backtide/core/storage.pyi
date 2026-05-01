@@ -6,9 +6,9 @@ __all__ = [
     "query_bars",
     "query_bars_summary",
     "query_dividends",
-    "query_experiment_strategies",
     "query_experiments",
     "query_instruments",
+    "query_strategy_runs",
 ]
 
 import pandas as pd
@@ -33,7 +33,7 @@ def delete_experiment(experiment_id) -> int:
     See Also
     --------
     - backtide.storage:delete_symbols
-    - backtide.storage:query_experiment_strategies
+    - backtide.storage:query_strategy_runs
     - backtide.storage:query_experiments
 
     Examples
@@ -215,37 +215,6 @@ def query_dividends(symbol=None, provider=None, *, limit=None) -> pd.DataFrame |
 
     """
 
-def query_experiment_strategies(experiment_id) -> list[StrategyRunResult]:
-    """Return every per-strategy result for a given experiment.
-
-    Parameters
-    ----------
-    experiment_id : str
-        The experiment id (as stored in the `experiments` table).
-
-    Returns
-    -------
-    list[[StrategyRunResult]]
-        One result entry per strategy that ran in this experiment.
-
-    See Also
-    --------
-    - backtide.backtest:run_experiment
-    - backtide.storage:query_experiments
-
-    Examples
-    --------
-    ```pycon
-    from backtide.storage import query_experiments, query_experiment_strategies
-
-    experiments = query_experiments()
-    if not experiments.empty:
-        runs = query_experiment_strategies(experiments.iloc[0]["id"])
-        print(runs)
-    ```
-
-    """
-
 def query_experiments(
     experiment_id=None,
     *,
@@ -279,7 +248,7 @@ def query_experiments(
     See Also
     --------
     - backtide.backtest:run_experiment
-    - backtide.storage:query_experiment_strategies
+    - backtide.storage:query_strategy_runs
 
     Examples
     --------
@@ -342,6 +311,37 @@ def query_instruments(
 
     xnas = query_instruments("stocks", exchange="XNAS", limit=5)
     print(xnas)
+    ```
+
+    """
+
+def query_strategy_runs(experiment_id) -> list[StrategyRunResult]:
+    """Return every per-strategy result for a given experiment.
+
+    Parameters
+    ----------
+    experiment_id : str
+        The experiment id (as stored in the `experiments` table).
+
+    Returns
+    -------
+    list[[StrategyRunResult]]
+        One result entry per strategy that ran in this experiment.
+
+    See Also
+    --------
+    - backtide.backtest:run_experiment
+    - backtide.storage:query_experiments
+
+    Examples
+    --------
+    ```pycon
+    from backtide.storage import query_experiments, query_strategy_runs
+
+    experiments = query_experiments()
+    if not experiments.empty:
+        runs = query_strategy_runs(experiments.iloc[0]["id"])
+        print(runs)
     ```
 
     """

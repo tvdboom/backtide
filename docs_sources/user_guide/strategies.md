@@ -1,4 +1,4 @@
-# Strategies
+ Strategies
 -----------
 
 Strategies are the decision-making logic that determines when to buy, sell, or
@@ -103,6 +103,40 @@ are divided into **single-asset** strategies (operating on one instrument)
 and **portfolio-rotation** strategies (ranking and rotating across multiple
 instruments). See the API reference for full details on each strategy's
 parameters, attributes, and logic.
+
+### Position sizing
+
+Built-in strategies don't take a `quantity` parameter — they size every order
+automatically from the portfolio's current cash, so the same strategy works
+unchanged across different starting capitals and prices. The exact rule depends
+on the strategy family:
+
+- **Single-asset strategies.** When a buy signal fires for a symbol, the
+  strategy allocates an equal-weight slice of the *current* cash balance to it:
+  `cash / N`, where `N` is the number of symbols configured in the experiment.
+  That cash is divided by the next-bar fill price to obtain the integer share
+  quantity. Symbols enter independently — a slow-history symbol that becomes
+  available later still gets its `1 / N` slice of whatever cash is left at that
+  point. Sell signals always close the full position for the symbol.
+
+  - [`BuyAndHold`] is the only exception: it buys once on each symbol's first
+    available bar and never re-sizes.
+  - [`TurtleTrading`] sizes by **risk parity** instead: the per-trade quantity
+    is `(risk_per_trade × equity) / (ATR × price_per_unit)`, capping
+    volatile instruments and scaling up calmer ones to the same dollar risk.
+
+- **Portfolio-rotation strategies.** On each rebalance, the strategy ranks the
+  universe, picks the top `K` symbols, and targets an equal-weight allocation
+  of `equity / K` per slot. Existing positions outside the new top-`K` are
+  fully liquidated; remaining positions are resized up or down to match the
+  new target weight, so the portfolio is always close to fully invested across
+  the current `K` winners.
+
+In every case, if the next-bar fill price plus slippage and commission would
+push an order over the available cash, the engine **auto-shrinks** the
+quantity to whatever fits rather than rejecting it outright. This keeps
+equal-weight strategies from silently dropping their last leg when fees nibble
+into the budget.
 
 ### Single-asset strategies
 

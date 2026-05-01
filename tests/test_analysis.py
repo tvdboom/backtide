@@ -615,7 +615,7 @@ class TestPlotPnl:
     def test_relative_pnl_in_percent(self):
         """Relative mode plots returns as a percentage of the start equity."""
         run = _StubRun("S1", [200.0, 220.0, 250.0])
-        fig = plot_pnl([run], relative=True, display=None)
+        fig = plot_pnl([run], normalize=True, display=None)
         y = np.array(fig.data[0].y, dtype=float)
         assert y[0] == 0.0
         assert y[-1] == pytest.approx(25.0)  # 250 / 200 - 1 = 25 %

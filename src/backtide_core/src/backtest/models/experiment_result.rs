@@ -24,6 +24,12 @@ use std::collections::HashMap;
 /// drawdown : float
 ///     Running drawdown (negative or zero) versus the all-time high
 ///     equity, expressed as a fraction (e.g. -0.12 = -12 %).
+///
+/// See Also
+/// --------
+/// - backtide.backtest:ExperimentResult
+/// - backtide.analysis:plot_pnl
+/// - backtide.backtest:StrategyRunResult
 #[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EquitySample {
@@ -70,6 +76,12 @@ impl EquitySample {
 ///
 /// pnl : float
 ///     Profit and loss in the base currency, after commission.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:Order
+/// - backtide.backtest:OrderRecord
+/// - backtide.backtest:StrategyRunResult
 #[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Trade {
@@ -120,6 +132,12 @@ impl Trade {
 ///     currency, after commission. Populated only on closing fills
 ///     (sell that flattens / reduces an existing long, or buy-to-cover);
 ///     `None` for opening fills, cancellations and rejections.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:Order
+/// - backtide.backtest:StrategyRunResult
+/// - backtide.backtest:Trade
 #[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OrderRecord {
@@ -176,6 +194,12 @@ impl OrderRecord {
 ///     row so the rest of the experiment isn't lost — the engine simply
 ///     records the error and reports the experiment status as
 ///     ``"failed"``.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:EquitySample
+/// - backtide.backtest:ExperimentResult
+/// - backtide.storage:query_strategy_runs
 #[pyclass(get_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StrategyRunResult {
@@ -234,6 +258,12 @@ impl StrategyRunResult {
 ///
 /// warnings : list[str]
 ///     Non-fatal warnings emitted during the run.
+///
+/// See Also
+/// --------
+/// - backtide.backtest:ExperimentConfig
+/// - backtide.backtest:run_experiment
+/// - backtide.backtest:StrategyRunResult
 #[pyclass(get_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExperimentResult {

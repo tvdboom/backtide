@@ -63,7 +63,7 @@ macro_rules! to_df {
 /// See Also
 /// --------
 /// - backtide.storage:delete_symbols
-/// - backtide.storage:query_experiment_strategies
+/// - backtide.storage:query_strategy_runs
 /// - backtide.storage:query_experiments
 ///
 /// Examples
@@ -377,19 +377,19 @@ pub fn query_dividends(
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.storage import query_experiments, query_experiment_strategies
+/// from backtide.storage import query_experiments, query_strategy_runs
 ///
 /// experiments = query_experiments()
 /// if not experiments.empty:
-///     runs = query_experiment_strategies(experiments.iloc[0]["id"])
+///     runs = query_strategy_runs(experiments.iloc[0]["id"])
 ///     print(runs)
 /// ```
 #[pyfunction]
 #[pyo3(signature = (experiment_id: "str") -> "list[StrategyRunResult]")]
-pub fn query_experiment_strategies(
+pub fn query_strategy_runs(
     experiment_id: &str,
 ) -> PyResult<Vec<crate::backtest::models::experiment_result::StrategyRunResult>> {
-    Ok(Engine::get()?.db.query_experiment_strategies(experiment_id)?)
+    Ok(Engine::get()?.db.query_strategy_runs(experiment_id)?)
 }
 
 /// Return stored experiments, optionally filtered by id and/or a search string.
@@ -419,7 +419,7 @@ pub fn query_experiment_strategies(
 /// See Also
 /// --------
 /// - backtide.backtest:run_experiment
-/// - backtide.storage:query_experiment_strategies
+/// - backtide.storage:query_strategy_runs
 ///
 /// Examples
 /// --------

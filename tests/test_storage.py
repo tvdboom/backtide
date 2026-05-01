@@ -12,9 +12,9 @@ from backtide.storage import (
     query_bars,
     query_bars_summary,
     query_dividends,
-    query_experiment_strategies,
     query_experiments,
     query_instruments,
+    query_strategy_runs,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ class TestDeleteSymbols:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# query_experiments / query_experiment_strategies
+# query_experiments / query_strategy_runs
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -173,9 +173,9 @@ class TestQueryExperiments:
         assert isinstance(query_experiments(limit=10), pd.DataFrame)
 
 
-class TestQueryExperimentStrategies:
-    """Tests for the 'query_experiment_strategies' function."""
+class TestQueryStrategyRuns:
+    """Tests for the 'query_strategy_runs' function."""
 
     def test_unknown_id_returns_empty_list(self):
         """Querying a missing experiment id returns ``[]``."""
-        assert query_experiment_strategies("__missing__") == []
+        assert query_strategy_runs("__missing__") == []

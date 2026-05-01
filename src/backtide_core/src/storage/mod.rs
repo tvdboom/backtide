@@ -17,7 +17,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(query_bars_summary, &m)?)?;
     m.add_function(wrap_pyfunction!(query_dividends, &m)?)?;
     m.add_function(wrap_pyfunction!(query_experiments, &m)?)?;
-    m.add_function(wrap_pyfunction!(query_experiment_strategies, &m)?)?;
+    m.add_function(wrap_pyfunction!(query_strategy_runs, &m)?)?;
     m.add_function(wrap_pyfunction!(query_instruments, &m)?)?;
     m.add_function(wrap_pyfunction!(delete_symbols, &m)?)?;
     m.add_function(wrap_pyfunction!(delete_experiment, &m)?)?;

@@ -88,6 +88,17 @@ A data source from which Backtide fetches historical market data. Each
 
 <br>
 
+[](){#nom-run}
+<strong id="run">run</strong>
+<div markdown style="margin: -1em 0 0 1.2em">
+A specific strategy execution within an experiment. An experiment that evaluates
+N strategies produces N runs — each with its own equity curve, executed orders,
+closed trades and summary metrics. Runs are persisted independently and can be
+queried via [`query_strategy_runs`]. See [`StrategyRunResult`].
+</div>
+
+<br>
+
 [](){#nom-symbol}
 <strong id="symbol">symbol</strong>
 <div markdown style="margin: -1em 0 0 1.2em">

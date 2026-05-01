@@ -25,9 +25,9 @@ use std::collections::HashMap;
 ///
 /// See Also
 /// --------
+/// - backtide.backtest:ExperimentConfig
 /// - backtide.backtest:Order
 /// - backtide.backtest:State
-/// - backtide.backtest:ExperimentConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Portfolio {

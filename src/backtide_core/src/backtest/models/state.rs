@@ -37,8 +37,8 @@ use serde::{Deserialize, Serialize};
 /// See Also
 /// --------
 /// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:Portfolio
 /// - backtide.backtest:Order
+/// - backtide.backtest:Portfolio
 #[pyclass(get_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct State {

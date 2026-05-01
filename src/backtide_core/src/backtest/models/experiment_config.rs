@@ -40,11 +40,7 @@ use std::collections::HashMap;
 /// See Also
 /// --------
 /// - backtide.backtest:DataExpConfig
-/// - backtide.backtest:EngineExpConfig
-/// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:IndicatorExpConfig
-/// - backtide.backtest:PortfolioExpConfig
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -117,13 +113,9 @@ impl GeneralExpConfig {
 ///
 /// See Also
 /// --------
-/// - backtide.backtest:EngineExpConfig
 /// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:GeneralExpConfig
 /// - backtide.backtest:IndicatorExpConfig
-/// - backtide.backtest:PortfolioExpConfig
-/// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -218,12 +210,8 @@ impl DataExpConfig {
 ///
 /// See Also
 /// --------
-/// - backtide.backtest:DataExpConfig
-/// - backtide.backtest:EngineExpConfig
 /// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:GeneralExpConfig
-/// - backtide.backtest:IndicatorExpConfig
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -306,11 +294,7 @@ impl PortfolioExpConfig {
 ///
 /// See Also
 /// --------
-/// - backtide.backtest:DataExpConfig
-/// - backtide.backtest:EngineExpConfig
-/// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:GeneralExpConfig
 /// - backtide.backtest:IndicatorExpConfig
 /// - backtide.backtest:PortfolioExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
@@ -370,11 +354,7 @@ impl StrategyExpConfig {
 /// See Also
 /// --------
 /// - backtide.backtest:DataExpConfig
-/// - backtide.backtest:EngineExpConfig
-/// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:GeneralExpConfig
-/// - backtide.backtest:PortfolioExpConfig
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -476,12 +456,8 @@ impl IndicatorExpConfig {
 /// See Also
 /// --------
 /// - backtide.backtest:DataExpConfig
-/// - backtide.backtest:EngineExpConfig
 /// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:GeneralExpConfig
-/// - backtide.backtest:IndicatorExpConfig
 /// - backtide.backtest:PortfolioExpConfig
-/// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExchangeExpConfig {
@@ -648,10 +624,6 @@ impl ExchangeExpConfig {
 /// - backtide.backtest:DataExpConfig
 /// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:GeneralExpConfig
-/// - backtide.backtest:IndicatorExpConfig
-/// - backtide.backtest:PortfolioExpConfig
-/// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EngineExpConfig {
@@ -778,11 +750,7 @@ pub struct ExperimentConfigInner {
 /// See Also
 /// --------
 /// - backtide.backtest:DataExpConfig
-/// - backtide.backtest:EngineExpConfig
-/// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:GeneralExpConfig
-/// - backtide.backtest:IndicatorExpConfig
-/// - backtide.backtest:PortfolioExpConfig
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug)]

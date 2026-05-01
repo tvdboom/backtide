@@ -106,11 +106,11 @@ custom notebooks and reports:
 
 ```python
 from backtide.analysis import plot_pnl
-from backtide.storage import query_experiment_strategies, query_experiments
+from backtide.storage import query_strategy_runs, query_experiments
 
 exp = query_experiments()[0]
-runs = query_experiment_strategies(exp.id)
-plot_pnl(runs, relative=True)
+runs = query_strategy_runs(exp.id)
+plot_pnl(runs, normalize=True)
 ```
 
 [plot_pnl]: ../api/analysis/plot_pnl.md

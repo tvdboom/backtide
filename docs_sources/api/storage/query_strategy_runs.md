@@ -1,7 +1,7 @@
-# query_experiment_strategies
-----------------------------
+# query_strategy_runs
+---------------------
 
-:: backtide.storage:query_experiment_strategies
+:: backtide.storage:query_strategy_runs
     :: signature
     :: head
     :: table:
@@ -14,3 +14,4 @@
 ## Example
 
 :: examples
+

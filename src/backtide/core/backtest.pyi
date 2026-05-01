@@ -1005,13 +1005,9 @@ class DataExpConfig:
 
     See Also
     --------
-    - backtide.backtest:EngineExpConfig
     - backtide.backtest:ExchangeExpConfig
     - backtide.backtest:ExperimentConfig
-    - backtide.backtest:GeneralExpConfig
     - backtide.backtest:IndicatorExpConfig
-    - backtide.backtest:PortfolioExpConfig
-    - backtide.backtest:StrategyExpConfig
 
     """
 
@@ -1147,6 +1143,7 @@ class EmptyBarPolicy:
     See Also
     --------
     - backtide.data:Bar
+    - backtide.data:Instrument
     - backtide.data:Interval
 
     """
@@ -1232,10 +1229,6 @@ class EngineExpConfig:
     - backtide.backtest:DataExpConfig
     - backtide.backtest:ExchangeExpConfig
     - backtide.backtest:ExperimentConfig
-    - backtide.backtest:GeneralExpConfig
-    - backtide.backtest:IndicatorExpConfig
-    - backtide.backtest:PortfolioExpConfig
-    - backtide.backtest:StrategyExpConfig
 
     """
 
@@ -1295,6 +1288,12 @@ class EquitySample:
     drawdown : float
         Running drawdown (negative or zero) versus the all-time high
         equity, expressed as a fraction (e.g. -0.12 = -12 %).
+
+    See Also
+    --------
+    - backtide.backtest:ExperimentResult
+    - backtide.analysis:plot_pnl
+    - backtide.backtest:StrategyRunResult
 
     """
 
@@ -1388,12 +1387,8 @@ class ExchangeExpConfig:
     See Also
     --------
     - backtide.backtest:DataExpConfig
-    - backtide.backtest:EngineExpConfig
     - backtide.backtest:ExperimentConfig
-    - backtide.backtest:GeneralExpConfig
-    - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:PortfolioExpConfig
-    - backtide.backtest:StrategyExpConfig
 
     """
 
@@ -1480,11 +1475,7 @@ class ExperimentConfig:
     See Also
     --------
     - backtide.backtest:DataExpConfig
-    - backtide.backtest:EngineExpConfig
-    - backtide.backtest:ExchangeExpConfig
     - backtide.backtest:GeneralExpConfig
-    - backtide.backtest:IndicatorExpConfig
-    - backtide.backtest:PortfolioExpConfig
     - backtide.backtest:StrategyExpConfig
 
     """
@@ -1604,6 +1595,12 @@ class ExperimentResult:
 
     warnings : list[str]
         Non-fatal warnings emitted during the run.
+
+    See Also
+    --------
+    - backtide.backtest:ExperimentConfig
+    - backtide.backtest:run_experiment
+    - backtide.backtest:StrategyRunResult
 
     """
 
@@ -1744,11 +1741,7 @@ class GeneralExpConfig:
     See Also
     --------
     - backtide.backtest:DataExpConfig
-    - backtide.backtest:EngineExpConfig
-    - backtide.backtest:ExchangeExpConfig
     - backtide.backtest:ExperimentConfig
-    - backtide.backtest:IndicatorExpConfig
-    - backtide.backtest:PortfolioExpConfig
     - backtide.backtest:StrategyExpConfig
 
     """
@@ -1893,11 +1886,7 @@ class IndicatorExpConfig:
     See Also
     --------
     - backtide.backtest:DataExpConfig
-    - backtide.backtest:EngineExpConfig
-    - backtide.backtest:ExchangeExpConfig
     - backtide.backtest:ExperimentConfig
-    - backtide.backtest:GeneralExpConfig
-    - backtide.backtest:PortfolioExpConfig
     - backtide.backtest:StrategyExpConfig
 
     """
@@ -2470,6 +2459,12 @@ class OrderRecord:
         (sell that flattens / reduces an existing long, or buy-to-cover);
         `None` for opening fills, cancellations and rejections.
 
+    See Also
+    --------
+    - backtide.backtest:Order
+    - backtide.backtest:StrategyRunResult
+    - backtide.backtest:Trade
+
     """
 
     commission: float
@@ -2519,6 +2514,7 @@ class OrderType:
     --------
     - backtide.backtest:CommissionType
     - backtide.backtest:ExchangeExpConfig
+    - backtide.backtest:Order
 
     """
 
@@ -2613,9 +2609,9 @@ class Portfolio:
 
     See Also
     --------
+    - backtide.backtest:ExperimentConfig
     - backtide.backtest:Order
     - backtide.backtest:State
-    - backtide.backtest:ExperimentConfig
 
     """
 
@@ -2662,12 +2658,8 @@ class PortfolioExpConfig:
 
     See Also
     --------
-    - backtide.backtest:DataExpConfig
-    - backtide.backtest:EngineExpConfig
     - backtide.backtest:ExchangeExpConfig
     - backtide.backtest:ExperimentConfig
-    - backtide.backtest:GeneralExpConfig
-    - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:StrategyExpConfig
 
     """
@@ -3593,8 +3585,8 @@ class State:
     See Also
     --------
     - backtide.backtest:ExperimentConfig
-    - backtide.backtest:Portfolio
     - backtide.backtest:Order
+    - backtide.backtest:Portfolio
 
     """
 
@@ -3741,11 +3733,7 @@ class StrategyExpConfig:
 
     See Also
     --------
-    - backtide.backtest:DataExpConfig
-    - backtide.backtest:EngineExpConfig
-    - backtide.backtest:ExchangeExpConfig
     - backtide.backtest:ExperimentConfig
-    - backtide.backtest:GeneralExpConfig
     - backtide.backtest:IndicatorExpConfig
     - backtide.backtest:PortfolioExpConfig
 
@@ -3817,6 +3805,12 @@ class StrategyRunResult:
         records the error and reports the experiment status as
         ``"failed"``.
 
+    See Also
+    --------
+    - backtide.backtest:EquitySample
+    - backtide.backtest:ExperimentResult
+    - backtide.storage:query_strategy_runs
+
     """
 
     equity_curve: list[EquitySample]
@@ -3877,6 +3871,12 @@ class Trade:
 
     pnl : float
         Profit and loss in the base currency, after commission.
+
+    See Also
+    --------
+    - backtide.backtest:Order
+    - backtide.backtest:OrderRecord
+    - backtide.backtest:StrategyRunResult
 
     """
 
