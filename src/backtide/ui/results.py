@@ -402,7 +402,7 @@ def _render_analysis_tabs(runs: list[RunResult]):
                     help="Number of bars used for the rolling return window.",
                 )
 
-            st.plotly_chart(plot_rolling_returns(runs, window=int(window), display=None), width="stretch")
+            st.plotly_chart(plot_rolling_returns(runs, window, display=None), width="stretch")
 
     with tab_map[all_labels[3]]:
         if active_tab == all_labels[3]:

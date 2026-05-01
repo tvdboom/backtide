@@ -27,8 +27,8 @@ cfg = get_config()
 @overload
 def plot_rolling_returns(
     runs: RunResult | Sequence[RunResult],
-    *,
     window: int = ...,
+    *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -38,8 +38,8 @@ def plot_rolling_returns(
 @overload
 def plot_rolling_returns(
     runs: RunResult | Sequence[RunResult],
-    *,
     window: int = ...,
+    *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -50,8 +50,8 @@ def plot_rolling_returns(
 
 def plot_rolling_returns(
     runs: RunResult | Sequence[RunResult],
-    *,
     window: int = 30,
+    *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] | None = (900, 600),
