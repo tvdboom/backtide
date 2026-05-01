@@ -94,7 +94,7 @@ A data source from which Backtide fetches historical market data. Each
 A specific strategy execution within an experiment. An experiment that evaluates
 N strategies produces N runs — each with its own equity curve, executed orders,
 closed trades and summary metrics. Runs are persisted independently and can be
-queried via [`query_strategy_runs`]. See [`StrategyRunResult`].
+queried via [`query_strategy_runs`]. See [`RunResult`].
 </div>
 
 <br>

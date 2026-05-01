@@ -63,12 +63,11 @@ from backtide.ui.utils import (
     _get_logokit_url,
     _get_provider_logo,
     _get_timezone,
-    _moment_to_strftime,
     _parse_date,
     _persist,
     _to_upper_values,
 )
-from backtide.utils.utils import _to_pandas
+from backtide.utils.utils import _moment_to_strftime, _to_pandas
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UI utility functions

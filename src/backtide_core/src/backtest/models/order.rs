@@ -32,7 +32,25 @@ pub fn new_order_id() -> String {
 ///     Signed quantity. Positive for buy orders, negative for sell orders.
 ///
 /// price : float | None
-///     Limit / stop price. ``None`` for market orders.
+///     Primary price for the order. The exact meaning depends on
+///     `order_type`:
+///
+///     - ``Market`` / ``CancelOrder`` / ``SettlePosition``: ignored.
+///     - ``Limit`` / ``TakeProfit``: the limit / target price.
+///     - ``StopLoss``: the stop (trigger) price.
+///     - ``StopLossLimit`` / ``TakeProfitLimit``: the stop (trigger)
+///       price; once hit the order converts to a limit at
+///       ``limit_price``.
+///     - ``TrailingStop`` / ``TrailingStopLimit``: the trail amount in
+///       price units (positive). The engine maintains the running
+///       extreme internally.
+///
+/// limit_price : float | None
+///     Secondary limit price used by the ``StopLossLimit``,
+///     ``TakeProfitLimit`` and ``TrailingStopLimit`` order types.
+///     Once the stop component triggers, the order converts to a
+///     limit order resting at this price. Ignored for all other
+///     order types.
 ///
 /// See Also
 /// --------
@@ -50,8 +68,11 @@ pub struct Order {
     pub order_type: OrderType,
     /// Signed quantity (positive = buy, negative = sell).
     pub quantity: i64,
-    /// Limit / stop price, or None for market orders.
+    /// Primary price (limit / stop / trail amount).
     pub price: Option<f64>,
+    /// Secondary limit price for `*Limit` stop-style orders.
+    #[serde(default)]
+    pub limit_price: Option<f64>,
 }
 
 #[pymethods]
@@ -75,7 +96,12 @@ impl Order {
     ///     Signed quantity (positive = buy, negative = sell).
     ///
     /// price : float | None, default=None
-    ///     Limit / stop price. ``None`` for market orders.
+    ///     Primary price (limit, stop or trail amount depending on
+    ///     `order_type`). ``None`` for market orders.
+    ///
+    /// limit_price : float | None, default=None
+    ///     Secondary limit price for `*Limit` stop-style orders. Once
+    ///     the stop triggers, the order rests as a limit at this price.
     ///
     /// id : str | None, default=None
     ///     Optional explicit order id. When ``None`` (default) a fresh
@@ -88,6 +114,7 @@ impl Order {
         order_type: "str | OrderType" = OrderType::default(),
         quantity: "int" = 0,
         price: "float | None" = None,
+        limit_price: "float | None" = None,
         id: "str | None" = None,
     ))]
     fn new(
@@ -95,6 +122,7 @@ impl Order {
         order_type: OrderType,
         quantity: i64,
         price: Option<f64>,
+        limit_price: Option<f64>,
         id: Option<String>,
     ) -> Self {
         Self {
@@ -103,16 +131,21 @@ impl Order {
             order_type,
             quantity,
             price,
+            limit_price,
         }
     }
 
     fn __repr__(&self) -> String {
-        match self.price {
-            Some(p) => format!(
+        match (self.price, self.limit_price) {
+            (Some(p), Some(l)) => format!(
+                "Order(id={:?}, symbol={:?}, type={}, qty={}, price={}, limit={})",
+                self.id, self.symbol, self.order_type, self.quantity, p, l,
+            ),
+            (Some(p), None) => format!(
                 "Order(id={:?}, symbol={:?}, type={}, qty={}, price={})",
                 self.id, self.symbol, self.order_type, self.quantity, p,
             ),
-            None => format!(
+            _ => format!(
                 "Order(id={:?}, symbol={:?}, type={}, qty={})",
                 self.id, self.symbol, self.order_type, self.quantity,
             ),

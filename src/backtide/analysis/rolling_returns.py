@@ -7,7 +7,6 @@ Description: Module containing the rolling returns chart.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
@@ -17,14 +16,16 @@ from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot
 from backtide.config import get_config
 
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from pathlib import Path
+
+    from backtide.backtest import RunResult
 
 cfg = get_config()
 
 
 @overload
 def plot_rolling_returns(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     window: int = ...,
     title: str | dict[str, Any] | None = ...,
@@ -35,7 +36,7 @@ def plot_rolling_returns(
 ) -> go.Figure: ...
 @overload
 def plot_rolling_returns(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     window: int = ...,
     title: str | dict[str, Any] | None = ...,
@@ -47,7 +48,7 @@ def plot_rolling_returns(
 
 
 def plot_rolling_returns(
-    runs: StrategyRunResult | list[StrategyRunResult],
+    runs: RunResult | list[RunResult],
     *,
     window: int = 30,
     title: str | dict[str, Any] | None = None,
@@ -64,7 +65,7 @@ def plot_rolling_returns(
 
     Parameters
     ----------
-    runs : [StrategyRunResult] | list[[StrategyRunResult]]
+    runs : [RunResult] | list[[RunResult]]
         The per-strategy results to plot.
 
     window : int, default=30
@@ -106,7 +107,7 @@ def plot_rolling_returns(
     --------
     - backtide.analysis:plot_pnl
     - backtide.analysis:plot_rolling_sharpe
-    - backtide.backtest:StrategyRunResult
+    - backtide.backtest:RunResult
 
     Examples
     --------
@@ -153,8 +154,7 @@ def plot_rolling_returns(
                 line=line,
                 showlegend=not is_benchmark,
                 hovertemplate=(
-                    "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d}<br>"
-                    "%{y:+.2f}%<extra></extra>"
+                    "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d}<br>%{y:+.2f}%<extra></extra>"
                 ),
             )
         )
@@ -182,4 +182,3 @@ def plot_rolling_returns(
         filename=filename,
         display=display,
     )
-

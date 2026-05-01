@@ -7,24 +7,25 @@ Description: Module containing the trade PnL histogram chart.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import _is_benchmark, _plot, _resolve_run_currency
 from backtide.config import get_config
-from backtide.core.data import Currency
 
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from pathlib import Path
+
+    from backtide.backtest import RunResult
+    from backtide.core.data import Currency
 
 cfg = get_config()
 
 
 @overload
 def plot_pnl_histogram(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     bins: int = ...,
     currency: str | Currency | None = ...,
@@ -36,7 +37,7 @@ def plot_pnl_histogram(
 ) -> go.Figure: ...
 @overload
 def plot_pnl_histogram(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     bins: int = ...,
     currency: str | Currency | None = ...,
@@ -49,7 +50,7 @@ def plot_pnl_histogram(
 
 
 def plot_pnl_histogram(
-    runs: StrategyRunResult | list[StrategyRunResult],
+    runs: RunResult | list[RunResult],
     *,
     bins: int = 40,
     currency: str | Currency | None = None,
@@ -67,7 +68,7 @@ def plot_pnl_histogram(
 
     Parameters
     ----------
-    runs : [StrategyRunResult] | list[[StrategyRunResult]]
+    runs : [RunResult] | list[[RunResult]]
         The per-strategy results to plot. Runs without trades are skipped.
 
     bins : int, default=40
@@ -180,4 +181,3 @@ def plot_pnl_histogram(
         filename=filename,
         display=display,
     )
-

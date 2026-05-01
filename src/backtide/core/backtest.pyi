@@ -41,13 +41,13 @@ __all__ = [
     "Rsi",
     "Rsrs",
     "RsrsRotation",
+    "RunResult",
     "SimpleMovingAverage",
     "SmaCrossover",
     "SmaNaive",
     "State",
     "StochasticOscillator",
     "StrategyExpConfig",
-    "StrategyRunResult",
     "Trade",
     "TripleRsiRotation",
     "TurtleTrading",
@@ -1293,7 +1293,7 @@ class EquitySample:
     --------
     - backtide.backtest:ExperimentResult
     - backtide.analysis:plot_pnl
-    - backtide.backtest:StrategyRunResult
+    - backtide.backtest:RunResult
 
     """
 
@@ -1590,7 +1590,7 @@ class ExperimentResult:
     status : str
         ``"completed"`` if every strategy succeeded, ``"failed"`` otherwise.
 
-    strategies : list[[StrategyRunResult]]
+    strategies : list[[RunResult]]
         One result entry per evaluated strategy.
 
     warnings : list[str]
@@ -1600,7 +1600,7 @@ class ExperimentResult:
     --------
     - backtide.backtest:ExperimentConfig
     - backtide.backtest:run_experiment
-    - backtide.backtest:StrategyRunResult
+    - backtide.backtest:RunResult
 
     """
 
@@ -1609,7 +1609,7 @@ class ExperimentResult:
     name: str
     started_at: int
     status: str
-    strategies: list[StrategyRunResult]
+    strategies: list[RunResult]
     tags: list[str]
     warnings: list[str]
 
@@ -2390,7 +2390,25 @@ class Order:
         Signed quantity. Positive for buy orders, negative for sell orders.
 
     price : float | None
-        Limit / stop price. ``None`` for market orders.
+        Primary price for the order. The exact meaning depends on
+        `order_type`:
+
+        - ``Market`` / ``CancelOrder`` / ``SettlePosition``: ignored.
+        - ``Limit`` / ``TakeProfit``: the limit / target price.
+        - ``StopLoss``: the stop (trigger) price.
+        - ``StopLossLimit`` / ``TakeProfitLimit``: the stop (trigger)
+          price; once hit the order converts to a limit at
+          ``limit_price``.
+        - ``TrailingStop`` / ``TrailingStopLimit``: the trail amount in
+          price units (positive). The engine maintains the running
+          extreme internally.
+
+    limit_price : float | None
+        Secondary limit price used by the ``StopLossLimit``,
+        ``TakeProfitLimit`` and ``TrailingStopLimit`` order types.
+        Once the stop component triggers, the order converts to a
+        limit order resting at this price. Ignored for all other
+        order types.
 
     See Also
     --------
@@ -2401,6 +2419,7 @@ class Order:
     """
 
     id: str
+    limit_price: float | None
     order_type: OrderType
     price: float | None
     quantity: int
@@ -2462,7 +2481,7 @@ class OrderRecord:
     See Also
     --------
     - backtide.backtest:Order
-    - backtide.backtest:StrategyRunResult
+    - backtide.backtest:RunResult
     - backtide.backtest:Trade
 
     """
@@ -3301,6 +3320,85 @@ class RsrsRotation:
 
         """
 
+class RunResult:
+    """Result of running a single strategy as part of an experiment.
+
+    Attributes
+    ----------
+    strategy_id : str
+        Unique identifier for this strategy run.
+
+    strategy_name : str
+        The user-facing name of the strategy.
+
+    equity_curve : list[[EquitySample]]
+        Per-bar equity samples in chronological order.
+
+    trades : list[[Trade]]
+        All round-trip trades closed during the run.
+
+    orders : list[[OrderRecord]]
+        All orders the engine processed (filled, canceled, rejected).
+
+    metrics : dict[str, float]
+        Summary metrics (total_return, sharpe, max_drawdown, ...).
+
+    base_currency : [Currency]
+        The portfolio's base (accounting) currency for this run. Equity,
+        PnL and drawdown values stored on the run are denominated in this
+        currency. Captured from the `ExperimentConfig` so analysis tools
+        don't need to look the experiment config up to label axes.
+
+    error : str | None
+        ``None`` on success. Otherwise the first error raised by the
+        strategy during the run (e.g. an exception thrown by
+        ``evaluate(...)``). Strategies that fail still produce a result
+        row so the rest of the experiment isn't lost — the engine simply
+        records the error and reports the experiment status as
+        ``"failed"``.
+
+    See Also
+    --------
+    - backtide.backtest:EquitySample
+    - backtide.backtest:ExperimentResult
+    - backtide.storage:query_strategy_runs
+
+    """
+
+    base_currency: Currency
+    equity_curve: list[EquitySample]
+    error: str | None
+    metrics: dict[str, float]
+    orders: list[OrderRecord]
+    strategy_id: str
+    strategy_name: str
+    trades: list[Trade]
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+
 class SimpleMovingAverage:
     """Simple Moving Average (SMA).
 
@@ -3774,85 +3872,6 @@ class StrategyExpConfig:
 
         """
 
-class StrategyRunResult:
-    """Result of running a single strategy as part of an experiment.
-
-    Attributes
-    ----------
-    strategy_id : str
-        Unique identifier for this strategy run.
-
-    strategy_name : str
-        The user-facing name of the strategy.
-
-    equity_curve : list[[EquitySample]]
-        Per-bar equity samples in chronological order.
-
-    trades : list[[Trade]]
-        All round-trip trades closed during the run.
-
-    orders : list[[OrderRecord]]
-        All orders the engine processed (filled, canceled, rejected).
-
-    metrics : dict[str, float]
-        Summary metrics (total_return, sharpe, max_drawdown, ...).
-
-    base_currency : [Currency]
-        The portfolio's base (accounting) currency for this run. Equity,
-        PnL and drawdown values stored on the run are denominated in this
-        currency. Captured from the `ExperimentConfig` so analysis tools
-        don't need to look the experiment config up to label axes.
-
-    error : str | None
-        ``None`` on success. Otherwise the first error raised by the
-        strategy during the run (e.g. an exception thrown by
-        ``evaluate(...)``). Strategies that fail still produce a result
-        row so the rest of the experiment isn't lost — the engine simply
-        records the error and reports the experiment status as
-        ``"failed"``.
-
-    See Also
-    --------
-    - backtide.backtest:EquitySample
-    - backtide.backtest:ExperimentResult
-    - backtide.storage:query_strategy_runs
-
-    """
-
-    equity_curve: list[EquitySample]
-    error: str | None
-    metrics: dict[str, float]
-    orders: list[OrderRecord]
-    strategy_id: str
-    strategy_name: str
-    trades: list[Trade]
-    base_currency: Currency
-
-    def __eq__(self, value, /):
-        ...
-    def __ge__(self, value, /):
-        ...
-    def __getstate__(self, /):
-        ...
-    def __gt__(self, value, /):
-        ...
-    def __hash__(self, /):
-        ...
-    def __init__(self, /, *args, **kwargs):
-        ...
-    def __le__(self, value, /):
-        ...
-    def __lt__(self, value, /):
-        ...
-    def __ne__(self, value, /):
-        ...
-    def __new__(cls, *args, **kwargs):
-        ...
-    def __repr__(self, /):
-        ...
-    def __str__(self, /):
-        ...
-
 class Trade:
     """A single round-trip trade (open + close of a position).
 
@@ -3883,7 +3902,7 @@ class Trade:
     --------
     - backtide.backtest:Order
     - backtide.backtest:OrderRecord
-    - backtide.backtest:StrategyRunResult
+    - backtide.backtest:RunResult
 
     """
 

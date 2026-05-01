@@ -7,7 +7,6 @@ Description: Module containing the trade-duration histogram chart.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numpy as np
@@ -17,7 +16,9 @@ from backtide.analysis.utils import _is_benchmark, _plot
 from backtide.config import get_config
 
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from pathlib import Path
+
+    from backtide.backtest import RunResult
 
 cfg = get_config()
 
@@ -40,7 +41,7 @@ def _pick_unit(median_seconds: float) -> str:
 
 @overload
 def plot_trade_duration(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     bins: int = ...,
     unit: UnitName = ...,
@@ -52,7 +53,7 @@ def plot_trade_duration(
 ) -> go.Figure: ...
 @overload
 def plot_trade_duration(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     bins: int = ...,
     unit: UnitName = ...,
@@ -65,7 +66,7 @@ def plot_trade_duration(
 
 
 def plot_trade_duration(
-    runs: StrategyRunResult | list[StrategyRunResult],
+    runs: RunResult | list[RunResult],
     *,
     bins: int = 40,
     unit: UnitName = "auto",
@@ -82,7 +83,7 @@ def plot_trade_duration(
 
     Parameters
     ----------
-    runs : [StrategyRunResult] | list[[StrategyRunResult]]
+    runs : [RunResult] | list[[RunResult]]
         The per-strategy results to plot. Runs without trades are skipped.
 
     bins : int, default=40
@@ -149,9 +150,7 @@ def plot_trade_duration(
         trades = getattr(run, "trades", None) or []
         if not trades:
             continue
-        durations[run.strategy_name] = [
-            float(int(t.exit_ts) - int(t.entry_ts)) for t in trades
-        ]
+        durations[run.strategy_name] = [float(int(t.exit_ts) - int(t.entry_ts)) for t in trades]
 
     if not durations:
         fig = go.Figure()
@@ -212,4 +211,3 @@ def plot_trade_duration(
         filename=filename,
         display=display,
     )
-

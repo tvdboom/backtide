@@ -7,8 +7,7 @@ Description: Module containing the candlestick chart function.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
 
 import plotly.graph_objects as go
 
@@ -20,6 +19,9 @@ from backtide.analysis.utils import (
     _resolve_dt,
 )
 from backtide.utils.utils import _format_price, _to_pandas
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @overload

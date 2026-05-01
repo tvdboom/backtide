@@ -77,7 +77,7 @@ If [`StrategyExpConfig.benchmark`][`StrategyExpConfig`] is non-empty, the engine
 ## Results
 
 Each experiment produces an [`ExperimentResult`] containing one
-[`StrategyRunResult`] per evaluated strategy.
+[`RunResult`] per evaluated strategy.
 
 | Component | Description |
 |---|---|

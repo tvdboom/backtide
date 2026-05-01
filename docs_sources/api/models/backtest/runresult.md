@@ -1,7 +1,7 @@
-# StrategyRunResult
-------------------
+# RunResult
+-----------
 
-:: backtide.backtest:StrategyRunResult
+:: backtide.backtest:RunResult
     :: signature
     :: head
     :: table:

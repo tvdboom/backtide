@@ -1,8 +1,6 @@
 //! DuckDB storage solution.
 
-use crate::backtest::models::experiment_result::{
-    EquitySample, OrderRecord, StrategyRunResult, Trade,
-};
+use crate::backtest::models::experiment_result::{EquitySample, OrderRecord, RunResult, Trade};
 use crate::backtest::models::order::Order;
 use crate::backtest::models::order_type::OrderType;
 use crate::data::models::bar::Bar;
@@ -126,6 +124,7 @@ impl Storage for DuckDb {
                 order_type        VARCHAR NOT NULL,
                 quantity          BIGINT NOT NULL,
                 price             DOUBLE,
+                limit_price       DOUBLE,
                 status            VARCHAR NOT NULL,
                 fill_price        DOUBLE,
                 reason            VARCHAR NOT NULL,
@@ -146,13 +145,6 @@ impl Storage for DuckDb {
                 UNIQUE (run_id, symbol, entry_ts, exit_ts)
             );
         ",
-        )?;
-
-        // ── Migrations ──────────────────────────────────────────────────
-        // Idempotent column additions for databases created before a given
-        // schema field existed. DuckDB supports `ADD COLUMN IF NOT EXISTS`.
-        conn.execute_batch(
-            "ALTER TABLE experiment_strategies ADD COLUMN IF NOT EXISTS base_currency VARCHAR;",
         )?;
 
         Ok(())
@@ -776,6 +768,7 @@ impl Storage for DuckDb {
                         o.order.order_type.to_string(),
                         o.order.quantity,
                         o.order.price,
+                        o.order.limit_price,
                         o.status,
                         o.fill_price,
                         o.reason,
@@ -880,7 +873,7 @@ impl Storage for DuckDb {
         Ok(rows)
     }
 
-    fn query_strategy_runs(&self, experiment_id: &str) -> StorageResult<Vec<StrategyRunResult>> {
+    fn query_strategy_runs(&self, experiment_id: &str) -> StorageResult<Vec<RunResult>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
@@ -906,10 +899,8 @@ impl Storage for DuckDb {
         for (run_id, strategy_id, name, metrics_str, base_ccy_str, error) in strats {
             let metrics: HashMap<String, f64> =
                 serde_json::from_str(&metrics_str).unwrap_or_default();
-            let base_currency = base_ccy_str
-                .as_deref()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or_default();
+            let base_currency =
+                base_ccy_str.as_deref().and_then(|s| s.parse().ok()).unwrap_or_default();
 
             let mut eq_stmt = conn.prepare(
                 "SELECT ts, equity, cash, drawdown FROM experiment_equity
@@ -927,7 +918,7 @@ impl Storage for DuckDb {
                 .collect::<Result<Vec<_>, _>>()?;
 
             let mut o_stmt = conn.prepare(
-                "SELECT order_id, ts, symbol, order_type, quantity, price, status, fill_price, reason, commission, pnl
+                "SELECT order_id, ts, symbol, order_type, quantity, price, limit_price, status, fill_price, reason, commission, pnl
                  FROM experiment_orders WHERE run_id = ? ORDER BY ts",
             )?;
             let orders = o_stmt
@@ -941,13 +932,14 @@ impl Storage for DuckDb {
                             order_type,
                             quantity: row.get(4)?,
                             price: row.get(5)?,
+                            limit_price: row.get(6)?,
                         },
                         timestamp: row.get(1)?,
-                        status: row.get(6)?,
-                        fill_price: row.get(7)?,
-                        reason: row.get(8)?,
-                        commission: row.get::<_, Option<f64>>(9)?.unwrap_or(0.0),
-                        pnl: row.get(10)?,
+                        status: row.get(7)?,
+                        fill_price: row.get(8)?,
+                        reason: row.get(9)?,
+                        commission: row.get::<_, Option<f64>>(10)?.unwrap_or(0.0),
+                        pnl: row.get(11)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -970,7 +962,7 @@ impl Storage for DuckDb {
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
 
-            out.push(StrategyRunResult {
+            out.push(RunResult {
                 strategy_id,
                 strategy_name: name,
                 equity_curve,

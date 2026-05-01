@@ -22,9 +22,9 @@ from backtide.core.backtest import (
     OrderType,
     Portfolio,
     PortfolioExpConfig,
+    RunResult,
     State,
     StrategyExpConfig,
-    StrategyRunResult,
     Trade,
     run_experiment,
 )

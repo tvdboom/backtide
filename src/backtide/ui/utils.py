@@ -10,7 +10,6 @@ from collections.abc import Sequence
 from datetime import date
 from datetime import datetime as dt
 from pathlib import Path
-import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -35,9 +34,8 @@ from backtide.core.storage import (
 )
 from backtide.utils.constants import (
     MAX_PRELOADED_INSTRUMENTS,
-    MOMENT_TO_STRFTIME,
 )
-from backtide.utils.utils import _to_list, _to_pandas
+from backtide.utils.utils import _moment_to_strftime, _to_list, _to_pandas
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility constants
@@ -322,20 +320,6 @@ def _list_instruments(
 ) -> dict[str, Instrument]:
     """Return available instruments for the given type."""
     return {x.symbol: x for x in list_instruments(instrument_type, limit=limit, verbose=False)}
-
-
-def _moment_to_strftime(fmt: str) -> str:
-    """Convert a momentjs string to strftime format."""
-    tokens = [re.escape(k) for k in MOMENT_TO_STRFTIME]
-    tokens.sort(key=len, reverse=True)
-    regex = re.compile("|".join(tokens))
-
-    def replace(match: re.Match) -> str:
-        """Replace a token in the string."""
-        token = match.group(0)
-        return MOMENT_TO_STRFTIME.get(token, token)
-
-    return regex.sub(replace, fmt)
 
 
 def _parse_date(ts: int, fmt: str, tz: ZoneInfo) -> str:

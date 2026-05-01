@@ -360,7 +360,7 @@ impl Engine {
         // threads would otherwise miss the file layer entirely.
         let par_span = Span::current();
 
-        let mut results: Vec<StrategyRunResult> = builtin
+        let mut results: Vec<RunResult> = builtin
             .into_par_iter()
             .map(|(name, obj, _)| {
                 par_span.in_scope(|| {
@@ -492,6 +492,9 @@ impl Engine {
                 if r.strategy_name != benchmark_name {
                     let bench_ret = windowed_return(bench, window_start).unwrap_or(0.0);
                     r.metrics.insert("alpha".into(), strat_ret - bench_ret);
+                } else {
+                    // Benchmark strategy always has zero alpha.
+                    r.metrics.insert("alpha".into(), 0.0);
                 }
             }
         }
@@ -936,7 +939,7 @@ fn run_one_strategy(
     indicators: &HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
     profiles: &[crate::data::models::instrument_profile::InstrumentProfile],
     timeline: &[i64],
-) -> StrategyRunResult {
+) -> RunResult {
     let symbols: Vec<String> = cfg.data.symbols.clone();
     let _ = &symbols;
     let total_bars: usize = aligned.values().map(|v| v.len()).next().unwrap_or(0);
@@ -970,6 +973,9 @@ fn run_one_strategy(
     cash.insert(base_ccy, cfg.portfolio.initial_cash as f64);
     let mut positions: HashMap<String, i64> = cfg.portfolio.starting_positions.clone();
     let mut open_orders: Vec<Order> = Vec::new();
+    // Per-order extremes for trailing stops: (running_high, running_low)
+    // observed since the order was first seen. Cleared on fill / cancel.
+    let mut trail_state: HashMap<String, (f64, f64)> = HashMap::new();
 
     let mut equity_curve: Vec<EquitySample> = Vec::with_capacity(total_bars);
     let mut order_records: Vec<OrderRecord> = Vec::new();
@@ -1138,6 +1144,7 @@ fn run_one_strategy(
             // Cancel orders take effect immediately and do not need a price.
             if order.order_type == OrderType::CancelOrder {
                 still_open.retain(|o| o.id != order.id);
+                trail_state.remove(&order.id);
                 order_records.push(OrderRecord {
                     order: order.clone(),
                     timestamp: ts,
@@ -1150,8 +1157,8 @@ fn run_one_strategy(
                 continue;
             }
 
-            let symbol = &order.symbol;
-            let bar = match aligned.get(symbol).and_then(|r| r[bar_index].clone()) {
+            let symbol = order.symbol.clone();
+            let bar = match aligned.get(&symbol).and_then(|r| r[bar_index].clone()) {
                 Some(b) => b,
                 None => {
                     still_open.push(order);
@@ -1159,18 +1166,44 @@ fn run_one_strategy(
                 },
             };
 
-            let fill_px = if cfg.engine.trade_on_close {
-                bar.close
-            } else {
-                bar.open
+            // Decide whether this order fires this bar (and at what price).
+            let outcome = resolve_trigger(
+                &mut order,
+                &bar,
+                &positions,
+                &mut trail_state,
+                cfg.engine.trade_on_close,
+            );
+            let (raw_px, mut fill_reason, limit_cap) = match outcome {
+                TriggerOutcome::Fill {
+                    raw_px,
+                    reason,
+                    limit_cap,
+                } => (raw_px, reason, limit_cap),
+                TriggerOutcome::Pending => {
+                    still_open.push(order);
+                    continue;
+                },
+                TriggerOutcome::Cancel {
+                    reason,
+                } => {
+                    trail_state.remove(&order.id);
+                    order_records.push(OrderRecord {
+                        order: order.clone(),
+                        timestamp: ts,
+                        status: "cancelled".into(),
+                        fill_price: None,
+                        reason,
+                        commission: 0.0,
+                        pnl: None,
+                    });
+                    continue;
+                },
             };
-            // Apply slippage (% of price) adverse to the trade direction.
+
+            // Apply slippage; for limit-style fills, never cross the limit.
             let slip = cfg.exchange.slippage / 100.0;
-            let fill_px = if order.quantity >= 0 {
-                fill_px * (1.0 + slip)
-            } else {
-                fill_px * (1.0 - slip)
-            };
+            let fill_px = apply_slippage(raw_px, order.quantity, slip, limit_cap);
 
             let qty = order.quantity;
             let mut filled_qty = qty;
@@ -1183,15 +1216,12 @@ fn run_one_strategy(
                 },
             };
 
-            let order_ccy = quote_ccy.get(symbol).copied().unwrap_or(base_ccy);
+            let order_ccy = quote_ccy.get(&symbol).copied().unwrap_or(base_ccy);
 
             // Realised PnL recorded on the OrderRecord for closing fills
             // (sell that flattens an existing long position). Stays `None`
             // for opening fills.
             let mut fill_pnl: Option<f64> = None;
-            // Reason annotation used when we auto-shrink a buy to fit
-            // the available cash.
-            let mut fill_reason = String::new();
 
             // ── Funds check & settlement ─────────────────────────────
             if qty > 0 {
@@ -1269,13 +1299,17 @@ fn run_one_strategy(
                         });
                         continue;
                     }
-                    fill_reason = "partial: shrunk to fit cash".to_owned();
+                    fill_reason = if fill_reason.is_empty() {
+                        "partial: shrunk to fit cash".to_owned()
+                    } else {
+                        format!("{fill_reason}; partial: shrunk to fit cash")
+                    };
                 }
                 *positions.entry(symbol.clone()).or_insert(0) += filled_qty;
-                update_open_trade_buy(&mut open_trades, symbol, ts, filled_qty, fill_px);
+                update_open_trade_buy(&mut open_trades, &symbol, ts, filled_qty, fill_px);
             } else if qty < 0 {
                 let abs_qty = qty.unsigned_abs() as i64;
-                let cur = *positions.get(symbol).unwrap_or(&0);
+                let cur = *positions.get(&symbol).unwrap_or(&0);
                 if !cfg.exchange.allow_short_selling && cur < abs_qty {
                     warn!(strategy=%name, order_id=%order.id, "Short selling disabled and not enough position, skipping.");
                     order_records.push(OrderRecord {
@@ -1309,7 +1343,7 @@ fn run_one_strategy(
                 *pos_entry -= abs_qty;
                 let realised_pnl = close_open_trade_sell(
                     &mut open_trades,
-                    symbol,
+                    &symbol,
                     ts,
                     abs_qty,
                     fill_px,
@@ -1483,7 +1517,7 @@ fn run_one_strategy(
         &closed_trades,
     );
 
-    StrategyRunResult {
+    RunResult {
         strategy_id: Uuid::new_v4().simple().to_string()[..16].to_owned(),
         strategy_name: name.to_owned(),
         equity_curve,
@@ -1492,6 +1526,324 @@ fn run_one_strategy(
         metrics,
         base_currency: cfg.portfolio.base_currency,
         error: run_error,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Order trigger resolution
+// ─────────────────────────────────────────────────────────────────────────
+//
+// `resolve_trigger` decides whether an open order fills against the
+// current bar, returning a `TriggerOutcome`:
+//
+//   * `Fill { raw_px, .. }` — the order fills at `raw_px` (before
+//     slippage). The caller is responsible for applying slippage and
+//     bookkeeping (cash, positions, commissions, …).
+//   * `Pending`             — the order does not fill this bar; keep it open.
+//   * `Cancel { .. }`       — the order cannot make sense (e.g.
+//     SettlePosition with no current position); record as cancelled.
+//
+// Stop-into-limit variants mutate `order` in place: when the stop fires
+// we replace `order_type` with `OrderType::Limit` and copy
+// `order.limit_price` into `order.price`, so that on subsequent bars
+// the order rests as a regular limit order.
+//
+// Trailing variants share `trail_state`, keyed by `order.id`, holding
+// `(running_high, running_low)` since the order was placed.
+
+#[derive(Debug)]
+enum TriggerOutcome {
+    /// The order fills at `raw_px` (before slippage).
+    /// `limit_cap` constrains slippage so the slipped fill never crosses
+    /// the resting limit price (used for Limit and *Limit variants).
+    Fill {
+        raw_px: f64,
+        reason: String,
+        limit_cap: Option<f64>,
+    },
+    /// The order does not fill this bar.
+    Pending,
+    /// The order is invalid against current state and should be cancelled.
+    Cancel {
+        reason: String,
+    },
+}
+
+/// Decide whether `order` fills this bar. May mutate `order` for the
+/// stop-into-limit transition, and may mutate `trail_state` for trailing
+/// variants. `positions` is read-only and only used by `SettlePosition`.
+fn resolve_trigger(
+    order: &mut Order,
+    bar: &Bar,
+    positions: &HashMap<String, i64>,
+    trail_state: &mut HashMap<String, (f64, f64)>,
+    trade_on_close: bool,
+) -> TriggerOutcome {
+    use OrderType::*;
+
+    match order.order_type {
+        // CancelOrder is handled before resolve_trigger is called.
+        CancelOrder => TriggerOutcome::Cancel {
+            reason: "cancel".into(),
+        },
+
+        Market => {
+            let px = if trade_on_close {
+                bar.close
+            } else {
+                bar.open
+            };
+            TriggerOutcome::Fill {
+                raw_px: px,
+                reason: String::new(),
+                limit_cap: None,
+            }
+        },
+
+        SettlePosition => {
+            let cur = *positions.get(&order.symbol).unwrap_or(&0);
+            if cur == 0 {
+                return TriggerOutcome::Cancel {
+                    reason: "no position to settle".into(),
+                };
+            }
+            // Translate to a market order that flattens the position.
+            order.quantity = -cur;
+            order.order_type = Market;
+            let px = if trade_on_close {
+                bar.close
+            } else {
+                bar.open
+            };
+            TriggerOutcome::Fill {
+                raw_px: px,
+                reason: "settle position".into(),
+                limit_cap: None,
+            }
+        },
+
+        Limit => match order.price {
+            Some(lim) => fill_limit(order.quantity, bar, lim),
+            None => TriggerOutcome::Cancel {
+                reason: "limit order missing price".into(),
+            },
+        },
+
+        TakeProfit => match order.price {
+            // Take-profit is a profit-target limit: same execution
+            // semantics as Limit (a buy fills at-or-below, a sell at-or-above).
+            Some(target) => fill_limit(order.quantity, bar, target),
+            None => TriggerOutcome::Cancel {
+                reason: "take-profit missing price".into(),
+            },
+        },
+
+        StopLoss => {
+            let stop = match order.price {
+                Some(p) => p,
+                None => {
+                    return TriggerOutcome::Cancel {
+                        reason: "stop-loss missing price".into(),
+                    }
+                },
+            };
+            if stop_triggered(order.quantity, bar, stop, /*is_take_profit=*/ false) {
+                fill_stop(order.quantity, bar, stop)
+            } else {
+                TriggerOutcome::Pending
+            }
+        },
+
+        StopLossLimit | TakeProfitLimit => {
+            let stop = match order.price {
+                Some(p) => p,
+                None => {
+                    return TriggerOutcome::Cancel {
+                        reason: "stop-limit missing stop price".into(),
+                    }
+                },
+            };
+            let is_tp = order.order_type == TakeProfitLimit;
+            if !stop_triggered(order.quantity, bar, stop, is_tp) {
+                return TriggerOutcome::Pending;
+            }
+            // Convert to a resting Limit at `limit_price` (or stop as fallback).
+            let lim = order.limit_price.unwrap_or(stop);
+            order.order_type = Limit;
+            order.price = Some(lim);
+            order.limit_price = None;
+            // Try to fill same bar; if the limit can't be hit on this bar
+            // it will rest and re-evaluate next bar via the new Limit path.
+            fill_limit(order.quantity, bar, lim)
+        },
+
+        TrailingStop | TrailingStopLimit => {
+            let trail = match order.price {
+                Some(p) if p > 0.0 => p,
+                _ => {
+                    return TriggerOutcome::Cancel {
+                        reason: "trailing stop missing/invalid trail amount".into(),
+                    }
+                },
+            };
+
+            // First-bar initialisation: seed extremes from this bar.
+            let entry = trail_state.entry(order.id.clone()).or_insert_with(|| (bar.high, bar.low));
+            entry.0 = entry.0.max(bar.high);
+            entry.1 = entry.1.min(bar.low);
+            let (running_high, running_low) = (entry.0, entry.1);
+
+            // Effective stop: sells trail running_high downward; buys
+            // trail running_low upward. `qty == 0` is meaningless here.
+            let stop = if order.quantity < 0 {
+                running_high - trail
+            } else if order.quantity > 0 {
+                running_low + trail
+            } else {
+                return TriggerOutcome::Cancel {
+                    reason: "zero quantity".into(),
+                };
+            };
+
+            // Re-use the regular stop-trigger / stop-fill helpers.
+            if !stop_triggered(order.quantity, bar, stop, /*is_take_profit=*/ false) {
+                return TriggerOutcome::Pending;
+            }
+
+            if order.order_type == TrailingStopLimit {
+                let lim = order.limit_price.unwrap_or(stop);
+                order.order_type = Limit;
+                order.price = Some(lim);
+                order.limit_price = None;
+                fill_limit(order.quantity, bar, lim)
+            } else {
+                trail_state.remove(&order.id);
+                fill_stop(order.quantity, bar, stop)
+            }
+        },
+    }
+}
+
+/// Fill semantics for a Limit (or TakeProfit, identical execution-wise):
+///
+/// * Buy (qty > 0): fill if price reached the limit *or below*. If the
+///   bar opens at-or-below the limit, fill at the open (better than
+///   limit). Otherwise, if `bar.low <= lim`, fill at the limit price.
+/// * Sell (qty < 0): symmetric — fill at open if open ≥ limit, else at
+///   limit if `bar.high >= lim`.
+fn fill_limit(qty: i64, bar: &Bar, lim: f64) -> TriggerOutcome {
+    if qty > 0 {
+        if bar.open <= lim {
+            TriggerOutcome::Fill {
+                raw_px: bar.open,
+                reason: "limit (open through)".into(),
+                limit_cap: Some(lim),
+            }
+        } else if bar.low <= lim {
+            TriggerOutcome::Fill {
+                raw_px: lim,
+                reason: "limit hit".into(),
+                limit_cap: Some(lim),
+            }
+        } else {
+            TriggerOutcome::Pending
+        }
+    } else if qty < 0 {
+        if bar.open >= lim {
+            TriggerOutcome::Fill {
+                raw_px: bar.open,
+                reason: "limit (open through)".into(),
+                limit_cap: Some(lim),
+            }
+        } else if bar.high >= lim {
+            TriggerOutcome::Fill {
+                raw_px: lim,
+                reason: "limit hit".into(),
+                limit_cap: Some(lim),
+            }
+        } else {
+            TriggerOutcome::Pending
+        }
+    } else {
+        TriggerOutcome::Cancel {
+            reason: "zero quantity".into(),
+        }
+    }
+}
+
+/// Stop trigger predicate.
+///
+/// * Stop-loss sell (qty < 0, long-protection): triggers when price
+///   *falls* to `stop` — `bar.low <= stop` or gap-down (`bar.open <= stop`).
+/// * Stop-loss buy  (qty > 0, short-cover): triggers when price *rises*
+///   to `stop` — `bar.high >= stop` or gap-up (`bar.open >= stop`).
+/// * Take-profit-limit reverses both directions (a sell TP triggers on
+///   a price rise, a buy TP on a price drop).
+fn stop_triggered(qty: i64, bar: &Bar, stop: f64, is_take_profit: bool) -> bool {
+    let down_trigger = (qty < 0 && !is_take_profit) || (qty > 0 && is_take_profit);
+    let up_trigger = (qty > 0 && !is_take_profit) || (qty < 0 && is_take_profit);
+    if down_trigger {
+        bar.open <= stop || bar.low <= stop
+    } else if up_trigger {
+        bar.open >= stop || bar.high >= stop
+    } else {
+        false
+    }
+}
+
+/// Stop fill price. Realistic gap handling: if the bar opens past the
+/// stop level, the stop fills at the open (worse than the stop) — a
+/// gap-down for sell stops, a gap-up for buy stops. Otherwise the stop
+/// fills at exactly the stop level.
+fn fill_stop(qty: i64, bar: &Bar, stop: f64) -> TriggerOutcome {
+    if qty < 0 {
+        if bar.open <= stop {
+            TriggerOutcome::Fill {
+                raw_px: bar.open,
+                reason: "stop triggered (gap-down)".into(),
+                limit_cap: None,
+            }
+        } else {
+            TriggerOutcome::Fill {
+                raw_px: stop,
+                reason: "stop triggered".into(),
+                limit_cap: None,
+            }
+        }
+    } else if qty > 0 {
+        if bar.open >= stop {
+            TriggerOutcome::Fill {
+                raw_px: bar.open,
+                reason: "stop triggered (gap-up)".into(),
+                limit_cap: None,
+            }
+        } else {
+            TriggerOutcome::Fill {
+                raw_px: stop,
+                reason: "stop triggered".into(),
+                limit_cap: None,
+            }
+        }
+    } else {
+        TriggerOutcome::Cancel {
+            reason: "zero quantity".into(),
+        }
+    }
+}
+
+/// Apply slippage to a raw fill price, optionally capping at the limit
+/// price so a buy never pays above its limit (and a sell never receives
+/// below). `slippage_pct` is the fraction (e.g. 0.005 = 0.5 %).
+fn apply_slippage(raw_px: f64, qty: i64, slippage_pct: f64, limit_cap: Option<f64>) -> f64 {
+    let slipped = if qty >= 0 {
+        raw_px * (1.0 + slippage_pct)
+    } else {
+        raw_px * (1.0 - slippage_pct)
+    };
+    match limit_cap {
+        Some(cap) if qty > 0 => slipped.min(cap),
+        Some(cap) if qty < 0 => slipped.max(cap),
+        _ => slipped,
     }
 }
 
@@ -1755,12 +2107,19 @@ mod tests {
     /// Tiny helper that emits a single market buy on the first bar
     /// after warmup, then nothing else. Implemented in pure Rust so the
     /// tests don't need the GIL.
+    ///
+    /// The order-resolution loop here mirrors the real
+    /// `run_one_strategy` logic for the features that don't depend on
+    /// Python interop: slippage, commission, multi-currency cash,
+    /// `allow_short_selling`, `allowed_order_types`, auto-shrinking,
+    /// and `trade_on_close`. Tests can therefore exercise real engine
+    /// semantics without spinning up a Python interpreter.
     fn run_with_orders(
         cfg: &ExperimentConfig,
         aligned: &HashMap<String, Vec<Option<Bar>>>,
         profiles: &[InstrumentProfile],
         injected: Vec<(usize, Order)>,
-    ) -> StrategyRunResult {
+    ) -> RunResult {
         let total_bars = aligned.values().map(|v| v.len()).next().unwrap_or(0);
         let timeline: Vec<i64> = aligned
             .values()
@@ -1775,6 +2134,7 @@ mod tests {
         cash.insert(base_ccy, cfg.portfolio.initial_cash as f64);
         let mut positions: HashMap<String, i64> = cfg.portfolio.starting_positions.clone();
         let mut open_orders: Vec<Order> = Vec::new();
+        let mut trail_state: HashMap<String, (f64, f64)> = HashMap::new();
         let mut equity_curve: Vec<EquitySample> = Vec::with_capacity(total_bars);
         let mut order_records: Vec<OrderRecord> = Vec::new();
         let mut closed_trades: Vec<Trade> = Vec::new();
@@ -1792,19 +2152,36 @@ mod tests {
             })
             .collect();
 
+        let allowed = &cfg.exchange.allowed_order_types;
+
         for bar_index in 0..total_bars {
             let ts = timeline[bar_index];
 
-            // Inject orders at this bar.
+            // Inject orders at this bar, validating them against the
+            // exchange's `allowed_order_types` exactly as the real engine
+            // does (see the `ords.retain_mut(...)` block in
+            // `run_one_strategy`).
             for (i, o) in &injected {
                 if *i == bar_index {
+                    if !allowed.contains(&o.order_type) && o.order_type != OrderType::CancelOrder {
+                        order_records.push(OrderRecord {
+                            order: o.clone(),
+                            timestamp: ts,
+                            status: "rejected".into(),
+                            fill_price: None,
+                            reason: format!("order type {} not allowed", o.order_type),
+                            commission: 0.0,
+                            pnl: None,
+                        });
+                        continue;
+                    }
                     open_orders.push(o.clone());
                 }
             }
 
-            // Resolve open orders: simplified copy of run_one_strategy's logic.
+            // Resolve open orders: faithful copy of run_one_strategy's logic.
             let drained: Vec<Order> = std::mem::take(&mut open_orders);
-            for order in drained {
+            for mut order in drained {
                 if order.order_type == OrderType::CancelOrder {
                     open_orders.retain(|o| o.id != order.id);
                     order_records.push(OrderRecord {
@@ -1825,53 +2202,188 @@ mod tests {
                         continue;
                     },
                 };
-                let fill_px = bar.open;
+
+                // Decide whether this order fires this bar (and at what price).
+                let outcome = resolve_trigger(
+                    &mut order,
+                    &bar,
+                    &positions,
+                    &mut trail_state,
+                    cfg.engine.trade_on_close,
+                );
+                let (raw_px, mut fill_reason, limit_cap) = match outcome {
+                    TriggerOutcome::Fill {
+                        raw_px,
+                        reason,
+                        limit_cap,
+                    } => (raw_px, reason, limit_cap),
+                    TriggerOutcome::Pending => {
+                        open_orders.push(order);
+                        continue;
+                    },
+                    TriggerOutcome::Cancel {
+                        reason,
+                    } => {
+                        trail_state.remove(&order.id);
+                        order_records.push(OrderRecord {
+                            order: order.clone(),
+                            timestamp: ts,
+                            status: "cancelled".into(),
+                            fill_price: None,
+                            reason,
+                            commission: 0.0,
+                            pnl: None,
+                        });
+                        continue;
+                    },
+                };
+
+                let slip = cfg.exchange.slippage / 100.0;
+                let fill_px = apply_slippage(raw_px, order.quantity, slip, limit_cap);
+
                 let qty = order.quantity;
-                let notional = fill_px * qty.unsigned_abs() as f64;
+                let mut filled_qty = qty;
+                let mut notional = fill_px * qty.unsigned_abs() as f64;
+                let mut commission = match cfg.exchange.commission_type {
+                    CommissionType::Percentage => notional * cfg.exchange.commission_pct / 100.0,
+                    CommissionType::Fixed => cfg.exchange.commission_fixed,
+                    CommissionType::PercentagePlusFixed => {
+                        notional * cfg.exchange.commission_pct / 100.0
+                            + cfg.exchange.commission_fixed
+                    },
+                };
                 let order_ccy = quote_ccy.get(&order.symbol).copied().unwrap_or(base_ccy);
+                let mut fill_pnl: Option<f64> = None;
 
                 if qty > 0 {
-                    if !try_debit(&mut cash, order_ccy, notional, base_ccy, 1.0) {
+                    let needed = notional + commission;
+                    if !try_debit(&mut cash, order_ccy, needed, base_ccy, 1.0) {
+                        let avail: f64 =
+                            cash.values().copied().filter(|v| v.is_finite() && *v > 0.0).sum();
+                        let pct_part = match cfg.exchange.commission_type {
+                            CommissionType::Percentage | CommissionType::PercentagePlusFixed => {
+                                cfg.exchange.commission_pct / 100.0
+                            },
+                            CommissionType::Fixed => 0.0,
+                        };
+                        let fixed_part = match cfg.exchange.commission_type {
+                            CommissionType::Fixed | CommissionType::PercentagePlusFixed => {
+                                cfg.exchange.commission_fixed
+                            },
+                            CommissionType::Percentage => 0.0,
+                        };
+                        let denom = fill_px * (1.0 + pct_part);
+                        let max_qty: i64 = if denom > 0.0 && avail > fixed_part {
+                            ((avail - fixed_part) / denom).floor().max(0.0) as i64
+                        } else {
+                            0
+                        };
+                        if max_qty <= 0 {
+                            order_records.push(OrderRecord {
+                                order: order.clone(),
+                                timestamp: ts,
+                                status: "rejected".into(),
+                                fill_price: None,
+                                reason: "insufficient funds".into(),
+                                commission: 0.0,
+                                pnl: None,
+                            });
+                            continue;
+                        }
+                        filled_qty = max_qty.min(qty);
+                        notional = fill_px * filled_qty as f64;
+                        commission = match cfg.exchange.commission_type {
+                            CommissionType::Percentage => {
+                                notional * cfg.exchange.commission_pct / 100.0
+                            },
+                            CommissionType::Fixed => cfg.exchange.commission_fixed,
+                            CommissionType::PercentagePlusFixed => {
+                                notional * cfg.exchange.commission_pct / 100.0
+                                    + cfg.exchange.commission_fixed
+                            },
+                        };
+                        let shrunk_needed = notional + commission;
+                        if !try_debit(&mut cash, order_ccy, shrunk_needed, base_ccy, 1.0) {
+                            order_records.push(OrderRecord {
+                                order: order.clone(),
+                                timestamp: ts,
+                                status: "rejected".into(),
+                                fill_price: None,
+                                reason: "insufficient funds".into(),
+                                commission: 0.0,
+                                pnl: None,
+                            });
+                            continue;
+                        }
+                        fill_reason = if fill_reason.is_empty() {
+                            "partial: shrunk to fit cash".to_owned()
+                        } else {
+                            format!("{fill_reason}; partial: shrunk to fit cash")
+                        };
+                    }
+                    *positions.entry(order.symbol.clone()).or_insert(0) += filled_qty;
+                    update_open_trade_buy(&mut open_trades, &order.symbol, ts, filled_qty, fill_px);
+                } else if qty < 0 {
+                    let abs_qty = qty.unsigned_abs() as i64;
+                    let cur = *positions.get(&order.symbol).unwrap_or(&0);
+                    if !cfg.exchange.allow_short_selling && cur < abs_qty {
                         order_records.push(OrderRecord {
                             order: order.clone(),
                             timestamp: ts,
                             status: "rejected".into(),
                             fill_price: None,
-                            reason: "insufficient funds".into(),
+                            reason: "short selling disabled".into(),
                             commission: 0.0,
                             pnl: None,
                         });
                         continue;
                     }
-                    *positions.entry(order.symbol.clone()).or_insert(0) += qty;
-                    update_open_trade_buy(&mut open_trades, &order.symbol, ts, qty, fill_px);
-                } else if qty < 0 {
-                    let abs = qty.unsigned_abs() as i64;
                     *cash.entry(order_ccy).or_insert(0.0) += notional;
-                    *positions.entry(order.symbol.clone()).or_insert(0) -= abs;
-                    if let Some(t) = close_open_trade_sell(
+                    if !try_debit(&mut cash, order_ccy, commission, base_ccy, 1.0) {
+                        *cash.entry(order_ccy).or_insert(0.0) -= notional;
+                        order_records.push(OrderRecord {
+                            order: order.clone(),
+                            timestamp: ts,
+                            status: "rejected".into(),
+                            fill_price: None,
+                            reason: "cannot pay commission".into(),
+                            commission: 0.0,
+                            pnl: None,
+                        });
+                        continue;
+                    }
+                    *positions.entry(order.symbol.clone()).or_insert(0) -= abs_qty;
+                    let realised = close_open_trade_sell(
                         &mut open_trades,
                         &order.symbol,
                         ts,
-                        abs,
+                        abs_qty,
                         fill_px,
-                        0.0,
-                    ) {
+                        commission,
+                    )
+                    .map(|t| {
+                        let pnl = t.pnl;
                         closed_trades.push(t);
-                    }
+                        pnl
+                    });
+                    fill_pnl = realised;
+                }
+
+                if filled_qty != order.quantity {
+                    order.quantity = filled_qty;
                 }
                 order_records.push(OrderRecord {
-                    order,
+                    order: order.clone(),
                     timestamp: ts,
                     status: "filled".into(),
                     fill_price: Some(fill_px),
-                    reason: String::new(),
-                    commission: 0.0,
-                    pnl: None,
+                    reason: fill_reason,
+                    commission,
+                    pnl: fill_pnl,
                 });
             }
 
-            // Equity sample.
+            // Equity sample: cash + sum(qty * close).
             let mut equity: f64 = cash.values().sum();
             for (sym, qty) in &positions {
                 if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
@@ -1897,7 +2409,7 @@ mod tests {
         let metrics =
             compute_metrics(cfg.portfolio.initial_cash as f64, 0.0, &equity_curve, &closed_trades);
 
-        StrategyRunResult {
+        RunResult {
             strategy_id: "test_id".into(),
             strategy_name: "test".into(),
             equity_curve,
@@ -1941,6 +2453,7 @@ mod tests {
             order_type: OrderType::Market,
             quantity: 10,
             price: None,
+            limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, order)]);
         assert_eq!(r.orders.len(), 1);
@@ -1960,6 +2473,7 @@ mod tests {
             order_type: OrderType::Market,
             quantity: 10,
             price: None,
+            limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, order)]);
         assert_eq!(r.orders[0].status, "rejected");
@@ -1978,6 +2492,7 @@ mod tests {
             order_type: OrderType::Market,
             quantity: 5,
             price: None,
+            limit_price: None,
         };
         let cancel = Order {
             id: "buy1".into(),
@@ -1985,6 +2500,7 @@ mod tests {
             order_type: OrderType::CancelOrder,
             quantity: 0,
             price: None,
+            limit_price: None,
         };
         // Both injected on bar 0, cancel comes first in the open-order
         // list so the cancel removes the buy before it fills.
@@ -2010,6 +2526,7 @@ mod tests {
             order_type: OrderType::Market,
             quantity: 100,
             price: None,
+            limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("VOD.L", "GBP")], vec![(0, order)]);
         assert_eq!(r.orders[0].status, "filled");
@@ -2025,6 +2542,7 @@ mod tests {
             order_type: OrderType::Market,
             quantity: 10,
             price: None,
+            limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         assert!(r.metrics.contains_key("sharpe"));
@@ -2043,6 +2561,7 @@ mod tests {
             order_type: OrderType::Market,
             quantity: 5,
             price: None,
+            limit_price: None,
         };
         let buy_b = Order {
             id: "b".into(),
@@ -2050,6 +2569,7 @@ mod tests {
             order_type: OrderType::Market,
             quantity: 10,
             price: None,
+            limit_price: None,
         };
         let ra = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy_a)]);
         let rb = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy_b)]);
@@ -2061,5 +2581,874 @@ mod tests {
         let ts = parse_iso_date_to_ts("2024-01-15").unwrap();
         // 2024-01-15 00:00 UTC
         assert_eq!(ts, 1_705_276_800);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Order types — see `OrderType` enum. The engine only implements
+    // Market + CancelOrder execution semantics today; everything else
+    // either falls through to the Market path (when present in
+    // `allowed_order_types`) or is rejected by the allowed-types filter.
+    // The tests below pin down both the working paths and the gaps so
+    // that any future change to the order-resolution logic surfaces as
+    // a deliberate test update rather than a silent behavioural shift.
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn allowed_order_types_filter_rejects_disallowed() {
+        // The exchange config's `allowed_order_types` is enforced at
+        // submission time. With only Market allowed, a Limit order is
+        // rejected before it ever reaches the resolution loop.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types = vec![OrderType::Market, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
+        let limit = Order {
+            id: "lim1".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Limit,
+            quantity: 5,
+            price: Some(95.0),
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
+        assert_eq!(r.orders.len(), 1);
+        assert_eq!(r.orders[0].status, "rejected");
+        assert!(r.orders[0].reason.contains("not allowed"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Limit orders
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn limit_buy_does_not_fill_when_price_above_limit() {
+        // Buy limit at 50, price stays around 100 → never hits the limit.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0]); // mk_bar makes high=*1.01, low=*0.99
+        let limit = Order {
+            id: "lim1".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Limit,
+            quantity: 5,
+            price: Some(50.0),
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
+        // No order record at all — the limit stayed pending across both bars.
+        assert!(r.orders.is_empty(), "expected no fills, got {:?}", r.orders);
+    }
+
+    #[test]
+    fn limit_buy_fills_at_open_when_open_below_limit() {
+        // Buy limit at 110, bar opens at 100 → fill at the open (better than limit).
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 100.0]);
+        let limit = Order {
+            id: "lim".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Limit,
+            quantity: 5,
+            price: Some(110.0),
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
+        assert_eq!(r.orders[0].status, "filled");
+        assert_eq!(r.orders[0].fill_price, Some(100.0));
+    }
+
+    #[test]
+    fn limit_buy_fills_at_limit_when_low_reaches_it() {
+        // mk_bar(100) → open=100, low=99. Buy limit at 99.5 → not at open
+        // (100 > 99.5), but bar.low (99) <= 99.5 → fill at limit price.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0]);
+        let limit = Order {
+            id: "lim".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Limit,
+            quantity: 5,
+            price: Some(99.5),
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
+        assert_eq!(r.orders[0].status, "filled");
+        assert_eq!(r.orders[0].fill_price, Some(99.5));
+    }
+
+    #[test]
+    fn limit_sell_fills_at_limit_when_high_reaches_it() {
+        // mk_bar(100) → open=100, high=101. Sell limit at 100.5 → fill at 100.5.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0]);
+        // Need a long to sell from.
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        // Inject buy at bar 0, then a sell-limit also at bar 0; the buy
+        // settles first (queue order preserved), so the limit sees +5 long.
+        let sell_limit = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Limit,
+            quantity: -5,
+            price: Some(100.5),
+            limit_price: None,
+        };
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile("AAPL", "USD")],
+            vec![(0, buy), (0, sell_limit)],
+        );
+        let sell_record = r.orders.iter().find(|o| o.order.id == "s").expect("sell missing");
+        assert_eq!(sell_record.status, "filled");
+        assert_eq!(sell_record.fill_price, Some(100.5));
+    }
+
+    #[test]
+    fn limit_buy_slippage_never_crosses_limit() {
+        // Buy limit at 99.5, bar.open=100, bar.low=99 → raw fill at 99.5,
+        // 1 % slippage would push it to ~100.495, which crosses the limit.
+        // Engine should clamp the slipped price at 99.5.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+        cfg.exchange.slippage = 1.0;
+        let aligned = mk_aligned("AAPL", &[100.0]);
+        let limit = Order {
+            id: "lim".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Limit,
+            quantity: 5,
+            price: Some(99.5),
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
+        assert_eq!(r.orders[0].status, "filled");
+        assert_eq!(r.orders[0].fill_price, Some(99.5));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Stop-loss / take-profit
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn stop_loss_sell_does_not_trigger_above_stop() {
+        // Sell stop at 90, prices stay at/above 100 → never triggers.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::StopLoss, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let sl = Order {
+            id: "sl".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::StopLoss,
+            quantity: -5,
+            price: Some(90.0),
+            limit_price: None,
+        };
+        let r =
+            run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sl)]);
+        // Only the buy got filled.
+        assert!(r.orders.iter().any(|o| o.order.id == "b" && o.status == "filled"));
+        assert!(!r.orders.iter().any(|o| o.order.id == "sl"));
+    }
+
+    #[test]
+    fn stop_loss_sell_triggers_when_low_crosses_stop() {
+        // Sell stop at 95, bar 1 has open=100, low=99, bar 2 open=90 → triggers via gap-down.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::StopLoss, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 90.0]); // bar2 open=90 < 95
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let sl = Order {
+            id: "sl".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::StopLoss,
+            quantity: -5,
+            price: Some(95.0),
+            limit_price: None,
+        };
+        let r =
+            run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sl)]);
+        let sl_rec = r.orders.iter().find(|o| o.order.id == "sl").expect("sl missing");
+        assert_eq!(sl_rec.status, "filled");
+        // Gap-down: filled at the open (90), not at the stop (95).
+        assert_eq!(sl_rec.fill_price, Some(90.0));
+        assert!(sl_rec.reason.contains("gap-down"));
+    }
+
+    #[test]
+    fn stop_loss_sell_fills_at_stop_when_no_gap() {
+        // mk_bar(100) → open=100, low=99. Stop at 99.5 → no gap, fills at 99.5.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::StopLoss, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let sl = Order {
+            id: "sl".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::StopLoss,
+            quantity: -5,
+            price: Some(99.5),
+            limit_price: None,
+        };
+        let r =
+            run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sl)]);
+        let sl_rec = r.orders.iter().find(|o| o.order.id == "sl").expect("sl missing");
+        assert_eq!(sl_rec.fill_price, Some(99.5));
+    }
+
+    #[test]
+    fn stop_loss_buy_triggers_on_price_rise() {
+        // Buy stop at 110 (typical short-cover or breakout entry). Bar 2
+        // opens at 105 with high 106.05 — doesn't reach 110. Bar 3 opens
+        // at 111 → gap-up triggers fill at open 111.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::StopLoss, OrderType::CancelOrder];
+        // 0 → buy stop placed; bar 1: 100 (low 99, high 101) — no trigger;
+        // bar 2: 111 (gap-up open above 110).
+        let aligned = mk_aligned("AAPL", &[100.0, 111.0]);
+        let stop_buy = Order {
+            id: "sb".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::StopLoss,
+            quantity: 5,
+            price: Some(110.0),
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, stop_buy)]);
+        assert_eq!(r.orders[0].status, "filled");
+        assert_eq!(r.orders[0].fill_price, Some(111.0));
+    }
+
+    #[test]
+    fn take_profit_executes_like_limit() {
+        // TakeProfit and Limit share execution rules. Sell TP at 100.5
+        // with bar.high=101 → fills at 100.5.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::TakeProfit, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let tp = Order {
+            id: "tp".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::TakeProfit,
+            quantity: -5,
+            price: Some(100.5),
+            limit_price: None,
+        };
+        let r =
+            run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, tp)]);
+        let tp_rec = r.orders.iter().find(|o| o.order.id == "tp").expect("tp missing");
+        assert_eq!(tp_rec.fill_price, Some(100.5));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Stop-Limit variants
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn stop_loss_limit_converts_to_limit_after_trigger() {
+        // Stop at 95, limit at 95. Bar 2 has open=90 → stop fires (gap-down),
+        // but as a limit-sell at 95 with bar.high=90.9, the limit can't be
+        // reached this same bar (sell-limit needs price >= 95). It rests
+        // pending. Bar 3 opens at 96 → sell-limit fills at 96 (open through
+        // limit) since open >= 95.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::StopLossLimit, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 90.0, 96.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let sll = Order {
+            id: "sll".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::StopLossLimit,
+            quantity: -5,
+            price: Some(95.0),       // stop trigger
+            limit_price: Some(95.0), // limit price after trigger
+        };
+        let r =
+            run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sll)]);
+        let sll_rec = r.orders.iter().find(|o| o.order.id == "sll").expect("sll missing");
+        assert_eq!(sll_rec.status, "filled");
+        // Filled on bar 3 at the open-through-limit (96 >= 95 → fill at open).
+        assert_eq!(sll_rec.fill_price, Some(96.0));
+        // Order's runtime type was mutated to Limit.
+        assert_eq!(sll_rec.order.order_type, OrderType::Limit);
+    }
+
+    #[test]
+    fn stop_loss_limit_does_nothing_until_stop_fires() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::StopLossLimit, OrderType::CancelOrder];
+        // Prices stay above stop forever.
+        let aligned = mk_aligned("AAPL", &[100.0, 102.0, 104.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let sll = Order {
+            id: "sll".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::StopLossLimit,
+            quantity: -5,
+            price: Some(90.0),
+            limit_price: Some(89.5),
+        };
+        let r =
+            run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sll)]);
+        assert!(!r.orders.iter().any(|o| o.order.id == "sll"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Trailing stops
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn trailing_stop_sell_does_not_fire_in_uptrend() {
+        // Trail offset 5. Prices march up → stop = high - 5 keeps rising
+        // and never gets hit.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::TrailingStop, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 105.0, 110.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let trail = Order {
+            id: "t".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::TrailingStop,
+            quantity: -5,
+            price: Some(5.0),
+            limit_price: None,
+        };
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile("AAPL", "USD")],
+            vec![(0, buy), (0, trail)],
+        );
+        assert!(!r.orders.iter().any(|o| o.order.id == "t"));
+    }
+
+    #[test]
+    fn trailing_stop_sell_fires_after_pullback() {
+        // Trail offset 5. Prices: 100 → 110 (high 111.1) → pullback to 100
+        // (open 100). running_high ≈ 111.1, stop = 106.1, bar.open (100)
+        // is below stop → fills at gap-down open (100).
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::TrailingStop, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 110.0, 100.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let trail = Order {
+            id: "t".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::TrailingStop,
+            quantity: -5,
+            price: Some(5.0),
+            limit_price: None,
+        };
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile("AAPL", "USD")],
+            vec![(0, buy), (0, trail)],
+        );
+        let t = r.orders.iter().find(|o| o.order.id == "t").expect("trail missing");
+        assert_eq!(t.status, "filled");
+        // Bar 3 opens at 100, well below the running stop of ~106.1 → gap-down.
+        assert_eq!(t.fill_price, Some(100.0));
+        assert!(t.reason.contains("gap-down"));
+    }
+
+    #[test]
+    fn trailing_stop_limit_rests_as_limit_after_trigger() {
+        // Trail 5, limit price 105. Once stop fires, becomes a sell-limit
+        // at 105. With bar.open=100 < 105 the limit doesn't fill that bar.
+        // Subsequent bar opens at 106 → sell-limit fills at the open.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::TrailingStopLimit, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 110.0, 100.0, 106.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let trail = Order {
+            id: "t".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::TrailingStopLimit,
+            quantity: -5,
+            price: Some(5.0),
+            limit_price: Some(105.0),
+        };
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile("AAPL", "USD")],
+            vec![(0, buy), (0, trail)],
+        );
+        let t = r.orders.iter().find(|o| o.order.id == "t").expect("trail missing");
+        assert_eq!(t.status, "filled");
+        assert_eq!(t.fill_price, Some(106.0));
+        assert_eq!(t.order.order_type, OrderType::Limit);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // SettlePosition
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn settle_position_flattens_long() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::SettlePosition, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 7,
+            price: None,
+            limit_price: None,
+        };
+        let settle = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::SettlePosition,
+            quantity: 0,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile("AAPL", "USD")],
+            vec![(0, buy), (1, settle)],
+        );
+        let settle_rec = r.orders.iter().find(|o| o.order.id == "s").expect("settle missing");
+        // Order's quantity was rewritten to negate the +7 long.
+        assert_eq!(settle_rec.order.quantity, -7);
+        assert_eq!(settle_rec.status, "filled");
+        // A round-trip trade was closed.
+        assert_eq!(r.trades.len(), 1);
+    }
+
+    #[test]
+    fn settle_position_with_no_position_is_cancelled() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::SettlePosition, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
+        let settle = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::SettlePosition,
+            quantity: 0,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, settle)]);
+        assert_eq!(r.orders[0].status, "cancelled");
+        assert_eq!(r.orders[0].reason, "no position to settle");
+    }
+
+    #[test]
+    fn settle_position_covers_short() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allow_short_selling = true;
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::SettlePosition, OrderType::CancelOrder];
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
+        let short = Order {
+            id: "sh".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: -3,
+            price: None,
+            limit_price: None,
+        };
+        let settle = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::SettlePosition,
+            quantity: 0,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile("AAPL", "USD")],
+            vec![(0, short), (1, settle)],
+        );
+        let settle_rec = r.orders.iter().find(|o| o.order.id == "s").expect("settle missing");
+        // The settle was rewritten to a +3 buy to flatten the -3 short.
+        assert_eq!(settle_rec.order.quantity, 3);
+        assert_eq!(settle_rec.status, "filled");
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Short selling
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn short_selling_disabled_rejects_naked_short() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allow_short_selling = false;
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
+        let sell = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: -5, // no prior position → naked short.
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, sell)]);
+        assert_eq!(r.orders[0].status, "rejected");
+        assert_eq!(r.orders[0].reason, "short selling disabled");
+    }
+
+    #[test]
+    fn short_selling_disabled_allows_closing_long() {
+        // Selling within an existing long is not a short and must fill
+        // even when shorting is disabled.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allow_short_selling = false;
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0, 102.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5,
+            price: None,
+            limit_price: None,
+        };
+        let sell = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: -3,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile("AAPL", "USD")],
+            vec![(0, buy), (1, sell)],
+        );
+        assert_eq!(r.orders[1].status, "filled");
+        // 3 of the 5 long units are closed → at least one trade closed.
+        assert!(!r.trades.is_empty());
+    }
+
+    #[test]
+    fn short_selling_enabled_credits_cash_and_creates_short() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allow_short_selling = true;
+        let aligned = mk_aligned("AAPL", &[100.0, 90.0]); // price drop favors short
+        let sell = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: -10,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, sell)]);
+        assert_eq!(r.orders[0].status, "filled");
+        // GAP: the short never gets re-priced into PnL because the
+        // position-valuation step is qty * close — for a -10 short, a
+        // drop from 100→90 increases equity by 10*10=100. We still
+        // assert the cash credit happened.
+        assert!(r.equity_curve.last().unwrap().equity > cfg.portfolio.initial_cash as f64);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Margin & risk — none implemented today.
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn no_margin_call_when_short_blows_up() {
+        // GAP: there is no margin model. A short position whose mark
+        // moves violently against the trader is *not* force-closed,
+        // and the equity curve simply goes more and more negative
+        // without any "margin call" event. This pins that behaviour.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allow_short_selling = true;
+        cfg.portfolio.initial_cash = 1_000;
+        // Price 5x's against a -10 short → unrealised loss of ~4,000.
+        let aligned = mk_aligned("AAPL", &[100.0, 200.0, 500.0]);
+        let sell = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: -10,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, sell)]);
+        assert_eq!(r.orders[0].status, "filled");
+        // Equity is allowed to go negative. There is no margin-call
+        // OrderRecord, no auto-flatten, no rejection mid-run.
+        let final_eq = r.equity_curve.last().unwrap().equity;
+        assert!(final_eq < 0.0, "expected negative equity, got {final_eq}");
+        assert!(r.orders.iter().all(|o| o.reason != "margin call"));
+    }
+
+    #[test]
+    fn no_partial_fill_based_on_volume() {
+        // GAP: bar volume is irrelevant to the engine. A 1,000,000-share
+        // buy on a bar with volume=1,000 still fills in full so long as
+        // cash allows it.
+        let cfg = mk_cfg("AAPL");
+        let aligned = mk_aligned("AAPL", &[1.0, 1.0]); // cheap, lots of shares affordable
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 9_000, // 9,000 * $1 = $9,000 (within $10,000 cash)
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
+        assert_eq!(r.orders[0].status, "filled");
+        assert_eq!(r.orders[0].order.quantity, 9_000);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Slippage
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn slippage_makes_buy_pay_more() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.slippage = 1.0; // 1 %
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 1,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
+        // Buy fills at open * (1 + slip) = 100 * 1.01 = 101.
+        assert!((r.orders[0].fill_price.unwrap() - 101.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn slippage_makes_sell_receive_less() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.slippage = 1.0;
+        cfg.exchange.allow_short_selling = true;
+        let aligned = mk_aligned("AAPL", &[100.0, 100.0]);
+        let sell = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: -1,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, sell)]);
+        // Sell fills at open * (1 - slip) = 100 * 0.99 = 99.
+        assert!((r.orders[0].fill_price.unwrap() - 99.0).abs() < 1e-9);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Commission
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn percentage_commission_charged_on_fill() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.commission_type = CommissionType::Percentage;
+        cfg.exchange.commission_pct = 0.5; // 0.5 %
+        let aligned = mk_aligned("AAPL", &[100.0, 100.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 10,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
+        // Notional = 10 * 100 = 1000, commission = 1000 * 0.5 % = 5.
+        assert!((r.orders[0].commission - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fixed_commission_charged_on_fill() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.commission_type = CommissionType::Fixed;
+        cfg.exchange.commission_fixed = 7.5;
+        let aligned = mk_aligned("AAPL", &[100.0, 100.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 10,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
+        assert!((r.orders[0].commission - 7.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pct_plus_fixed_commission_charged_on_fill() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.commission_type = CommissionType::PercentagePlusFixed;
+        cfg.exchange.commission_pct = 0.5;
+        cfg.exchange.commission_fixed = 1.0;
+        let aligned = mk_aligned("AAPL", &[100.0, 100.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 10,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
+        // 1000 * 0.5 % + 1.0 = 5.0 + 1.0 = 6.0.
+        assert!((r.orders[0].commission - 6.0).abs() < 1e-9);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Auto-shrinking
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn buy_auto_shrinks_to_fit_cash() {
+        // The auto-shrink path is triggered when `try_debit` returns
+        // false. That only happens cross-currency (the same-currency
+        // path silently allows cash to go negative — see
+        // `same_currency_buy_can_overdraw_cash` below for that quirk).
+        // Here: base=USD, quote=GBP, no GBP cash, only $1,000 base.
+        // A buy of 11 @ 100 GBP needs 1,100; the engine shrinks to 10.
+        let mut cfg = mk_cfg("VOD.L");
+        cfg.portfolio.base_currency = Currency::USD;
+        cfg.portfolio.initial_cash = 1_000;
+        let aligned = mk_aligned("VOD.L", &[100.0, 100.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "VOD.L".into(),
+            order_type: OrderType::Market,
+            quantity: 11,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("VOD.L", "GBP")], vec![(0, buy)]);
+        assert_eq!(r.orders[0].status, "filled");
+        assert_eq!(r.orders[0].order.quantity, 10);
+        assert!(r.orders[0].reason.contains("partial"));
+    }
+
+    #[test]
+    fn same_currency_buy_can_overdraw_cash() {
+        // GAP: when the order's quote currency equals the portfolio's
+        // base currency, `try_debit` falls back to "pay from base" and
+        // allows cash to go negative because the same map entry is
+        // first read for `avail` then re-read for `base_avail`. The
+        // auto-shrink branch is therefore never reached and the buy
+        // settles in full at a negative cash balance.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.portfolio.initial_cash = 1_000;
+        let aligned = mk_aligned("AAPL", &[100.0, 100.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 11, // 11 * 100 = 1,100 > 1,000 cash
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
+        assert_eq!(r.orders[0].status, "filled");
+        assert_eq!(r.orders[0].order.quantity, 11); // not shrunk
+                                                    // Cash went negative: 1,000 - 1,100 = -100.
+        assert!(r.equity_curve.last().unwrap().cash < 0.0);
     }
 }

@@ -7,7 +7,6 @@ Description: Module containing the per-trade PnL scatter chart.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
@@ -15,18 +14,20 @@ import plotly.graph_objects as go
 
 from backtide.analysis.utils import _is_benchmark, _plot, _resolve_run_currency
 from backtide.config import get_config
-from backtide.core.data import Currency
 from backtide.utils.utils import _format_price
 
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from pathlib import Path
+
+    from backtide.backtest import RunResult
+    from backtide.core.data import Currency
 
 cfg = get_config()
 
 
 @overload
 def plot_trade_pnl(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     currency: str | Currency | None = ...,
     title: str | dict[str, Any] | None = ...,
@@ -37,7 +38,7 @@ def plot_trade_pnl(
 ) -> go.Figure: ...
 @overload
 def plot_trade_pnl(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     currency: str | Currency | None = ...,
     title: str | dict[str, Any] | None = ...,
@@ -49,7 +50,7 @@ def plot_trade_pnl(
 
 
 def plot_trade_pnl(
-    runs: StrategyRunResult | list[StrategyRunResult],
+    runs: RunResult | list[RunResult],
     *,
     currency: str | Currency | None = None,
     title: str | dict[str, Any] | None = None,
@@ -66,7 +67,7 @@ def plot_trade_pnl(
 
     Parameters
     ----------
-    runs : [StrategyRunResult] | list[[StrategyRunResult]]
+    runs : [RunResult] | list[[RunResult]]
         The per-strategy results to plot. Runs without trades are skipped.
 
     currency : str | [Currency] | None, default=None
@@ -139,8 +140,7 @@ def plot_trade_pnl(
         symbols = [getattr(t, "symbol", "") for t in trades]
         # Pair the symbol with a pre-formatted price for the hover tooltip.
         customdata = [
-            [sym, _format_price(p, currency=ccy)]
-            for sym, p in zip(symbols, pnls, strict=True)
+            [sym, _format_price(p, currency=ccy)] for sym, p in zip(symbols, pnls, strict=True)
         ]
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
@@ -183,4 +183,3 @@ def plot_trade_pnl(
         filename=filename,
         display=display,
     )
-

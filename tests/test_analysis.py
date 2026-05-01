@@ -575,7 +575,7 @@ class _StubSample:
 
 
 class _StubRun:
-    """Minimal duck-typed stand-in for `StrategyRunResult`."""
+    """Minimal duck-typed stand-in for `RunResult`."""
 
     def __init__(
         self,
@@ -609,6 +609,22 @@ class TestPlotPnl:
         assert len(fig.data) == 2  # PnL + drawdown
         # Subplots: yaxis2 must exist for the drawdown panel.
         assert fig.layout.yaxis2 is not None
+
+    def test_drawdown_absolute_when_not_normalized(self):
+        """Default mode plots drawdown as absolute currency, not percent."""
+        run = _StubRun("S1", [100.0, 120.0, 90.0])
+        fig = plot_pnl([run], drawdown=True, normalize=False, display=None)
+        dd = np.array(fig.data[1].y, dtype=float)
+        assert dd.tolist() == [0.0, 0.0, -30.0]
+
+    def test_drawdown_percent_when_normalized(self):
+        """Normalized mode plots drawdown as a percentage."""
+        run = _StubRun("S1", [100.0, 120.0, 90.0])
+        fig = plot_pnl([run], drawdown=True, normalize=True, display=None)
+        dd = np.array(fig.data[1].y, dtype=float)
+        assert dd[0] == 0.0
+        assert dd[1] == 0.0
+        assert dd[2] == pytest.approx(-25.0)
 
     def test_one_trace_per_strategy(self):
         """Plotting N strategies yields N traces (no drawdown)."""
@@ -660,11 +676,10 @@ class TestPlotPnl:
         # `line.dash` is None for solid lines and "dash" for the benchmark.
         assert bench.line.dash == "dash"
 
-    def test_empty_input_returns_figure(self):
-        """An empty `runs` list still returns a figure (with a placeholder)."""
-        fig = plot_pnl([], drawdown=False, display=None)
-        assert isinstance(fig, go.Figure)
-        assert len(fig.data) == 0
+    def test_empty_input_raises(self):
+        """An empty `runs` list should raise a ValueError."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            plot_pnl([], drawdown=False, display=None)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -9,17 +9,20 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import importlib
-from types import ModuleType
-from typing import TYPE_CHECKING, Any, TypeVar, overload
-from zoneinfo import ZoneInfo
+import re
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import numpy as np
 import pandas as pd
 
 from backtide.config import DataFrameLibrary, get_config
 from backtide.core.data import Currency
+from backtide.utils.constants import MOMENT_TO_STRFTIME
 
 if TYPE_CHECKING:
+    from types import ModuleType
+    from zoneinfo import ZoneInfo
+
     import polars as pl
 
 
@@ -85,8 +88,9 @@ def _format_number(n: float) -> str:
 def _format_price(
     n: float,
     decimals: int | None = None,
-    currency: str | Currency | None = None,
     *,
+    signed: bool = False,
+    currency: str | Currency | None = None,
     compact: bool = False,
 ) -> str:
     """Format a price using a currency's symbol and placement convention.
@@ -100,6 +104,9 @@ def _format_price(
         Number of decimal places. If None and the currency is recognized, it uses
         the currency's decimal places (non-compact) or 0 (compact). Else it
         uses 2 (non-compact) or 0 (compact).
+
+    signed : bool, default=False
+        If True, show a + sign for positive numbers.
 
     currency : str | Currency | None, default=None
         Currency code to use for formatting. If None, no currency symbol
@@ -133,7 +140,7 @@ def _format_price(
         else:
             return f"{num} {currency.symbol}"
 
-    return _format_number(n) if compact else f"{n:,.{dec}f}"
+    return f"{'+' if signed and n > 0 else ''}{_format_number(n) if compact else f'{n:,.{dec}f}'}"
 
 
 def _make_dummy_bars(
@@ -160,11 +167,21 @@ def _make_dummy_bars(
     return result
 
 
-@overload
-def _to_list(item: Iterable[T]) -> list[T]: ...
-@overload
-def _to_list(item: T) -> list[T]: ...
-def _to_list(item: Any) -> Any:
+def _moment_to_strftime(fmt: str) -> str:
+    """Convert a momentjs string to strftime format."""
+    tokens = [re.escape(k) for k in MOMENT_TO_STRFTIME]
+    tokens.sort(key=len, reverse=True)
+    regex = re.compile("|".join(tokens))
+
+    def replace(match: re.Match) -> str:
+        """Replace a token in the string."""
+        token = match.group(0)
+        return MOMENT_TO_STRFTIME.get(token, token)
+
+    return regex.sub(replace, fmt)
+
+
+def _to_list(item: T | Iterable[T]) -> list[T]:
     """Convert an item to a list with just the one item if not already.
 
     Parameters

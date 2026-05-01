@@ -7,8 +7,6 @@ Description: Module containing the position-size-over-time chart.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
@@ -18,14 +16,17 @@ from backtide.analysis.utils import _plot
 from backtide.config import get_config
 
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from collections.abc import Iterable
+    from pathlib import Path
+
+    from backtide.backtest import RunResult
 
 cfg = get_config()
 
 
 @overload
 def plot_position_size(
-    run: StrategyRunResult,
+    run: RunResult,
     *,
     symbols: Iterable[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
@@ -36,7 +37,7 @@ def plot_position_size(
 ) -> go.Figure: ...
 @overload
 def plot_position_size(
-    run: StrategyRunResult,
+    run: RunResult,
     *,
     symbols: Iterable[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
@@ -48,7 +49,7 @@ def plot_position_size(
 
 
 def plot_position_size(
-    run: StrategyRunResult,
+    run: RunResult,
     *,
     symbols: Iterable[str] | None = None,
     title: str | dict[str, Any] | None = None,
@@ -65,7 +66,7 @@ def plot_position_size(
 
     Parameters
     ----------
-    run : [StrategyRunResult]
+    run : [RunResult]
         The strategy run to plot.
 
     symbols : Iterable[str] | None, default=None
@@ -193,4 +194,3 @@ def plot_position_size(
         filename=filename,
         display=display,
     )
-

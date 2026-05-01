@@ -123,6 +123,7 @@ fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
         order_type: OrderType::Market,
         quantity: qty,
         price: None,
+        limit_price: None,
     })
 }
 
@@ -137,6 +138,7 @@ fn sell_order(symbol: &str, quantity: i64) -> Option<Order> {
         order_type: OrderType::Market,
         quantity: -quantity,
         price: None,
+        limit_price: None,
     })
 }
 

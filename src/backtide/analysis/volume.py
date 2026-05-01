@@ -7,8 +7,7 @@ Description: Module containing the volume bar chart function.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
 
 import plotly.graph_objects as go
 
@@ -21,6 +20,9 @@ from backtide.analysis.utils import (
 )
 from backtide.config import get_config
 from backtide.utils.utils import _format_price, _to_pandas
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 cfg = get_config()
 

@@ -7,7 +7,6 @@ Description: Module containing the rolling Sharpe-ratio chart.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import numpy as np
@@ -18,14 +17,16 @@ from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot
 from backtide.config import get_config
 
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from pathlib import Path
+
+    from backtide.backtest import RunResult
 
 cfg = get_config()
 
 
 @overload
 def plot_rolling_sharpe(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     window: int = ...,
     periods_per_year: int = ...,
@@ -37,7 +38,7 @@ def plot_rolling_sharpe(
 ) -> go.Figure: ...
 @overload
 def plot_rolling_sharpe(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     window: int = ...,
     periods_per_year: int = ...,
@@ -50,7 +51,7 @@ def plot_rolling_sharpe(
 
 
 def plot_rolling_sharpe(
-    runs: StrategyRunResult | list[StrategyRunResult],
+    runs: RunResult | list[RunResult],
     *,
     window: int = 60,
     periods_per_year: int = 252,
@@ -68,7 +69,7 @@ def plot_rolling_sharpe(
 
     Parameters
     ----------
-    runs : [StrategyRunResult] | list[[StrategyRunResult]]
+    runs : [RunResult] | list[[RunResult]]
         The per-strategy results to plot.
 
     window : int, default=60
@@ -113,7 +114,7 @@ def plot_rolling_sharpe(
     --------
     - backtide.analysis:plot_pnl
     - backtide.analysis:plot_rolling_returns
-    - backtide.backtest:StrategyRunResult
+    - backtide.backtest:RunResult
 
     Examples
     --------
@@ -162,8 +163,7 @@ def plot_rolling_sharpe(
                 line=line,
                 showlegend=not is_benchmark,
                 hovertemplate=(
-                    "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d}<br>"
-                    "Sharpe: %{y:+.2f}<extra></extra>"
+                    "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d}<br>Sharpe: %{y:+.2f}<extra></extra>"
                 ),
             )
         )
@@ -192,4 +192,3 @@ def plot_rolling_sharpe(
         filename=filename,
         display=display,
     )
-

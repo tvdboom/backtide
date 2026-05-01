@@ -23,8 +23,8 @@ from backtide.backtest import (
     OrderRecord,
     OrderType,
     PortfolioExpConfig,
+    RunResult,
     StrategyExpConfig,
-    StrategyRunResult,
     Trade,
     run_experiment,
 )
@@ -302,7 +302,7 @@ class TestResultModels:
         assert EquitySample is not None
         assert Trade is not None
         assert OrderRecord is not None
-        assert StrategyRunResult is not None
+        assert RunResult is not None
         assert ExperimentResult is not None
 
 

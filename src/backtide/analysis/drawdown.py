@@ -7,15 +7,18 @@ Description: Module containing the drawdown chart function.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
 
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import _check_columns, _plot, _resolve_dt
 from backtide.config import get_config
-from backtide.utils.types import DataFrameLike
 from backtide.utils.utils import _to_pandas
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from backtide.utils.types import DataFrameLike
 
 cfg = get_config()
 

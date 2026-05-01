@@ -11,6 +11,16 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import streamlit as st
+
+from backtide.analysis import (
+    plot_pnl,
+    plot_pnl_histogram,
+    plot_rolling_returns,
+    plot_rolling_sharpe,
+    plot_trade_duration,
+    plot_trade_pnl,
+)
+from backtide.analysis.utils import _is_benchmark
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
 from backtide.storage import (
@@ -19,28 +29,19 @@ from backtide.storage import (
     query_instruments,
     query_strategy_runs,
 )
-from backtide.analysis import (
-        plot_pnl,
-        plot_pnl_histogram,
-        plot_rolling_returns,
-        plot_rolling_sharpe,
-        plot_trade_duration,
-        plot_trade_pnl,
-    )
 from backtide.ui.utils import (
     _default,
     _fmt_duration,
     _fmt_metric,
     _fmt_period,
     _get_logokit_url,
-    _moment_to_strftime,
     _persist,
     _to_pandas,
 )
-from backtide.utils.utils import _format_price
+from backtide.utils.utils import _format_price, _moment_to_strftime
 
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from backtide.backtest import RunResult
 
 
 cfg = get_config()
@@ -72,7 +73,7 @@ st.markdown(
             font-size: 1.3em;
         }
 
-        div[data-testid="stPopoverBody"] {
+        div[data-testid="stPopoverBody"]:has(.wide-marker) {
             width: 50vw !important;
             max-width: 50vw !important;
         }
@@ -142,7 +143,7 @@ def _colored_metric(container, label: str, value: str, tone: str = ""):
     container.metric(label, f":{tone}[{value}]" if tone else value)
 
 
-def _render_strategy_summary(run: StrategyRunResult):
+def _render_strategy_summary(run: RunResult):
     """Render compact summary metrics for a single strategy run."""
     if err := getattr(run, "error", None):
         st.error(
@@ -154,37 +155,25 @@ def _render_strategy_summary(run: StrategyRunResult):
 
     mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([0.8, 0.8, 0.9, 0.9, 0.9, 0.9, 1.2])
 
-    def _safe(key: str, default: float = 0.0) -> float:
-        v = run.metrics.get(key, default)
-        if v is None:
-            return default
-        try:
-            if v != v:  # NaN
-                return default
-        except TypeError:
-            return default
-        return float(v)
+    sharpe = run.metrics["sharpe"]
+    pnl = run.metrics["pnl"]
+    total_return = run.metrics["total_return"]
+    cagr = run.metrics["cagr"]
+    alpha = run.metrics["alpha"]
+    max_dd = run.metrics["max_dd"]
+    n_trades = run.metrics["n_trades"]
+    win_rate = run.metrics["win_rate"]
 
-    pnl = _safe("pnl")
-    total_return = _safe("total_return")
-    cagr = _safe("cagr")
-    alpha = _safe("alpha")
-    sharpe = _safe("sharpe")
-    max_dd = _safe("max_dd")
-
-    # Sharpe is the headline risk-adjusted metric: leads the row.
     _colored_metric(
         mc1,
         ":material/military_tech: Sharpe",
         _fmt_metric(sharpe),
-        _tone(sharpe, good_above=1.0, bad_below=0.0),  # >1 good, <0 bad
+        _tone(sharpe, good_above=1.0, bad_below=0.0),
     )
-
-    pnl_str = _format_price(pnl, currency=cfg.general.base_currency, compact=True)
     _colored_metric(
         mc2,
         ":material/payments: PnL",
-        f"{'+' if pnl > 0 else ''}{pnl_str}",
+        f"{'+' if pnl > 0 else ''}{_format_price(pnl, currency=run.base_currency, compact=True)}",
         _tone(pnl),
     )
     _colored_metric(
@@ -202,7 +191,7 @@ def _render_strategy_summary(run: StrategyRunResult):
     _colored_metric(
         mc5,
         ":material/compare_arrows: Alpha",
-        _fmt_pct(alpha, signed=True),
+        "--" if _is_benchmark(run.strategy_name) else _fmt_pct(alpha, signed=True),
         _tone(alpha),
     )
     _colored_metric(
@@ -211,8 +200,7 @@ def _render_strategy_summary(run: StrategyRunResult):
         _fmt_pct(max_dd),
         "red" if max_dd and not pd.isna(max_dd) else "",  # Any non-zero drawdown is bad.
     )
-    n_trades = int(run.metrics.get("n_trades", 0))
-    win_rate = run.metrics.get("win_rate", 0.0)
+
     wr_pct = _fmt_metric(win_rate * 100, suffix="%")
     if win_rate > 0.5:
         wr_str = f":green[{wr_pct}]"
@@ -305,10 +293,7 @@ def _confirm_delete_experiment(exp_id: str, name: str):
         st.rerun()
 
 
-def _render_analysis_tabs(
-    runs: list[StrategyRunResult],
-    exp_cfg: ExperimentConfig | None,
-) -> None:
+def _render_analysis_tabs(runs: list[RunResult]):
     """Render the experiment-level (multi-run) analysis-plot tabs.
 
     Only plots that overlay every strategy on the same axes are rendered
@@ -348,36 +333,81 @@ def _render_analysis_tabs(
 
     with tab_map[all_labels[0]]:
         if active_tab == all_labels[0]:
-            st.plotly_chart(plot_pnl(runs, display=None), width="stretch")
+            c1, c2 = st.columns([10, 1])
+            c1.caption("Cumulative profit and loss over time for each strategy.")
+            with c2.popover(":material/tune:", help="PnL chart options"):
+                st.toggle(
+                    "Normalize",
+                    key="results_pnl_normalize",
+                    value=_default("results_pnl_normalize", fallback=False),
+                    on_change=lambda: _persist("results_pnl_normalize"),
+                    help="Show PnL and drawdown in percentage terms.",
+                )
+                st.toggle(
+                    "Show drawdown",
+                    key="results_pnl_drawdown",
+                    value=_default("results_pnl_drawdown", fallback=True),
+                    on_change=lambda: _persist("results_pnl_drawdown"),
+                    help="Show a second panel with strategy drawdown.",
+                )
+            st.plotly_chart(
+                plot_pnl(
+                    runs,
+                    normalize=bool(st.session_state.get("results_pnl_normalize", False)),
+                    drawdown=bool(st.session_state.get("results_pnl_drawdown", True)),
+                    display=None,
+                ),
+                width="stretch",
+            )
 
     with tab_map[all_labels[1]]:
         if active_tab == all_labels[1]:
+            c1, c2 = st.columns([10, 1])
+            c1.caption("Distribution of realized trade PnL across strategies.")
+            with c2.popover(":material/tune:"):
+                st.caption("No options available for this plot.")
             st.plotly_chart(plot_pnl_histogram(runs, display=None), width="stretch")
 
     with tab_map[all_labels[2]]:
         if active_tab == all_labels[2]:
+            c1, c2 = st.columns([10, 1])
+            c1.caption("Rolling return trend to compare momentum over time.")
+            with c2.popover(":material/tune:"):
+                st.caption("No options available for this plot.")
             st.plotly_chart(plot_rolling_returns(runs, display=None), width="stretch")
 
     with tab_map[all_labels[3]]:
         if active_tab == all_labels[3]:
+            c1, c2 = st.columns([10, 1])
+            c1.caption("Rolling Sharpe ratio showing risk-adjusted performance.")
+            with c2.popover(":material/tune:"):
+                st.caption("No options available for this plot.")
             st.plotly_chart(plot_rolling_sharpe(runs, display=None), width="stretch")
 
     with tab_map[all_labels[4]]:
         if active_tab == all_labels[4]:
+            c1, c2 = st.columns([10, 1])
+            c1.caption("Distribution of trade holding periods.")
+            with c2.popover(":material/tune:"):
+                st.caption("No options available for this plot.")
             st.plotly_chart(plot_trade_duration(runs, display=None), width="stretch")
 
     with tab_map[all_labels[5]]:
         if active_tab == all_labels[5]:
+            c1, c2 = st.columns([10, 1])
+            c1.caption("Per-trade PnL profile for each strategy.")
+            with c2.popover(":material/tune:"):
+                st.caption("No options available for this plot.")
             st.plotly_chart(plot_trade_pnl(runs, display=None), width="stretch")
 
 
 def _render_strategy_plots(
-    run: StrategyRunResult,
+    run: RunResult,
     exp_cfg: ExperimentConfig | None,
 ) -> None:
     """Render per-strategy plot tabs (MAE/MFE, Position size, Price).
 
-    These plots take a single `StrategyRunResult` as input, so the
+    These plots take a single `RunResult` as input, so the
     surrounding strategy tab provides the context — no extra strategy
     selector is needed. Tabs are ordered alphabetically.
 
@@ -405,6 +435,10 @@ def _render_strategy_plots(
 
     with label_to_tab[labels[0]]:
         if active_tab == labels[0]:
+            c1, c2 = st.columns([10, 1])
+            c1.caption("Maximum adverse/favorable excursion per trade.")
+            with c2.popover(":material/tune:"):
+                st.caption("No options available for this plot.")
             st.plotly_chart(
                 plot_mae_mfe(run, interval=interval, display=None),
                 width="stretch",
@@ -412,10 +446,16 @@ def _render_strategy_plots(
 
     with label_to_tab[labels[1]]:
         if active_tab == labels[1]:
+            c1, c2 = st.columns([10, 1])
+            c1.caption("Position size evolution through time.")
+            with c2.popover(":material/tune:"):
+                st.caption("No options available for this plot.")
             st.plotly_chart(plot_position_size(run, display=None), width="stretch")
 
     with label_to_tab[labels[2]]:
         if active_tab == labels[2]:
+            c1, c2 = st.columns([10, 1])
+            c1.caption("Price action with strategy context for the selected symbol.")
             # Determine the symbols actually traded by this run; fall back to
             # the experiment's configured universe so the user can still load
             # a chart for a non-traded benchmark.
@@ -425,11 +465,12 @@ def _render_strategy_plots(
             if not traded:
                 st.info("No symbols available for this run.")
             else:
-                sym = st.selectbox(
-                    "Symbol",
-                    traded,
-                    key=f"strat_price_sym_{run.strategy_name}",
-                )
+                with c2.popover(":material/tune:"):
+                    sym = st.selectbox(
+                        "Symbol",
+                        traded,
+                        key=f"strat_price_sym_{run.strategy_name}",
+                    )
                 try:
                     df = query_bars(symbol=sym, interval=interval)
                 except Exception as exc:  # noqa: BLE001
@@ -481,6 +522,7 @@ def _render_full_analysis(row: pd.Series):
                 else "No log file found for this experiment."
             ),
         ):
+            st.html("<span class='wide-marker' style='display:none'></span>")
             try:
                 log_text = log_path.read_text(encoding="utf-8", errors="replace")
             except OSError as ex:
@@ -663,7 +705,6 @@ def _render_full_analysis(row: pd.Series):
     _colored_metric(c3, ":material/schedule: Interval", interval_str)
 
     st.markdown("")
-
 
     _render_analysis_tabs(runs, exp_cfg)
 

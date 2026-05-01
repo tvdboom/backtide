@@ -30,7 +30,7 @@ use std::collections::HashMap;
 /// --------
 /// - backtide.backtest:ExperimentResult
 /// - backtide.analysis:plot_pnl
-/// - backtide.backtest:StrategyRunResult
+/// - backtide.backtest:RunResult
 #[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EquitySample {
@@ -82,7 +82,7 @@ impl EquitySample {
 /// --------
 /// - backtide.backtest:Order
 /// - backtide.backtest:OrderRecord
-/// - backtide.backtest:StrategyRunResult
+/// - backtide.backtest:RunResult
 #[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Trade {
@@ -137,7 +137,7 @@ impl Trade {
 /// See Also
 /// --------
 /// - backtide.backtest:Order
-/// - backtide.backtest:StrategyRunResult
+/// - backtide.backtest:RunResult
 /// - backtide.backtest:Trade
 #[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -209,7 +209,7 @@ impl OrderRecord {
 /// - backtide.storage:query_strategy_runs
 #[pyclass(get_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct StrategyRunResult {
+pub struct RunResult {
     #[serde(default)]
     pub strategy_id: String,
     pub strategy_name: String,
@@ -224,13 +224,13 @@ pub struct StrategyRunResult {
 }
 
 #[pymethods]
-impl StrategyRunResult {
+impl RunResult {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 
     fn __repr__(&self) -> String {
         format!(
-            "StrategyRunResult(id={:?}, strategy={:?}, n_bars={}, n_trades={}, error={:?})",
+            "RunResult(id={:?}, strategy={:?}, n_bars={}, n_trades={}, error={:?})",
             self.strategy_id,
             self.strategy_name,
             self.equity_curve.len(),
@@ -262,7 +262,7 @@ impl StrategyRunResult {
 /// status : str
 ///     ``"completed"`` if every strategy succeeded, ``"failed"`` otherwise.
 ///
-/// strategies : list[[StrategyRunResult]]
+/// strategies : list[[RunResult]]
 ///     One result entry per evaluated strategy.
 ///
 /// warnings : list[str]
@@ -272,7 +272,7 @@ impl StrategyRunResult {
 /// --------
 /// - backtide.backtest:ExperimentConfig
 /// - backtide.backtest:run_experiment
-/// - backtide.backtest:StrategyRunResult
+/// - backtide.backtest:RunResult
 #[pyclass(get_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExperimentResult {
@@ -282,7 +282,7 @@ pub struct ExperimentResult {
     pub started_at: i64,
     pub finished_at: i64,
     pub status: String,
-    pub strategies: Vec<StrategyRunResult>,
+    pub strategies: Vec<RunResult>,
     pub warnings: Vec<String>,
 }
 

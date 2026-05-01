@@ -7,8 +7,6 @@ Description: Module containing the price line chart function.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
@@ -22,12 +20,14 @@ from backtide.analysis.utils import (
     _resolve_dt,
 )
 from backtide.config import get_config
-from backtide.indicators import BaseIndicator
 from backtide.utils.utils import _format_price, _to_list, _to_pandas
 
-
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from collections.abc import Sequence
+    from pathlib import Path
+
+    from backtide.backtest import RunResult
+    from backtide.indicators import BaseIndicator
 
 
 # Supported price columns and their display labels.
@@ -49,7 +49,7 @@ def plot_price(
     price_col: str = ...,
     *,
     indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = ...,
-    run: StrategyRunResult | None = ...,
+    run: RunResult | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -62,7 +62,7 @@ def plot_price(
     price_col: str = ...,
     *,
     indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = ...,
-    strategy_run: StrategyRunResult | None = ...,
+    strategy_run: RunResult | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -76,7 +76,7 @@ def plot_price(
     price_col: str = "adj_close",
     *,
     indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = None,
-    run: StrategyRunResult | None = None,
+    run: RunResult | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] | None = (900, 600),
@@ -100,7 +100,7 @@ def plot_price(
         Indicators to overlay on the price chart. If dict, it must map a name
         (used in the legend) to an indicator instance.
 
-    run : [StrategyRunResult] | None, default=None
+    run : [RunResult] | None, default=None
         When provided, overlays entry/exit markers from the strategy run's
         trades on top of the price line. Triangles mark entries (up for
         long, down for short) and crosses mark exits (green for winners,
@@ -178,7 +178,8 @@ def plot_price(
         else:
             ind_dict = {x.__class__.__name__: x for x in _to_list(indicators)}
 
-    for idx, symbol in enumerate(data["symbol"].unique()):
+    symbols = data["symbol"].unique()
+    for idx, symbol in enumerate(symbols):
         subset = data[data["symbol"] == symbol].sort_values("dt")
         color = cfg.plots.palette[idx % len(cfg.plots.palette)]
 
@@ -243,7 +244,6 @@ def plot_price(
                     )
 
     if run:
-        available = set(data["symbol"].unique())
         long_x: list[Any] = []
         long_y: list[float] = []
         short_x: list[Any] = []
@@ -257,10 +257,11 @@ def plot_price(
         win_text: list[str] = []
         loss_text: list[str] = []
 
-        for t in getattr(run, "trades", None) or []:
+        for t in getattr(run, "trades", []):
             sym = str(getattr(t, "symbol", ""))
-            if sym not in available:
+            if sym not in symbols:
                 continue
+
             entry_dt = pd.to_datetime(int(t.entry_ts), unit="s")
             exit_dt = pd.to_datetime(int(t.exit_ts), unit="s")
             entry_price = float(t.entry_price)

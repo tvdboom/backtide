@@ -8,17 +8,19 @@ Description: Shared plotting utilities for consistent figure styling.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, overload
-
-import pandas as pd
-import plotly.graph_objects as go
+from typing import TYPE_CHECKING, Any, overload
 
 from backtide.core.config import get_config
 from backtide.core.data import Currency
 from backtide.ui.utils import _get_timezone
 from backtide.utils.constants import BENCHMARK_NAME
-from backtide.utils.types import DataFrameLike
 from backtide.utils.utils import _ts_to_datetime
+
+if TYPE_CHECKING:
+    import pandas as pd
+    import plotly.graph_objects as go
+
+    from backtide.utils.types import DataFrameLike
 
 
 cfg = get_config()
@@ -46,8 +48,10 @@ def _resolve_currency(currency: str | Currency | None) -> Currency | None:
     """
     if currency is None:
         currency = cfg.general.base_currency
+
     if isinstance(currency, Currency):
         return currency
+
     try:
         return Currency(currency)
     except (ValueError, KeyError):
@@ -62,12 +66,8 @@ def _resolve_run_currency(
 
     Resolution order:
 
-    1. An explicit `currency` argument from the caller (string or
-       `Currency`).
-    2. The first run's `base_currency` attribute, populated by the engine
-       from `ExperimentConfig.portfolio.base_currency`. This makes plots
-       label themselves correctly without callers needing to know the
-       experiment's configuration.
+    1. An explicit `currency` argument from the caller (string or `Currency`).
+    2. The first run's `base_currency` attribute.
     3. `cfg.general.base_currency` as a last-resort fallback.
 
     `runs` may be a single run or an iterable of runs.
@@ -82,7 +82,6 @@ def _resolve_run_currency(
             return _resolve_currency(ccy)
 
     return _resolve_currency(None)
-
 
 
 def _resolve_dt(data: pd.DataFrame) -> pd.DataFrame:
@@ -317,8 +316,6 @@ def _plot(
         "showlegend": legend is not None,
         "hoverlabel": {"font_size": cfg.plots.label_fontsize},
         "margin": {"l": 50, "b": 50, "r": 0, "t": 25 + title_space, "pad": 0},
-        "xaxis_tickfont_size": cfg.plots.tick_fontsize,
-        "yaxis_tickfont_size": cfg.plots.tick_fontsize,
     }
 
     if title_cfg:
@@ -340,6 +337,8 @@ def _plot(
         layout["yaxis_range"] = ylim
 
     fig.update_layout(**layout)
+    fig.update_xaxes(tickfont_size=cfg.plots.tick_fontsize)
+    fig.update_yaxes(tickfont_size=cfg.plots.tick_fontsize)
 
     if filename:
         path = Path(filename)

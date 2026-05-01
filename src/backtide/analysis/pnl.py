@@ -7,7 +7,6 @@ Description: Module containing the PnL chart function.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
@@ -16,18 +15,20 @@ from plotly.subplots import make_subplots
 
 from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot, _resolve_run_currency
 from backtide.config import get_config
-from backtide.core.data import Currency
-from backtide.utils.utils import _format_price
+from backtide.utils.utils import _format_price, _to_list
 
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from pathlib import Path
+
+    from backtide.backtest import RunResult
+    from backtide.core.data import Currency
 
 cfg = get_config()
 
 
 @overload
 def plot_pnl(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     normalize: bool = ...,
     drawdown: bool = ...,
@@ -40,7 +41,7 @@ def plot_pnl(
 ) -> go.Figure: ...
 @overload
 def plot_pnl(
-    runs: list[StrategyRunResult],
+    runs: list[RunResult],
     *,
     normalize: bool = ...,
     drawdown: bool = ...,
@@ -54,7 +55,7 @@ def plot_pnl(
 
 
 def plot_pnl(
-    runs: StrategyRunResult | list[StrategyRunResult],
+    runs: RunResult | list[RunResult],
     *,
     normalize: bool = False,
     drawdown: bool = True,
@@ -73,10 +74,11 @@ def plot_pnl(
     strategies with different initial cash visually comparable. When
     `drawdown=True` (the default), a second panel is rendered below the
     PnL curve showing each strategy's running drawdown on a shared x-axis.
+    The benchmark run is shown as a dashed gray line, if provided.
 
     Parameters
     ----------
-    runs : [StrategyRunResult] | list[[StrategyRunResult]]
+    runs : [RunResult] | list[[RunResult]]
         The per-strategy results to plot, typically obtained from
         `query_strategy_runs` or directly from [`ExperimentResult`].
 
@@ -131,7 +133,7 @@ def plot_pnl(
     --------
     - backtide.analysis:plot_rolling_returns
     - backtide.analysis:plot_trade_pnl
-    - backtide.backtest:StrategyRunResult
+    - backtide.backtest:RunResult
 
     Examples
     --------
@@ -141,11 +143,20 @@ def plot_pnl(
 
     exp = query_experiments()[0]
     runs = query_strategy_runs(exp.id)
+
+    # Absolute PnL
+    plot_pnl(runs)
+
+    # Normalized values
     plot_pnl(runs, normalize=True)
     ```
 
     """
+    if not runs:
+        raise ValueError("Parameter runs cannot be empty.")
+
     ccy = None if normalize else _resolve_run_currency(currency, runs)
+
     if drawdown:
         fig = make_subplots(
             rows=2,
@@ -157,15 +168,13 @@ def plot_pnl(
     else:
         fig = go.Figure()
 
-    plotted = 0
-    for idx, run in enumerate(runs):
-        curve = getattr(run, "equity_curve", None)
-        if not curve:
+    for idx, run in enumerate(_to_list(runs)):
+        if not (curve := getattr(run, "equity_curve", None)):
             continue
 
         ts = pd.to_datetime([s.timestamp for s in curve], unit="s")
         equity = [float(s.equity) for s in curve]
-        base = next((e for e in equity if e), 0.0)  # first non-zero equity
+        base = next((e for e in equity if e), 0.0)  # First non-zero equity
         if base == 0.0:
             continue
 
@@ -174,12 +183,8 @@ def plot_pnl(
         else:
             y = [e - base for e in equity]
 
-        # Distinguish the benchmark with a gray dashed line so it sits in
-        # the background. The benchmark is hidden from the legend to keep
-        # the user-strategy comparison front and centre.
-        is_benchmark = _is_benchmark(run.strategy_name)
-        if is_benchmark:
-            line: dict[str, Any] = BENCHMARK_LINE
+        if is_benchmark := _is_benchmark(run.strategy_name):
+            line = BENCHMARK_LINE
         else:
             color = cfg.plots.palette[idx % len(cfg.plots.palette)]
             line = {"color": color, "width": 2}
@@ -192,24 +197,24 @@ def plot_pnl(
             line=line,
             legendgroup=run.strategy_name,
             showlegend=not is_benchmark,
-            customdata=(
-                None
-                if normalize
-                else [_format_price(v, currency=ccy) for v in y]
-            ),
+            customdata=[_format_price(v, signed=True, currency=ccy) for v in y],
             hovertemplate=(
-                "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d}<br>"
-                + ("PnL: %{y:+.2f}%" if normalize else "PnL: %{customdata}")
-                + "<extra></extra>"
+                f"%{{x}}<br>PnL: {'%{y:+.2f}' if normalize else '%{customdata}'}"
+                "<extra>%{fullData.name}</extra>"
             ),
         )
 
         if drawdown:
             fig.add_trace(equity_trace, row=1, col=1)
-            # Drawdown is already precomputed per `EquitySample` as a
-            # negative fraction; render as a percentage so multiple
-            # strategies remain readable when overlaid.
-            dd_y = [float(getattr(s, "drawdown", 0.0)) * 100.0 for s in curve]
+
+            # Drawdown is plotted in the same unit family as the top panel.
+            dd_y = []
+            peak = equity[0]
+            for e in equity:
+                peak = max(peak, e)
+                dd_frac = ((e - peak) / peak) if peak else 0.0
+                dd_y.append(dd_frac * 100.0 if normalize else (e - peak))
+
             fig.add_trace(
                 go.Scatter(
                     x=ts,
@@ -219,9 +224,10 @@ def plot_pnl(
                     line=line,
                     legendgroup=run.strategy_name,
                     showlegend=False,
+                    customdata=[_format_price(v, signed=True, currency=ccy) for v in dd_y],
                     hovertemplate=(
-                        "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d}<br>"
-                        "%{y:+.2f}%<extra>drawdown</extra>"
+                        f"%{{x}}<br>Drawdown: {'%{y:+.2f}' if normalize else '%{customdata}'}"
+                        "<extra>%{fullData.name}</extra>"
                     ),
                 ),
                 row=2,
@@ -229,19 +235,6 @@ def plot_pnl(
             )
         else:
             fig.add_trace(equity_trace)
-        plotted += 1
-
-    if plotted == 0:
-        # Still produce a (blank) figure so callers get a deterministic
-        # return type rather than having to guard against None.
-        fig.add_annotation(
-            text="No equity data to plot.",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-        )
 
     # Zero reference line: the break-even level for absolute PnL and
     # the 0 % return level for relative PnL — both useful anchors.
@@ -254,23 +247,23 @@ def plot_pnl(
             row=1,
             col=1,
         )
-        # Style the drawdown axis directly; `_plot` only labels the primary axes.
-        fig.update_yaxes(title_text="Drawdown (%)", row=2, col=1)
+
         fig.update_xaxes(title_text="Date", row=2, col=1)
+        fig.update_yaxes(
+            title_text=f"Drawdown{' (%)' if normalize else (f' ({ccy.symbol})' if ccy else '')}",
+            row=2,
+            col=1,
+        )
     else:
         fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="rgba(128,128,128,0.6)")
 
-    if normalize:
-        ylabel = "Return (%)"
-    else:
-        ylabel = f"PnL ({ccy.symbol})" if ccy else "PnL"
-
     return _plot(
         fig,
+        groupclick="togglegroup",
         title=title,
         legend=legend,
         xlabel=None if drawdown else "Date",
-        ylabel=ylabel,
+        ylabel="Return (%)" if normalize else (f"PnL ({ccy.symbol})" if ccy else "PnL"),
         figsize=figsize,
         filename=filename,
         display=display,

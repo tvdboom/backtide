@@ -366,7 +366,7 @@ pub fn query_dividends(
 ///
 /// Returns
 /// -------
-/// list[[StrategyRunResult]]
+/// list[[RunResult]]
 ///     One result entry per strategy that ran in this experiment.
 ///
 /// See Also
@@ -385,10 +385,10 @@ pub fn query_dividends(
 ///     print(runs)
 /// ```
 #[pyfunction]
-#[pyo3(signature = (experiment_id: "str") -> "list[StrategyRunResult]")]
+#[pyo3(signature = (experiment_id: "str") -> "list[RunResult]")]
 pub fn query_strategy_runs(
     experiment_id: &str,
-) -> PyResult<Vec<crate::backtest::models::experiment_result::StrategyRunResult>> {
+) -> PyResult<Vec<crate::backtest::models::experiment_result::RunResult>> {
     Ok(Engine::get()?.db.query_strategy_runs(experiment_id)?)
 }
 

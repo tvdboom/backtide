@@ -5,7 +5,7 @@ use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
 use crate::backtest::models::experiment_config::*;
 use crate::backtest::models::experiment_result::{
-    EquitySample, ExperimentResult, OrderRecord, StrategyRunResult, Trade,
+    EquitySample, ExperimentResult, OrderRecord, RunResult, Trade,
 };
 use crate::backtest::models::order::Order;
 use crate::backtest::models::order_type::OrderType;
@@ -48,7 +48,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<EquitySample>()?;
     m.add_class::<ExperimentResult>()?;
     m.add_class::<OrderRecord>()?;
-    m.add_class::<StrategyRunResult>()?;
+    m.add_class::<RunResult>()?;
     m.add_class::<Trade>()?;
 
     // Indicators

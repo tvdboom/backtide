@@ -7,25 +7,26 @@ Description: Module containing the MAE/MFE scatter chart.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import _plot, _resolve_run_currency
-from backtide.core.data import Currency
 from backtide.storage import query_bars
 from backtide.utils.utils import _format_price
 
 if TYPE_CHECKING:
-    from backtide.backtest import StrategyRunResult
+    from collections.abc import Iterable
+    from pathlib import Path
+
+    from backtide.backtest import RunResult
+    from backtide.core.data import Currency
 
 
 @overload
 def plot_mae_mfe(
-    run: StrategyRunResult,
+    run: RunResult,
     *,
     interval: str | None = ...,
     symbols: Iterable[str] | None = ...,
@@ -38,7 +39,7 @@ def plot_mae_mfe(
 ) -> go.Figure: ...
 @overload
 def plot_mae_mfe(
-    run: StrategyRunResult,
+    run: RunResult,
     *,
     interval: str | None = ...,
     symbols: Iterable[str] | None = ...,
@@ -52,7 +53,7 @@ def plot_mae_mfe(
 
 
 def plot_mae_mfe(
-    run: StrategyRunResult,
+    run: RunResult,
     *,
     interval: str | None = None,
     symbols: Iterable[str] | None = None,
@@ -73,7 +74,7 @@ def plot_mae_mfe(
 
     Parameters
     ----------
-    run : [StrategyRunResult]
+    run : [RunResult]
         The strategy run whose trades will be analysed.
 
     interval : str | None, default=None
@@ -267,4 +268,3 @@ def plot_mae_mfe(
         filename=filename,
         display=display,
     )
-

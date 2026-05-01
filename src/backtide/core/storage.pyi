@@ -14,7 +14,7 @@ __all__ = [
 import pandas as pd
 import polars as pl
 
-from backtide.core.backtest import StrategyRunResult
+from backtide.core.backtest import RunResult
 from backtide.core.data import Instrument
 
 def delete_experiment(experiment_id) -> int:
@@ -315,7 +315,7 @@ def query_instruments(
 
     """
 
-def query_strategy_runs(experiment_id) -> list[StrategyRunResult]:
+def query_strategy_runs(experiment_id) -> list[RunResult]:
     """Return every per-strategy result for a given experiment.
 
     Parameters
@@ -325,7 +325,7 @@ def query_strategy_runs(experiment_id) -> list[StrategyRunResult]:
 
     Returns
     -------
-    list[[StrategyRunResult]]
+    list[[RunResult]]
         One result entry per strategy that ran in this experiment.
 
     See Also

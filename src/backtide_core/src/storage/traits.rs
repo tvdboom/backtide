@@ -84,11 +84,11 @@ pub trait Storage: Send + Sync {
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredExperiment>>;
 
-    /// Load every persisted [`StrategyRunResult`] for a given experiment.
+    /// Load every persisted [`RunResult`] for a given experiment.
     fn query_strategy_runs(
         &self,
         experiment_id: &str,
-    ) -> StorageResult<Vec<crate::backtest::models::experiment_result::StrategyRunResult>>;
+    ) -> StorageResult<Vec<crate::backtest::models::experiment_result::RunResult>>;
 
     /// Delete a single experiment and all its child rows.
     fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64>;
