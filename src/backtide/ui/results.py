@@ -542,11 +542,20 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
             c1, c2 = st.columns([10, 1])
             c1.caption("Maximum adverse/favorable excursion per trade.")
             with c2.popover(":material/tune:"):
-                st.caption("No options available for this plot.")
+                traded = sorted({t.symbol for t in run.trades})
+                mae_mfe_symbols = st.multiselect(
+                    "Symbols",
+                    options=traded,
+                    default=traded,
+                    key=(key := f"mae_mfe_symbols_{run.strategy_name}"),
+                    on_change=lambda k=key: _persist(k),
+                    help="Select which symbols to show in the plot.",
+                )
+                mae_mfe_symbols = mae_mfe_symbols or traded
 
             with st.spinner("Loading plot..."):
                 st.plotly_chart(
-                    plot_mae_mfe(run, interval=interval, display=None),
+                    plot_mae_mfe(run, interval=interval, symbols=mae_mfe_symbols, display=None),
                     width="stretch",
                 )
 
@@ -555,44 +564,47 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
             c1, c2 = st.columns([10, 1])
             c1.caption("Position size evolution through time.")
             with c2.popover(":material/tune:"):
-                st.caption("No options available for this plot.")
+                filled_orders = [o for o in run.orders if o.status == "filled"]
+                traded = sorted({o.order.symbol for o in filled_orders})
+                position_size_symbols = st.multiselect(
+                    "Symbols",
+                    options=traded,
+                    default=traded,
+                    key=(key := f"position_size_symbols_{run.strategy_name}"),
+                    on_change=lambda k=key: _persist(k),
+                    help="Select which symbols to show in the plot.",
+                )
+                position_size_symbols = position_size_symbols or traded
 
             with st.spinner("Loading plot..."):
-                st.plotly_chart(plot_position_size(run, display=None), width="stretch")
+                st.plotly_chart(plot_position_size(run, symbols=position_size_symbols, display=None), width="stretch")
 
     with label_to_tab[labels[2]]:
         if active_tab == labels[2]:
             c1, c2 = st.columns([10, 1])
             c1.caption("Price action with strategy context for the selected symbol.")
 
-            # Determine the symbols actually traded by this run; fall back to
-            # the experiment's configured universe so the user can still load
-            # a chart for a non-traded benchmark.
-            traded = sorted({getattr(t, "symbol", "") for t in (run.trades or [])})
-            if not traded:
+            if not (traded := sorted({t.symbol for t in run.trades})):
                 traded = exp_cfg.data.symbols
             if not traded:
                 st.info("No symbols available for this run.")
             else:
                 with c2.popover(":material/tune:"):
-                    sym = st.selectbox(
-                        "Symbol",
-                        traded,
-                        key=f"strat_price_sym_{run.strategy_name}",
+                    symbol = st.selectbox(
+                        label="Symbol",
+                        key=(key := f"price_sym_{run.strategy_name}"),
+                        options=traded,
+                        on_change=lambda k=key: _persist(k),
                     )
-                try:
-                    df = query_bars(symbol=sym, interval=interval)
-                except Exception as exc:  # noqa: BLE001
-                    st.warning(f"Could not load bars for {sym}: {exc}")
+
+                if len(df := query_bars(symbol=symbol, interval=interval)) == 0:
+                    st.info(f"No price data available for {sym}.")
                 else:
-                    if df is None or len(df) == 0:
-                        st.info(f"No price data available for {sym}.")
-                    else:
-                        with st.spinner("Loading plot..."):
-                            st.plotly_chart(
-                                plot_price(df, run=run, display=None),
-                                width="stretch",
-                            )
+                    with st.spinner("Loading plot..."):
+                        st.plotly_chart(
+                            plot_price(df, run=run, display=None),
+                            width="stretch",
+                        )
 
 
 def _render_full_analysis(row: pd.Series):

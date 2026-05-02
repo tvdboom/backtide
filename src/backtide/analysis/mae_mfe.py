@@ -30,6 +30,7 @@ def plot_mae_mfe(
     run: RunResult,
     *,
     interval: str | None = ...,
+    symbols: list[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -41,6 +42,7 @@ def plot_mae_mfe(
     run: RunResult,
     *,
     interval: str | None = ...,
+    symbols: list[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -53,6 +55,7 @@ def plot_mae_mfe(
     run: RunResult,
     *,
     interval: str | None = None,
+    symbols: list[str] | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] = (900, 600),
@@ -73,6 +76,10 @@ def plot_mae_mfe(
     interval : str | [Interval] | None, default=None
         Bar interval to load (e.g., `1d`, `1h`). When `None`, the
         function lets `query_bars` pick whatever is available.
+
+    symbols : list[str] | None, default=None
+        List of symbols to include in the plot. If `None` or empty,
+        all traded symbols are included.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -133,6 +140,10 @@ def plot_mae_mfe(
     win_mae, win_mfe, win_text = [], [], []
     loss_mae, loss_mfe, loss_text = [], [], []
     for t in run.trades:
+        # Filter by symbols if specified
+        if symbols and t.symbol not in symbols:
+            continue
+
         if t.symbol not in cache:
             cache[t.symbol] = query_bars(symbol=t.symbol, interval=interval)
         df = cache[t.symbol]

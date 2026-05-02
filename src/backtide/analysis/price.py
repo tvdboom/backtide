@@ -273,7 +273,7 @@ def plot_price(
         long_x, long_y, short_x, short_y = [], [], [], []
         win_x, win_y, loss_x, loss_y = [], [], [], []
         long_data, short_data, win_data, loss_data = [], [], [], []
-        for t in getattr(run, "trades", []):
+        for t in run.trades:
             sym = str(t.symbol)
             if sym not in symbols:
                 continue

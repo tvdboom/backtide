@@ -29,6 +29,7 @@ cfg = get_config()
 def plot_position_size(
     run: RunResult,
     *,
+    symbols: list[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -39,6 +40,7 @@ def plot_position_size(
 def plot_position_size(
     run: RunResult,
     *,
+    symbols: list[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -50,6 +52,7 @@ def plot_position_size(
 def plot_position_size(
     run: RunResult,
     *,
+    symbols: list[str] | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] = (900, 600),
@@ -66,6 +69,10 @@ def plot_position_size(
     ----------
     run : [RunResult]
         The strategy run to plot.
+
+    symbols : list[str] | None, default=None
+        List of symbols to include in the plot. If `None` or empty,
+        all traded symbols are included.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -123,6 +130,9 @@ def plot_position_size(
 
     by_symbol = defaultdict(list)
     for o in fills:
+        # Filter by symbols if specified
+        if symbols and o.order.symbol not in symbols:
+            continue
         by_symbol[o.order.symbol].append((o.timestamp, o.order.quantity))
 
     for idx, (sym, rows) in enumerate(sorted(by_symbol.items())):
