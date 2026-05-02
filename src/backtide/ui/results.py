@@ -295,7 +295,7 @@ def _confirm_delete_experiment(exp_id: str, name: str):
         st.rerun()
 
 
-def _render_analysis_tabs(runs: list[RunResult]):
+def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
     """Render the experiment-level (multi-run) analysis-plot tabs.
 
     Only plots that overlay every strategy on the same axes are rendered
@@ -415,7 +415,7 @@ def _render_analysis_tabs(runs: list[RunResult]):
                     max_value=365,
                     step=1,
                     key=(key := "results_rolling_returns_window"),
-                    value=_default(key, fallback=30),
+                    value=_default(key, fallback=60),
                     on_change=lambda k=key: _persist(k),
                     help="Number of bars used for the rolling return window.",
                 )
@@ -427,17 +427,17 @@ def _render_analysis_tabs(runs: list[RunResult]):
 
     with tab_map[all_labels[4]]:
         if active_tab == all_labels[4]:
-            vol1, c2 = st.columns([10, 1])
-            vol1.caption("Distribution of trade holding periods.")
-            with c2.popover(":material/tune:"):
+            col1, col2 = st.columns([10, 1])
+            col1.caption("Distribution of trade holding periods.")
+            with col2.popover(":material/tune:"):
                 st.caption("No options available for this plot.")
             st.plotly_chart(plot_trade_duration(runs, display=None), width="stretch")
 
     with tab_map[all_labels[5]]:
         if active_tab == all_labels[5]:
-            vol1, c2 = st.columns([10, 1])
-            vol1.caption("Per-trade PnL profile for each strategy.")
-            with c2.popover(":material/tune:"):
+            col1, col2 = st.columns([10, 1])
+            col1.caption("Per-trade PnL profile for each strategy.")
+            with col2.popover(":material/tune:"):
                 st.caption("No options available for this plot.")
             st.plotly_chart(plot_trade_pnl(runs, display=None), width="stretch")
 
@@ -720,7 +720,7 @@ def _render_full_analysis(row: pd.Series):
 
     st.markdown("")
 
-    _render_analysis_tabs(runs)
+    _render_analysis_tabs(runs, exp_cfg)
 
     st.markdown("")
 

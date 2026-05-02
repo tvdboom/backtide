@@ -50,7 +50,9 @@ two strategies asking for the same `SMA(20)` only compute it once.
 
 You don't need to think about this for built-in strategies. For [custom strategies](#custom-strategies),
 you can declare auto-included indicators yourself by overriding the `required_indicators`
-method on your subclass:
+method on your subclass (note the `__auto_` prefix to avoid naming conflicts with
+user-defined indicators). The engine will then compute and inject those indicators
+into your strategy's `evaluate` method just like it does for built-in ones.:
 
 ```python
 from backtide.indicators import SimpleMovingAverage
@@ -66,7 +68,7 @@ class MyStrategy(BaseStrategy):
 
     def evaluate(self, data, portfolio, state, indicators):
         # Read the auto-injected SMA via its deterministic key.
-        sma_name = f"__auto_SMA_{self.period}"
+        sma = indicators[f"__auto_SMA_{self.period}"]
         ...
 ```
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numpy as np
 import plotly.graph_objects as go
-
+from backtide.utils.utils import _to_list
 from backtide.analysis.utils import _is_benchmark, _plot
 from backtide.config import get_config
 
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from backtide.backtest import RunResult
+
 
 cfg = get_config()
 
@@ -143,36 +144,17 @@ def plot_trade_duration(
     ```
 
     """
+    if not runs:
+        raise ValueError("Parameter runs cannot be empty.")
+
+    runs = _to_list(runs)
+
     durations: dict[str, list[float]] = {}
     for run in runs:
-        # Per-trade view; the benchmark has no real trades, skip it.
-        if _is_benchmark(run.strategy_name):
+        if _is_benchmark(run) or not run.trades:
             continue
-        trades = getattr(run, "trades", None) or []
-        if not trades:
-            continue
-        durations[run.strategy_name] = [float(int(t.exit_ts) - int(t.entry_ts)) for t in trades]
 
-    if not durations:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No trades to plot.",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-        )
-        return _plot(
-            fig,
-            title=title,
-            legend=legend,
-            xlabel="Trade duration",
-            ylabel="Trade count",
-            figsize=figsize,
-            filename=filename,
-            display=display,
-        )
+        durations[run.strategy_name] = [float(t.exit_ts - t.entry_ts) for t in run.trades]
 
     if unit == "auto":
         all_secs = [d for v in durations.values() for d in v]
@@ -181,21 +163,20 @@ def plot_trade_duration(
     factor = _UNIT_FACTORS[unit]
 
     fig = go.Figure()
-    runs_iter = list(runs)
-    for idx, run in enumerate(runs_iter):
+    for idx, run in enumerate(runs):
         if (secs := durations.get(run.strategy_name)) is None:
             continue
-        color = cfg.plots.palette[idx % len(cfg.plots.palette)]
+
         fig.add_trace(
             go.Histogram(
                 x=[s / factor for s in secs],
                 nbinsx=bins,
                 name=run.strategy_name,
-                marker_color=color,
+                marker_color=cfg.plots.palette[idx % len(cfg.plots.palette)],
                 opacity=0.55,
                 hovertemplate=(
-                    f"<b>%{{fullData.name}}</b><br>Duration: %{{x:,.2f}} {unit}<br>"
-                    "Trades: %{y}<extra></extra>"
+                    f"Duration: %{{x:,.2f}} {unit}<br>"
+                    "Trades: %{y}<extra>%{{fullData.name}}</extra>"
                 ),
             )
         )
