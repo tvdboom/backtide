@@ -162,13 +162,9 @@ def plot_pnl(
         fig = go.Figure()
 
     for idx, run in enumerate(runs):
-        if not (curve := getattr(run, "equity_curve", None)):
-            continue
-
-        ts = pd.to_datetime([s.timestamp for s in curve], unit="s")
-        equity = [float(s.equity) for s in curve]
-        base = next((e for e in equity if e), 0.0)  # First non-zero equity
-        if base == 0.0:
+        ts = pd.to_datetime([s.timestamp for s in run.equity_curve], unit="s")
+        equity = [s.equity for s in run.equity_curve]
+        if (base := next((e for e in equity if e), 0.0)) == 0.0:  # First non-zero equity
             continue
 
         if normalize:

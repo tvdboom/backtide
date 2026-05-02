@@ -439,15 +439,17 @@ impl Engine {
         let rf = config.engine.risk_free_rate / 100.0;
 
         // Snapshot of the benchmark's equity curve (ts, equity), if any.
-        let bench_snapshot: Option<Vec<(i64, f64)>> = if !benchmark.is_empty() {
-            results
-                .iter()
-                .find(|r| r.strategy_name == benchmark_name)
-                .map(|r| r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect())
+        let bench_run = if !benchmark.is_empty() {
+            results.iter().find(|r| r.strategy_name == benchmark_name)
         } else {
             None
         };
-        let bench_start_ts = bench_snapshot.as_ref().and_then(|c| c.first().map(|(t, _)| *t));
+        let bench_snapshot: Option<Vec<(i64, f64)>> = bench_run
+            .map(|r| r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect());
+
+        // Benchmark availability starts when the benchmark can actually be
+        // traded (first entry trade), not at the first synthetic equity sample.
+        let bench_start_ts = bench_run.and_then(|r| r.trades.iter().map(|t| t.entry_ts).min());
 
         // Windowed total return: (final_equity - first_equity_at_or_after_ws)
         //                       / first_equity_at_or_after_ws.
@@ -464,11 +466,20 @@ impl Engine {
         for r in &mut results {
             let curve_pts: Vec<(i64, f64)> =
                 r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect();
-            let strat_start = match curve_pts.first() {
+            let curve_start = match curve_pts.first() {
                 Some((t, _)) => *t,
                 None => continue,
             };
-            let strat_end = curve_pts.last().map(|(t, _)| *t).unwrap_or(strat_start);
+            let strat_end = curve_pts.last().map(|(t, _)| *t).unwrap_or(curve_start);
+
+            // For delayed listings, the strategy only becomes investable at
+            // first fill; before that, equity is a placeholder flat segment.
+            let strat_start = r
+                .trades
+                .iter()
+                .map(|t| t.entry_ts)
+                .min()
+                .unwrap_or(curve_start);
 
             // Align with benchmark when available.
             let window_start = match bench_start_ts {
@@ -476,22 +487,37 @@ impl Engine {
                 None => strat_start,
             };
 
-            let strat_ret = windowed_return(&curve_pts, window_start).unwrap_or(0.0);
+            let strat_ret = windowed_return(&curve_pts, window_start);
 
-            // Compounded risk-free return over the window.
-            let years = ((strat_end - window_start).max(0) as f64) / SECS_PER_YEAR;
-            let rf_ret = if years > 0.0 {
-                (1.0_f64 + rf).powf(years) - 1.0
+            // Compounded risk-free return over the same valid window.
+            let excess_return = strat_ret.map(|ret| {
+                let years = ((strat_end - window_start).max(0) as f64) / SECS_PER_YEAR;
+                let rf_ret = if years > 0.0 {
+                    (1.0_f64 + rf).powf(years) - 1.0
+                } else {
+                    0.0
+                };
+                ret - rf_ret
+            });
+            if let Some(v) = excess_return {
+                r.metrics.insert("excess_return".into(), v);
             } else {
-                0.0
-            };
-            r.metrics.insert("excess_return".into(), strat_ret - rf_ret);
+                r.metrics.remove("excess_return");
+            }
 
             // Alpha is only meaningful for non-benchmark runs.
             if let Some(bench) = bench_snapshot.as_ref() {
                 if r.strategy_name != benchmark_name {
-                    let bench_ret = windowed_return(bench, window_start).unwrap_or(0.0);
-                    r.metrics.insert("alpha".into(), strat_ret - bench_ret);
+                    // If benchmark never became investable, alpha is unavailable.
+                    let alpha = bench_start_ts.and_then(|_| {
+                        strat_ret
+                            .and_then(|ret| windowed_return(bench, window_start).map(|b| ret - b))
+                    });
+                    if let Some(v) = alpha {
+                        r.metrics.insert("alpha".into(), v);
+                    } else {
+                        r.metrics.remove("alpha");
+                    }
                 } else {
                     // Benchmark strategy always has zero alpha.
                     r.metrics.insert("alpha".into(), 0.0);
@@ -541,13 +567,13 @@ impl Engine {
             let tr = r.metrics.get("total_return").copied().unwrap_or(0.0);
             let sh = r.metrics.get("sharpe").copied().unwrap_or(0.0);
             let alpha = r.metrics.get("alpha").copied();
-            let excess = r.metrics.get("excess_return").copied().unwrap_or(0.0);
+            let excess = r.metrics.get("excess_return").copied();
             info!(
-                "  • {:<32} total_return={:+.4} sharpe={:+.3} excess={:+.4} alpha={}",
+                "  • {:<32} total_return={:+.4} sharpe={:+.3} excess={} alpha={}",
                 r.strategy_name,
                 tr,
                 sh,
-                excess,
+                excess.map(|e| format!("{e:+.4}")).unwrap_or_else(|| "n/a".into()),
                 alpha.map(|a| format!("{a:+.4}")).unwrap_or_else(|| "n/a".into())
             );
         }

@@ -16,6 +16,7 @@ import pytest
 from backtide.analysis import (
     compute_statistics,
     plot_candlestick,
+    plot_cash_holdings,
     plot_correlation,
     plot_dividends,
     plot_drawdown,
@@ -584,12 +585,14 @@ class _StubRun:
         start: int = 1_700_000_000,
         trades: list | None = None,
         orders: list | None = None,
+        base_currency: str = "USD",
     ):
         self.strategy_name = name
         # 1-day spacing (in seconds) so the x axis renders sensibly.
         self.equity_curve = [_StubSample(start + i * 86_400, e) for i, e in enumerate(equity)]
         self.trades = trades or []
         self.orders = orders or []
+        self.base_currency = base_currency
 
 
 class TestPlotPnl:
@@ -720,10 +723,29 @@ class _StubOrder:
 class _StubOrderRecord:
     """Minimal duck-typed stand-in for `OrderRecord`."""
 
-    def __init__(self, symbol: str, quantity: int, ts: int, status: str = "filled"):
+    def __init__(
+        self,
+        symbol: str,
+        quantity: int,
+        ts: int,
+        status: str = "filled",
+        *,
+        fill_price: float = 100.0,
+        commission: float = 0.0,
+    ):
         self.order = _StubOrder(symbol, quantity)
         self.timestamp = ts
         self.status = status
+        self.fill_price = fill_price
+        self.commission = commission
+
+
+class _StubInstrument:
+    """Minimal duck-typed stand-in for `Instrument` with quote currency."""
+
+    def __init__(self, symbol: str, quote: str):
+        self.symbol = symbol
+        self.quote = quote
 
 
 def _make_run_with_trades(
@@ -784,6 +806,61 @@ class TestPlotRollingReturns:
         # No traces, but a figure with the placeholder annotation.
         assert isinstance(fig, go.Figure)
         assert len(fig.data) == 0
+
+
+class TestPlotCashHoldings:
+    """Tests for plot_cash_holdings."""
+
+    def test_single_currency_labels_strategy_and_axis(self, monkeypatch):
+        """Single-currency strategies use strategy names and currency in y label."""
+        monkeypatch.setattr(
+            "backtide.analysis.cash_holdings.query_instruments",
+            lambda: [_StubInstrument("AAPL", "USD")],
+        )
+
+        base = 1_700_000_000
+        run_a = _StubRun(
+            "S1",
+            [10_000.0, 9_000.0],
+            orders=[_StubOrderRecord("AAPL", 10, base, fill_price=100.0)],
+            base_currency="USD",
+        )
+        run_b = _StubRun(
+            "S2",
+            [10_000.0, 9_500.0],
+            orders=[_StubOrderRecord("AAPL", 5, base + 60, fill_price=100.0)],
+            base_currency="USD",
+        )
+
+        fig = plot_cash_holdings([run_a, run_b], display=None)
+        assert isinstance(fig, go.Figure)
+        assert {t.name for t in fig.data} == {"S1", "S2"}
+        assert fig.layout.yaxis.title.text == "Cash holdings ($)"
+
+    def test_multi_currency_groups_by_strategy(self, monkeypatch):
+        """Multi-currency strategies show currency labels under a strategy legend group."""
+        monkeypatch.setattr(
+            "backtide.analysis.cash_holdings.query_instruments",
+            lambda: [_StubInstrument("AAPL", "USD"), _StubInstrument("SAP.DE", "EUR")],
+        )
+
+        base = 1_700_000_000
+        run = _StubRun(
+            "Global",
+            [10_000.0, 10_100.0],
+            orders=[
+                _StubOrderRecord("AAPL", 10, base, fill_price=100.0),
+                _StubOrderRecord("SAP.DE", 10, base + 60, fill_price=90.0),
+            ],
+            base_currency="USD",
+        )
+
+        fig = plot_cash_holdings([run], display=None)
+        assert isinstance(fig, go.Figure)
+        assert {t.name for t in fig.data} == {"USD", "EUR"}
+        assert all(t.legendgroup == "Global" for t in fig.data)
+        assert fig.data[0].legendgrouptitle.text == "Global"
+        assert fig.layout.yaxis.title.text == "Cash holdings"
 
 
 class TestPlotRollingSharpe:

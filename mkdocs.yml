@@ -136,6 +136,7 @@ nav:
         - analysis:
             - compute_statistics: api/analysis/compute_statistics.md
             - plot_candlestick: api/analysis/plot_candlestick.md
+            - plot_cash_holdings: api/analysis/plot_cash_holdings.md
             - plot_correlation: api/analysis/plot_correlation.md
             - plot_dividends: api/analysis/plot_dividends.md
             - plot_drawdown: api/analysis/plot_drawdown.md

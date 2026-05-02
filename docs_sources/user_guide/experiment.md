@@ -121,6 +121,7 @@ order) are:
 
 | Tab | Function | Multi-run? |
 |---|---|---|
+| Cash holdings | [`plot_cash_holdings`](../api/analysis/plot_cash_holdings.md) | multi |
 | MAE / MFE | [`plot_mae_mfe`](../api/analysis/plot_mae_mfe.md) | single |
 | PnL histogram | [`plot_pnl_histogram`](../api/analysis/plot_pnl_histogram.md) | multi |
 | Position size | [`plot_position_size`](../api/analysis/plot_position_size.md) | single |

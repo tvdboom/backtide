@@ -6,6 +6,7 @@ Description: Analysis and plotting functionalities for backtide.
 """
 
 from backtide.analysis.candlestick import plot_candlestick
+from backtide.analysis.cash_holdings import plot_cash_holdings
 from backtide.analysis.correlation import plot_correlation
 from backtide.analysis.dividends import plot_dividends
 from backtide.analysis.drawdown import plot_drawdown

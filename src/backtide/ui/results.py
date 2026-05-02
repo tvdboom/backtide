@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from backtide.analysis import (
+    plot_cash_holdings,
     plot_pnl,
     plot_pnl_histogram,
     plot_rolling_returns,
@@ -310,6 +311,7 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
 
     all_labels = [
         ":material/payments: PnL",
+        ":material/account_balance_wallet: Cash holdings",
         ":material/bar_chart: PnL histogram",
         ":material/stacked_line_chart: Rolling returns",
         ":material/military_tech: Rolling Sharpe",
@@ -361,6 +363,14 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
     with tab_map[all_labels[1]]:
         if active_tab == all_labels[1]:
             col1, col2 = st.columns([10, 1])
+            col1.caption("Cash balance timeline split by strategy and settlement currency.")
+            with col2.popover(":material/tune:"):
+                st.caption("No options available for this plot.")
+            st.plotly_chart(plot_cash_holdings(runs, display=None), width="stretch")
+
+    with tab_map[all_labels[2]]:
+        if active_tab == all_labels[2]:
+            col1, col2 = st.columns([10, 1])
             col1.caption("Distribution of realized trade PnL across strategies.")
             with col2.popover(":material/tune:", help="PnL histogram options"):
                 set_bins = st.toggle(
@@ -386,8 +396,8 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
 
             st.plotly_chart(plot_pnl_histogram(runs, bins=bins, display=None), width="stretch")
 
-    with tab_map[all_labels[2]]:
-        if active_tab == all_labels[2]:
+    with tab_map[all_labels[3]]:
+        if active_tab == all_labels[3]:
             col1, col2 = st.columns([10, 1])
             col1.caption("Rolling return trend to compare momentum over time.")
             with col2.popover(":material/tune:", help="Rolling returns options"):
@@ -404,8 +414,8 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
 
             st.plotly_chart(plot_rolling_returns(runs, window, display=None), width="stretch")
 
-    with tab_map[all_labels[3]]:
-        if active_tab == all_labels[3]:
+    with tab_map[all_labels[4]]:
+        if active_tab == all_labels[4]:
             col1, col2 = st.columns([10, 1])
             col1.caption("Rolling Sharpe ratio showing risk-adjusted performance.")
             with col2.popover(":material/tune:", help="Rolling Sharpe options"):
@@ -425,16 +435,46 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
 
             st.plotly_chart(plot_rolling_sharpe(runs, window, ppy, display=None), width="stretch")
 
-    with tab_map[all_labels[4]]:
-        if active_tab == all_labels[4]:
+    with tab_map[all_labels[5]]:
+        if active_tab == all_labels[5]:
             col1, col2 = st.columns([10, 1])
             col1.caption("Distribution of trade holding periods.")
             with col2.popover(":material/tune:"):
-                st.caption("No options available for this plot.")
-            st.plotly_chart(plot_trade_duration(runs, display=None), width="stretch")
+                unit = st.pills(
+                    "Unit",
+                    options=["auto", "minutes", "hours", "days"],
+                    key=(key := "results_trade_duration_unit"),
+                    default=_default(key, fallback="auto"),
+                    on_change=lambda k=key: _persist(k),
+                    help="Time unit used on the x-axis.",
+                )
+                set_bins = st.toggle(
+                    "Set bins",
+                    key=(key := "results_trade_duration_set_bins"),
+                    value=_default(key, fallback=False),
+                    on_change=lambda k=key: _persist(k),
+                    help="Enable a custom number of histogram bins.",
+                )
+                if set_bins:
+                    bins = st.slider(
+                        "Bins",
+                        min_value=5,
+                        max_value=100,
+                        step=1,
+                        key=(key := "results_trade_duration_bins"),
+                        value=_default(key, fallback=40),
+                        on_change=lambda k=key: _persist(k),
+                        help="Set the number of histogram bins.",
+                    )
+                else:
+                    bins = None
+            st.plotly_chart(
+                plot_trade_duration(runs, bins=bins, unit=unit or "auto", display=None),
+                width="stretch",
+            )
 
-    with tab_map[all_labels[5]]:
-        if active_tab == all_labels[5]:
+    with tab_map[all_labels[6]]:
+        if active_tab == all_labels[6]:
             col1, col2 = st.columns([10, 1])
             col1.caption("Per-trade PnL profile for each strategy.")
             with col2.popover(":material/tune:"):

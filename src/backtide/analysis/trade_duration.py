@@ -24,29 +24,13 @@ if TYPE_CHECKING:
 
 cfg = get_config()
 
-UnitName = Literal["auto", "minutes", "hours", "days"]
-_UNIT_FACTORS: dict[str, float] = {
-    "minutes": 60.0,
-    "hours": 3_600.0,
-    "days": 86_400.0,
-}
-
-
-def _pick_unit(median_seconds: float) -> str:
-    """Select an axis unit based on the median trade duration."""
-    if median_seconds >= 2 * 86_400:
-        return "days"
-    if median_seconds >= 2 * 3_600:
-        return "hours"
-    return "minutes"
-
 
 @overload
 def plot_trade_duration(
     runs: RunResult | Sequence[RunResult],
     *,
-    bins: int = ...,
-    unit: UnitName = ...,
+    bins: int | None = ...,
+    unit: Literal["auto", "minutes", "hours", "days"] = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -57,8 +41,8 @@ def plot_trade_duration(
 def plot_trade_duration(
     runs: RunResult | Sequence[RunResult],
     *,
-    bins: int = ...,
-    unit: UnitName = ...,
+    bins: int | None = ...,
+    unit: Literal["auto", "minutes", "hours", "days"] = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] | None = ...,
@@ -70,8 +54,8 @@ def plot_trade_duration(
 def plot_trade_duration(
     runs: RunResult | Sequence[RunResult],
     *,
-    bins: int = 40,
-    unit: UnitName = "auto",
+    bins: int | None = None,
+    unit: Literal["auto", "minutes", "hours", "days"] = "auto",
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper right",
     figsize: tuple[int, int] | None = (900, 600),
@@ -88,12 +72,13 @@ def plot_trade_duration(
     runs : [RunResult] | list[[RunResult]]
         The per-strategy results to plot. Runs without trades are skipped.
 
-    bins : int, default=40
-        Number of histogram bins.
+    bins : int | None, default=None
+        Number of histogram bins. If `None`, Plotly's default binning algorithm
+        is used.
 
     unit : "auto" | "minutes" | "hours" | "days", default="auto"
-        Time unit used on the x-axis. When `"auto"`, the unit is picked
-        from the median trade duration across all runs.
+        Time unit used on the x-axis. When `auto`, the unit is picked from the
+        median trade duration across all runs.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -149,18 +134,24 @@ def plot_trade_duration(
 
     runs = _to_list(runs)
 
-    durations: dict[str, list[float]] = {}
+    durations = {}
     for run in runs:
         if _is_benchmark(run) or not run.trades:
             continue
 
-        durations[run.strategy_name] = [float(t.exit_ts - t.entry_ts) for t in run.trades]
+        durations[run.strategy_name] = [t.exit_ts - t.entry_ts for t in run.trades]
 
+    unit = unit.lower()
     if unit == "auto":
-        all_secs = [d for v in durations.values() for d in v]
-        unit = _pick_unit(float(np.median(all_secs))) if all_secs else "hours"  # ty: ignore[invalid-assignment]
+        median_secs = np.median([d for v in durations.values() for d in v])
+        if median_secs >= 2 * 86_400:
+            unit = "days"
+        elif median_secs >= 2 * 3_600:
+            unit = "hours"
+        else:
+            unit = "minutes"
 
-    factor = _UNIT_FACTORS[unit]
+    factor = {"minutes": 60., "hours": 3_600., "days": 86_400.}[unit]
 
     fig = go.Figure()
     for idx, run in enumerate(runs):
@@ -175,8 +166,7 @@ def plot_trade_duration(
                 marker_color=cfg.plots.palette[idx % len(cfg.plots.palette)],
                 opacity=0.55,
                 hovertemplate=(
-                    f"Duration: %{{x:,.2f}} {unit}<br>"
-                    "Trades: %{y}<extra>%{{fullData.name}}</extra>"
+                    f"Duration: %{{x:,}}{unit[0]}<br>Trades: %{y}<extra>%{fullData.name}</extra>"
                 ),
             )
         )
