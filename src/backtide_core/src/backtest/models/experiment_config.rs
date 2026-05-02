@@ -108,7 +108,7 @@ impl GeneralExpConfig {
 /// end_date : str | None, default=None
 ///     ISO-8601 end date.
 ///
-/// interval : str | [Interval], default="1d"
+/// interval : [Interval], default="1d"
 ///     Bar interval.
 ///
 /// See Also

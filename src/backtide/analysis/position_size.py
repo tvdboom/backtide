@@ -7,16 +7,17 @@ Description: Module containing the position-size-over-time chart.
 
 from __future__ import annotations
 
+from collections import defaultdict
+from itertools import accumulate
 from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import _plot
+from backtide.analysis.utils import REFERENCE_LINE, _plot
 from backtide.config import get_config
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
     from pathlib import Path
 
     from backtide.backtest import RunResult
@@ -28,7 +29,6 @@ cfg = get_config()
 def plot_position_size(
     run: RunResult,
     *,
-    symbols: Iterable[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -39,7 +39,6 @@ def plot_position_size(
 def plot_position_size(
     run: RunResult,
     *,
-    symbols: Iterable[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -51,27 +50,22 @@ def plot_position_size(
 def plot_position_size(
     run: RunResult,
     *,
-    symbols: Iterable[str] | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
-    """Create a position-size-over-time chart for a single strategy run.
+    """Create a position-size over time chart for a single strategy run.
 
     Reconstructs the held quantity per symbol from the run's filled
-    orders and renders one step line per symbol. Positive values are
+    orders and renders one-step line per symbol. Positive values are
     long positions, negative values are short.
 
     Parameters
     ----------
     run : [RunResult]
         The strategy run to plot.
-
-    symbols : Iterable[str] | None, default=None
-        Restrict the chart to these symbols. When `None`, every symbol
-        traded by the strategy is plotted.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -123,64 +117,29 @@ def plot_position_size(
 
     """
     fig = go.Figure()
+    fig.add_hline(y=0, line=REFERENCE_LINE)
 
-    orders = getattr(run, "orders", None) or []
-    fills = [o for o in orders if getattr(o, "status", "") == "filled"]
-    if not fills:
-        fig.add_annotation(
-            text="No filled orders to plot.",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-        )
-        return _plot(
-            fig,
-            title=title,
-            legend=legend,
-            xlabel="Date",
-            ylabel="Position size",
-            figsize=figsize,
-            filename=filename,
-            display=display,
-        )
+    fills = [o for o in run.orders if o.status == "filled"]
 
-    by_symbol: dict[str, list[tuple[int, int]]] = {}
+    by_symbol = defaultdict(list)
     for o in fills:
-        sym = getattr(o.order, "symbol", "")
-        qty = int(getattr(o.order, "quantity", 0))
-        ts = int(getattr(o, "timestamp", 0))
-        by_symbol.setdefault(sym, []).append((ts, qty))
-
-    if symbols is not None:
-        wanted = set(symbols)
-        by_symbol = {s: rows for s, rows in by_symbol.items() if s in wanted}
-
-    fig.add_hline(y=0, line_width=cfg.plots.line_width / 2, line_dash="dot", line_color="rgba(128,128,128,0.6)")
+        by_symbol[o.order.symbol].append((o.timestamp, o.order.quantity))
 
     for idx, (sym, rows) in enumerate(sorted(by_symbol.items())):
         rows.sort(key=lambda r: r[0])
-        ts_list = [r[0] for r in rows]
-        qty_running: list[int] = []
-        running = 0
-        for _, q in rows:
-            running += q
-            qty_running.append(running)
 
-        x = pd.to_datetime(ts_list, unit="s")
-        color = cfg.plots.palette[idx % len(cfg.plots.palette)]
         fig.add_trace(
             go.Scatter(
-                x=x,
-                y=qty_running,
+                x=pd.to_datetime([r[0] for r in rows], unit="s"),
+                y=accumulate(q for _, q in rows),
                 mode="lines",
                 name=sym,
-                line={"color": color, "width": cfg.plots.line_width, "shape": "hv"},
-                hovertemplate=(
-                    "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d %H:%M}<br>"
-                    "Position: %{y:+,.0f}<extra></extra>"
-                ),
+                line={
+                    "color": cfg.plots.palette[idx % len(cfg.plots.palette)],
+                    "width": cfg.plots.line_width,
+                    "shape": "hv",
+                },
+                hovertemplate="%{x}<br>Position: %{y:,}<extra>%{fullData.name}</extra>",
             )
         )
 

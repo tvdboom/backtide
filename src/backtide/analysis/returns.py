@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, overload
 import numpy as np
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import _check_columns, _plot, _resolve_dt
+from backtide.analysis.utils import REFERENCE_LINE, _check_columns, _plot, _resolve_dt
 from backtide.config import get_config
 from backtide.utils.utils import _to_pandas
 
@@ -125,6 +125,7 @@ def plot_returns(
     _check_columns(data, ["symbol", price_col, "dt"], "plot_returns")
 
     fig = go.Figure()
+    fig.add_vline(x=0, line=REFERENCE_LINE)
 
     # Collect per-symbol returns first so we can derive a shared x-axis range
     # that crops extreme outliers (which would otherwise compress the bulk of
@@ -192,14 +193,6 @@ def plot_returns(
                     hoverinfo="skip",
                 )
             )
-
-    # Reference line at zero return.
-    fig.add_vline(
-        x=0,
-        line_width=cfg.plots.line_width / 2,
-        line_dash="dash",
-        line_color="rgba(120, 120, 120, 0.7)",
-    )
 
     fig.update_layout(barmode="overlay", bargap=0.02)
 

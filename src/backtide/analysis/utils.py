@@ -26,11 +26,20 @@ if TYPE_CHECKING:
 
 cfg = get_config()
 
-# Gray dashed style used to render the auto-injected benchmark consistently
-# across plots that compare strategies to the benchmark.
-BENCHMARK_LINE: dict[str, Any] = {
+GREEN = "#26A69A"
+RED = "#EF5350"
+
+# Gray dashed style used to render the auto-injected benchmark.
+BENCHMARK_LINE = {
     "color": "rgba(128,128,128,0.7)",
     "width": cfg.plots.line_width,
+    "dash": "dash",
+}
+
+# Gray dashed style used to render reference lines (e.g., y=0).
+REFERENCE_LINE = {
+    "color": "rgba(128,128,128,0.5)",
+    "width": cfg.plots.line_width / 2,
     "dash": "dash",
 }
 

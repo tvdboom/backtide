@@ -14,6 +14,8 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import (
+    GREEN,
+    RED,
     _check_columns,
     _get_currency_symbol,
     _plot,
@@ -209,7 +211,10 @@ def plot_price(
                             x=subset["dt"],
                             y=(y := values.iloc[:, 0]),
                             mode="lines",
-                            line={"color": f"rgba{color[3:-1]}, 0.7)", "width": cfg.plots.line_width},
+                            line={
+                                "color": f"rgba{color[3:-1]}, 0.7)",
+                                "width": cfg.plots.line_width,
+                            },
                             name=name,
                             legendgroup=symbol,
                             customdata=[_format_price(v, currency=ccy) for v in y],
@@ -298,7 +303,11 @@ def plot_price(
                     y=long_y,
                     mode="markers",
                     name="Long entry",
-                    marker={"symbol": "triangle-up", "color": "#2ecc71", "size": cfg.plots.marker_size + 3},
+                    marker={
+                        "symbol": "triangle-up",
+                        "color": "#2ecc71",
+                        "size": cfg.plots.marker_size + 3,
+                    },
                     legendgroup="trades",
                     customdata=long_data,
                     hovertemplate=(
@@ -316,7 +325,11 @@ def plot_price(
                     y=short_y,
                     mode="markers",
                     name="Short entry",
-                    marker={"symbol": "triangle-down", "color": "#3498db", "size": cfg.plots.marker_size + 3},
+                    marker={
+                        "symbol": "triangle-down",
+                        "color": "#3498db",
+                        "size": cfg.plots.marker_size + 3,
+                    },
                     legendgroup="trades",
                     customdata=short_data,
                     hovertemplate=(
@@ -334,7 +347,12 @@ def plot_price(
                     y=win_y,
                     mode="markers",
                     name="Exit (win)",
-                    marker={"symbol": "x", "color": "#27ae60", "size": cfg.plots.marker_size + 2, "line": {"width": cfg.plots.line_width}},
+                    marker={
+                        "symbol": "x",
+                        "color": GREEN,
+                        "size": cfg.plots.marker_size + 2,
+                        "line": {"width": cfg.plots.line_width},
+                    },
                     legendgroup="trades",
                     customdata=win_data,
                     hovertemplate=(
@@ -353,7 +371,12 @@ def plot_price(
                     y=loss_y,
                     mode="markers",
                     name="Exit (loss)",
-                    marker={"symbol": "x", "color": "#e74c3c", "size": cfg.plots.marker_size + 2, "line": {"width": cfg.plots.line_width}},
+                    marker={
+                        "symbol": "x",
+                        "color": RED,
+                        "size": cfg.plots.marker_size + 2,
+                        "line": {"width": cfg.plots.line_width},
+                    },
                     legendgroup="trades",
                     customdata=loss_data,
                     hovertemplate=(

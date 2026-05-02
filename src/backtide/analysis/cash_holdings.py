@@ -79,7 +79,6 @@ def plot_cash_holdings(
 
         currencies = defaultdict(list)
         for eq in run.equity_curve:
-            print(eq.cash)
             for ccy, amount in eq.cash.items():
                 currencies[str(ccy)].append(amount)
 

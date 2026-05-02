@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, overload
 
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import _is_benchmark, _plot, _resolve_runs_currency
+from backtide.analysis.utils import REFERENCE_LINE, _is_benchmark, _plot, _resolve_runs_currency
 from backtide.config import get_config
 from backtide.utils.utils import _format_price, _to_list
 
@@ -129,6 +129,8 @@ def plot_pnl_histogram(
     ccy = _resolve_runs_currency(runs)
 
     fig = go.Figure()
+    fig.add_vline(x=0, line=REFERENCE_LINE)
+
     for idx, run in enumerate(runs):
         if _is_benchmark(run) or not run.trades:
             continue
@@ -146,7 +148,6 @@ def plot_pnl_histogram(
         )
 
     fig.update_layout(barmode="overlay")
-    fig.add_vline(x=0, line_width=cfg.plots.line_width / 2, line_dash="dot", line_color="rgba(128,128,128,0.6)")
 
     return _plot(
         fig,

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, overload
 import pandas as pd
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot
+from backtide.analysis.utils import BENCHMARK_LINE, REFERENCE_LINE, _is_benchmark, _plot
 from backtide.config import get_config
 from backtide.utils.utils import _to_list
 
@@ -128,6 +128,8 @@ def plot_rolling_returns(
     runs = _to_list(runs)
 
     fig = go.Figure()
+    fig.add_hline(y=0, line=REFERENCE_LINE)
+
     for idx, run in enumerate(runs):
         curve = run.equity_curve
         if not curve or len(curve) <= window:
@@ -147,7 +149,10 @@ def plot_rolling_returns(
         if is_benchmark := _is_benchmark(run):
             line = BENCHMARK_LINE
         else:
-            line = {"color": cfg.plots.palette[idx % len(cfg.plots.palette)], "width": cfg.plots.line_width}
+            line = {
+                "color": cfg.plots.palette[idx % len(cfg.plots.palette)],
+                "width": cfg.plots.line_width,
+            }
 
         fig.add_trace(
             go.Scatter(
@@ -160,8 +165,6 @@ def plot_rolling_returns(
                 showlegend=not is_benchmark,
             )
         )
-
-    fig.add_hline(y=0, line_width=cfg.plots.line_width / 2, line_dash="dot", line_color="rgba(128,128,128,0.6)")
 
     return _plot(
         fig,

@@ -1653,7 +1653,7 @@ fn run_one_strategy(
         equity_curve.push(EquitySample {
             timestamp: ts,
             equity,
-            cash: cash.clone(),
+            cash: cash.iter().filter(|(_, v)| v.abs() > 1e-12).map(|(k, v)| (*k, *v)).collect(),
             drawdown,
         });
     }
@@ -2053,7 +2053,7 @@ fn try_debit(
         _ => f64::INFINITY,
     };
     if needed_base.is_finite() && base_avail >= needed_base {
-        cash.insert(ccy, 0.0);
+        cash.remove(&ccy);
         *cash.entry(base).or_insert(0.0) -= needed_base;
         return true;
     }
@@ -2119,6 +2119,8 @@ fn try_debit(
     for (c, v) in staged {
         *cash.entry(c).or_insert(0.0) -= v;
     }
+    // Remove buckets drained to zero so they don't linger in equity snapshots.
+    cash.retain(|_, v| v.abs() > 1e-12);
     true
 }
 
@@ -2153,7 +2155,7 @@ fn sweep_foreign_to_base(
                 continue;
             }
         }
-        cash.insert(ccy, 0.0);
+        cash.remove(&ccy);
         *cash.entry(base).or_insert(0.0) += in_base;
     }
 }

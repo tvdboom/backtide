@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot
+from backtide.analysis.utils import BENCHMARK_LINE, GREEN, RED, _is_benchmark, _plot
 from backtide.config import get_config
 from backtide.utils.utils import _to_list
 
@@ -156,7 +156,10 @@ def plot_rolling_sharpe(
         if is_benchmark := _is_benchmark(run):
             line = BENCHMARK_LINE
         else:
-            line = {"color": cfg.plots.palette[idx % len(cfg.plots.palette)], "width": cfg.plots.line_width}
+            line = {
+                "color": cfg.plots.palette[idx % len(cfg.plots.palette)],
+                "width": cfg.plots.line_width,
+            }
 
         fig.add_trace(
             go.Scatter(
@@ -165,13 +168,13 @@ def plot_rolling_sharpe(
                 mode="lines",
                 name=run.strategy_name,
                 line=line,
-                hovertemplate="%{x}<br>Sharpe ratio: %{y:.2f}%<extra>%{fullData.name}</extra>",
+                hovertemplate="%{x}<br>Sharpe ratio: %{y:.2f}<extra>%{fullData.name}</extra>",
                 showlegend=not is_benchmark,
             )
         )
 
-    fig.add_hline(y=0, line_width=cfg.plots.line_width / 2, line_dash="dot", line_color="rgba(128,128,128,0.6)")
-    fig.add_hline(y=1, line_width=cfg.plots.line_width / 2, line_dash="dash", line_color="rgba(46,204,113,0.4)")
+    fig.add_hline(y=0, line_width=cfg.plots.line_width / 2, line_dash="dash", line_color=RED)
+    fig.add_hline(y=1, line_width=cfg.plots.line_width / 2, line_dash="dash", line_color=GREEN)
 
     return _plot(
         fig,

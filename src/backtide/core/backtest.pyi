@@ -1000,7 +1000,7 @@ class DataExpConfig:
     end_date : str | None, default=None
         ISO-8601 end date.
 
-    interval : str | [Interval], default="1d"
+    interval : [Interval], default="1d"
         Bar interval.
 
     See Also
@@ -1014,7 +1014,7 @@ class DataExpConfig:
     end_date: str | None
     full_history: bool
     instrument_type: str | InstrumentType
-    interval: str | Interval
+    interval: Interval
     start_date: str | None
     symbols: list[str]
 

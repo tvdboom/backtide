@@ -14,7 +14,13 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot, _resolve_runs_currency
+from backtide.analysis.utils import (
+    BENCHMARK_LINE,
+    REFERENCE_LINE,
+    _is_benchmark,
+    _plot,
+    _resolve_runs_currency,
+)
 from backtide.config import get_config
 from backtide.utils.utils import _format_price, _to_list
 
@@ -158,8 +164,10 @@ def plot_pnl(
             row_heights=[0.7, 0.3],
             vertical_spacing=0.04,
         )
+        fig.add_hline(y=0, line=REFERENCE_LINE, row=1, col=1)
     else:
         fig = go.Figure()
+        fig.add_hline(y=0, line=REFERENCE_LINE)
 
     for idx, run in enumerate(runs):
         ts = pd.to_datetime([s.timestamp for s in run.equity_curve], unit="s")
@@ -175,7 +183,10 @@ def plot_pnl(
         if is_benchmark := _is_benchmark(run):
             line = BENCHMARK_LINE
         else:
-            line = {"color": cfg.plots.palette[idx % len(cfg.plots.palette)], "width": cfg.plots.line_width}
+            line = {
+                "color": cfg.plots.palette[idx % len(cfg.plots.palette)],
+                "width": cfg.plots.line_width,
+            }
 
         equity_trace = go.Scatter(
             x=ts,
@@ -227,23 +238,12 @@ def plot_pnl(
     # Zero reference line: the break-even level for absolute PnL and
     # the 0 % return level for relative PnL — both useful anchors.
     if drawdown:
-        fig.add_hline(
-            y=0,
-            line_width=cfg.plots.line_width / 2,
-            line_dash="dot",
-            line_color="rgba(128,128,128,0.6)",
-            row=1,
-            col=1,
-        )
-
         fig.update_xaxes(title_text="Date", row=2, col=1)
         fig.update_yaxes(
             title_text=f"Drawdown{' (%)' if normalize else (f' ({ccy.symbol})' if ccy else '')}",
             row=2,
             col=1,
         )
-    else:
-        fig.add_hline(y=0, line_width=cfg.plots.line_width / 2, line_dash="dot", line_color="rgba(128,128,128,0.6)")
 
     return _plot(
         fig,

@@ -142,17 +142,17 @@ def plot_trade_duration(
 
         durations[run.strategy_name] = [t.exit_ts - t.entry_ts for t in run.trades]
 
-    unit = unit.lower()
-    if unit == "auto":
+    unit_s = unit.lower()
+    if unit_s == "auto":
         median_secs = np.median([d for v in durations.values() for d in v])
         if median_secs >= 2 * 86_400:
-            unit = "days"
+            unit_s = "days"
         elif median_secs >= 2 * 3_600:
-            unit = "hours"
+            unit_s = "hours"
         else:
-            unit = "minutes"
+            unit_s = "minutes"
 
-    factor = {"minutes": 60.0, "hours": 3_600.0, "days": 86_400.0}[unit]
+    factor = {"minutes": 60.0, "hours": 3_600.0, "days": 86_400.0}[unit_s]
 
     fig = go.Figure()
     for idx, run in enumerate(runs):
@@ -167,7 +167,7 @@ def plot_trade_duration(
                 marker_color=cfg.plots.palette[idx % len(cfg.plots.palette)],
                 opacity=0.55,
                 hovertemplate=(
-                    f"Duration: %{{x:,}}{unit[0]}<br>Trades: %{{y}}"
+                    f"Duration: %{{x:,}}{unit_s[0]}<br>Trades: %{{y}}"
                     "<extra>%{fullData.name}</extra>"
                 ),
             )
@@ -179,7 +179,7 @@ def plot_trade_duration(
         fig,
         title=title,
         legend=legend,
-        xlabel=f"Trade duration ({unit})",
+        xlabel=f"Trade duration ({unit_s})",
         ylabel="Trade count",
         figsize=figsize,
         filename=filename,

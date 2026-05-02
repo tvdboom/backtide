@@ -12,13 +12,12 @@ from typing import TYPE_CHECKING, Any, overload
 import pandas as pd
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import _plot, _resolve_runs_currency
+from backtide.analysis.utils import GREEN, RED, REFERENCE_LINE, _plot, _resolve_runs_currency
 from backtide.config import get_config
 from backtide.storage import query_bars
-from backtide.utils.utils import _format_price
+from backtide.utils.utils import _format_price, _moment_to_strftime
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
     from pathlib import Path
 
     from backtide.backtest import RunResult
@@ -31,7 +30,6 @@ def plot_mae_mfe(
     run: RunResult,
     *,
     interval: str | None = ...,
-    symbols: Iterable[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -43,7 +41,6 @@ def plot_mae_mfe(
     run: RunResult,
     *,
     interval: str | None = ...,
-    symbols: Iterable[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -56,7 +53,6 @@ def plot_mae_mfe(
     run: RunResult,
     *,
     interval: str | None = None,
-    symbols: Iterable[str] | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
     figsize: tuple[int, int] = (900, 600),
@@ -77,9 +73,6 @@ def plot_mae_mfe(
     interval : str | [Interval] | None, default=None
         Bar interval to load (e.g., `1d`, `1h`). When `None`, the
         function lets `query_bars` pick whatever is available.
-
-    symbols : Iterable[str] | None, default=None
-        Restrict the chart to trades on these symbols.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -130,63 +123,43 @@ def plot_mae_mfe(
     ```
 
     """
-    ccy = _resolve_runs_currency([run])
+    cache = {}  # Cache bars per symbol so we only hit storage once per traded symbol.
 
     fig = go.Figure()
+    ccy = _resolve_runs_currency([run])
 
-    trades = list(getattr(run, "trades", None) or [])
-    if symbols is not None:
-        wanted = set(symbols)
-        trades = [t for t in trades if getattr(t, "symbol", "") in wanted]
+    dt_fmt = _moment_to_strftime(cfg.display.datetime_format())
 
-    # Cache bars per symbol so we only hit storage once per traded symbol.
-    bars_cache: dict[str, pd.DataFrame] = {}
-    win_mae: list[float] = []
-    win_mfe: list[float] = []
-    win_text: list[str] = []
-    loss_mae: list[float] = []
-    loss_mfe: list[float] = []
-    loss_text: list[str] = []
+    win_mae, win_mfe, win_text = [], [], []
+    loss_mae, loss_mfe, loss_text = [], [], []
+    for t in run.trades:
+        if t.symbol not in cache:
+            cache[t.symbol] = query_bars(symbol=t.symbol, interval=interval)
+        df = cache[t.symbol]
 
-    for t in trades:
-        sym = t.symbol
-        if sym not in bars_cache:
-            try:
-                df = query_bars(symbol=sym, interval=interval)
-            except Exception:  # noqa: BLE001
-                df = pd.DataFrame()
-            bars_cache[sym] = df
-
-        df = bars_cache[sym]
-        if df.empty or "open_ts" not in df.columns:
-            continue
-
-        entry_ts = int(t.entry_ts)
-        exit_ts = int(t.exit_ts)
-        mask = (df["open_ts"] >= entry_ts) & (df["open_ts"] <= exit_ts)
-        window = df.loc[mask]
+        window = df.loc[(df["open_ts"] >= t.entry_ts) & (df["open_ts"] <= t.exit_ts)]
         if window.empty:
             continue
 
-        entry_price = float(t.entry_price)
-        qty = int(getattr(t, "quantity", 0))
-        if qty >= 0:
+        if t.quantity >= 0:
             # Long: gain on highs, loss on lows.
-            mfe = max(0.0, float(window["high"].max()) - entry_price)
-            mae = max(0.0, entry_price - float(window["low"].min()))
+            mfe = max(0.0, window["high"].max() - t.entry_price)
+            mae = max(0.0, t.entry_price - window["low"].min())
         else:
             # Short: gain when price drops, loss when price rises.
-            mfe = max(0.0, entry_price - float(window["low"].min()))
-            mae = max(0.0, float(window["high"].max()) - entry_price)
+            mfe = max(0.0, t.entry_price - window["low"].min())
+            mae = max(0.0, window["high"].max() - t.entry_price)
 
         label = (
-            f"{sym}<br>Entry: {pd.to_datetime(entry_ts, unit='s'):%Y-%m-%d}<br>"
-            f"Exit: {pd.to_datetime(exit_ts, unit='s'):%Y-%m-%d}<br>"
-            f"PnL: {_format_price(float(t.pnl), currency=ccy)}<br>"
+            f"<b>{t.symbol}</b><br>"
+            f"Entry: {pd.to_datetime(t.entry_ts, unit='s'):{dt_fmt}}<br>"
+            f"Exit: {pd.to_datetime(t.exit_ts, unit='s'):{dt_fmt}}<br>"
+            f"PnL: {_format_price(t.pnl, signed=True, currency=ccy)}<br>"
             f"MAE: {_format_price(mae, currency=ccy)}<br>"
             f"MFE: {_format_price(mfe, currency=ccy)}"
         )
-        if float(t.pnl) >= 0:
+
+        if t.pnl >= 0:
             win_mae.append(mae)
             win_mfe.append(mfe)
             win_text.append(label)
@@ -201,8 +174,7 @@ def plot_mae_mfe(
             x=[0, max_axis],
             y=[0, max_axis],
             mode="lines",
-            line={"color": "rgba(128,128,128,0.5)", "dash": "dash", "width": cfg.plots.line_width / 2},
-            name="MFE = MAE",
+            line=REFERENCE_LINE,
             hoverinfo="skip",
             showlegend=False,
         )
@@ -215,7 +187,7 @@ def plot_mae_mfe(
                 y=win_mfe,
                 mode="markers",
                 name="Winners",
-                marker={"color": "#2ecc71", "size": cfg.plots.marker_size, "line": {"width": 0}},
+                marker={"color": GREEN, "size": cfg.plots.marker_size},
                 customdata=win_text,
                 hovertemplate="%{customdata}<extra></extra>",
                 showlegend=False,
@@ -229,7 +201,7 @@ def plot_mae_mfe(
                 y=loss_mfe,
                 mode="markers",
                 name="Losers",
-                marker={"color": "#e74c3c", "size": cfg.plots.marker_size, "line": {"width": 0}},
+                marker={"color": RED, "size": cfg.plots.marker_size},
                 customdata=loss_text,
                 hovertemplate="%{customdata}<extra></extra>",
                 showlegend=False,

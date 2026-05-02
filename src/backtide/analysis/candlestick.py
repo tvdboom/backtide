@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, overload
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import (
+    GREEN,
+    RED,
     _check_columns,
     _get_currency_symbol,
     _plot,
@@ -134,15 +136,11 @@ def plot_candlestick(
     ccy = _get_currency_symbol(data)
     symbol = data["symbol"].iloc[0]
 
-    # Default candlestick colors
-    inc = "#26A69A"  # Teal (bullish)
-    dec = "#EF5350"  # Red (bearish)
-
     # Pre-format OHLC values for hover
     triangle = lambda s, c: f"<span style='color:{c}'>{s}</span>"
     customdata = data.apply(
         lambda r: [
-            triangle("▲", "#26A69A") if r["close"] >= r["open"] else triangle("▼", "#EF5350"),
+            triangle("▲", GREEN) if r["close"] >= r["open"] else triangle("▼", RED),
             _format_price(r["open"], currency=r.get("currency")),
             _format_price(r["high"], currency=r.get("currency")),
             _format_price(r["low"], currency=r.get("currency")),
@@ -161,8 +159,8 @@ def plot_candlestick(
             close=data["close"],
             whiskerwidth=0.2,
             name=symbol,
-            increasing={"line": {"color": inc}, "fillcolor": inc},
-            decreasing={"line": {"color": dec}, "fillcolor": dec},
+            increasing={"line": {"color": GREEN}, "fillcolor": GREEN},
+            decreasing={"line": {"color": RED}, "fillcolor": RED},
             customdata=customdata.values,
             hovertemplate=(
                 "%{customdata[0]} %{x}<br>"
