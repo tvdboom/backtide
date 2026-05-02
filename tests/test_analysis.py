@@ -34,6 +34,8 @@ from backtide.analysis.utils import (
     _plot,
     _resolve_dt,
 )
+from backtide.backtest import RunResult
+from backtide.core.data import Currency
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -596,7 +598,19 @@ class _StubRun:
         ]
         self.trades = trades or []
         self.orders = orders or []
-        self.base_currency = base_currency
+        self.base_currency = Currency(base_currency)
+
+
+def _run_result(
+    name: str,
+    equity: list[float],
+    start: int = 1_700_000_000,
+    trades: list | None = None,
+    orders: list | None = None,
+    base_currency: str = "USD",
+) -> RunResult:
+    """Build a `_StubRun` and expose it as a `RunResult` for type checkers."""
+    return cast(RunResult, _StubRun(name, equity, start, trades, orders, base_currency))
 
 
 class TestPlotPnl:
@@ -604,14 +618,14 @@ class TestPlotPnl:
 
     def test_returns_figure(self):
         """Plotting one strategy returns a figure with one trace (no drawdown)."""
-        run = _StubRun("S1", [10_000.0, 10_500.0, 11_000.0])
+        run = _run_result("S1", [10_000.0, 10_500.0, 11_000.0])
         fig = plot_pnl([run], drawdown=False, display=None)
         assert isinstance(fig, go.Figure)
         assert len(fig.data) == 1
 
     def test_drawdown_default_adds_subplot(self):
         """`drawdown=True` (default) yields two traces per run on two rows."""
-        run = _StubRun("S1", [10_000.0, 10_500.0, 11_000.0])
+        run = _run_result("S1", [10_000.0, 10_500.0, 11_000.0])
         fig = plot_pnl([run], display=None)
         assert len(fig.data) == 2  # PnL + drawdown
         # Subplots: yaxis2 must exist for the drawdown panel.
@@ -619,14 +633,14 @@ class TestPlotPnl:
 
     def test_drawdown_absolute_when_not_normalized(self):
         """Default mode plots drawdown as absolute currency, not percent."""
-        run = _StubRun("S1", [100.0, 120.0, 90.0])
+        run = _run_result("S1", [100.0, 120.0, 90.0])
         fig = plot_pnl([run], drawdown=True, normalize=False, display=None)
         dd = np.array(fig.data[1].y, dtype=float)
         assert dd.tolist() == [0.0, 0.0, -30.0]
 
     def test_drawdown_percent_when_normalized(self):
         """Normalized mode plots drawdown as a percentage."""
-        run = _StubRun("S1", [100.0, 120.0, 90.0])
+        run = _run_result("S1", [100.0, 120.0, 90.0])
         fig = plot_pnl([run], drawdown=True, normalize=True, display=None)
         dd = np.array(fig.data[1].y, dtype=float)
         assert dd[0] == 0.0
@@ -636,9 +650,9 @@ class TestPlotPnl:
     def test_one_trace_per_strategy(self):
         """Plotting N strategies yields N traces (no drawdown)."""
         runs = [
-            _StubRun("S1", [10_000.0, 10_500.0, 11_000.0]),
-            _StubRun("S2", [10_000.0, 9_500.0, 9_800.0]),
-            _StubRun("Benchmark (SPY)", [10_000.0, 10_100.0, 10_200.0]),
+            _run_result("S1", [10_000.0, 10_500.0, 11_000.0]),
+            _run_result("S2", [10_000.0, 9_500.0, 9_800.0]),
+            _run_result("Benchmark (SPY)", [10_000.0, 10_100.0, 10_200.0]),
         ]
         fig = plot_pnl(runs, drawdown=False, display=None)
         assert len(fig.data) == 3
@@ -646,7 +660,7 @@ class TestPlotPnl:
 
     def test_absolute_pnl_starts_at_zero(self):
         """Absolute PnL should start at zero for every strategy."""
-        run = _StubRun("S1", [10_000.0, 10_500.0, 11_000.0])
+        run = _run_result("S1", [10_000.0, 10_500.0, 11_000.0])
         fig = plot_pnl([run], drawdown=False, display=None)
         y = np.array(fig.data[0].y, dtype=float)
         assert y[0] == 0.0
@@ -654,7 +668,7 @@ class TestPlotPnl:
 
     def test_relative_pnl_in_percent(self):
         """Relative mode plots returns as a percentage of the start equity."""
-        run = _StubRun("S1", [200.0, 220.0, 250.0])
+        run = _run_result("S1", [200.0, 220.0, 250.0])
         fig = plot_pnl([run], normalize=True, drawdown=False, display=None)
         y = np.array(fig.data[0].y, dtype=float)
         assert y[0] == 0.0
@@ -666,17 +680,18 @@ class TestPlotPnl:
         class _Empty:
             strategy_name = "empty"
             equity_curve = None
+            base_currency = Currency.USD
 
-        run = _StubRun("S1", [10_000.0, 10_100.0])
-        fig = plot_pnl([_Empty(), run], drawdown=False, display=None)
+        run = _run_result("S1", [10_000.0, 10_100.0])
+        fig = plot_pnl([cast(RunResult, _Empty()), run], drawdown=False, display=None)
         assert len(fig.data) == 1
         assert fig.data[0].name == "S1"
 
     def test_benchmark_drawn_dashed(self):
         """The auto-injected benchmark run is rendered with a dashed line."""
         runs = [
-            _StubRun("S1", [10_000.0, 10_500.0]),
-            _StubRun("Benchmark (SPY)", [10_000.0, 10_100.0]),
+            _run_result("S1", [10_000.0, 10_500.0]),
+            _run_result("Benchmark (SPY)", [10_000.0, 10_100.0]),
         ]
         fig = plot_pnl(runs, drawdown=False, display=None)
         bench = next(t for t in fig.data if t.name.startswith("Benchmark"))
@@ -755,7 +770,7 @@ class _StubInstrument:
 def _make_run_with_trades(
     name: str = "S1",
     pnls: tuple[float, ...] = (50.0, -30.0, 20.0, -10.0),
-) -> _StubRun:
+) -> RunResult:
     """Build a `_StubRun` with synthetic trades and matching orders."""
     base = 1_700_000_000
     trades = [
@@ -776,7 +791,7 @@ def _make_run_with_trades(
         orders.append(_StubOrderRecord("AAPL", -t.quantity, t.exit_ts))
         if i == 0:
             orders.append(_StubOrderRecord("MSFT", 5, t.entry_ts + 1_000))
-    return _StubRun(
+    return _run_result(
         name,
         [10_000.0 + sum(pnls[: i + 1]) for i in range(len(pnls))],
         trades=trades,
@@ -796,7 +811,7 @@ class TestPlotRollingReturns:
         """Builds one rolling-return trace per run."""
         from backtide.analysis import plot_rolling_returns
 
-        run = _StubRun("S1", [100.0 + i for i in range(50)])
+        run = _run_result("S1", [100.0 + i for i in range(50)])
         fig = plot_rolling_returns([run], window=10, display=None)
         assert isinstance(fig, go.Figure)
         assert len(fig.data) == 1
@@ -805,7 +820,7 @@ class TestPlotRollingReturns:
         """Runs with fewer samples than `window` are silently skipped."""
         from backtide.analysis import plot_rolling_returns
 
-        short = _StubRun("S1", [100.0, 101.0, 102.0])
+        short = _run_result("S1", [100.0, 101.0, 102.0])
         fig = plot_rolling_returns([short], window=30, display=None)
         # No traces, but a figure with the placeholder annotation.
         assert isinstance(fig, go.Figure)
@@ -818,13 +833,13 @@ class TestPlotCashHoldings:
     def test_single_currency_labels_strategy_and_axis(self):
         """Single-currency strategies use strategy names and currency in y label."""
         base = 1_700_000_000
-        run_a = _StubRun(
+        run_a = _run_result(
             "S1",
             [10_000.0, 9_000.0],
             orders=[_StubOrderRecord("AAPL", 10, base, fill_price=100.0)],
             base_currency="USD",
         )
-        run_b = _StubRun(
+        run_b = _run_result(
             "S2",
             [10_000.0, 9_500.0],
             orders=[_StubOrderRecord("AAPL", 5, base + 60, fill_price=100.0)],
@@ -838,7 +853,7 @@ class TestPlotCashHoldings:
 
     def test_multi_currency_groups_by_strategy(self):
         """Multi-currency strategies show currency labels under a strategy legend group."""
-        run = _StubRun(
+        run = _run_result(
             "Global",
             [10_000.0, 10_100.0],
             base_currency="USD",
@@ -863,7 +878,7 @@ class TestPlotRollingSharpe:
 
         rng = np.random.default_rng(0)
         equity = list(np.cumprod(1 + rng.normal(0.001, 0.01, 200)) * 1_000)
-        run = _StubRun("S1", equity)
+        run = _run_result("S1", equity)
         fig = plot_rolling_sharpe([run], window=30, display=None)
         assert isinstance(fig, go.Figure)
         assert len(fig.data) == 1
@@ -922,7 +937,7 @@ class TestPlotTradeDuration:
         """Produces a blank figure when the run has no trades."""
         from backtide.analysis import plot_trade_duration
 
-        empty = _StubRun("Empty", [10_000.0])
+        empty = _run_result("Empty", [10_000.0])
         fig = plot_trade_duration([empty], display=None)
         assert isinstance(fig, go.Figure)
         assert len(fig.data) == 0
@@ -946,7 +961,7 @@ class TestPlotPositionSize:
         """Returns a blank figure when the run has no filled orders."""
         from backtide.analysis import plot_position_size
 
-        run = _StubRun("Empty", [10_000.0])
+        run = _run_result("Empty", [10_000.0])
         fig = plot_position_size(run, display=None)
         assert isinstance(fig, go.Figure)
         # No trace traces, just the y=0 reference line annotation/shape.
@@ -984,7 +999,7 @@ class TestPlotMaeMfe:
         """Returns an empty figure when the run has no trades."""
         from backtide.analysis import plot_mae_mfe
 
-        empty = _StubRun("Empty", [10_000.0])
+        empty = _run_result("Empty", [10_000.0])
         fig = plot_mae_mfe(empty, display=None)
         assert isinstance(fig, go.Figure)
 

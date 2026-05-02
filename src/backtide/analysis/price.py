@@ -261,7 +261,7 @@ def plot_price(
 
     if run:
 
-        def _hover_data(sym: str, px: float, qty: int, pnl: float) -> tuple[str, str, str, str]:
+        def _hover_data(sym: str, px: float, qty: float, pnl: float) -> tuple[str, str, str, str]:
             """Convert the data for the hovertemplate to nicely formatted strings."""
             return (
                 _format_price(px, currency=ccy),

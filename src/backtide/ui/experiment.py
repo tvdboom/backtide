@@ -403,7 +403,8 @@ with tab2:
         default=_default(key, exp.data.instrument_type),
         format_func=lambda x: f"{x.icon()} {x}",
         on_change=lambda k=key: (
-            _clear_state("symbols", "currency", "benchmark"),
+            _clear_state("symbols", default=[]),
+            _clear_state("currency", "benchmark"),
             _persist(k),
         ),
         help="Select the type of financial instrument you want to backtest.",
@@ -468,7 +469,8 @@ with tab2:
         key=(key := "use_storage"),
         value=_default(key, fallback=False),
         on_change=lambda k=key: (  # ty: ignore[invalid-argument-type]
-            _clear_state("symbols", "currency", "start_date", "end_date"),
+            _clear_state("symbols", default=[]),
+            _clear_state("currency", "start_date", "end_date"),
             _persist(k),
         ),
         help=(
@@ -604,7 +606,7 @@ with tab2:
                 full_history=full_history,
                 start_ts=start_ts,
                 end_ts=end_ts,
-                estimate_rows=False,
+                estimate_rows=not use_storage,
             )
             st.html(_CARD_CSS + html)
 
@@ -653,20 +655,31 @@ with tab3:
         )
 
         if direct:
+            is_crypto = instrument_type == InstrumentType.Crypto
             positions = st.data_editor(
                 data=[
-                    {"Symbol": p.symbol, "Quantity": _default("starting_pos", {}).get(p.symbol, 0)}
+                    {
+                        "Symbol": p.symbol,
+                        "Quantity": float(_default("starting_pos", {}).get(p.symbol, 0.0)),
+                    }
                     for p in direct
                 ],
                 num_rows="fixed",
                 hide_index=True,
                 column_config={
                     "Symbol": st.column_config.TextColumn(width="medium", disabled=True),
-                    "Quantity": st.column_config.NumberColumn(min_value=0),
+                    "Quantity": st.column_config.NumberColumn(
+                        min_value=0.0,
+                        step=None if is_crypto else 1,
+                        format="%.6f" if is_crypto else "%d",
+                    ),
                 },
             )
 
-            st.session_state["_starting_pos"] = {r["Symbol"]: r["Quantity"] for r in positions}
+            st.session_state["_starting_pos"] = {
+                r["Symbol"]: (float(r["Quantity"]) if is_crypto else int(r["Quantity"]))
+                for r in positions
+            }
         else:
             st.caption("No symbols selected.")
 
@@ -1232,6 +1245,22 @@ st.divider()
 
 running_experiment = st.session_state.get("running_experiment", False)
 can_run = profiles and start_ts and latest_ts and not err_benchmark and selected_strats
+
+if not running_experiment and not can_run:
+    missing = []
+    if not symbols:
+        missing.append("select at least one **symbol**")
+    if not selected_strats:
+        missing.append("select at least one **strategy**")
+    if err_benchmark:
+        missing.append("fix the **benchmark** symbol error")
+    if not start_ts or not latest_ts:
+        missing.append("configure a valid **date range**")
+    if missing:
+        st.info(
+            "To run the experiment, " + ", ".join(missing) + ".",
+            icon=":material/info:",
+        )
 
 button_slot = st.empty()
 if button_slot.button(

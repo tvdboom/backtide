@@ -16,9 +16,10 @@ use std::collections::HashMap;
 ///     Cash balances keyed by currency. Each value is the amount held
 ///     in that currency.
 ///
-/// positions : dict[str, int]
+/// positions : dict[str, float]
 ///     Open positions keyed by ticker symbol. Positive values are long
-///     positions, negative values are short positions.
+///     positions, negative values are short positions. Fractional values
+///     are supported (e.g. 0.0234 BTC).
 ///
 /// orders : list[[Order]]
 ///     Currently open (unfilled) orders.
@@ -34,7 +35,7 @@ pub struct Portfolio {
     /// Cash balances keyed by currency.
     pub cash: HashMap<Currency, f64>,
     /// Open positions keyed by ticker symbol.
-    pub positions: HashMap<String, i64>,
+    pub positions: HashMap<String, f64>,
     /// Currently open (unfilled) orders.
     pub orders: Vec<Order>,
 }
@@ -59,12 +60,12 @@ impl Portfolio {
     #[new]
     #[pyo3(signature = (
         cash: "dict[str | Currency, float]" = HashMap::from([(Currency::default(), 0.0)]),
-        positions: "dict[str, int]" = HashMap::new(),
+        positions: "dict[str, float]" = HashMap::new(),
         orders: "list[Order]" = vec![],
     ))]
     fn new(
         cash: HashMap<Currency, f64>,
-        positions: HashMap<String, i64>,
+        positions: HashMap<String, f64>,
         orders: Vec<Order>,
     ) -> Self {
         Self {

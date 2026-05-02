@@ -14,6 +14,7 @@ import plotly.graph_objects as go
 
 from backtide.analysis.utils import GREEN, RED, REFERENCE_LINE, _plot, _resolve_runs_currency
 from backtide.config import get_config
+from backtide.core.data import Interval
 from backtide.storage import query_bars
 from backtide.utils.utils import _format_price, _moment_to_strftime
 
@@ -135,7 +136,10 @@ def plot_mae_mfe(
     fig = go.Figure()
     ccy = _resolve_runs_currency([run])
 
-    dt_fmt = _moment_to_strftime(cfg.display.datetime_format())
+    if Interval(interval).is_intraday():
+        dt_fmt = _moment_to_strftime(cfg.display.datetime_format())
+    else:
+        dt_fmt = _moment_to_strftime(cfg.display.date_format)
 
     win_mae, win_mfe, win_text = [], [], []
     loss_mae, loss_mfe, loss_text = [], [], []
@@ -179,18 +183,6 @@ def plot_mae_mfe(
             loss_mfe.append(mfe)
             loss_text.append(label)
 
-    max_axis = max(win_mae + win_mfe + loss_mae + loss_mfe + [1.0])
-    fig.add_trace(
-        go.Scatter(
-            x=[0, max_axis],
-            y=[0, max_axis],
-            mode="lines",
-            line=REFERENCE_LINE,
-            hoverinfo="skip",
-            showlegend=False,
-        )
-    )
-
     if win_mae:
         fig.add_trace(
             go.Scatter(
@@ -217,6 +209,21 @@ def plot_mae_mfe(
                 hovertemplate="%{customdata}<extra></extra>",
                 showlegend=False,
             )
+        )
+
+    # Add a diagonal line
+    all_mae = [*win_mae, *loss_mae]
+    all_mfe = [*win_mfe, *loss_mfe]
+    if all_mae and all_mfe:
+        lo = min(min(all_mae), min(all_mfe))
+        hi = max(max(all_mae), max(all_mfe))
+        fig.add_shape(
+            type="line",
+            x0=lo,
+            y0=lo,
+            x1=hi,
+            y1=hi,
+            line=REFERENCE_LINE,
         )
 
     return _plot(

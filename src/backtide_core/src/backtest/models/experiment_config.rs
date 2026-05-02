@@ -205,8 +205,9 @@ impl DataExpConfig {
 /// base_currency : str | [Currency], default="USD"
 ///     ISO 4217 code the portfolio is denominated in.
 ///
-/// starting_positions : dict[str, int], default={}
-///     Pre-loaded positions `{symbol: quantity}`.
+/// starting_positions : dict[str, float], default={}
+///     Pre-loaded positions `{symbol: quantity}`. Fractional values are
+///     accepted for crypto-style instruments.
 ///
 /// See Also
 /// --------
@@ -219,7 +220,7 @@ pub struct PortfolioExpConfig {
     pub initial_cash: u64,
     pub base_currency: Currency,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub starting_positions: HashMap<String, i64>,
+    pub starting_positions: HashMap<String, f64>,
 }
 
 impl Default for PortfolioExpConfig {
@@ -241,12 +242,12 @@ impl PortfolioExpConfig {
     #[pyo3(signature = (
         initial_cash: "float" = 10_000,
         base_currency: "str | Currency" = Currency::default(),
-        starting_positions: "dict[str, int]" = HashMap::new(),
+        starting_positions: "dict[str, float]" = HashMap::new(),
     ))]
     fn new(
         initial_cash: u64,
         base_currency: Currency,
-        starting_positions: HashMap<String, i64>,
+        starting_positions: HashMap<String, f64>,
     ) -> Self {
         Self {
             initial_cash,

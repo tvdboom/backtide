@@ -26,8 +26,9 @@ if TYPE_CHECKING:
 
 cfg = get_config()
 
-GREEN = "#26A69A"
-RED = "#EF5350"
+GREEN = "rgb(38, 166, 154)"
+YELLOW = "rgb(241, 196, 15)"
+RED = "rgb(239, 83, 80)"
 
 # Gray dashed style used to render the auto-injected benchmark.
 BENCHMARK_LINE = {

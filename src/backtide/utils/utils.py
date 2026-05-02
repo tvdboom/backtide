@@ -82,7 +82,7 @@ def _format_number(n: float) -> str:
     elif abs(n) >= 1_000:
         return f"{n / 1_000:.1f}k"
     else:
-        return str(n)
+        return f"{n:.0f}"
 
 
 def _format_price(

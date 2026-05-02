@@ -113,8 +113,8 @@ fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
     if price <= 0.0 || target_cash <= 0.0 {
         return None;
     }
-    let qty = (target_cash / price).floor() as i64;
-    if qty <= 0 {
+    let qty = target_cash / price;
+    if qty <= 0.0 {
         return None;
     }
     Some(Order {
@@ -128,8 +128,8 @@ fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
 }
 
 /// Build a market sell order to flatten an existing long position.
-fn sell_order(symbol: &str, quantity: i64) -> Option<Order> {
-    if quantity <= 0 {
+fn sell_order(symbol: &str, quantity: f64) -> Option<Order> {
+    if quantity <= 0.0 {
         return None;
     }
     Some(Order {
@@ -147,23 +147,38 @@ fn portfolio_cash(portfolio: &Portfolio) -> f64 {
     portfolio.cash.values().sum()
 }
 
+/// Total portfolio equity: cash + positions marked to their latest close.
+fn portfolio_equity(portfolio: &Portfolio, closes: &[(String, &[f64])]) -> f64 {
+    let mut equity = portfolio_cash(portfolio);
+    for (sym, c) in closes {
+        let qty = portfolio.positions.get(sym.as_str()).copied().unwrap_or(0.0);
+        if qty.abs() > 1e-12 {
+            let last = *c.last().unwrap_or(&0.0);
+            equity += qty * last;
+        }
+    }
+    equity
+}
+
 /// Generic single-asset signal: place a buy when `signal == true` and
 /// the position is flat, place a sell when `signal == false` and we are
-/// long.
+/// long. `target_notional` is the desired position size (in cash terms),
+/// capped at available cash to avoid over-allocation.
 fn react_to_signal(
     symbol: &str,
     signal_long: bool,
     last_price: f64,
     portfolio: &Portfolio,
-    target_alloc: f64,
+    target_notional: f64,
 ) -> Vec<Order> {
-    let cur = portfolio.positions.get(symbol).copied().unwrap_or(0);
-    if signal_long && cur <= 0 {
+    let cur = portfolio.positions.get(symbol).copied().unwrap_or(0.0);
+    if signal_long && cur <= 0.0 {
         let cash = portfolio_cash(portfolio);
-        if let Some(o) = buy_order(symbol, cash * target_alloc, last_price) {
+        let alloc = target_notional.min(cash);
+        if let Some(o) = buy_order(symbol, alloc, last_price) {
             return vec![o];
         }
-    } else if !signal_long && cur > 0 {
+    } else if !signal_long && cur > 0.0 {
         if let Some(o) = sell_order(symbol, cur) {
             return vec![o];
         }
@@ -224,7 +239,7 @@ fn rotation_orders(
 
     // Close positions not in target.
     for (sym, qty) in &portfolio.positions {
-        if *qty > 0 && !target.contains(sym) {
+        if *qty > 0.0 && !target.contains(sym) {
             if let Some(o) = sell_order(sym, *qty) {
                 orders.push(o);
             }
@@ -236,8 +251,8 @@ fn rotation_orders(
         let cash = portfolio_cash(portfolio);
         let per = cash / target.len() as f64;
         for sym in &target {
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
-            if cur > 0 {
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            if cur > 0.0 {
                 continue;
             }
             if let Some(px) = last_prices.get(sym).copied() {
@@ -414,12 +429,12 @@ impl Strategy for AdaptiveRsi {
                 None => continue,
             };
             let last = *c.last().unwrap_or(&0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
-            if r < 30.0 && cur <= 0 {
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            if r < 30.0 && cur <= 0.0 {
                 if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
                     orders.push(o);
                 }
-            } else if r > 70.0 && cur > 0 {
+            } else if r > 70.0 && cur > 0.0 {
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);
                 }
@@ -527,12 +542,12 @@ impl Strategy for AlphaRsiPro {
             let oversold = (30.0 + shift).clamp(15.0, 50.0);
             let overbought = (70.0 + shift).clamp(50.0, 85.0);
 
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
-            if r < oversold && cur <= 0 {
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            if r < oversold && cur <= 0.0 {
                 if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
                     orders.push(o);
                 }
-            } else if r > overbought && cur > 0 {
+            } else if r > overbought && cur > 0.0 {
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);
                 }
@@ -629,12 +644,12 @@ impl Strategy for BollingerMeanReversion {
                 continue;
             }
             let last = *c.last().unwrap_or(&0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
-            if last < lower && cur <= 0 {
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            if last < lower && cur <= 0.0 {
                 if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
                     orders.push(o);
                 }
-            } else if last > upper && cur > 0 {
+            } else if last > upper && cur > 0.0 {
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);
                 }
@@ -721,8 +736,8 @@ impl Strategy for BuyAndHold {
         // symbol that doesn't have any data yet).
         if let Some(target) = &self.symbol {
             // Skip once anything is held *or* still pending fill.
-            let has_position = portfolio.positions.values().any(|q| *q > 0);
-            let has_pending_buy = portfolio.orders.iter().any(|o| o.quantity > 0);
+            let has_position = portfolio.positions.values().any(|q| *q > 0.0);
+            let has_pending_buy = portfolio.orders.iter().any(|o| o.quantity > 0.0);
             if has_position || has_pending_buy {
                 return Vec::new();
             }
@@ -751,9 +766,9 @@ impl Strategy for BuyAndHold {
         let mut needs_entry: Vec<(&str, f64)> = Vec::new();
         let mut already_entered = 0usize;
         for (sym, c) in closes {
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
-            let pending = portfolio.orders.iter().any(|o| &o.symbol == sym && o.quantity > 0);
-            if cur > 0 || pending {
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let pending = portfolio.orders.iter().any(|o| &o.symbol == sym && o.quantity > 0.0);
+            if cur > 0.0 || pending {
                 already_entered += 1;
                 continue;
             }
@@ -867,13 +882,13 @@ impl Strategy for DoubleTop {
             let level_match = resistance > 0.0 && (p1.1 - p2.1).abs() / resistance < 0.03;
 
             let last = *c.last().unwrap_or(&0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
 
-            if level_match && last > resistance && cur <= 0 {
+            if level_match && last > resistance && cur <= 0.0 {
                 if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
                     orders.push(o);
                 }
-            } else if cur > 0 && last < neckline {
+            } else if cur > 0.0 && last < neckline {
                 // Pattern invalidated: bail out.
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);
@@ -1000,12 +1015,12 @@ impl Strategy for HybridAlphaRsi {
             let mean = recent.iter().sum::<f64>() / recent.len() as f64;
             let in_uptrend = last > mean;
 
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
-            if r < oversold && in_uptrend && cur <= 0 {
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            if r < oversold && in_uptrend && cur <= 0.0 {
                 if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
                     orders.push(o);
                 }
-            } else if (r > overbought || !in_uptrend) && cur > 0 {
+            } else if (r > overbought || !in_uptrend) && cur > 0.0 {
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);
                 }
@@ -1105,6 +1120,7 @@ impl Strategy for Macd {
             &[fmt_arg(self.fast_period), fmt_arg(self.slow_period), fmt_arg(self.signal_period)],
         );
         let n = closes.len().max(1) as f64;
+        let target = portfolio_equity(portfolio, closes) / n;
         let mut orders = Vec::new();
         for (sym, c) in closes {
             let parts = match indicators.last(&macd_name, sym) {
@@ -1116,7 +1132,7 @@ impl Strategy for Macd {
                 continue;
             }
             let last = *c.last().unwrap_or(&0.0);
-            orders.extend(react_to_signal(sym, macd > signal, last, portfolio, 1.0 / n));
+            orders.extend(react_to_signal(sym, macd > signal, last, portfolio, target));
         }
         orders
     }
@@ -1206,6 +1222,7 @@ impl Strategy for Momentum {
         // confirmation is a pure price comparison (no indicator required).
         let sma_name = auto_indicator_name("SMA", &[fmt_arg(self.ma_period)]);
         let n = closes.len().max(1) as f64;
+        let target = portfolio_equity(portfolio, closes) / n;
         let mut orders = Vec::new();
         for (sym, c) in closes {
             if c.len() <= self.period {
@@ -1223,7 +1240,7 @@ impl Strategy for Momentum {
                 positive_momentum && last > ma,
                 last,
                 portfolio,
-                1.0 / n,
+                target,
             ));
         }
         orders
@@ -1440,12 +1457,12 @@ impl Strategy for RiskAverse {
             };
             let low_vol = atr.is_finite() && atr / last < 0.04;
 
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
-            if low_vol && last >= high && cur <= 0 {
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            if low_vol && last >= high && cur <= 0.0 {
                 if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
                     orders.push(o);
                 }
-            } else if cur > 0 && last <= low {
+            } else if cur > 0.0 && last <= low {
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);
                 }
@@ -1522,6 +1539,7 @@ impl Strategy for Roc {
     ) -> Vec<Order> {
         // ROC is just a price-change ratio; not an indicator we precompute.
         let n = closes.len().max(1) as f64;
+        let target = portfolio_equity(portfolio, closes) / n;
         let mut orders = Vec::new();
         for (sym, c) in closes {
             if c.len() <= self.period {
@@ -1533,7 +1551,7 @@ impl Strategy for Roc {
             }
             let last = *c.last().unwrap_or(&0.0);
             let roc = (last - prev) / prev * 100.0;
-            orders.extend(react_to_signal(sym, roc > 5.0, last, portfolio, 1.0 / n));
+            orders.extend(react_to_signal(sym, roc > 5.0, last, portfolio, target));
         }
         orders
     }
@@ -1737,14 +1755,14 @@ impl Strategy for Rsi {
             };
             let (upper, lower) = (bb[0], bb[1]);
             let last = *c.last().unwrap_or(&0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             // Dual confirmation: oversold RSI + price at/below lower band.
-            if r < 30.0 && last <= lower && cur <= 0 {
+            if r < 30.0 && last <= lower && cur <= 0.0 {
                 let cash = portfolio_cash(portfolio);
                 if let Some(o) = buy_order(sym, cash / n, last) {
                     orders.push(o);
                 }
-            } else if (r > 70.0 || last >= upper) && cur > 0 {
+            } else if (r > 70.0 || last >= upper) && cur > 0.0 {
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);
                 }
@@ -1824,6 +1842,7 @@ impl Strategy for Rsrs {
         _state: &State,
     ) -> Vec<Order> {
         let n = closes.len().max(1) as f64;
+        let target = portfolio_equity(portfolio, closes) / n;
         let mut orders = Vec::new();
         for (sym, c) in closes {
             if c.len() < self.period {
@@ -1842,7 +1861,7 @@ impl Strategy for Rsrs {
             let last = *c.last().unwrap_or(&0.0);
             // ``> 0`` would whipsaw constantly; require a sustained ascent.
             let signal_long = strength > 0.001 && last > mean_y;
-            orders.extend(react_to_signal(sym, signal_long, last, portfolio, 1.0 / n));
+            orders.extend(react_to_signal(sym, signal_long, last, portfolio, target));
         }
         orders
     }
@@ -2025,6 +2044,7 @@ impl Strategy for SmaCrossover {
         let fast_name = auto_indicator_name("SMA", &[fmt_arg(self.fast_period)]);
         let slow_name = auto_indicator_name("SMA", &[fmt_arg(self.slow_period)]);
         let n = closes.len().max(1) as f64;
+        let target = portfolio_equity(portfolio, closes) / n;
         let mut orders = Vec::new();
         for (sym, c) in closes {
             let fast = match indicators.value(&fast_name, sym) {
@@ -2036,7 +2056,7 @@ impl Strategy for SmaCrossover {
                 None => continue,
             };
             let last = *c.last().unwrap_or(&0.0);
-            orders.extend(react_to_signal(sym, fast > slow, last, portfolio, 1.0 / n));
+            orders.extend(react_to_signal(sym, fast > slow, last, portfolio, target));
         }
         orders
     }
@@ -2113,6 +2133,7 @@ impl Strategy for SmaNaive {
     ) -> Vec<Order> {
         let name = auto_indicator_name("SMA", &[fmt_arg(self.period)]);
         let n = closes.len().max(1) as f64;
+        let target = portfolio_equity(portfolio, closes) / n;
         let mut orders = Vec::new();
         for (sym, c) in closes {
             let last = match c.last() {
@@ -2123,7 +2144,7 @@ impl Strategy for SmaNaive {
                 Some(v) => v,
                 None => continue,
             };
-            orders.extend(react_to_signal(sym, last > ma, last, portfolio, 1.0 / n));
+            orders.extend(react_to_signal(sym, last > ma, last, portfolio, target));
         }
         orders
     }
@@ -2365,12 +2386,12 @@ impl Strategy for TurtleTrading {
                 c[c.len() - self.entry_period..].iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             let exit_low =
                 c[c.len() - self.exit_period..].iter().cloned().fold(f64::INFINITY, f64::min);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
-            if last >= entry_high && cur <= 0 {
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            if last >= entry_high && cur <= 0.0 {
                 if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n_syms, last) {
                     orders.push(o);
                 }
-            } else if last <= exit_low && cur > 0 {
+            } else if last <= exit_low && cur > 0.0 {
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);
                 }
@@ -2486,13 +2507,13 @@ impl Strategy for Vcp {
             }
 
             let last = *c.last().unwrap_or(&0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0);
+            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
 
-            if last > ceiling && cur <= 0 {
+            if last > ceiling && cur <= 0.0 {
                 if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
                     orders.push(o);
                 }
-            } else if cur > 0 && last < ceiling * 0.92 {
+            } else if cur > 0.0 && last < ceiling * 0.92 {
                 // Stop-out 8% below the breakout ceiling.
                 if let Some(o) = sell_order(sym, cur) {
                     orders.push(o);

@@ -28,8 +28,10 @@ pub fn new_order_id() -> String {
 /// order_type : [OrderType]
 ///     The execution semantics (market, limit, stop-loss, etc.).
 ///
-/// quantity : int
+/// quantity : float
 ///     Signed quantity. Positive for buy orders, negative for sell orders.
+///     Floating-point so fractional units (e.g. 0.0234 BTC) are supported
+///     for crypto and other instruments with high unit prices.
 ///
 /// price : float | None
 ///     Primary price for the order. The exact meaning depends on
@@ -66,8 +68,9 @@ pub struct Order {
     pub symbol: String,
     /// The execution semantics.
     pub order_type: OrderType,
-    /// Signed quantity (positive = buy, negative = sell).
-    pub quantity: i64,
+    /// Signed quantity (positive = buy, negative = sell). Fractional values
+    /// allowed for crypto-style instruments.
+    pub quantity: f64,
     /// Primary price (limit / stop / trail amount).
     pub price: Option<f64>,
     /// Secondary limit price for `*Limit` stop-style orders.
@@ -92,8 +95,9 @@ impl Order {
     /// order_type : str | OrderType, default="market"
     ///     The execution semantics.
     ///
-    /// quantity : int, default=0
-    ///     Signed quantity (positive = buy, negative = sell).
+    /// quantity : float, default=0.0
+    ///     Signed quantity (positive = buy, negative = sell). Fractional
+    ///     values are accepted for crypto-style instruments.
     ///
     /// price : float | None, default=None
     ///     Primary price (limit, stop or trail amount depending on
@@ -112,7 +116,7 @@ impl Order {
     #[pyo3(signature = (
         symbol: "str" = "",
         order_type: "str | OrderType" = OrderType::default(),
-        quantity: "int" = 0,
+        quantity: "float" = 0.0,
         price: "float | None" = None,
         limit_price: "float | None" = None,
         id: "str | None" = None,
@@ -120,7 +124,7 @@ impl Order {
     fn new(
         symbol: &str,
         order_type: OrderType,
-        quantity: i64,
+        quantity: f64,
         price: Option<f64>,
         limit_price: Option<f64>,
         id: Option<String>,

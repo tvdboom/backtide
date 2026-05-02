@@ -126,11 +126,20 @@ _SUMMARY_CSS = """
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _clear_state(*keys: str):
-    """Drop both the live and shadow value for *keys* from Streamlit's state."""
+def _clear_state(*keys: str, default: Any = None):
+    """Reset both the live and shadow value for `keys` in Streamlit's state.
+
+    Sets the live key to `default` (rather than only popping it) so that
+    keyed widgets whose internal value would otherwise survive a rerun
+    are properly reset on the next render cycle.
+
+    """
     for k in keys:
-        st.session_state.pop(k, None)
         st.session_state.pop(f"_{k}", None)
+        if default is not None:
+            st.session_state[k] = default
+        else:
+            st.session_state.pop(k, None)
 
 
 def _default(key: str, fallback: Any = None) -> Any:

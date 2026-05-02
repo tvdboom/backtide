@@ -63,8 +63,9 @@ impl EquitySample {
 /// symbol : str
 ///     The traded instrument's symbol.
 ///
-/// quantity : int
+/// quantity : float
 ///     Signed quantity. Positive = long round trip, negative = short.
+///     Floating-point so fractional units are tracked exactly for crypto.
 ///
 /// entry_ts : int
 ///     Open timestamp (seconds since the Unix epoch).
@@ -90,7 +91,7 @@ impl EquitySample {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Trade {
     pub symbol: String,
-    pub quantity: i64,
+    pub quantity: f64,
     pub entry_ts: i64,
     pub exit_ts: i64,
     pub entry_price: f64,

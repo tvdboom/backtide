@@ -2386,8 +2386,10 @@ class Order:
     order_type : [OrderType]
         The execution semantics (market, limit, stop-loss, etc.).
 
-    quantity : int
+    quantity : float
         Signed quantity. Positive for buy orders, negative for sell orders.
+        Floating-point so fractional units (e.g. 0.0234 BTC) are supported
+        for crypto and other instruments with high unit prices.
 
     price : float | None
         Primary price for the order. The exact meaning depends on
@@ -2422,7 +2424,7 @@ class Order:
     limit_price: float | None
     order_type: OrderType
     price: float | None
-    quantity: int
+    quantity: float
     symbol: str
 
     def __eq__(self, value, /):
@@ -2619,9 +2621,10 @@ class Portfolio:
         Cash balances keyed by currency. Each value is the amount held
         in that currency.
 
-    positions : dict[str, int]
+    positions : dict[str, float]
         Open positions keyed by ticker symbol. Positive values are long
-        positions, negative values are short positions.
+        positions, negative values are short positions. Fractional values
+        are supported (e.g. 0.0234 BTC).
 
     orders : list[[Order]]
         Currently open (unfilled) orders.
@@ -2636,7 +2639,7 @@ class Portfolio:
 
     cash: dict[Currency, float]
     orders: list[Order]
-    positions: dict[str, int]
+    positions: dict[str, float]
 
     def __eq__(self, value, /):
         ...
@@ -2672,8 +2675,9 @@ class PortfolioExpConfig:
     base_currency : str | [Currency], default="USD"
         ISO 4217 code the portfolio is denominated in.
 
-    starting_positions : dict[str, int], default={}
-        Pre-loaded positions `{symbol: quantity}`.
+    starting_positions : dict[str, float], default={}
+        Pre-loaded positions `{symbol: quantity}`. Fractional values are
+        accepted for crypto-style instruments.
 
     See Also
     --------
@@ -2685,7 +2689,7 @@ class PortfolioExpConfig:
 
     base_currency: str | Currency
     initial_cash: int
-    starting_positions: dict[str, int]
+    starting_positions: dict[str, float]
 
     def __eq__(self, value, /):
         ...
@@ -3880,8 +3884,9 @@ class Trade:
     symbol : str
         The traded instrument's symbol.
 
-    quantity : int
+    quantity : float
         Signed quantity. Positive = long round trip, negative = short.
+        Floating-point so fractional units are tracked exactly for crypto.
 
     entry_ts : int
         Open timestamp (seconds since the Unix epoch).
@@ -3911,7 +3916,7 @@ class Trade:
     exit_price: float
     exit_ts: int
     pnl: float
-    quantity: int
+    quantity: float
     symbol: str
 
     def __eq__(self, value, /):

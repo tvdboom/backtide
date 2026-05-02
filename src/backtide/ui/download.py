@@ -50,7 +50,11 @@ instrument_type = st.segmented_control(  # ty: ignore[no-matching-overload]
     options=InstrumentType.variants(),
     default=_default(key, InstrumentType.get_default()),
     format_func=lambda x: f"{x.icon()} {x}",
-    on_change=lambda k=key: (_clear_state("symbols", "currency"), _persist(k)),
+    on_change=lambda k=key: (
+        _clear_state("symbols", default=[]),
+        _clear_state("currency"),
+        _persist(k),
+    ),
     help="Select the type of financial instrument you want to download.",
 )
 

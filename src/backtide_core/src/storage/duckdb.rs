@@ -123,7 +123,7 @@ impl Storage for DuckDb {
                 ts                BIGINT NOT NULL,
                 symbol            VARCHAR NOT NULL,
                 order_type        VARCHAR NOT NULL,
-                quantity          BIGINT NOT NULL,
+                quantity          DOUBLE NOT NULL,
                 price             DOUBLE,
                 limit_price       DOUBLE,
                 status            VARCHAR NOT NULL,
@@ -137,7 +137,7 @@ impl Storage for DuckDb {
             CREATE TABLE IF NOT EXISTS experiment_trades (
                 run_id            VARCHAR NOT NULL,
                 symbol            VARCHAR NOT NULL,
-                quantity          BIGINT NOT NULL,
+                quantity          DOUBLE NOT NULL,
                 entry_ts          BIGINT NOT NULL,
                 exit_ts           BIGINT NOT NULL,
                 entry_price       DOUBLE NOT NULL,

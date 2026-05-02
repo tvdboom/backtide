@@ -47,6 +47,10 @@ impl ConversionPeriod {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown conversion period: {s}")))
     }
 
+    fn __repr__(&self) -> String {
+        self.to_string().to_lowercase()
+    }
+
     pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
         let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))

@@ -24,7 +24,7 @@ from backtide.analysis import (
     plot_trade_duration,
     plot_trade_pnl,
 )
-from backtide.analysis.utils import _is_benchmark
+from backtide.analysis.utils import GREEN, RED, YELLOW, _is_benchmark
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
 from backtide.storage import (
@@ -56,9 +56,9 @@ datetime_fmt = _moment_to_strftime(cfg.display.datetime_format())
 st.set_page_config(page_title="Backtide - Results")
 
 st.markdown(
-    """
+    f"""
     <style>
-        .tag-pill {
+        .tag-pill {{
             display: inline-block;
             padding: 2px 10px;
             margin: 0 4px 4px 0;
@@ -69,22 +69,22 @@ st.markdown(
             font-size: 0.75em;
             font-weight: 500;
             line-height: 1.4;
-        }
+        }}
 
         /* Compact metrics */
-        [data-testid="stMetricLabel"] {
+        [data-testid="stMetricLabel"] {{
             font-size: 0.82em;
-        }
-        [data-testid="stMetricValue"] {
+        }}
+        [data-testid="stMetricValue"] {{
             font-size: 1.3em;
-        }
+        }}
 
-        div[data-testid="stPopoverBody"]:has(.wide-marker) {
+        div[data-testid="stPopoverBody"]:has(.wide-marker) {{
             width: 50vw !important;
             max-width: 50vw !important;
-        }
+        }}
 
-        .status-badge {
+        .status-badge {{
             display: inline-block;
             width: 12px;
             height: 12px;
@@ -93,41 +93,41 @@ st.markdown(
             position: relative;
             top: -0.1em;
             margin-left: 4px;
-        }
-        .status-badge.success { background: #2ecc71; }
-        .status-badge.warning { background: #f1c40f; }
-        .status-badge.error   { background: #e74c3c; }
+        }}
+        .status-badge.success {{ background: {GREEN}; }}
+        .status-badge.warning {{ background: {YELLOW}; }}
+        .status-badge.error   {{ background: {RED}; }}
 
         /* Tighten dividers inside cards */
-        hr {
+        hr {{
             margin: 0.25rem 0 0.85rem 0 !important;
-        }
+        }}
 
         /* Full-results page experiment title */
-        .experiment-title {
+        .experiment-title {{
             margin-top: 20px;
             text-align: center;
             font-size: 2.2em;
             font-weight: 700;
-        }
+        }}
 
         /* Center the strategy segmented-control on the full-results page.
            Aggressive: shrink every nested wrapper to its content width and
            auto-margin it, so the button row ends up centered no matter
            what BaseWeb/Streamlit re-renders the control as. */
         .st-key-strategy_picker,
-        .st-key-strategy_picker [data-testid="stVerticalBlock"] {
+        .st-key-strategy_picker [data-testid="stVerticalBlock"] {{
             align-items: center !important;
-        }
+        }}
         .st-key-strategy_picker [data-testid="stElementContainer"],
         .st-key-strategy_picker [data-testid="stSegmentedControl"],
-        .st-key-strategy_picker [data-baseweb="button-group"] {
+        .st-key-strategy_picker [data-baseweb="button-group"] {{
             width: fit-content !important;
             max-width: 100% !important;
             margin-left: auto !important;
             margin-right: auto !important;
             flex: 0 0 auto !important;
-        }
+        }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -177,13 +177,13 @@ def _render_run_metrics(run: RunResult):
         if not run.equity_curve and not run.trades:
             return
 
-    mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([0.8, 0.8, 0.9, 0.9, 0.9, 0.9, 1.2])
+    mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns([0.8, 0.9, 0.9, 0.9, 0.9, 0.9, 1.2])
 
     sharpe = run.metrics["sharpe"]
     pnl = run.metrics["pnl"]
     total_return = run.metrics["total_return"]
     cagr = run.metrics["cagr"]
-    alpha = run.metrics["alpha"]
+    alpha = run.metrics.get("alpha")
     max_dd = run.metrics["max_dd"]
     n_trades = int(run.metrics["n_trades"])
     win_rate = run.metrics["win_rate"]
@@ -215,7 +215,7 @@ def _render_run_metrics(run: RunResult):
     _colored_metric(
         mc5,
         ":material/compare_arrows: Alpha",
-        "--" if _is_benchmark(run) else _fmt_pct(alpha, signed=True),
+        "--" if _is_benchmark(run) or alpha is None else _fmt_pct(alpha, signed=True),
         _tone(alpha),
     )
     _colored_metric(
@@ -227,9 +227,9 @@ def _render_run_metrics(run: RunResult):
 
     wr_pct = _fmt_metric(win_rate * 100, suffix="%")
     if win_rate > 0.5:
-        wr_str = f":green[{wr_pct}]"
+        wr_str = f":color[{wr_pct}]{{foreground='{GREEN}'}}"
     elif win_rate < 0.5:
-        wr_str = f":red[{wr_pct}]"
+        wr_str = f":color[{wr_pct}]{{foreground='{RED}'}}"
     else:
         wr_str = wr_pct
     _colored_metric(mc7, ":material/swap_vert: Trades (w/r)", f"{n_trades} ({wr_str})")
@@ -544,10 +544,11 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
             with c2.popover(":material/tune:"):
                 traded = sorted({t.symbol for t in run.trades})
                 mae_mfe_symbols = st.multiselect(
-                    "Symbols",
+                    label="Symbols",
+                    key=(key := f"mae_mfe_symbols_{run.strategy_name}"),
                     options=traded,
                     default=traded,
-                    key=(key := f"mae_mfe_symbols_{run.strategy_name}"),
+                    placeholder="Choose symbols...",
                     on_change=lambda k=key: _persist(k),
                     help="Select which symbols to show in the plot.",
                 )
@@ -564,20 +565,22 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
             c1, c2 = st.columns([10, 1])
             c1.caption("Position size evolution through time.")
             with c2.popover(":material/tune:"):
-                filled_orders = [o for o in run.orders if o.status == "filled"]
-                traded = sorted({o.order.symbol for o in filled_orders})
-                position_size_symbols = st.multiselect(
-                    "Symbols",
-                    options=traded,
-                    default=traded,
+                options = sorted({o.order.symbol for o in run.orders if o.status == "filled"})
+                symbols = st.multiselect(
+                    label="Symbols",
                     key=(key := f"position_size_symbols_{run.strategy_name}"),
+                    options=options,
+                    default=options,
+                    placeholder="Choose symbols...",
                     on_change=lambda k=key: _persist(k),
                     help="Select which symbols to show in the plot.",
                 )
-                position_size_symbols = position_size_symbols or traded
 
             with st.spinner("Loading plot..."):
-                st.plotly_chart(plot_position_size(run, symbols=position_size_symbols, display=None), width="stretch")
+                st.plotly_chart(
+                    plot_position_size(run, symbols=symbols or options, display=None),
+                    width="stretch",
+                )
 
     with label_to_tab[labels[2]]:
         if active_tab == labels[2]:
@@ -598,7 +601,7 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
                     )
 
                 if len(df := query_bars(symbol=symbol, interval=interval)) == 0:
-                    st.info(f"No price data available for {sym}.")
+                    st.info(f"No price data available for **{symbol}**.")
                 else:
                     with st.spinner("Loading plot..."):
                         st.plotly_chart(
@@ -823,10 +826,10 @@ def _render_full_analysis(row: pd.Series):
         selected_strategy = st.segmented_control(
             label="Strategies",
             label_visibility="collapsed",
-            key=(key := "selected_strategy"),
+            key=(key := f"selected_strategy_{exp_id}"),
             required=True,
             options=(options := [run.strategy_name for run in runs]),
-            default=_default(key, options[1]),
+            default=_default(key, next(r for r in options if r != BENCHMARK_NAME)),
             format_func=lambda x: (
                 f":material/{'bar_chart' if x == BENCHMARK_NAME else 'psychology'}: **{x}**"
             ),
@@ -849,6 +852,7 @@ def _render_full_analysis(row: pd.Series):
 
     if not run.orders:
         st.warning("The strategy didn't execute any orders.", icon=":material/warning:")
+        st.stop()
 
     # Map every traded symbol to the currency it actually settled in.
     symbol_to_ccy, symbol_to_it = {}, {}
@@ -903,9 +907,9 @@ def _render_full_analysis(row: pd.Series):
 
     def _color_side(val: str) -> str:
         if val == "Buy":
-            return "color: #2ecc71; font-weight: 600;"
+            return f"color: {GREEN}; font-weight: 600;"
         if val == "Sell":
-            return "color: #e74c3c; font-weight: 600;"
+            return f"color: {RED}; font-weight: 600;"
         return ""
 
     def _color_pnl(val: str | None) -> str:
@@ -914,7 +918,7 @@ def _render_full_analysis(row: pd.Series):
         s = val.replace(",", "")
         if not any(ch.isdigit() for ch in s):
             return ""
-        return "color: #e74c3c;" if "-" in s else "color: #2ecc71;"
+        return f"color: {RED};" if "-" in s else f"color: {GREEN};"
 
     st.dataframe(
         df.style.map(_color_side, subset=["Side"]).map(_color_pnl, subset=["PnL"]),

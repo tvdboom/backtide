@@ -616,6 +616,21 @@ impl Engine {
             if let Some(err) = &r.error {
                 warn!(strategy = %r.strategy_name, "Strategy failed: {err}");
                 warnings.push(format!("Strategy {:?} failed: {}", r.strategy_name, err));
+            } else if r.orders.is_empty() {
+                // No error, no orders — most often happens when the initial
+                // cash is too low to afford a single whole unit of the
+                // configured symbol(s). Quantities are tracked as integers,
+                // so e.g. a $10k portfolio buying a $60k BTC benchmark
+                // would round to 0 shares and never trade. Surface this
+                // explicitly so it doesn't look like a silent failure.
+                let msg = format!(
+                    "Strategy {:?} placed no orders. The initial cash may be too low \
+                     to afford a single whole unit of the targeted symbol(s) \
+                     (quantities are integer). Consider increasing initial_cash.",
+                    r.strategy_name
+                );
+                warn!(strategy = %r.strategy_name, "{msg}");
+                warnings.push(msg);
             }
         }
         let status = if n_failed == 0 {
@@ -1072,7 +1087,7 @@ fn run_one_strategy(
     let base_ccy = cfg.portfolio.base_currency;
     let mut cash: HashMap<Currency, f64> = HashMap::new();
     cash.insert(base_ccy, cfg.portfolio.initial_cash as f64);
-    let mut positions: HashMap<String, i64> = cfg.portfolio.starting_positions.clone();
+    let mut positions: HashMap<String, f64> = cfg.portfolio.starting_positions.clone();
     let mut open_orders: Vec<Order> = Vec::new();
     // Per-order extremes for trailing stops: (running_high, running_low)
     // observed since the order was first seen. Cleared on fill / cancel.
@@ -1082,7 +1097,7 @@ fn run_one_strategy(
     let mut order_records: Vec<OrderRecord> = Vec::new();
     let mut closed_trades: Vec<Trade> = Vec::new();
     // Open trade tracker per symbol: (entry_ts, qty_remaining, entry_price)
-    let mut open_trades: HashMap<String, (i64, i64, f64)> = HashMap::new();
+    let mut open_trades: HashMap<String, (i64, f64, f64)> = HashMap::new();
 
     let mut peak_equity = cfg.portfolio.initial_cash as f64;
 
@@ -1320,7 +1335,7 @@ fn run_one_strategy(
 
             let qty = order.quantity;
             let mut filled_qty = qty;
-            let mut notional = fill_px * qty.unsigned_abs() as f64;
+            let mut notional = fill_px * qty.abs();
             let mut commission = match cfg.exchange.commission_type {
                 CommissionType::Percentage => notional * cfg.exchange.commission_pct / 100.0,
                 CommissionType::Fixed => cfg.exchange.commission_fixed,
@@ -1337,7 +1352,7 @@ fn run_one_strategy(
             let mut fill_pnl: Option<f64> = None;
 
             // ── Funds check & settlement ─────────────────────────────
-            if qty > 0 {
+            if qty > 0.0 {
                 // BUY: try paying in `order_ccy` first, else convert from base.
                 let needed = notional + commission;
                 if !try_debit(&mut cash, order_ccy, needed, base_ccy, fx, ts) {
@@ -1369,15 +1384,15 @@ fn run_one_strategy(
                         },
                         CommissionType::Percentage => 0.0,
                     };
-                    // Solve for largest integer q such that
+                    // Solve for the largest fractional quantity q such that
                     //   fill_px * q * (1 + pct_part) + fixed_part <= avail.
                     let denom = fill_px * (1.0 + pct_part);
-                    let max_qty: i64 = if denom > 0.0 && avail > fixed_part {
-                        ((avail - fixed_part) / denom).floor().max(0.0) as i64
+                    let max_qty: f64 = if denom > 0.0 && avail > fixed_part {
+                        ((avail - fixed_part) / denom).max(0.0)
                     } else {
-                        0
+                        0.0
                     };
-                    if max_qty <= 0 {
+                    if max_qty <= 0.0 {
                         warn!(
                             strategy=%name, order_id=%order.id,
                             "Insufficient funds for buy, skipping order."
@@ -1394,7 +1409,7 @@ fn run_one_strategy(
                         continue;
                     }
                     filled_qty = max_qty.min(qty);
-                    notional = fill_px * filled_qty as f64;
+                    notional = fill_px * filled_qty;
                     commission = match cfg.exchange.commission_type {
                         CommissionType::Percentage => {
                             notional * cfg.exchange.commission_pct / 100.0
@@ -1426,11 +1441,11 @@ fn run_one_strategy(
                         format!("{fill_reason}; partial: shrunk to fit cash")
                     };
                 }
-                *positions.entry(symbol.clone()).or_insert(0) += filled_qty;
+                *positions.entry(symbol.clone()).or_insert(0.0) += filled_qty;
                 update_open_trade_buy(&mut open_trades, &symbol, ts, filled_qty, fill_px);
-            } else if qty < 0 {
-                let abs_qty = qty.unsigned_abs() as i64;
-                let cur = *positions.get(&symbol).unwrap_or(&0);
+            } else if qty < 0.0 {
+                let abs_qty = qty.abs();
+                let cur = *positions.get(&symbol).unwrap_or(&0.0);
                 if !cfg.exchange.allow_short_selling && cur < abs_qty {
                     warn!(strategy=%name, order_id=%order.id, "Short selling disabled and not enough position, skipping.");
                     order_records.push(OrderRecord {
@@ -1460,7 +1475,7 @@ fn run_one_strategy(
                     });
                     continue;
                 }
-                let pos_entry = positions.entry(symbol.clone()).or_insert(0);
+                let pos_entry = positions.entry(symbol.clone()).or_insert(0.0);
                 *pos_entry -= abs_qty;
                 let realised_pnl = close_open_trade_sell(
                     &mut open_trades,
@@ -1481,7 +1496,7 @@ fn run_one_strategy(
             // Reflect the actually-filled quantity on the record so the
             // UI shows what the engine settled (matters when a buy was
             // auto-shrunk to fit the available cash).
-            if filled_qty != order.quantity {
+            if (filled_qty - order.quantity).abs() > 1e-12 {
                 order.quantity = filled_qty;
             }
             order_records.push(OrderRecord {
@@ -1633,11 +1648,11 @@ fn run_one_strategy(
             equity += fx.convert(*amount, *ccy, base_ccy, ts).unwrap_or(*amount);
         }
         for (sym, qty) in &positions {
-            if *qty == 0 {
+            if qty.abs() < 1e-12 {
                 continue;
             }
             if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
-                let value = *qty as f64 * b.close;
+                let value = *qty * b.close;
                 let pos_ccy = quote_ccy.get(sym).copied().unwrap_or(base_ccy);
                 equity += fx.convert(value, pos_ccy, base_ccy, ts).unwrap_or(value);
             }
@@ -1661,13 +1676,13 @@ fn run_one_strategy(
     // ── 5. Liquidate remaining positions to compute final PnL ───────────
     if let Some(last_idx) = total_bars.checked_sub(1) {
         for (sym, qty) in positions.clone() {
-            if qty == 0 {
+            if qty.abs() < 1e-12 {
                 continue;
             }
             if let Some(b) = aligned.get(&sym).and_then(|r| r[last_idx].as_ref()) {
                 let exit_px = b.close;
                 if let Some((entry_ts, _q, entry_px)) = open_trades.remove(&sym) {
-                    let pnl = (exit_px - entry_px) * qty as f64;
+                    let pnl = (exit_px - entry_px) * qty;
                     closed_trades.push(Trade {
                         symbol: sym.clone(),
                         quantity: qty,
@@ -1748,7 +1763,7 @@ enum TriggerOutcome {
 fn resolve_trigger(
     order: &mut Order,
     bar: &Bar,
-    positions: &HashMap<String, i64>,
+    positions: &HashMap<String, f64>,
     trail_state: &mut HashMap<String, (f64, f64)>,
     trade_on_close: bool,
 ) -> TriggerOutcome {
@@ -1774,8 +1789,8 @@ fn resolve_trigger(
         },
 
         SettlePosition => {
-            let cur = *positions.get(&order.symbol).unwrap_or(&0);
-            if cur == 0 {
+            let cur = *positions.get(&order.symbol).unwrap_or(&0.0);
+            if cur.abs() < 1e-12 {
                 return TriggerOutcome::Cancel {
                     reason: "no position to settle".into(),
                 };
@@ -1868,9 +1883,9 @@ fn resolve_trigger(
 
             // Effective stop: sells trail running_high downward; buys
             // trail running_low upward. `qty == 0` is meaningless here.
-            let stop = if order.quantity < 0 {
+            let stop = if order.quantity < 0.0 {
                 running_high - trail
-            } else if order.quantity > 0 {
+            } else if order.quantity > 0.0 {
                 running_low + trail
             } else {
                 return TriggerOutcome::Cancel {
@@ -1904,8 +1919,8 @@ fn resolve_trigger(
 ///   limit). Otherwise, if `bar.low <= lim`, fill at the limit price.
 /// * Sell (qty < 0): symmetric — fill at open if open ≥ limit, else at
 ///   limit if `bar.high >= lim`.
-fn fill_limit(qty: i64, bar: &Bar, lim: f64) -> TriggerOutcome {
-    if qty > 0 {
+fn fill_limit(qty: f64, bar: &Bar, lim: f64) -> TriggerOutcome {
+    if qty > 0.0 {
         if bar.open <= lim {
             TriggerOutcome::Fill {
                 raw_px: bar.open,
@@ -1921,7 +1936,7 @@ fn fill_limit(qty: i64, bar: &Bar, lim: f64) -> TriggerOutcome {
         } else {
             TriggerOutcome::Pending
         }
-    } else if qty < 0 {
+    } else if qty < 0.0 {
         if bar.open >= lim {
             TriggerOutcome::Fill {
                 raw_px: bar.open,
@@ -1952,9 +1967,9 @@ fn fill_limit(qty: i64, bar: &Bar, lim: f64) -> TriggerOutcome {
 ///   to `stop` — `bar.high >= stop` or gap-up (`bar.open >= stop`).
 /// * Take-profit-limit reverses both directions (a sell TP triggers on
 ///   a price rise, a buy TP on a price drop).
-fn stop_triggered(qty: i64, bar: &Bar, stop: f64, is_take_profit: bool) -> bool {
-    let down_trigger = (qty < 0 && !is_take_profit) || (qty > 0 && is_take_profit);
-    let up_trigger = (qty > 0 && !is_take_profit) || (qty < 0 && is_take_profit);
+fn stop_triggered(qty: f64, bar: &Bar, stop: f64, is_take_profit: bool) -> bool {
+    let down_trigger = (qty < 0.0 && !is_take_profit) || (qty > 0.0 && is_take_profit);
+    let up_trigger = (qty > 0.0 && !is_take_profit) || (qty < 0.0 && is_take_profit);
     if down_trigger {
         bar.open <= stop || bar.low <= stop
     } else if up_trigger {
@@ -1968,8 +1983,8 @@ fn stop_triggered(qty: i64, bar: &Bar, stop: f64, is_take_profit: bool) -> bool 
 /// stop level, the stop fills at the open (worse than the stop) — a
 /// gap-down for sell stops, a gap-up for buy stops. Otherwise the stop
 /// fills at exactly the stop level.
-fn fill_stop(qty: i64, bar: &Bar, stop: f64) -> TriggerOutcome {
-    if qty < 0 {
+fn fill_stop(qty: f64, bar: &Bar, stop: f64) -> TriggerOutcome {
+    if qty < 0.0 {
         if bar.open <= stop {
             TriggerOutcome::Fill {
                 raw_px: bar.open,
@@ -1983,7 +1998,7 @@ fn fill_stop(qty: i64, bar: &Bar, stop: f64) -> TriggerOutcome {
                 limit_cap: None,
             }
         }
-    } else if qty > 0 {
+    } else if qty > 0.0 {
         if bar.open >= stop {
             TriggerOutcome::Fill {
                 raw_px: bar.open,
@@ -2007,15 +2022,15 @@ fn fill_stop(qty: i64, bar: &Bar, stop: f64) -> TriggerOutcome {
 /// Apply slippage to a raw fill price, optionally capping at the limit
 /// price so a buy never pays above its limit (and a sell never receives
 /// below). `slippage_pct` is the fraction (e.g. 0.005 = 0.5 %).
-fn apply_slippage(raw_px: f64, qty: i64, slippage_pct: f64, limit_cap: Option<f64>) -> f64 {
-    let slipped = if qty >= 0 {
+fn apply_slippage(raw_px: f64, qty: f64, slippage_pct: f64, limit_cap: Option<f64>) -> f64 {
+    let slipped = if qty >= 0.0 {
         raw_px * (1.0 + slippage_pct)
     } else {
         raw_px * (1.0 - slippage_pct)
     };
     match limit_cap {
-        Some(cap) if qty > 0 => slipped.min(cap),
-        Some(cap) if qty < 0 => slipped.max(cap),
+        Some(cap) if qty > 0.0 => slipped.min(cap),
+        Some(cap) if qty < 0.0 => slipped.max(cap),
         _ => slipped,
     }
 }
@@ -2184,37 +2199,37 @@ fn period_bucket(
 }
 
 fn update_open_trade_buy(
-    open_trades: &mut HashMap<String, (i64, i64, f64)>,
+    open_trades: &mut HashMap<String, (i64, f64, f64)>,
     symbol: &str,
     ts: i64,
-    qty: i64,
+    qty: f64,
     px: f64,
 ) {
     open_trades
         .entry(symbol.to_owned())
         .and_modify(|(_, q, p)| {
-            let total = (*q as f64) * *p + (qty as f64) * px;
+            let total = *q * *p + qty * px;
             *q += qty;
-            if *q != 0 {
-                *p = total / (*q as f64);
+            if q.abs() > 1e-12 {
+                *p = total / *q;
             }
         })
         .or_insert((ts, qty, px));
 }
 
 fn close_open_trade_sell(
-    open_trades: &mut HashMap<String, (i64, i64, f64)>,
+    open_trades: &mut HashMap<String, (i64, f64, f64)>,
     symbol: &str,
     ts: i64,
-    abs_qty: i64,
+    abs_qty: f64,
     exit_px: f64,
     commission: f64,
 ) -> Option<Trade> {
     let (entry_ts, mut q, entry_px) = open_trades.remove(symbol)?;
     let used = abs_qty.min(q);
     q -= used;
-    let pnl = (exit_px - entry_px) * used as f64 - commission;
-    if q > 0 {
+    let pnl = (exit_px - entry_px) * used - commission;
+    if q > 1e-12 {
         open_trades.insert(symbol.to_owned(), (entry_ts, q, entry_px));
     }
     Some(Trade {
@@ -2438,13 +2453,13 @@ mod tests {
         let base_ccy = cfg.portfolio.base_currency;
         let mut cash: HashMap<Currency, f64> = HashMap::new();
         cash.insert(base_ccy, cfg.portfolio.initial_cash as f64);
-        let mut positions: HashMap<String, i64> = cfg.portfolio.starting_positions.clone();
+        let mut positions: HashMap<String, f64> = cfg.portfolio.starting_positions.clone();
         let mut open_orders: Vec<Order> = Vec::new();
         let mut trail_state: HashMap<String, (f64, f64)> = HashMap::new();
         let mut equity_curve: Vec<EquitySample> = Vec::with_capacity(total_bars);
         let mut order_records: Vec<OrderRecord> = Vec::new();
         let mut closed_trades: Vec<Trade> = Vec::new();
-        let mut open_trades: HashMap<String, (i64, i64, f64)> = HashMap::new();
+        let mut open_trades: HashMap<String, (i64, f64, f64)> = HashMap::new();
         let mut peak = cfg.portfolio.initial_cash as f64;
 
         let quote_ccy: HashMap<String, Currency> = profiles
@@ -2554,7 +2569,7 @@ mod tests {
 
                 let qty = order.quantity;
                 let mut filled_qty = qty;
-                let mut notional = fill_px * qty.unsigned_abs() as f64;
+                let mut notional = fill_px * qty.abs();
                 let mut commission = match cfg.exchange.commission_type {
                     CommissionType::Percentage => notional * cfg.exchange.commission_pct / 100.0,
                     CommissionType::Fixed => cfg.exchange.commission_fixed,
@@ -2566,7 +2581,7 @@ mod tests {
                 let order_ccy = quote_ccy.get(&order.symbol).copied().unwrap_or(base_ccy);
                 let mut fill_pnl: Option<f64> = None;
 
-                if qty > 0 {
+                if qty > 0.0 {
                     let needed = notional + commission;
                     if !try_debit(&mut cash, order_ccy, needed, base_ccy, &fx, ts) {
                         let avail: f64 =
@@ -2584,12 +2599,12 @@ mod tests {
                             CommissionType::Percentage => 0.0,
                         };
                         let denom = fill_px * (1.0 + pct_part);
-                        let max_qty: i64 = if denom > 0.0 && avail > fixed_part {
-                            ((avail - fixed_part) / denom).floor().max(0.0) as i64
+                        let max_qty: f64 = if denom > 0.0 && avail > fixed_part {
+                            ((avail - fixed_part) / denom).max(0.0)
                         } else {
-                            0
+                            0.0
                         };
-                        if max_qty <= 0 {
+                        if max_qty <= 0.0 {
                             order_records.push(OrderRecord {
                                 order: order.clone(),
                                 timestamp: ts,
@@ -2602,7 +2617,7 @@ mod tests {
                             continue;
                         }
                         filled_qty = max_qty.min(qty);
-                        notional = fill_px * filled_qty as f64;
+                        notional = fill_px * filled_qty;
                         commission = match cfg.exchange.commission_type {
                             CommissionType::Percentage => {
                                 notional * cfg.exchange.commission_pct / 100.0
@@ -2632,11 +2647,11 @@ mod tests {
                             format!("{fill_reason}; partial: shrunk to fit cash")
                         };
                     }
-                    *positions.entry(order.symbol.clone()).or_insert(0) += filled_qty;
+                    *positions.entry(order.symbol.clone()).or_insert(0.0) += filled_qty;
                     update_open_trade_buy(&mut open_trades, &order.symbol, ts, filled_qty, fill_px);
-                } else if qty < 0 {
-                    let abs_qty = qty.unsigned_abs() as i64;
-                    let cur = *positions.get(&order.symbol).unwrap_or(&0);
+                } else if qty < 0.0 {
+                    let abs_qty = qty.abs();
+                    let cur = *positions.get(&order.symbol).unwrap_or(&0.0);
                     if !cfg.exchange.allow_short_selling && cur < abs_qty {
                         order_records.push(OrderRecord {
                             order: order.clone(),
@@ -2663,7 +2678,7 @@ mod tests {
                         });
                         continue;
                     }
-                    *positions.entry(order.symbol.clone()).or_insert(0) -= abs_qty;
+                    *positions.entry(order.symbol.clone()).or_insert(0.0) -= abs_qty;
                     let realised = close_open_trade_sell(
                         &mut open_trades,
                         &order.symbol,
@@ -2680,7 +2695,7 @@ mod tests {
                     fill_pnl = realised;
                 }
 
-                if filled_qty != order.quantity {
+                if (filled_qty - order.quantity).abs() > 1e-12 {
                     order.quantity = filled_qty;
                 }
                 order_records.push(OrderRecord {
@@ -2698,7 +2713,7 @@ mod tests {
             let mut equity: f64 = cash.values().sum();
             for (sym, qty) in &positions {
                 if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
-                    equity += *qty as f64 * b.close;
+                    equity += *qty * b.close;
                 }
             }
             if equity > peak {
@@ -2762,7 +2777,7 @@ mod tests {
             id: "buy1".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 10,
+            quantity: 10.0,
             price: None,
             limit_price: None,
         };
@@ -2782,7 +2797,7 @@ mod tests {
             id: "buy1".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 10,
+            quantity: 10.0,
             price: None,
             limit_price: None,
         };
@@ -2801,7 +2816,7 @@ mod tests {
             id: "buy1".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -2809,7 +2824,7 @@ mod tests {
             id: "buy1".into(),
             symbol: "".into(),
             order_type: OrderType::CancelOrder,
-            quantity: 0,
+            quantity: 0.0,
             price: None,
             limit_price: None,
         };
@@ -2835,7 +2850,7 @@ mod tests {
             id: "b".into(),
             symbol: "VOD.L".into(),
             order_type: OrderType::Market,
-            quantity: 100,
+            quantity: 100.0,
             price: None,
             limit_price: None,
         };
@@ -2851,7 +2866,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 10,
+            quantity: 10.0,
             price: None,
             limit_price: None,
         };
@@ -2870,7 +2885,7 @@ mod tests {
             id: "a".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -2878,7 +2893,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 10,
+            quantity: 10.0,
             price: None,
             limit_price: None,
         };
@@ -2916,7 +2931,7 @@ mod tests {
             id: "lim1".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Limit,
-            quantity: 5,
+            quantity: 5.0,
             price: Some(95.0),
             limit_price: None,
         };
@@ -2941,7 +2956,7 @@ mod tests {
             id: "lim1".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Limit,
-            quantity: 5,
+            quantity: 5.0,
             price: Some(50.0),
             limit_price: None,
         };
@@ -2961,7 +2976,7 @@ mod tests {
             id: "lim".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Limit,
-            quantity: 5,
+            quantity: 5.0,
             price: Some(110.0),
             limit_price: None,
         };
@@ -2982,7 +2997,7 @@ mod tests {
             id: "lim".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Limit,
-            quantity: 5,
+            quantity: 5.0,
             price: Some(99.5),
             limit_price: None,
         };
@@ -3003,7 +3018,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3013,7 +3028,7 @@ mod tests {
             id: "s".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Limit,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(100.5),
             limit_price: None,
         };
@@ -3042,7 +3057,7 @@ mod tests {
             id: "lim".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Limit,
-            quantity: 5,
+            quantity: 5.0,
             price: Some(99.5),
             limit_price: None,
         };
@@ -3066,7 +3081,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3074,7 +3089,7 @@ mod tests {
             id: "sl".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::StopLoss,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(90.0),
             limit_price: None,
         };
@@ -3096,7 +3111,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3104,7 +3119,7 @@ mod tests {
             id: "sl".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::StopLoss,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(95.0),
             limit_price: None,
         };
@@ -3128,7 +3143,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3136,7 +3151,7 @@ mod tests {
             id: "sl".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::StopLoss,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(99.5),
             limit_price: None,
         };
@@ -3161,7 +3176,7 @@ mod tests {
             id: "sb".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::StopLoss,
-            quantity: 5,
+            quantity: 5.0,
             price: Some(110.0),
             limit_price: None,
         };
@@ -3182,7 +3197,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3190,7 +3205,7 @@ mod tests {
             id: "tp".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::TakeProfit,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(100.5),
             limit_price: None,
         };
@@ -3219,7 +3234,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3227,7 +3242,7 @@ mod tests {
             id: "sll".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::StopLossLimit,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(95.0),       // stop trigger
             limit_price: Some(95.0), // limit price after trigger
         };
@@ -3252,7 +3267,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3260,7 +3275,7 @@ mod tests {
             id: "sll".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::StopLossLimit,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(90.0),
             limit_price: Some(89.5),
         };
@@ -3285,7 +3300,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3293,7 +3308,7 @@ mod tests {
             id: "t".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::TrailingStop,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(5.0),
             limit_price: None,
         };
@@ -3319,7 +3334,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3327,7 +3342,7 @@ mod tests {
             id: "t".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::TrailingStop,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(5.0),
             limit_price: None,
         };
@@ -3357,7 +3372,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3365,7 +3380,7 @@ mod tests {
             id: "t".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::TrailingStopLimit,
-            quantity: -5,
+            quantity: -5.0,
             price: Some(5.0),
             limit_price: Some(105.0),
         };
@@ -3395,7 +3410,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 7,
+            quantity: 7.0,
             price: None,
             limit_price: None,
         };
@@ -3403,7 +3418,7 @@ mod tests {
             id: "s".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::SettlePosition,
-            quantity: 0,
+            quantity: 0.0,
             price: None,
             limit_price: None,
         };
@@ -3415,7 +3430,7 @@ mod tests {
         );
         let settle_rec = r.orders.iter().find(|o| o.order.id == "s").expect("settle missing");
         // Order's quantity was rewritten to negate the +7 long.
-        assert_eq!(settle_rec.order.quantity, -7);
+        assert_eq!(settle_rec.order.quantity, -7.0);
         assert_eq!(settle_rec.status, "filled");
         // A round-trip trade was closed.
         assert_eq!(r.trades.len(), 1);
@@ -3431,7 +3446,7 @@ mod tests {
             id: "s".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::SettlePosition,
-            quantity: 0,
+            quantity: 0.0,
             price: None,
             limit_price: None,
         };
@@ -3451,7 +3466,7 @@ mod tests {
             id: "sh".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: -3,
+            quantity: -3.0,
             price: None,
             limit_price: None,
         };
@@ -3459,7 +3474,7 @@ mod tests {
             id: "s".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::SettlePosition,
-            quantity: 0,
+            quantity: 0.0,
             price: None,
             limit_price: None,
         };
@@ -3471,7 +3486,7 @@ mod tests {
         );
         let settle_rec = r.orders.iter().find(|o| o.order.id == "s").expect("settle missing");
         // The settle was rewritten to a +3 buy to flatten the -3 short.
-        assert_eq!(settle_rec.order.quantity, 3);
+        assert_eq!(settle_rec.order.quantity, 3.0);
         assert_eq!(settle_rec.status, "filled");
     }
 
@@ -3488,7 +3503,7 @@ mod tests {
             id: "s".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: -5, // no prior position → naked short.
+            quantity: -5.0, // no prior position → naked short.
             price: None,
             limit_price: None,
         };
@@ -3508,7 +3523,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 5,
+            quantity: 5.0,
             price: None,
             limit_price: None,
         };
@@ -3516,7 +3531,7 @@ mod tests {
             id: "s".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: -3,
+            quantity: -3.0,
             price: None,
             limit_price: None,
         };
@@ -3540,7 +3555,7 @@ mod tests {
             id: "s".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: -10,
+            quantity: -10.0,
             price: None,
             limit_price: None,
         };
@@ -3572,7 +3587,7 @@ mod tests {
             id: "s".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: -10,
+            quantity: -10.0,
             price: None,
             limit_price: None,
         };
@@ -3596,13 +3611,13 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 9_000, // 9,000 * $1 = $9,000 (within $10,000 cash)
+            quantity: 9_000.0, // 9,000 * $1 = $9,000 (within $10,000 cash)
             price: None,
             limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         assert_eq!(r.orders[0].status, "filled");
-        assert_eq!(r.orders[0].order.quantity, 9_000);
+        assert_eq!(r.orders[0].order.quantity, 9_000.0);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -3618,7 +3633,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 1,
+            quantity: 1.0,
             price: None,
             limit_price: None,
         };
@@ -3637,7 +3652,7 @@ mod tests {
             id: "s".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: -1,
+            quantity: -1.0,
             price: None,
             limit_price: None,
         };
@@ -3660,7 +3675,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 10,
+            quantity: 10.0,
             price: None,
             limit_price: None,
         };
@@ -3679,7 +3694,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 10,
+            quantity: 10.0,
             price: None,
             limit_price: None,
         };
@@ -3698,7 +3713,7 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 10,
+            quantity: 10.0,
             price: None,
             limit_price: None,
         };
@@ -3727,13 +3742,13 @@ mod tests {
             id: "b".into(),
             symbol: "VOD.L".into(),
             order_type: OrderType::Market,
-            quantity: 11,
+            quantity: 11.0,
             price: None,
             limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("VOD.L", "GBP")], vec![(0, buy)]);
         assert_eq!(r.orders[0].status, "filled");
-        assert_eq!(r.orders[0].order.quantity, 10);
+        assert_eq!(r.orders[0].order.quantity, 10.0);
         assert!(r.orders[0].reason.contains("partial"));
     }
 
@@ -3752,14 +3767,14 @@ mod tests {
             id: "b".into(),
             symbol: "AAPL".into(),
             order_type: OrderType::Market,
-            quantity: 11, // 11 * 100 = 1,100 > 1,000 cash
+            quantity: 11.0, // 11 * 100 = 1,100 > 1,000 cash
             price: None,
             limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         assert_eq!(r.orders[0].status, "filled");
-        assert_eq!(r.orders[0].order.quantity, 11); // not shrunk
-                                                    // Cash went negative: 1,000 - 1,100 = -100.
+        assert_eq!(r.orders[0].order.quantity, 11.0); // not shrunk
+                                                      // Cash went negative: 1,000 - 1,100 = -100.
         let last_cash = r
             .equity_curve
             .last()

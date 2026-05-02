@@ -17,6 +17,7 @@ from backtide.analysis.drawdown import plot_drawdown
 from backtide.analysis.price import PRICE_COLUMNS, plot_price
 from backtide.analysis.returns import plot_returns
 from backtide.analysis.seasonality import plot_seasonality
+from backtide.analysis.utils import GREEN, RED
 from backtide.analysis.volatility import plot_volatility
 from backtide.analysis.volume import plot_volume
 from backtide.analysis.vwap import plot_vwap
@@ -463,9 +464,10 @@ with tab_map[tab_summary]:
                     intensity = min(abs(val - 0.5) / 0.3, 1.0)
                 else:
                     return ""
-                rgb = "0,128,0" if good else "200,30,30"
+
+                rgb = GREEN if good else RED
                 alpha = 0.08 + intensity * 0.32
-                return f"background-color: rgba({rgb},{alpha:.2f})"
+                return f"background-color: rgba({rgb[4:-1]},{alpha:.2f})"
 
             column_config = {
                 "symbol": st.column_config.TextColumn(
