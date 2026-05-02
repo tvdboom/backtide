@@ -19,8 +19,8 @@ use std::collections::HashMap;
 /// equity : float
 ///     Total portfolio value (cash + positions) in the base currency.
 ///
-/// cash : float
-///     Cash balance in the base currency at this bar.
+/// cash : dict[str | Currency, float]
+///     Cash balance per currency at this bar.
 ///
 /// drawdown : float
 ///     Running drawdown (negative or zero) versus the all-time high
@@ -36,7 +36,7 @@ use std::collections::HashMap;
 pub struct EquitySample {
     pub timestamp: i64,
     pub equity: f64,
-    pub cash: f64,
+    pub cash: HashMap<Currency, f64>,
     pub drawdown: f64,
 }
 
@@ -47,8 +47,11 @@ impl EquitySample {
 
     fn __repr__(&self) -> String {
         format!(
-            "EquitySample(ts={}, equity={:.2}, cash={:.2}, dd={:.4})",
-            self.timestamp, self.equity, self.cash, self.drawdown,
+            "EquitySample(ts={}, equity={:.2}, cash_ccy={}, dd={:.4})",
+            self.timestamp,
+            self.equity,
+            self.cash.len(),
+            self.drawdown,
         )
     }
 }

@@ -570,9 +570,10 @@ class TestComputeStatistics:
 class _StubSample:
     """Minimal duck-typed stand-in for `EquitySample`."""
 
-    def __init__(self, ts: int, equity: float):
+    def __init__(self, ts: int, equity: float, cash: dict[str, float] | None = None):
         self.timestamp = ts
         self.equity = equity
+        self.cash = cash or {}
 
 
 class _StubRun:
@@ -589,7 +590,9 @@ class _StubRun:
     ):
         self.strategy_name = name
         # 1-day spacing (in seconds) so the x axis renders sensibly.
-        self.equity_curve = [_StubSample(start + i * 86_400, e) for i, e in enumerate(equity)]
+        self.equity_curve = [
+            _StubSample(start + i * 86_400, e, cash={base_currency: e}) for i, e in enumerate(equity)
+        ]
         self.trades = trades or []
         self.orders = orders or []
         self.base_currency = base_currency
@@ -811,12 +814,8 @@ class TestPlotRollingReturns:
 class TestPlotCashHoldings:
     """Tests for plot_cash_holdings."""
 
-    def test_single_currency_labels_strategy_and_axis(self, monkeypatch):
+    def test_single_currency_labels_strategy_and_axis(self):
         """Single-currency strategies use strategy names and currency in y label."""
-        monkeypatch.setattr(
-            "backtide.analysis.cash_holdings.query_instruments",
-            lambda: [_StubInstrument("AAPL", "USD")],
-        )
 
         base = 1_700_000_000
         run_a = _StubRun(
@@ -837,23 +836,17 @@ class TestPlotCashHoldings:
         assert {t.name for t in fig.data} == {"S1", "S2"}
         assert fig.layout.yaxis.title.text == "Cash holdings ($)"
 
-    def test_multi_currency_groups_by_strategy(self, monkeypatch):
+    def test_multi_currency_groups_by_strategy(self):
         """Multi-currency strategies show currency labels under a strategy legend group."""
-        monkeypatch.setattr(
-            "backtide.analysis.cash_holdings.query_instruments",
-            lambda: [_StubInstrument("AAPL", "USD"), _StubInstrument("SAP.DE", "EUR")],
-        )
 
         base = 1_700_000_000
         run = _StubRun(
             "Global",
             [10_000.0, 10_100.0],
-            orders=[
-                _StubOrderRecord("AAPL", 10, base, fill_price=100.0),
-                _StubOrderRecord("SAP.DE", 10, base + 60, fill_price=90.0),
-            ],
             base_currency="USD",
         )
+        run.equity_curve[0].cash = {"USD": 10_000.0, "EUR": 0.0}
+        run.equity_curve[1].cash = {"USD": 9_000.0, "EUR": 1_000.0}
 
         fig = plot_cash_holdings([run], display=None)
         assert isinstance(fig, go.Figure)

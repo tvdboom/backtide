@@ -1506,7 +1506,7 @@ fn run_one_strategy(
         equity_curve.push(EquitySample {
             timestamp: ts,
             equity,
-            cash: cash.values().sum::<f64>(),
+            cash: cash.clone(),
             drawdown,
         });
     }
@@ -2427,7 +2427,7 @@ mod tests {
             equity_curve.push(EquitySample {
                 timestamp: ts,
                 equity,
-                cash: cash.values().sum(),
+                cash: cash.clone(),
                 drawdown: dd,
             });
         }
@@ -3475,6 +3475,12 @@ mod tests {
         assert_eq!(r.orders[0].status, "filled");
         assert_eq!(r.orders[0].order.quantity, 11); // not shrunk
                                                     // Cash went negative: 1,000 - 1,100 = -100.
-        assert!(r.equity_curve.last().unwrap().cash < 0.0);
+        let last_cash = r
+            .equity_curve
+            .last()
+            .and_then(|s| s.cash.get(&cfg.portfolio.base_currency))
+            .copied()
+            .unwrap_or(0.0);
+        assert!(last_cash < 0.0);
     }
 }

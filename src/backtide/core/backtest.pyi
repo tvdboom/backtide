@@ -1282,8 +1282,8 @@ class EquitySample:
     equity : float
         Total portfolio value (cash + positions) in the base currency.
 
-    cash : float
-        Cash balance in the base currency at this bar.
+    cash : dict[str | Currency, float]
+        Cash balance per currency at this bar.
 
     drawdown : float
         Running drawdown (negative or zero) versus the all-time high
@@ -1297,7 +1297,7 @@ class EquitySample:
 
     """
 
-    cash: float
+    cash: dict[str | Currency, float]
     drawdown: float
     equity: float
     timestamp: int

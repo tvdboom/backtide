@@ -4,6 +4,7 @@ use crate::backtest::models::experiment_result::{EquitySample, OrderRecord, RunR
 use crate::backtest::models::order::Order;
 use crate::backtest::models::order_type::OrderType;
 use crate::data::models::bar::Bar;
+use crate::data::models::currency::Currency;
 use crate::data::models::dividend::Dividend;
 use crate::data::models::exchange::Exchange;
 use crate::data::models::instrument::Instrument;
@@ -111,7 +112,7 @@ impl Storage for DuckDb {
                 run_id            VARCHAR NOT NULL,
                 ts                BIGINT NOT NULL,
                 equity            DOUBLE NOT NULL,
-                cash              DOUBLE NOT NULL,
+                cash              VARCHAR NOT NULL,
                 drawdown          DOUBLE NOT NULL,
                 UNIQUE (run_id, ts)
             );
@@ -146,6 +147,9 @@ impl Storage for DuckDb {
             );
         ",
         )?;
+
+        // Migrate older databases where experiment_equity.cash was DOUBLE.
+        let _ = conn.execute_batch("ALTER TABLE experiment_equity ALTER COLUMN cash TYPE VARCHAR");
 
         Ok(())
     }
@@ -744,11 +748,12 @@ impl Storage for DuckDb {
             let mut appender = conn.appender("experiment_equity")?;
             for strat in &result.strategies {
                 for s in &strat.equity_curve {
+                    let cash_json = serde_json::to_string(&s.cash).unwrap_or_else(|_| "{}".into());
                     appender.append_row(params![
                         strat.strategy_id,
                         s.timestamp,
                         s.equity,
-                        s.cash,
+                        cash_json,
                         s.drawdown,
                     ])?;
                 }
@@ -903,15 +908,25 @@ impl Storage for DuckDb {
                 base_ccy_str.as_deref().and_then(|s| s.parse().ok()).unwrap_or_default();
 
             let mut eq_stmt = conn.prepare(
-                "SELECT ts, equity, cash, drawdown FROM experiment_equity
+                "SELECT ts, equity, CAST(cash AS VARCHAR), drawdown FROM experiment_equity
                  WHERE run_id = ? ORDER BY ts",
             )?;
             let equity_curve = eq_stmt
                 .query_map(params![run_id], |row| {
+                    let cash_raw: String = row.get(2)?;
+                    // Backward compatible: old rows might contain a scalar,
+                    // newer rows store a JSON object keyed by currency code.
+                    let cash = if cash_raw.trim_start().starts_with('{') {
+                        serde_json::from_str::<HashMap<Currency, f64>>(&cash_raw)
+                            .unwrap_or_default()
+                    } else {
+                        let v = cash_raw.parse::<f64>().unwrap_or(0.0);
+                        HashMap::from([(base_currency, v)])
+                    };
                     Ok(EquitySample {
                         timestamp: row.get(0)?,
                         equity: row.get(1)?,
-                        cash: row.get(2)?,
+                        cash,
                         drawdown: row.get(3)?,
                     })
                 })?
