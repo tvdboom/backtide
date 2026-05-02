@@ -30,7 +30,7 @@ cfg = get_config()
 def plot_mae_mfe(
     run: RunResult,
     *,
-    interval: str | None = ...,
+    interval: str | Interval | None = ...,
     symbols: list[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -42,7 +42,7 @@ def plot_mae_mfe(
 def plot_mae_mfe(
     run: RunResult,
     *,
-    interval: str | None = ...,
+    interval: str | Interval | None = ...,
     symbols: list[str] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -55,7 +55,7 @@ def plot_mae_mfe(
 def plot_mae_mfe(
     run: RunResult,
     *,
-    interval: str | None = None,
+    interval: str | Interval | None = None,
     symbols: list[str] | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
@@ -136,10 +136,10 @@ def plot_mae_mfe(
     fig = go.Figure()
     ccy = _resolve_runs_currency([run])
 
-    if Interval(interval).is_intraday():
-        dt_fmt = _moment_to_strftime(cfg.display.datetime_format())
-    else:
+    if interval and not Interval(interval).is_intraday():
         dt_fmt = _moment_to_strftime(cfg.display.date_format)
+    else:
+        dt_fmt = _moment_to_strftime(cfg.display.datetime_format())
 
     win_mae, win_mfe, win_text = [], [], []
     loss_mae, loss_mfe, loss_text = [], [], []

@@ -457,7 +457,7 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
                 )
 
             # Number of bars per year for the experiment's interval
-            ppy = 365 * 24 * 60 / exp_cfg.data.interval.minutes()
+            ppy = int(365 * 24 * 60 / exp_cfg.data.interval.minutes())
 
             with st.spinner("Loading plot..."):
                 st.plotly_chart(
@@ -472,8 +472,9 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
             with col2.popover(":material/tune:"):
                 unit = st.pills(
                     "Unit",
-                    options=["auto", "minutes", "hours", "days"],
                     key=(key := "results_trade_duration_unit"),
+                    required=True,
+                    options=["auto", "minutes", "hours", "days"],
                     default=_default(key, fallback="auto"),
                     on_change=lambda k=key: _persist(k),
                     help="Time unit used on the x-axis.",

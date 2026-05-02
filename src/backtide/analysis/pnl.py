@@ -170,6 +170,9 @@ def plot_pnl(
         fig.add_hline(y=0, line=REFERENCE_LINE)
 
     for idx, run in enumerate(runs):
+        if not run.equity_curve:
+            continue
+
         ts = pd.to_datetime([s.timestamp for s in run.equity_curve], unit="s")
         equity = [s.equity for s in run.equity_curve]
         if (base := next((e for e in equity if e), 0.0)) == 0.0:  # First non-zero equity

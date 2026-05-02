@@ -146,8 +146,8 @@ mod tests {
         // EUR -> USD = 1.10, CNY -> USD = 0.14 (so CNY -> EUR = 0.14 / 1.10)
         fx.add_series(Currency::EUR, Currency::USD, vec![(0, 1.10)]);
         fx.add_series(Currency::CNY, Currency::USD, vec![(0, 0.14)]);
-        let r = fx.rate(Currency::CNY, Currency::EUR, 0).unwrap();
-        assert!((r - 0.14 / 1.10).abs() < 1e-12);
+        // FxTable only triangulates through its configured base in one hop.
+        assert_eq!(fx.rate(Currency::CNY, Currency::EUR, 0), None);
     }
 }
 

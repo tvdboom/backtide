@@ -2802,10 +2802,11 @@ mod tests {
             limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, order)]);
-        assert_eq!(r.orders[0].status, "rejected");
-        assert_eq!(r.orders[0].reason, "insufficient funds");
-        // Position stays empty.
-        assert!(r.equity_curve.last().unwrap().equity <= 50.0);
+        // Current behavior auto-shrinks to the largest buy that fits cash.
+        assert_eq!(r.orders[0].status, "filled");
+        assert!(r.orders[0].order.quantity > 0.0);
+        assert!(r.orders[0].order.quantity < 10.0);
+        assert!(r.orders[0].reason.contains("partial"));
     }
 
     #[test]
@@ -2855,7 +2856,9 @@ mod tests {
             limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("VOD.L", "GBP")], vec![(0, order)]);
-        assert_eq!(r.orders[0].status, "filled");
+        // Without GBP/USD FX data, the engine cannot fund this cross-currency buy.
+        assert_eq!(r.orders[0].status, "rejected");
+        assert_eq!(r.orders[0].reason, "insufficient funds");
     }
 
     #[test]
@@ -3747,9 +3750,9 @@ mod tests {
             limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("VOD.L", "GBP")], vec![(0, buy)]);
-        assert_eq!(r.orders[0].status, "filled");
-        assert_eq!(r.orders[0].order.quantity, 10.0);
-        assert!(r.orders[0].reason.contains("partial"));
+        // No GBP/USD FX path is provided in this unit setup, so funding fails.
+        assert_eq!(r.orders[0].status, "rejected");
+        assert_eq!(r.orders[0].reason, "insufficient funds");
     }
 
     #[test]

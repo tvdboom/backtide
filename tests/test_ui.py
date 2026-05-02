@@ -1378,7 +1378,7 @@ class TestExperimentPage:
         """Config import success message is shown."""
         at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
-        at.session_state["_import_success"] = "Loaded config."
+        at.session_state["_success"] = "Loaded config."
         at.run()
         assert any("Loaded" in s.value for s in at.success)
 
@@ -1387,7 +1387,7 @@ class TestExperimentPage:
         """Config import error message is shown."""
         at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
         at.run()
-        at.session_state["_import_error"] = "Failed to parse."
+        at.session_state["_error"] = "Failed to parse."
         at.run()
         assert any("Failed" in e.value for e in at.error)
 

@@ -49,6 +49,9 @@ lint:
 tox:
     uv run tox
 
+ty:
+    uv run ty check
+
 # Build and serve the docs locally
 docs:
     $env:PYTHONPATH="."; uv run mkdocs serve

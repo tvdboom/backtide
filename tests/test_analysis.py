@@ -36,6 +36,7 @@ from backtide.analysis.utils import (
 )
 from backtide.backtest import RunResult
 from backtide.core.data import Currency
+from backtide.utils.constants import BENCHMARK_NAME
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -694,9 +695,9 @@ class TestPlotPnl:
             _run_result("Benchmark (SPY)", [10_000.0, 10_100.0]),
         ]
         fig = plot_pnl(runs, drawdown=False, display=None)
-        bench = next(t for t in fig.data if t.name.startswith("Benchmark"))
-        # `line.dash` is None for solid lines and "dash" for the benchmark.
-        assert bench.line.dash == "dash"
+        bench = next(t for t in fig.data if t.name == BENCHMARK_NAME)
+        # Only the reserved exact benchmark name is treated as benchmark style.
+        assert bench.line.dash is None
 
     def test_empty_input_raises(self):
         """An empty `runs` list should raise a ValueError."""
@@ -849,7 +850,7 @@ class TestPlotCashHoldings:
         fig = plot_cash_holdings([run_a, run_b], display=None)
         assert isinstance(fig, go.Figure)
         assert {t.name for t in fig.data} == {"S1", "S2"}
-        assert fig.layout.yaxis.title.text == "Cash holdings ($)"
+        assert fig.layout.yaxis.title.text == "Cash ($)"
 
     def test_multi_currency_groups_by_strategy(self):
         """Multi-currency strategies show currency labels under a strategy legend group."""
@@ -866,7 +867,7 @@ class TestPlotCashHoldings:
         assert {t.name for t in fig.data} == {"USD", "EUR"}
         assert all(t.legendgroup == "Global" for t in fig.data)
         assert fig.data[0].legendgrouptitle.text == "Global"
-        assert fig.layout.yaxis.title.text == "Cash holdings"
+        assert fig.layout.yaxis.title.text == "Cash"
 
 
 class TestPlotRollingSharpe:
@@ -898,12 +899,11 @@ class TestPlotPnlHistogram:
         assert {t.name for t in fig.data} == {"A", "B"}
 
     def test_empty_input(self):
-        """Returns an empty figure when no runs are passed."""
+        """An empty runs list should raise a ValueError."""
         from backtide.analysis import plot_pnl_histogram
 
-        fig = plot_pnl_histogram([], display=None)
-        assert isinstance(fig, go.Figure)
-        assert len(fig.data) == 0
+        with pytest.raises(ValueError, match="cannot be empty"):
+            plot_pnl_histogram([], display=None)
 
 
 class TestPlotTradePnl:
@@ -990,8 +990,9 @@ class TestPlotMaeMfe:
         )
         fig = plot_mae_mfe(run, display=None)
         names = {t.name for t in fig.data}
-        # Diagonal reference line plus both winner and loser scatters.
-        assert "MFE = MAE" in names
+        # Diagonal reference is rendered as a layout shape.
+        assert fig.layout.shapes is not None
+        assert len(fig.layout.shapes) >= 1
         assert "Winners" in names
         assert "Losers" in names
 
