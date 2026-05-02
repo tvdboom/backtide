@@ -30,14 +30,14 @@ cfg = get_config()
 # across plots that compare strategies to the benchmark.
 BENCHMARK_LINE: dict[str, Any] = {
     "color": "rgba(128,128,128,0.7)",
-    "width": 2,
+    "width": cfg.plots.line_width,
     "dash": "dash",
 }
 
 
 def _is_benchmark(run: RunResult) -> bool:
     """Whether this run is the benchmark run or not."""
-    return bool(BENCHMARK_NAME.match(run.strategy_name))
+    return run.strategy_name == BENCHMARK_NAME
 
 
 def _resolve_runs_currency(runs: list[RunResult]) -> Currency | None:
@@ -135,7 +135,7 @@ def _plot(
     ylim: tuple[float, float] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
     **kwargs,
@@ -150,7 +150,7 @@ def _plot(
     ylim: tuple[float, float] | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
     **kwargs,
@@ -166,7 +166,7 @@ def _plot(
     ylim: tuple[float, float] | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper right",
-    figsize: tuple[int, int] | None = None,
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
     **kwargs,
@@ -208,7 +208,7 @@ def _plot(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -228,7 +228,7 @@ def _plot(
         The figure object. Only returned when `display=None`.
 
     """
-    width, height = figsize or (900, 600)
+    width, height = figsize
 
     default_title = {
         "x": 0.5,

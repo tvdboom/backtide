@@ -12,9 +12,10 @@ from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
-from backtide.utils.utils import _to_list
+
 from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot
 from backtide.config import get_config
+from backtide.utils.utils import _to_list
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,7 +32,7 @@ def plot_rolling_returns(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -42,7 +43,7 @@ def plot_rolling_returns(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -54,7 +55,7 @@ def plot_rolling_returns(
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
-    figsize: tuple[int, int] | None = (900, 600),
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -87,7 +88,7 @@ def plot_rolling_returns(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -146,7 +147,7 @@ def plot_rolling_returns(
         if is_benchmark := _is_benchmark(run):
             line = BENCHMARK_LINE
         else:
-            line = {"color": cfg.plots.palette[idx % len(cfg.plots.palette)], "width": 2}
+            line = {"color": cfg.plots.palette[idx % len(cfg.plots.palette)], "width": cfg.plots.line_width}
 
         fig.add_trace(
             go.Scatter(
@@ -160,7 +161,7 @@ def plot_rolling_returns(
             )
         )
 
-    fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="rgba(128,128,128,0.6)")
+    fig.add_hline(y=0, line_width=cfg.plots.line_width / 2, line_dash="dot", line_color="rgba(128,128,128,0.6)")
 
     return _plot(
         fig,

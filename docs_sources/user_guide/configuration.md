@@ -57,6 +57,8 @@ If no file is found, the built-in defaults are used.
     title_fontsize = 22
     label_fontsize = 20
     tick_fontsize = 14
+    line_width = 2.0
+    marker_size = 8.0
     ```
 
 === "YAML"
@@ -99,6 +101,8 @@ If no file is found, the built-in defaults are used.
         title_fontsize: 22
         label_fontsize: 20
         tick_fontsize: 14
+        line_width: 2.0
+        marker_size: 8.0
     ```
 
 === "JSON"
@@ -143,7 +147,9 @@ If no file is found, the built-in defaults are used.
             ],
             "title_fontsize": 22,
             "label_fontsize": 20,
-            "tick_fontsize": 14
+            "tick_fontsize": 14,
+            "line_width": 2.0,
+            "marker_size": 8.0
         }
     }
     ```

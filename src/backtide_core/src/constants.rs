@@ -32,3 +32,6 @@ pub const TASK_TIMEOUT: Duration = Duration::from_secs(300);
 /// Number of consecutive download failures before the circuit breaker trips
 /// and all remaining tasks are skipped.
 pub const CIRCUIT_BREAKER_THRESHOLD: usize = 20;
+
+/// Name used for the benchmark run
+pub const BENCHMARK: &str = "Benchmark";

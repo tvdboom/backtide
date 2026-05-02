@@ -47,7 +47,7 @@ def plot_seasonality(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -58,7 +58,7 @@ def plot_seasonality(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -70,7 +70,7 @@ def plot_seasonality(
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = None,
-    figsize: tuple[int, int] | None = (900, 600),
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -101,7 +101,7 @@ def plot_seasonality(
         Legend for the plot. Defaults to None since a colorbar is shown
         instead.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -257,7 +257,7 @@ def plot_seasonality(
     )
 
     # Scale figure height to the number of rows so they don't overlap
-    base_w, base_h = figsize or (900, 600)
+    base_w, base_h = figsize
     scaled_h = max(base_h, n_rows * 35)
 
     return _plot(

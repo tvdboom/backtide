@@ -52,7 +52,7 @@ def plot_price(
     run: RunResult | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -65,7 +65,7 @@ def plot_price(
     strategy_run: RunResult | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -79,7 +79,7 @@ def plot_price(
     run: RunResult | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
-    figsize: tuple[int, int] | None = (900, 600),
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -121,7 +121,7 @@ def plot_price(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -188,7 +188,7 @@ def plot_price(
                 y=subset[price_col],
                 mode="lines",
                 name="Price" if ind_dict else symbol,
-                line={"color": color, "width": 2},
+                line={"color": color, "width": cfg.plots.line_width},
                 legendgroup=symbol,
                 legendgrouptitle_text=symbol if ind_dict else None,
                 customdata=[
@@ -209,7 +209,7 @@ def plot_price(
                             x=subset["dt"],
                             y=(y := values.iloc[:, 0]),
                             mode="lines",
-                            line={"color": f"rgba{color[3:-1]}, 0.7)", "width": 1.5},
+                            line={"color": f"rgba{color[3:-1]}, 0.7)", "width": cfg.plots.line_width},
                             name=name,
                             legendgroup=symbol,
                             customdata=[_format_price(v, currency=ccy) for v in y],
@@ -225,7 +225,7 @@ def plot_price(
                                 x=subset["dt"],
                                 y=(y := values.iloc[:, 0]),
                                 mode="lines",
-                                line={"width": 1, "color": color},
+                                line={"width": cfg.plots.line_width / 2, "color": color},
                                 customdata=[_format_price(v, currency=ccy) for v in y],
                                 hovertemplate=(
                                     f"%{{x}}<br>{name} (upper): %{{customdata}}"
@@ -239,7 +239,7 @@ def plot_price(
                                 x=subset["dt"],
                                 y=(y := values.iloc[:, 1]),
                                 mode="lines",
-                                line={"width": 1, "color": color},
+                                line={"width": cfg.plots.line_width / 2, "color": color},
                                 fill="tonexty",
                                 fillcolor=f"rgba{color[3:-1]}, 0.2)",
                                 customdata=[_format_price(v, currency=ccy) for v in y],
@@ -298,7 +298,7 @@ def plot_price(
                     y=long_y,
                     mode="markers",
                     name="Long entry",
-                    marker={"symbol": "triangle-up", "color": "#2ecc71", "size": 11},
+                    marker={"symbol": "triangle-up", "color": "#2ecc71", "size": cfg.plots.marker_size + 3},
                     legendgroup="trades",
                     customdata=long_data,
                     hovertemplate=(
@@ -316,7 +316,7 @@ def plot_price(
                     y=short_y,
                     mode="markers",
                     name="Short entry",
-                    marker={"symbol": "triangle-down", "color": "#3498db", "size": 11},
+                    marker={"symbol": "triangle-down", "color": "#3498db", "size": cfg.plots.marker_size + 3},
                     legendgroup="trades",
                     customdata=short_data,
                     hovertemplate=(
@@ -334,7 +334,7 @@ def plot_price(
                     y=win_y,
                     mode="markers",
                     name="Exit (win)",
-                    marker={"symbol": "x", "color": "#27ae60", "size": 10, "line": {"width": 2}},
+                    marker={"symbol": "x", "color": "#27ae60", "size": cfg.plots.marker_size + 2, "line": {"width": cfg.plots.line_width}},
                     legendgroup="trades",
                     customdata=win_data,
                     hovertemplate=(
@@ -353,7 +353,7 @@ def plot_price(
                     y=loss_y,
                     mode="markers",
                     name="Exit (loss)",
-                    marker={"symbol": "x", "color": "#e74c3c", "size": 10, "line": {"width": 2}},
+                    marker={"symbol": "x", "color": "#e74c3c", "size": cfg.plots.marker_size + 2, "line": {"width": cfg.plots.line_width}},
                     legendgroup="trades",
                     customdata=loss_data,
                     hovertemplate=(

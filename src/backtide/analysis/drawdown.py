@@ -30,7 +30,7 @@ def plot_drawdown(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -41,7 +41,7 @@ def plot_drawdown(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -53,7 +53,7 @@ def plot_drawdown(
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "lower left",
-    figsize: tuple[int, int] | None = (900, 600),
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -87,7 +87,7 @@ def plot_drawdown(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -138,7 +138,7 @@ def plot_drawdown(
                 y=drawdown,
                 mode="lines",
                 name=symbol,
-                line={"color": color, "width": 2},
+                line={"color": color, "width": cfg.plots.line_width},
                 fill="tozeroy",
                 fillcolor=f"rgba{color[3:-1]}, 0.15)",
             )

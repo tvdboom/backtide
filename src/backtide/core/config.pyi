@@ -462,6 +462,13 @@ class PlotsConfig:
     tick_fontsize : int, default=14
         Font size in pixels for axis tick labels.
 
+    line_width : float, default=2.0
+        Default line width in pixels for data traces. Reference/identity lines
+        and band boundaries use half this value.
+
+    marker_size : float, default=8.0
+        Default marker size in pixels for scatter plots.
+
     See Also
     --------
     - backtide.config:get_config
@@ -471,6 +478,8 @@ class PlotsConfig:
     """
 
     label_fontsize: int
+    line_width: float
+    marker_size: float
     palette: list[str]
     template: str
     tick_fontsize: int

@@ -30,7 +30,7 @@ def plot_correlation(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -41,7 +41,7 @@ def plot_correlation(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -53,7 +53,7 @@ def plot_correlation(
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = None,
-    figsize: tuple[int, int] | None = (700, 600),
+    figsize: tuple[int, int] = (700, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:

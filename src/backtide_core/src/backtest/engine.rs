@@ -4,6 +4,7 @@
 //! multi-currency portfolio bookkeeping and result aggregation. It runs
 //! every selected strategy fully in parallel using [`rayon`].
 
+use crate::backtest::fx::FxTable;
 use crate::backtest::indicators::Indicator as BuiltinIndicator;
 use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::experiment_config::ExperimentConfig;
@@ -13,8 +14,10 @@ use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
 use crate::backtest::strategies::{BuiltinStrategy, BuyAndHold, IndicatorView};
+use crate::constants::BENCHMARK;
 use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
+use crate::data::models::instrument_profile::InstrumentProfile;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
@@ -26,13 +29,12 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use pyo3::Py;
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn, Span};
 use uuid::Uuid;
-
 // ────────────────────────────────────────────────────────────────────────────
 // Public interface
 // ────────────────────────────────────────────────────────────────────────────
@@ -219,13 +221,87 @@ impl Engine {
         let aligned = align_bars(&bar_map, &all_ts, config.engine.empty_bar_policy);
         info!("Aligned bars using policy={:?}.", config.engine.empty_bar_policy);
 
+        // ── Build FX rate table from currency-conversion legs ───────────
+        //
+        // Every primary instrument whose quote currency differs from the
+        // portfolio base currency carries one or more conversion legs in
+        // its profile (resolved by `Engine::resolve_legs`). We load the
+        // close-price series for each unique leg symbol — possibly from a
+        // different provider than the primary instruments — and feed
+        // them into an `FxTable` keyed by `(from_ccy, to_ccy)` so the
+        // run loop can convert any cash/MTM amount at any timestamp via
+        // forward-fill (latest known rate ≤ ts).
+        let primary_set: std::collections::HashSet<&str> =
+            symbols.iter().map(String::as_str).collect();
+        let leg_profiles: Vec<&InstrumentProfile> = profiles
+            .iter()
+            .filter(|p| !primary_set.contains(p.instrument.symbol.as_str()))
+            .collect();
+        info!("Building FX table from {} conversion leg(s).", leg_profiles.len());
+
+        let mut fx = FxTable::new(config.portfolio.base_currency);
+        for leg in &leg_profiles {
+            let leg_provider = match self.config.data.providers.get(&leg.instrument.instrument_type)
+            {
+                Some(p) => *p,
+                None => {
+                    warn!(symbol=%leg.instrument.symbol, "No provider for leg instrument type, skipping.");
+                    continue;
+                },
+            };
+            let leg_bars = match self.load_bars(
+                std::slice::from_ref(&leg.instrument.symbol),
+                config.data.interval,
+                leg_provider,
+                start_clamp,
+                end_clamp,
+            ) {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!(symbol=%leg.instrument.symbol, "Failed to load leg bars: {e}");
+                    continue;
+                },
+            };
+            let bars = match leg_bars.get(&leg.instrument.symbol) {
+                Some(v) if !v.is_empty() => v,
+                _ => {
+                    warn!(symbol=%leg.instrument.symbol, "Leg has no bars, skipping FX series.");
+                    continue;
+                },
+            };
+
+            // Parse base/quote currencies. Crypto legs may have a non-fiat
+            // base (e.g. BTC) — we can still record the series if both
+            // sides parse to a `Currency`, otherwise skip the leg.
+            let from_ccy = leg.instrument.base.as_deref().and_then(|s| s.parse::<Currency>().ok());
+            let to_ccy = leg.instrument.quote.parse::<Currency>().ok();
+            let (Some(from_ccy), Some(to_ccy)) = (from_ccy, to_ccy) else {
+                debug!(
+                    symbol=%leg.instrument.symbol,
+                    base=?leg.instrument.base,
+                    quote=%leg.instrument.quote,
+                    "Leg base/quote not a recognised Currency; skipping FX series.",
+                );
+                continue;
+            };
+
+            let series: Vec<(i64, f64)> =
+                bars.iter().map(|b| (b.open_ts as i64, b.close)).collect();
+            debug!(
+                symbol=%leg.instrument.symbol,
+                from=%from_ccy, to=%to_ccy,
+                "Adding FX series ({} points).", series.len()
+            );
+            fx.add_series(from_ccy, to_ccy, series);
+        }
+
         // ── Phase 3a: load strategies (so we can collect their auto indicators) ──
         info!("Phase 3: loading {} strategy definition(s)...", config.strategy.strategies.len());
 
         let mut strategy_objs = load_strategies(&config.strategy.strategies)?;
 
         // Auto-inject a Buy & Hold of the benchmark symbol as a regular strategy.
-        let benchmark_name = format!("Benchmark ({benchmark})");
+        let benchmark_name = BENCHMARK.to_owned();
         if !benchmark.is_empty() {
             match Python::attach(|py| -> PyResult<Py<PyAny>> {
                 let bh = BuyAndHold {
@@ -234,10 +310,7 @@ impl Engine {
                 Ok(Py::new(py, bh)?.into_any())
             }) {
                 Ok(obj) => {
-                    info!(
-                        "Injected benchmark strategy {:?} (BuyAndHold {}).",
-                        benchmark_name, benchmark
-                    );
+                    info!("Injected benchmark strategy BuyAndHold({}).", benchmark);
                     strategy_objs.push((benchmark_name.clone(), obj, false));
                 },
                 Err(e) => {
@@ -326,16 +399,18 @@ impl Engine {
         let pb_arc = pb.as_ref().map(|p| Mutex::new(p.clone()));
 
         let cfg_clone = config.clone();
-        let aligned_arc = std::sync::Arc::new(aligned);
-        let indicators_arc = std::sync::Arc::new(indicators);
-        let profiles_arc = std::sync::Arc::new(profiles.clone());
+        let aligned_arc = Arc::new(aligned);
+        let indicators_arc = Arc::new(indicators);
+        let profiles_arc = Arc::new(profiles.clone());
+        let fx_arc = Arc::new(fx);
+
         // Master timeline shared by all strategies. Built once here from
         // `all_ts` so per-strategy logic doesn't have to reconstruct it
         // from per-symbol rows (which would fall back to row indices for
         // bars where the chosen reference symbol has no data — yielding
         // bogus timestamps like ``1970-01-01 …`` for any benchmark whose
         // history starts later than the earliest selected symbol).
-        let timeline_arc = std::sync::Arc::new(all_ts.clone());
+        let timeline_arc = Arc::new(all_ts.clone());
 
         // Built-in (Rust) strategies are run in parallel via rayon.
         // Custom (Python) strategies are run sequentially under the GIL.
@@ -347,13 +422,14 @@ impl Engine {
             custom.len()
         );
 
-        let cfg_arc = std::sync::Arc::new(cfg_clone);
+        let cfg_arc = Arc::new(cfg_clone);
 
-        let cfg_for_par = std::sync::Arc::clone(&cfg_arc);
-        let aligned_for_par = std::sync::Arc::clone(&aligned_arc);
-        let indicators_for_par = std::sync::Arc::clone(&indicators_arc);
-        let profiles_for_par = std::sync::Arc::clone(&profiles_arc);
-        let timeline_for_par = std::sync::Arc::clone(&timeline_arc);
+        let cfg_for_par = Arc::clone(&cfg_arc);
+        let aligned_for_par = Arc::clone(&aligned_arc);
+        let indicators_for_par = Arc::clone(&indicators_arc);
+        let profiles_for_par = Arc::clone(&profiles_arc);
+        let timeline_for_par = Arc::clone(&timeline_arc);
+        let fx_for_par = Arc::clone(&fx_arc);
 
         // Capture the experiment span so each rayon worker can re-enter it
         // — `tracing` span scope is thread-local, so events from worker
@@ -373,9 +449,10 @@ impl Engine {
                         &indicators_for_par,
                         &profiles_for_par,
                         &timeline_for_par,
+                        &fx_for_par,
                     );
                     info!(
-                        "✔ Finished strategy {:?}: {} trades, {} bar(s) in equity curve.",
+                        "✔ Finished strategy {:?}: {} trades, {} bars in equity curve.",
                         r.strategy_name,
                         r.trades.len(),
                         r.equity_curve.len()
@@ -398,9 +475,10 @@ impl Engine {
                 &indicators_arc,
                 &profiles_arc,
                 &timeline_arc,
+                &fx_arc,
             );
             info!(
-                "✔ Finished custom strategy {:?}: {} trades, {} bar(s) in equity curve.",
+                "✔ Finished custom strategy {:?}: {} trades, {} bars in equity curve.",
                 r.strategy_name,
                 r.trades.len(),
                 r.equity_curve.len()
@@ -444,8 +522,8 @@ impl Engine {
         } else {
             None
         };
-        let bench_snapshot: Option<Vec<(i64, f64)>> = bench_run
-            .map(|r| r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect());
+        let bench_snapshot: Option<Vec<(i64, f64)>> =
+            bench_run.map(|r| r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect());
 
         // Benchmark availability starts when the benchmark can actually be
         // traded (first entry trade), not at the first synthetic equity sample.
@@ -474,12 +552,7 @@ impl Engine {
 
             // For delayed listings, the strategy only becomes investable at
             // first fill; before that, equity is a placeholder flat segment.
-            let strat_start = r
-                .trades
-                .iter()
-                .map(|t| t.entry_ts)
-                .min()
-                .unwrap_or(curve_start);
+            let strat_start = r.trades.iter().map(|t| t.entry_ts).min().unwrap_or(curve_start);
 
             // Align with benchmark when available.
             let window_start = match bench_start_ts {
@@ -957,14 +1030,16 @@ fn load_strategies(names: &[String]) -> EngineResult<Vec<(String, Py<PyAny>, boo
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Execute one strategy through the entire timeline.
+#[allow(clippy::too_many_arguments)]
 fn run_one_strategy(
     name: &str,
     strategy: Py<PyAny>,
     cfg: &ExperimentConfig,
     aligned: &HashMap<String, Vec<Option<Bar>>>,
     indicators: &HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
-    profiles: &[crate::data::models::instrument_profile::InstrumentProfile],
+    profiles: &[InstrumentProfile],
     timeline: &[i64],
+    fx: &FxTable,
 ) -> RunResult {
     let symbols: Vec<String> = cfg.data.symbols.clone();
     let _ = &symbols;
@@ -974,15 +1049,15 @@ fn run_one_strategy(
     // Each strategy may only "see" the symbols the user explicitly
     // selected in the data tab. The benchmark symbol is folded into the
     // global symbol list (and downloaded / aligned) so its bars are
-    // available for the auto-injected `Benchmark (...)` strategy and so
+    // available for the auto-injected benchmark strategy and so
     // the engine can value any benchmark-only positions, but it must
     // *not* be visible to user strategies — otherwise SMA Crossover &
     // friends would silently trade the benchmark too. The auto-injected
     // benchmark strategy is detected by name and gets a closes view
     // restricted to just the benchmark symbol.
     let benchmark = cfg.strategy.benchmark.trim().to_owned();
-    let is_benchmark_run = !benchmark.is_empty() && name == format!("Benchmark ({benchmark})");
-    let allowed_symbols: std::collections::HashSet<String> = if is_benchmark_run {
+    let is_benchmark_run = !benchmark.is_empty() && name == BENCHMARK;
+    let allowed_symbols: HashSet<String> = if is_benchmark_run {
         std::iter::once(benchmark.clone()).collect()
     } else {
         symbols.iter().cloned().collect()
@@ -1010,6 +1085,18 @@ fn run_one_strategy(
     let mut open_trades: HashMap<String, (i64, i64, f64)> = HashMap::new();
 
     let mut peak_equity = cfg.portfolio.initial_cash as f64;
+
+    // ── Currency-conversion state ──────────────────────────────────────
+    //
+    // Tracks the boundary used by `EndOfPeriod` (last seen day/week/...
+    // bucket) and the bar counter used by `CustomInterval`.
+    use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
+    let conv_mode = cfg.exchange.conversion_mode;
+    let conv_threshold = cfg.exchange.conversion_threshold.unwrap_or(0.0);
+    let conv_period = cfg.exchange.conversion_period;
+    let conv_interval = cfg.exchange.conversion_interval.unwrap_or(0) as usize;
+    let mut last_period_bucket: Option<i64> = None;
+    let mut bars_since_conv: usize = 0;
 
     // Pre-compute instrument quote currency lookup.
     let quote_ccy: HashMap<String, Currency> = profiles
@@ -1253,15 +1340,23 @@ fn run_one_strategy(
             if qty > 0 {
                 // BUY: try paying in `order_ccy` first, else convert from base.
                 let needed = notional + commission;
-                if !try_debit(&mut cash, order_ccy, needed, base_ccy, 1.0) {
+                if !try_debit(&mut cash, order_ccy, needed, base_ccy, fx, ts) {
                     // Auto-shrink the order rather than reject it. Equal-weight
                     // strategies routinely size the last leg at exactly
                     // `cash / n_symbols`, which gets pushed fractionally over
                     // the available cash by slippage + commission. Shrinking
                     // the qty to whatever fits keeps every leg actually
                     // tradable instead of mysteriously dropping symbols.
-                    let avail: f64 =
-                        cash.values().copied().filter(|v| v.is_finite() && *v > 0.0).sum();
+                    //
+                    // Compute available funds in `order_ccy` by summing every
+                    // cash bucket converted to `order_ccy` at the current
+                    // bar's FX rate (forward-filled). Buckets whose currency
+                    // can't be converted at `ts` are ignored.
+                    let avail: f64 = cash
+                        .iter()
+                        .filter(|(_, v)| v.is_finite() && **v > 0.0)
+                        .filter_map(|(ccy, v)| fx.convert(*v, *ccy, order_ccy, ts))
+                        .sum();
                     let pct_part = match cfg.exchange.commission_type {
                         CommissionType::Percentage | CommissionType::PercentagePlusFixed => {
                             cfg.exchange.commission_pct / 100.0
@@ -1311,7 +1406,7 @@ fn run_one_strategy(
                         },
                     };
                     let shrunk_needed = notional + commission;
-                    if !try_debit(&mut cash, order_ccy, shrunk_needed, base_ccy, 1.0) {
+                    if !try_debit(&mut cash, order_ccy, shrunk_needed, base_ccy, fx, ts) {
                         // Belt-and-braces: should be unreachable given the
                         // qty solve above, but stay safe under FP edge cases.
                         order_records.push(OrderRecord {
@@ -1351,7 +1446,7 @@ fn run_one_strategy(
                 }
                 // Credit proceeds, debit commission.
                 *cash.entry(order_ccy).or_insert(0.0) += notional;
-                if !try_debit(&mut cash, order_ccy, commission, base_ccy, 1.0) {
+                if !try_debit(&mut cash, order_ccy, commission, base_ccy, fx, ts) {
                     // Reverse: not enough to even pay commission; very unlikely.
                     *cash.entry(order_ccy).or_insert(0.0) -= notional;
                     order_records.push(OrderRecord {
@@ -1400,6 +1495,44 @@ fn run_one_strategy(
             });
         }
         open_orders = still_open;
+
+        // ── 1b. Apply currency-conversion policy ────────────────────────
+        //
+        // Foreign-currency cash buckets created by sells in the loop above
+        // (or carried over from previous bars) are swept back into the
+        // base currency according to the configured `conversion_mode`:
+        //
+        //   * Immediate           → sweep every bar after fills.
+        //   * HoldUntilThreshold  → sweep buckets whose value ≥ threshold
+        //                           (in base ccy units) every bar.
+        //   * EndOfPeriod         → sweep when day/week/month/year flips.
+        //   * CustomInterval      → sweep every N bars.
+        match conv_mode {
+            CurrencyConversionMode::Immediate => {
+                sweep_foreign_to_base(&mut cash, base_ccy, fx, ts, None);
+            },
+            CurrencyConversionMode::HoldUntilThreshold => {
+                sweep_foreign_to_base(&mut cash, base_ccy, fx, ts, Some(conv_threshold));
+            },
+            CurrencyConversionMode::EndOfPeriod => {
+                if let Some(period) = conv_period {
+                    let bucket = period_bucket(ts, period);
+                    if let Some(prev) = last_period_bucket {
+                        if bucket != prev {
+                            sweep_foreign_to_base(&mut cash, base_ccy, fx, ts, None);
+                        }
+                    }
+                    last_period_bucket = Some(bucket);
+                }
+            },
+            CurrencyConversionMode::CustomInterval => {
+                bars_since_conv += 1;
+                if conv_interval > 0 && bars_since_conv >= conv_interval {
+                    sweep_foreign_to_base(&mut cash, base_ccy, fx, ts, None);
+                    bars_since_conv = 0;
+                }
+            },
+        }
 
         // ── 2. Build State + Portfolio + per-symbol view ────────────────
         let state = State {
@@ -1486,13 +1619,27 @@ fn run_one_strategy(
         }
 
         // ── 4. Mark-to-market & equity sample ────────────────────────────
-        let mut equity = cash.values().sum::<f64>(); // base + foreign treated 1:1 (best-effort)
+        //
+        // Equity is computed entirely in the portfolio base currency. Each
+        // cash bucket is converted via the FX table at `ts` (forward-fill);
+        // each open position is marked at its bar close in its quote
+        // currency, then converted to base. Buckets/positions for which
+        // no FX rate is available at `ts` are summed at par (rate 1.0)
+        // so equity stays a finite, comparable number — this matches the
+        // engine's previous "best-effort" behaviour and surfaces missing
+        // FX coverage as a flat segment rather than a NaN.
+        let mut equity = 0.0;
+        for (ccy, amount) in &cash {
+            equity += fx.convert(*amount, *ccy, base_ccy, ts).unwrap_or(*amount);
+        }
         for (sym, qty) in &positions {
             if *qty == 0 {
                 continue;
             }
             if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
-                equity += *qty as f64 * b.close;
+                let value = *qty as f64 * b.close;
+                let pos_ccy = quote_ccy.get(sym).copied().unwrap_or(base_ccy);
+                equity += fx.convert(value, pos_ccy, base_ccy, ts).unwrap_or(value);
             }
         }
         if equity > peak_equity {
@@ -1874,32 +2021,163 @@ fn apply_slippage(raw_px: f64, qty: i64, slippage_pct: f64, limit_cap: Option<f6
 }
 
 /// Try to debit `amount` of `ccy` from `cash`. If `ccy` doesn't have enough,
-/// fall back to the base currency at the given conversion rate. Returns
-/// `false` if even the fallback is insufficient.
+/// fall back to the base currency (and finally any other foreign bucket)
+/// converting at the FX rate observed at `ts`. Returns `false` if no
+/// combination of available cash covers the debit.
 fn try_debit(
     cash: &mut HashMap<Currency, f64>,
     ccy: Currency,
     amount: f64,
     base: Currency,
-    rate_to_base: f64,
+    fx: &FxTable,
+    ts: i64,
 ) -> bool {
     if amount <= 0.0 {
         return true;
     }
+
+    // 1) Pay directly out of `ccy`.
     let avail = *cash.get(&ccy).unwrap_or(&0.0);
     if avail >= amount {
         *cash.entry(ccy).or_insert(0.0) -= amount;
         return true;
     }
-    let remaining = amount - avail.max(0.0);
+
+    // 2) Drain the existing `ccy` bucket first, remember the residual.
+    let mut remaining = amount - avail.max(0.0);
+
+    // 3) Cover the residual from the base currency at the current FX rate.
     let base_avail = *cash.get(&base).unwrap_or(&0.0);
-    let needed_in_base = remaining * rate_to_base;
-    if base_avail >= needed_in_base {
+    let needed_base = match fx.rate(ccy, base, ts) {
+        Some(r) if r > 0.0 => remaining * r,
+        _ => f64::INFINITY,
+    };
+    if needed_base.is_finite() && base_avail >= needed_base {
         cash.insert(ccy, 0.0);
-        *cash.entry(base).or_insert(0.0) -= needed_in_base;
-        true
+        *cash.entry(base).or_insert(0.0) -= needed_base;
+        return true;
+    }
+
+    // 4) Last resort: drain other foreign buckets in deterministic order.
+    let mut buckets: Vec<(Currency, f64)> = cash
+        .iter()
+        .filter(|(c, v)| **c != ccy && **c != base && v.is_finite() && **v > 0.0)
+        .map(|(c, v)| (*c, *v))
+        .collect();
+    buckets.sort_by_key(|(c, _)| c.to_string());
+
+    // Tentatively zero `ccy` and reduce base.
+    let mut staged: Vec<(Currency, f64)> = Vec::new();
+    let staged_ccy_drain = avail.max(0.0);
+    let mut staged_base_drain = if base_avail > 0.0 {
+        base_avail
     } else {
-        false
+        0.0
+    };
+    if needed_base.is_finite() {
+        staged_base_drain = staged_base_drain.min(needed_base);
+        let covered_in_ccy = if staged_base_drain > 0.0 {
+            match fx.rate(base, ccy, ts) {
+                Some(r) if r > 0.0 => staged_base_drain * r,
+                _ => 0.0,
+            }
+        } else {
+            0.0
+        };
+        remaining = (remaining - covered_in_ccy).max(0.0);
+    } else {
+        staged_base_drain = 0.0;
+    }
+
+    for (other_ccy, other_avail) in buckets {
+        if remaining <= 0.0 {
+            break;
+        }
+        let r = match fx.rate(other_ccy, ccy, ts) {
+            Some(r) if r > 0.0 => r,
+            _ => continue,
+        };
+        let other_in_ccy = other_avail * r;
+        if other_in_ccy >= remaining {
+            staged.push((other_ccy, remaining / r));
+            remaining = 0.0;
+        } else {
+            staged.push((other_ccy, other_avail));
+            remaining -= other_in_ccy;
+        }
+    }
+    if remaining > 0.0 {
+        return false;
+    }
+    // Commit drains.
+    if staged_ccy_drain > 0.0 {
+        *cash.entry(ccy).or_insert(0.0) -= staged_ccy_drain;
+    }
+    if staged_base_drain > 0.0 {
+        *cash.entry(base).or_insert(0.0) -= staged_base_drain;
+    }
+    for (c, v) in staged {
+        *cash.entry(c).or_insert(0.0) -= v;
+    }
+    true
+}
+
+/// Sweep every non-base currency bucket into the base currency at the
+/// FX rate observed at `ts`. If `threshold` is `Some(t)`, only buckets
+/// whose value in base currency is `>= t` are swept; otherwise every
+/// foreign bucket with a positive (or negative) finite balance is
+/// converted. Buckets without an available FX rate are left untouched.
+fn sweep_foreign_to_base(
+    cash: &mut HashMap<Currency, f64>,
+    base: Currency,
+    fx: &FxTable,
+    ts: i64,
+    threshold: Option<f64>,
+) {
+    let foreign: Vec<Currency> = cash
+        .iter()
+        .filter(|(c, v)| **c != base && v.is_finite() && v.abs() > 0.0)
+        .map(|(c, _)| *c)
+        .collect();
+    for ccy in foreign {
+        let amount = match cash.get(&ccy).copied() {
+            Some(v) if v.is_finite() && v.abs() > 0.0 => v,
+            _ => continue,
+        };
+        let in_base = match fx.convert(amount, ccy, base, ts) {
+            Some(v) => v,
+            None => continue,
+        };
+        if let Some(t) = threshold {
+            if in_base.abs() < t {
+                continue;
+            }
+        }
+        cash.insert(ccy, 0.0);
+        *cash.entry(base).or_insert(0.0) += in_base;
+    }
+}
+
+/// Return a coarse "bucket" identifier for `ts` under the given
+/// conversion period. Two timestamps falling into different buckets
+/// trigger an end-of-period sweep.
+fn period_bucket(
+    ts: i64,
+    period: crate::backtest::models::conversion_period::ConversionPeriod,
+) -> i64 {
+    use crate::backtest::models::conversion_period::ConversionPeriod::*;
+    use chrono::{DateTime, Datelike, Utc};
+    let dt = DateTime::<Utc>::from_timestamp(ts, 0)
+        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap());
+    match period {
+        Day => ts.div_euclid(86_400),
+        Week => {
+            // ISO week-year combined identifier.
+            let iso = dt.iso_week();
+            (iso.year() as i64) * 100 + iso.week() as i64
+        },
+        Month => (dt.year() as i64) * 12 + (dt.month0() as i64),
+        Year => dt.year() as i64,
     }
 }
 
@@ -2180,6 +2458,11 @@ mod tests {
 
         let allowed = &cfg.exchange.allowed_order_types;
 
+        // Empty FX table — tests run single-currency, no leg bars. The
+        // FX-aware `try_debit` falls back to base-only debits when the
+        // table has no rates, exactly matching the legacy behaviour.
+        let fx = FxTable::new(base_ccy);
+
         for bar_index in 0..total_bars {
             let ts = timeline[bar_index];
 
@@ -2283,7 +2566,7 @@ mod tests {
 
                 if qty > 0 {
                     let needed = notional + commission;
-                    if !try_debit(&mut cash, order_ccy, needed, base_ccy, 1.0) {
+                    if !try_debit(&mut cash, order_ccy, needed, base_ccy, &fx, ts) {
                         let avail: f64 =
                             cash.values().copied().filter(|v| v.is_finite() && *v > 0.0).sum();
                         let pct_part = match cfg.exchange.commission_type {
@@ -2329,7 +2612,7 @@ mod tests {
                             },
                         };
                         let shrunk_needed = notional + commission;
-                        if !try_debit(&mut cash, order_ccy, shrunk_needed, base_ccy, 1.0) {
+                        if !try_debit(&mut cash, order_ccy, shrunk_needed, base_ccy, &fx, ts) {
                             order_records.push(OrderRecord {
                                 order: order.clone(),
                                 timestamp: ts,
@@ -2365,7 +2648,7 @@ mod tests {
                         continue;
                     }
                     *cash.entry(order_ccy).or_insert(0.0) += notional;
-                    if !try_debit(&mut cash, order_ccy, commission, base_ccy, 1.0) {
+                    if !try_debit(&mut cash, order_ccy, commission, base_ccy, &fx, ts) {
                         *cash.entry(order_ccy).or_insert(0.0) -= notional;
                         order_records.push(OrderRecord {
                             order: order.clone(),

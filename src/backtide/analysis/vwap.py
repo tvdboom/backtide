@@ -33,7 +33,7 @@ def plot_vwap(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -43,7 +43,7 @@ def plot_vwap(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -54,7 +54,7 @@ def plot_vwap(
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
-    figsize: tuple[int, int] | None = (900, 600),
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -85,7 +85,7 @@ def plot_vwap(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -149,7 +149,7 @@ def plot_vwap(
                 y=subset["close"],
                 mode="lines",
                 name="Close",
-                line={"color": color, "width": 2, "dash": "dot"},
+                line={"color": color, "width": cfg.plots.line_width, "dash": "dot"},
                 opacity=0.8,
                 legendgroup=symbol,
                 legendgrouptitle_text=symbol,
@@ -168,7 +168,7 @@ def plot_vwap(
                 y=vwap,
                 mode="lines",
                 name="VWAP",
-                line={"color": color, "width": 2},
+                line={"color": color, "width": cfg.plots.line_width},
                 legendgroup=symbol,
                 customdata=[
                     _format_price(vwap[i], currency=x.get("currency"))

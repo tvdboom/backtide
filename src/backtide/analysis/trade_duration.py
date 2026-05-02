@@ -12,9 +12,10 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numpy as np
 import plotly.graph_objects as go
-from backtide.utils.utils import _to_list
+
 from backtide.analysis.utils import _is_benchmark, _plot
 from backtide.config import get_config
+from backtide.utils.utils import _to_list
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -33,7 +34,7 @@ def plot_trade_duration(
     unit: Literal["auto", "minutes", "hours", "days"] = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -45,7 +46,7 @@ def plot_trade_duration(
     unit: Literal["auto", "minutes", "hours", "days"] = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -58,7 +59,7 @@ def plot_trade_duration(
     unit: Literal["auto", "minutes", "hours", "days"] = "auto",
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper right",
-    figsize: tuple[int, int] | None = (900, 600),
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -95,7 +96,7 @@ def plot_trade_duration(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -151,7 +152,7 @@ def plot_trade_duration(
         else:
             unit = "minutes"
 
-    factor = {"minutes": 60., "hours": 3_600., "days": 86_400.}[unit]
+    factor = {"minutes": 60.0, "hours": 3_600.0, "days": 86_400.0}[unit]
 
     fig = go.Figure()
     for idx, run in enumerate(runs):
@@ -166,7 +167,8 @@ def plot_trade_duration(
                 marker_color=cfg.plots.palette[idx % len(cfg.plots.palette)],
                 opacity=0.55,
                 hovertemplate=(
-                    f"Duration: %{{x:,}}{unit[0]}<br>Trades: %{y}<extra>%{fullData.name}</extra>"
+                    f"Duration: %{{x:,}}{unit[0]}<br>Trades: %{{y}}"
+                    "<extra>%{fullData.name}</extra>"
                 ),
             )
         )

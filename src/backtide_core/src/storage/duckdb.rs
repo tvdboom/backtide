@@ -148,9 +148,6 @@ impl Storage for DuckDb {
         ",
         )?;
 
-        // Migrate older databases where experiment_equity.cash was DOUBLE.
-        let _ = conn.execute_batch("ALTER TABLE experiment_equity ALTER COLUMN cash TYPE VARCHAR");
-
         Ok(())
     }
 

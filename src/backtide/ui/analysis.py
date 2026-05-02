@@ -556,36 +556,37 @@ with tab_map[tab_summary]:
 # ── Tab: Candlestick ──────────────────────────────────────────────────────────
 
 with tab_map[tab_candlestick]:
-    col1, col2 = st.columns([10, 1])
-    col1.caption("OHLC candlestick chart showing price action over time.")
-
-    with col2.popover(":material/tune:"):
-        cs_symbol = st.selectbox(
-            label="Symbol",
-            key=(key := "cs_symbol"),
-            options=symbols,
-            index=0,
-            on_change=lambda k=key: _persist(k),
-            help="Select the symbol to display in the candlestick chart.",
-        )
-
-        cs_rangeslider = st.toggle(
-            label="Range slider",
-            key=(key := "cs_rangeslider"),
-            value=_default(key, fallback=True),
-            on_change=lambda k=key: _persist(k),
-            help="Hide/show the range slider below the chart.",
-        )
-
     if active_tab == tab_candlestick:
-        st.plotly_chart(
-            plot_candlestick(
-                bars[bars["symbol"] == cs_symbol],
-                rangeslider=cs_rangeslider,
-                display=None,
-            ),
-            width="stretch",
-        )
+        col1, col2 = st.columns([10, 1])
+        col1.caption("OHLC candlestick chart showing price action over time.")
+
+        with col2.popover(":material/tune:"):
+            cs_symbol = st.selectbox(
+                label="Symbol",
+                key=(key := "cs_symbol"),
+                options=symbols,
+                index=0,
+                on_change=lambda k=key: _persist(k),
+                help="Select the symbol to display in the candlestick chart.",
+            )
+
+            cs_rangeslider = st.toggle(
+                label="Range slider",
+                key=(key := "cs_rangeslider"),
+                value=_default(key, fallback=True),
+                on_change=lambda k=key: _persist(k),
+                help="Hide/show the range slider below the chart.",
+            )
+
+        with st.spinner("Loading plot..."):
+            st.plotly_chart(
+                plot_candlestick(
+                    bars[bars["symbol"] == cs_symbol],
+                    rangeslider=cs_rangeslider,
+                    display=None,
+                ),
+                width="stretch",
+            )
 
         if len(symbols) > 1:
             st.warning(
@@ -596,35 +597,35 @@ with tab_map[tab_candlestick]:
 # ── Tab: Correlation ──────────────────────────────────────────────────────────
 
 with tab_map[tab_correlation]:
-    col1, col2 = st.columns([10, 1])
-    col1.caption(
-        "Pairwise correlation of returns across selected symbols. Select at least two symbols."
-    )
-
-    with col2.popover(":material/tune:"):
-        price_col = price_col_radio("price_col_corr")
-
     if active_tab == tab_correlation:
+        col1, col2 = st.columns([10, 1])
+        col1.caption(
+            "Pairwise correlation of returns across selected symbols. Select at least two symbols."
+        )
+
+        with col2.popover(":material/tune:"):
+            price_col = price_col_radio("price_col_corr")
+
         if len(symbols) < 2:
             st.info(
                 "Select at least two symbols to compute correlation.",
                 icon=":material/info:",
             )
         else:
-            st.plotly_chart(
-                plot_correlation(data=bars, price_col=price_col, display=None),
-                width="stretch",
-            )
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(
+                    plot_correlation(data=bars, price_col=price_col, display=None),
+                    width="stretch",
+                )
 
 # ── Tab: Dividends ────────────────────────────────────────────────────────────
 
 if tab_dividends in tab_map:
     with tab_map[tab_dividends]:
-        st.caption("Dividend payment history for selected symbols.")
-
         if active_tab == tab_dividends:
-            dividends = _to_pandas(query_dividends(symbol=symbols))
+            st.caption("Dividend payment history for selected symbols.")
 
+            dividends = _to_pandas(query_dividends(symbol=symbols))
             if dividends.empty:
                 st.info(
                     "No dividend data available for the selected symbols.",
@@ -653,59 +654,61 @@ if tab_dividends in tab_map:
                     )
                 else:
                     dividends["currency"] = dividends["symbol"].map(lambda s: str(all_i[s].quote))
-                    st.plotly_chart(
-                        plot_dividends(data=dividends, display=None),
-                        width="stretch",
-                    )
+                    with st.spinner("Loading plot..."):
+                        st.plotly_chart(
+                            plot_dividends(data=dividends, display=None),
+                            width="stretch",
+                        )
 
 # ── Tab: Drawdown ─────────────────────────────────────────────────────────────
 
 with tab_map[tab_drawdown]:
-    col1, col2 = st.columns([10, 1])
-    col1.caption("Percentage drawdown from the running peak over time.")
-
-    with col2.popover(":material/tune:"):
-        price_col = price_col_radio("price_col_drawdown")
-
     if active_tab == tab_drawdown:
-        st.plotly_chart(
-            plot_drawdown(data=bars, price_col=price_col, display=None),
-            width="stretch",
-        )
+        col1, col2 = st.columns([10, 1])
+        col1.caption("Percentage drawdown from the running peak over time.")
+
+        with col2.popover(":material/tune:"):
+            price_col = price_col_radio("price_col_drawdown")
+
+        with st.spinner("Loading plot..."):
+            st.plotly_chart(
+                plot_drawdown(data=bars, price_col=price_col, display=None),
+                width="stretch",
+            )
 
 # ── Tab: Price ────────────────────────────────────────────────────────────────
 
 with tab_map[tab_price]:
-    col1, col2 = st.columns([10, 1])
-    col1.caption("Price over time for selected symbols.")
-
-    stored_ind = _load_stored_indicators(cfg)
-
-    with col2.popover(":material/tune:"):
-        price_col = price_col_radio("price_col_price")
-
-        price_normalize = st.toggle(
-            label="Normalize",
-            key=(key := "price_normalize"),
-            value=_default(key, fallback=False),
-            on_change=lambda k=key: _persist(k),
-            help="Normalize prices to base 100 for easy relative comparison across symbols.",
-        )
-
-        if stored_ind and not price_normalize:
-            selected_ind = st.multiselect(
-                label="Indicators",
-                key=(key := "price_indicators"),
-                options=stored_ind,
-                default=_default(key, []),
-                placeholder="Select indicators...",
-                on_change=lambda k=key: _persist(k),
-                help="Overlay indicators on the price chart.",
-            )
-        else:
-            selected_ind = []
-
     if active_tab == tab_price:
+        col1, col2 = st.columns([10, 1])
+        col1.caption("Price over time for selected symbols.")
+
+        stored_ind = _load_stored_indicators(cfg)
+
+        with col2.popover(":material/tune:"):
+            price_col = price_col_radio("price_col_price")
+
+            price_normalize = st.toggle(
+                label="Normalize",
+                key=(key := "price_normalize"),
+                value=_default(key, fallback=False),
+                on_change=lambda k=key: _persist(k),
+                help="Normalize prices to base 100 for easy relative comparison across symbols.",
+            )
+
+            if stored_ind and not price_normalize:
+                selected_ind = st.multiselect(
+                    label="Indicators",
+                    key=(key := "price_indicators"),
+                    options=stored_ind,
+                    default=_default(key, []),
+                    placeholder="Select indicators...",
+                    on_change=lambda k=key: _persist(k),
+                    help="Overlay indicators on the price chart.",
+                )
+            else:
+                selected_ind = []
+
         price_bars = bars
         if price_normalize:
             price_bars = bars.copy()
@@ -715,151 +718,159 @@ with tab_map[tab_price]:
                 if first != 0:
                     price_bars.loc[mask, price_col] = price_bars.loc[mask, price_col] / first * 100
 
-        st.plotly_chart(
-            plot_price(
-                data=price_bars,
-                price_col=price_col,
-                indicators={n: stored_ind[n] for n in selected_ind},
-                display=None,
-            ),
-            width="stretch",
-        )
+        with st.spinner("Loading plot..."):
+            st.plotly_chart(
+                plot_price(
+                    data=price_bars,
+                    price_col=price_col,
+                    indicators={n: stored_ind[n] for n in selected_ind},
+                    display=None,
+                ),
+                width="stretch",
+            )
 
 # ── Tab: Returns ──────────────────────────────────────────────────────────────
 
 with tab_map[tab_returns]:
-    col1, col2 = st.columns([10, 1])
-    col1.caption("Distribution of period-over-period percentage returns.")
-
-    with col2.popover(":material/tune:"):
-        price_col = price_col_radio("price_col_dist")
-
-        ret_log = st.toggle(
-            label="Log scale",
-            key=(key := "ret_log_scale"),
-            value=_default(key, fallback=False),
-            on_change=lambda k=key: _persist(k),
-            help="Use a logarithmic scale for the y-axis.",
-        )
-
     if active_tab == tab_returns:
-        fig = plot_returns(data=bars, price_col=price_col, display=None)
-        if ret_log:
-            fig.update_yaxes(type="log")
-        st.plotly_chart(fig, width="stretch")
-
-# ── Tab: Seasonality ──────────────────────────────────────────────────────────
-
-with tab_map[tab_seasonality]:
-    col1, col2 = st.columns([10, 1])
-    if interval.is_intraday():
-        col1.caption("Average returns heatmap by hour and day of week.")
-    else:
-        col1.caption("Average returns heatmap by month and year.")
-
-    with col2.popover(":material/tune:"):
-        price_col = price_col_radio("price_col_season")
-
-        season_symbol = st.selectbox(
-            label="Symbol",
-            key=(key := "season_symbol"),
-            options=symbols,
-            index=0,
-            on_change=lambda k=key: _persist(k),
-            help="Select the symbol to display in the seasonality heatmap.",
-        )
-
-    if active_tab == tab_seasonality:
-        st.plotly_chart(
-            plot_seasonality(
-                data=bars[bars["symbol"] == season_symbol],
-                price_col=price_col,
-                display=None,
-            ),
-            width="stretch",
-        )
-
-        if len(symbols) > 1:
-            st.warning(
-                f"Seasonality heatmap shows data for **{season_symbol}** only.",
-                icon=":material/warning:",
-            )
-
-# ── Tab: Volatility ──────────────────────────────────────────────────────────
-
-with tab_map[tab_volatility]:
-    col1, col2 = st.columns([10, 1])
-    col1.caption("Rolling volatility (standard deviation of returns) over time.")
-
-    with col2.popover(":material/tune:"):
-        price_col = price_col_radio("price_col_vol")
-
-        vol_window = st.number_input(
-            label="Window",
-            key=(key := "vol_window"),
-            value=_default(key, fallback=21),
-            min_value=2,
-            max_value=252,
-            step=1,
-            on_change=lambda k=key: _persist(k),
-            help="Rolling window size (number of bars) for computing volatility.",
-        )
-
-    if active_tab == tab_volatility:
-        st.plotly_chart(
-            plot_volatility(
-                data=bars,
-                price_col=price_col,
-                window=int(vol_window),
-                display=None,
-            ),
-            width="stretch",
-        )
-
-# ── Tab: Volume ───────────────────────────────────────────────────────────────
-
-if tab_volume in tab_map:
-    with tab_map[tab_volume]:
         col1, col2 = st.columns([10, 1])
-        col1.caption("Trading volume over time for selected symbols.")
+        col1.caption("Distribution of period-over-period percentage returns.")
 
         with col2.popover(":material/tune:"):
-            vol_dollar = st.toggle(
-                label="Dollar volume",
-                key=(key := "vol_dollar"),
-                value=_default(key, fallback=False),
-                on_change=lambda k=key: _persist(k),
-                help="Show volume as price x shares (dollar volume) instead of raw share count.",
-            )
+            price_col = price_col_radio("price_col_dist")
 
-            vol_log = st.toggle(
+            ret_log = st.toggle(
                 label="Log scale",
-                key=(key := "vol_log_scale"),
+                key=(key := "ret_log_scale"),
                 value=_default(key, fallback=False),
                 on_change=lambda k=key: _persist(k),
                 help="Use a logarithmic scale for the y-axis.",
             )
 
-        if active_tab == tab_volume:
-            vol_bars = bars.copy()
-            if vol_dollar:
-                vol_bars["volume"] = vol_bars["volume"] * vol_bars["close"]
-            else:
-                vol_bars = vol_bars.drop(columns=["currency"], errors="ignore")
-
-            fig = plot_volume(data=vol_bars, display=None)
-            if vol_log:
+        with st.spinner("Loading plot..."):
+            fig = plot_returns(data=bars, price_col=price_col, display=None)
+            if ret_log:
                 fig.update_yaxes(type="log")
             st.plotly_chart(fig, width="stretch")
+
+# ── Tab: Seasonality ──────────────────────────────────────────────────────────
+
+with tab_map[tab_seasonality]:
+    if active_tab == tab_seasonality:
+        col1, col2 = st.columns([10, 1])
+        if interval.is_intraday():
+            col1.caption("Average returns heatmap by hour and day of week.")
+        else:
+            col1.caption("Average returns heatmap by month and year.")
+
+        with col2.popover(":material/tune:"):
+            price_col = price_col_radio("price_col_season")
+
+            season_symbol = st.selectbox(
+                label="Symbol",
+                key=(key := "season_symbol"),
+                options=symbols,
+                index=0,
+                on_change=lambda k=key: _persist(k),
+                help="Select the symbol to display in the seasonality heatmap.",
+            )
+
+        with st.spinner("Loading plot..."):
+            st.plotly_chart(
+                plot_seasonality(
+                    data=bars[bars["symbol"] == season_symbol],
+                    price_col=price_col,
+                    display=None,
+                ),
+                width="stretch",
+            )
+
+            if len(symbols) > 1:
+                st.warning(
+                    f"Seasonality heatmap shows data for **{season_symbol}** only.",
+                    icon=":material/warning:",
+                )
+
+# ── Tab: Volatility ──────────────────────────────────────────────────────────
+
+with tab_map[tab_volatility]:
+    if active_tab == tab_volatility:
+        col1, col2 = st.columns([10, 1])
+        col1.caption("Rolling volatility (standard deviation of returns) over time.")
+
+        with col2.popover(":material/tune:"):
+            price_col = price_col_radio("price_col_vol")
+
+            vol_window = st.number_input(
+                label="Window",
+                key=(key := "vol_window"),
+                value=_default(key, fallback=21),
+                min_value=2,
+                max_value=252,
+                step=1,
+                on_change=lambda k=key: _persist(k),
+                help="Rolling window size (number of bars) for computing volatility.",
+            )
+
+        with st.spinner("Loading plot..."):
+            st.plotly_chart(
+                plot_volatility(
+                    data=bars,
+                    price_col=price_col,
+                    window=int(vol_window),
+                    display=None,
+                ),
+                width="stretch",
+            )
+
+# ── Tab: Volume ───────────────────────────────────────────────────────────────
+
+if tab_volume in tab_map:
+    with tab_map[tab_volume]:
+        if active_tab == tab_volume:
+            col1, col2 = st.columns([10, 1])
+            col1.caption("Trading volume over time for selected symbols.")
+
+            with col2.popover(":material/tune:"):
+                vol_dollar = st.toggle(
+                    label="Dollar volume",
+                    key=(key := "vol_dollar"),
+                    value=_default(key, fallback=False),
+                    on_change=lambda k=key: _persist(k),
+                    help=(
+                        "Show volume as price x shares (dollar volume) instead of raw share count."
+                    ),
+                )
+
+                vol_log = st.toggle(
+                    label="Log scale",
+                    key=(key := "vol_log_scale"),
+                    value=_default(key, fallback=False),
+                    on_change=lambda k=key: _persist(k),
+                    help="Use a logarithmic scale for the y-axis.",
+                )
+
+            with st.spinner("Loading plot..."):
+                vol_bars = bars.copy()
+                if vol_dollar:
+                    vol_bars["volume"] = vol_bars["volume"] * vol_bars["close"]
+                else:
+                    vol_bars = vol_bars.drop(columns=["currency"], errors="ignore")
+
+                fig = plot_volume(data=vol_bars, display=None)
+                if vol_log:
+                    fig.update_yaxes(type="log")
+                st.plotly_chart(fig, width="stretch")
 
 # ── Tab: VWAP ─────────────────────────────────────────────────────────────────
 
 if tab_vwap in tab_map:
     with tab_map[tab_vwap]:
-        st.caption("Volume-Weighted Average Price compared to closing price.")
-
         if active_tab == tab_vwap:
-            st.plotly_chart(
-                plot_vwap(data=bars, display=None),
-                width="stretch",
-            )
+            st.caption("Volume-Weighted Average Price compared to closing price.")
+
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(
+                    plot_vwap(data=bars, display=None),
+                    width="stretch",
+                )

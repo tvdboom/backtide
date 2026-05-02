@@ -236,9 +236,9 @@ def _on_config_upload():
         try:
             exp = _parse_config_upload(upload)
             _apply_config_to_state(exp, st.session_state)
-            st.session_state["_import_success"] = f"Loaded configuration from `{upload.name}`."
+            st.session_state["_success"] = f"Loaded configuration from `{upload.name}`."
         except Exception as ex:  # noqa: BLE001
-            st.session_state["_import_error"] = f"Failed to parse file: {ex}"
+            st.session_state["_error"] = f"Failed to parse file: {ex}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -253,9 +253,9 @@ if pending := st.session_state.pop("_pending_experiment_config", None):
     try:
         _apply_config_to_state(pending, st.session_state)
     except Exception as _ex:  # noqa: BLE001
-        st.session_state["_import_error"] = f"Failed to apply configuration: {_ex}"
+        st.session_state["_error"] = f"Failed to apply configuration: {_ex}"
     else:
-        st.session_state["_import_success"] = (
+        st.session_state["_success"] = (
             f"Loaded configuration from experiment **{st.session_state.experiment_name}**."
         )
 
@@ -384,9 +384,9 @@ with tab1:
         help="Upload a TOML, YAML or JSON file to pre-fill the experiment configuration.",
     )
 
-    if _import_msg := st.session_state.pop("_import_success", None):
+    if _import_msg := st.session_state.pop("_success", None):
         st.success(_import_msg)
-    if _import_err := st.session_state.pop("_import_error", None):
+    if _import_err := st.session_state.pop("_error", None):
         st.error(_import_err)
 
 

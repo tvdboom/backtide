@@ -65,9 +65,9 @@ If [`StrategyExpConfig.benchmark`][`StrategyExpConfig`] is non-empty, the engine
 
 - Folds the benchmark symbol into the data download list so its bars are
   available for every strategy.
-- Auto-injects an extra strategy run named `Benchmark (<SYMBOL>)` that holds a
-  pure passive `BuyAndHold(symbol=<SYMBOL>)` over the same window. This is the
-  series used to compute [alpha](#alpha).
+- Auto-injects an extra strategy run named `Benchmark` that holds a pure passive
+  `BuyAndHold(<SYMBOL>)` over the same window. This is the series used to compute
+  [alpha](#alpha).
 - **Does not** let the benchmark symbol leak into other strategies. Only the
   symbols you explicitly added in the data tab are visible to user strategies;
   if you want a strategy to also trade the benchmark, add it to the symbol list.

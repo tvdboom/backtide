@@ -14,20 +14,22 @@ import streamlit as st
 
 from backtide.analysis import (
     plot_cash_holdings,
+    plot_mae_mfe,
     plot_pnl,
     plot_pnl_histogram,
+    plot_position_size,
+    plot_price,
     plot_rolling_returns,
     plot_rolling_sharpe,
     plot_trade_duration,
     plot_trade_pnl,
 )
-from backtide.analysis import plot_mae_mfe, plot_position_size, plot_price
-from backtide.storage import query_bars
 from backtide.analysis.utils import _is_benchmark
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
 from backtide.storage import (
     delete_experiment,
+    query_bars,
     query_experiments,
     query_instruments,
     query_strategy_runs,
@@ -41,6 +43,7 @@ from backtide.ui.utils import (
     _persist,
     _to_pandas,
 )
+from backtide.utils.constants import BENCHMARK_NAME
 from backtide.utils.utils import _format_price, _moment_to_strftime
 
 if TYPE_CHECKING:
@@ -107,6 +110,24 @@ st.markdown(
             font-size: 2.2em;
             font-weight: 700;
         }
+
+        /* Center the strategy segmented-control on the full-results page.
+           Aggressive: shrink every nested wrapper to its content width and
+           auto-margin it, so the button row ends up centered no matter
+           what BaseWeb/Streamlit re-renders the control as. */
+        .st-key-strategy_picker,
+        .st-key-strategy_picker [data-testid="stVerticalBlock"] {
+            align-items: center !important;
+        }
+        .st-key-strategy_picker [data-testid="stElementContainer"],
+        .st-key-strategy_picker [data-testid="stSegmentedControl"],
+        .st-key-strategy_picker [data-baseweb="button-group"] {
+            width: fit-content !important;
+            max-width: 100% !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            flex: 0 0 auto !important;
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -146,7 +167,7 @@ def _colored_metric(container, label: str, value: str, tone: str = ""):
     container.metric(label, f":{tone}[{value}]" if tone else value)
 
 
-def _render_strategy_summary(run: RunResult):
+def _render_run_metrics(run: RunResult):
     """Render compact summary metrics for a single strategy run."""
     if err := getattr(run, "error", None):
         st.error(
@@ -164,7 +185,7 @@ def _render_strategy_summary(run: RunResult):
     cagr = run.metrics["cagr"]
     alpha = run.metrics["alpha"]
     max_dd = run.metrics["max_dd"]
-    n_trades = run.metrics["n_trades"]
+    n_trades = int(run.metrics["n_trades"])
     win_rate = run.metrics["win_rate"]
 
     _colored_metric(
@@ -311,7 +332,7 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
 
     all_labels = [
         ":material/payments: PnL",
-        ":material/account_balance_wallet: Cash holdings",
+        ":material/account_balance_wallet: Cash",
         ":material/bar_chart: PnL histogram",
         ":material/stacked_line_chart: Rolling returns",
         ":material/military_tech: Rolling Sharpe",
@@ -355,10 +376,11 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
                     help="Show a second panel with strategy drawdown.",
                 )
 
-            st.plotly_chart(
-                plot_pnl(runs, normalize=normalize, drawdown=drawdown, display=None),
-                width="stretch",
-            )
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(
+                    plot_pnl(runs, normalize=normalize, drawdown=drawdown, display=None),
+                    width="stretch",
+                )
 
     with tab_map[all_labels[1]]:
         if active_tab == all_labels[1]:
@@ -366,7 +388,9 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
             col1.caption("Cash balance timeline split by strategy and settlement currency.")
             with col2.popover(":material/tune:"):
                 st.caption("No options available for this plot.")
-            st.plotly_chart(plot_cash_holdings(runs, display=None), width="stretch")
+
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(plot_cash_holdings(runs, display=None), width="stretch")
 
     with tab_map[all_labels[2]]:
         if active_tab == all_labels[2]:
@@ -394,7 +418,8 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
                 else:
                     bins = None
 
-            st.plotly_chart(plot_pnl_histogram(runs, bins=bins, display=None), width="stretch")
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(plot_pnl_histogram(runs, bins=bins, display=None), width="stretch")
 
     with tab_map[all_labels[3]]:
         if active_tab == all_labels[3]:
@@ -412,7 +437,8 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
                     help="Number of bars used for the rolling return window.",
                 )
 
-            st.plotly_chart(plot_rolling_returns(runs, window, display=None), width="stretch")
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(plot_rolling_returns(runs, window, display=None), width="stretch")
 
     with tab_map[all_labels[4]]:
         if active_tab == all_labels[4]:
@@ -433,7 +459,11 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
             # Number of bars per year for the experiment's interval
             ppy = 365 * 24 * 60 / exp_cfg.data.interval.minutes()
 
-            st.plotly_chart(plot_rolling_sharpe(runs, window, ppy, display=None), width="stretch")
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(
+                    plot_rolling_sharpe(runs, window, ppy, display=None),
+                    width="stretch",
+                )
 
     with tab_map[all_labels[5]]:
         if active_tab == all_labels[5]:
@@ -468,10 +498,12 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
                     )
                 else:
                     bins = None
-            st.plotly_chart(
-                plot_trade_duration(runs, bins=bins, unit=unit or "auto", display=None),
-                width="stretch",
-            )
+
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(
+                    plot_trade_duration(runs, bins=bins, unit=unit or "auto", display=None),
+                    width="stretch",
+                )
 
     with tab_map[all_labels[6]]:
         if active_tab == all_labels[6]:
@@ -479,7 +511,9 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
             col1.caption("Per-trade PnL profile for each strategy.")
             with col2.popover(":material/tune:"):
                 st.caption("No options available for this plot.")
-            st.plotly_chart(plot_trade_pnl(runs, display=None), width="stretch")
+
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(plot_trade_pnl(runs, display=None), width="stretch")
 
 
 def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
@@ -493,13 +527,13 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
     ]
 
     # Use a per-strategy key so each tab group remembers its active selection.
-    key = f"plot_tabs_strategy_{run.strategy_name}"
     tabs = st.tabs(
         labels,
-        key=key,
+        key=(key := f"plot_tabs_strategy_{run.strategy_name}"),
         default=_default(key),
         on_change=lambda k=key: _persist(k),
     )
+
     label_to_tab = dict(zip(labels, tabs, strict=True))
     active_tab = st.session_state.get(key, labels[0])
 
@@ -509,10 +543,12 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
             c1.caption("Maximum adverse/favorable excursion per trade.")
             with c2.popover(":material/tune:"):
                 st.caption("No options available for this plot.")
-            st.plotly_chart(
-                plot_mae_mfe(run, interval=interval, display=None),
-                width="stretch",
-            )
+
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(
+                    plot_mae_mfe(run, interval=interval, display=None),
+                    width="stretch",
+                )
 
     with label_to_tab[labels[1]]:
         if active_tab == labels[1]:
@@ -520,12 +556,15 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
             c1.caption("Position size evolution through time.")
             with c2.popover(":material/tune:"):
                 st.caption("No options available for this plot.")
-            st.plotly_chart(plot_position_size(run, display=None), width="stretch")
+
+            with st.spinner("Loading plot..."):
+                st.plotly_chart(plot_position_size(run, display=None), width="stretch")
 
     with label_to_tab[labels[2]]:
         if active_tab == labels[2]:
             c1, c2 = st.columns([10, 1])
             c1.caption("Price action with strategy context for the selected symbol.")
+
             # Determine the symbols actually traded by this run; fall back to
             # the experiment's configured universe so the user can still load
             # a chart for a non-traded benchmark.
@@ -549,10 +588,11 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
                     if df is None or len(df) == 0:
                         st.info(f"No price data available for {sym}.")
                     else:
-                        st.plotly_chart(
-                            plot_price(df, run=run, display=None),
-                            width="stretch",
-                        )
+                        with st.spinner("Loading plot..."):
+                            st.plotly_chart(
+                                plot_price(df, run=run, display=None),
+                                width="stretch",
+                            )
 
 
 def _render_full_analysis(row: pd.Series):
@@ -763,105 +803,114 @@ def _render_full_analysis(row: pd.Series):
     _render_analysis_tabs(runs, exp_cfg)
 
     st.markdown("")
+    st.markdown("")
 
-    tabs = st.tabs(
-        [f"**{run.strategy_name}**" for run in runs],
-        key=(key := "full_results_strategy_tabs"),
-        default=_default(key),
-        on_change=lambda k=key: _persist(k),
-    )
+    st.markdown("### Strategies", text_alignment="center")
+
+    with st.container(key="strategy_picker"):
+        selected_strategy = st.segmented_control(
+            label="Strategies",
+            label_visibility="collapsed",
+            key=(key := "selected_strategy"),
+            required=True,
+            options=(options := [run.strategy_name for run in runs]),
+            default=_default(key, options[1]),
+            format_func=lambda x: (
+                f":material/{'bar_chart' if x == BENCHMARK_NAME else 'psychology'}: **{x}**"
+            ),
+            on_change=lambda k=key: _persist(k),
+            help="Select the strategy to analyze.",
+        )
+
+    logokit_key = cfg.display.logokit_api_key
+    run = next(r for r in runs if r.strategy_name == selected_strategy)
+
+    st.markdown("##### Metrics")
+    _render_run_metrics(run)
+    st.markdown("")
+
+    st.markdown("##### Plots")
+    _render_strategy_plots(run, exp_cfg)
+    st.markdown("")
+
+    st.markdown("##### Orders")
+
+    if not run.orders:
+        st.warning("The strategy didn't execute any orders.", icon=":material/warning:")
 
     # Map every traded symbol to the currency it actually settled in.
-    symbol_to_ccy: dict[str, str] = {}
-    symbol_to_it: dict[str, object] = {}
+    symbol_to_ccy, symbol_to_it = {}, {}
     for inst in query_instruments():
         if inst.quote:
             symbol_to_ccy[inst.symbol] = str(inst.quote)
         symbol_to_it[inst.symbol] = inst.instrument_type
 
-    logokit_key = cfg.display.logokit_api_key
+    rows = []
+    for o in run.orders:
+        qty = o.order.quantity
+        side = "Buy" if qty > 0 else ("Sell" if qty < 0 else "—")
+        px = o.fill_price if o.fill_price is not None else o.order.price
 
-    for tab, run in zip(tabs, runs, strict=True):
-        with tab:
-            _render_strategy_summary(run)
+        # Settle each fill in the instrument's quote currency
+        # (matches what the engine actually debited / credited).
+        quote_ccy = symbol_to_ccy.get(o.order.symbol, run.base_currency)
 
-            st.markdown("")
-            _render_strategy_plots(run, exp_cfg)
-            st.markdown("")
+        total = (px * abs(qty)) if px is not None else None
 
-            st.markdown("##### Orders")
+        rows.append(
+            {
+                "Datetime": dt.fromtimestamp(o.timestamp),
+                "Symbol": o.order.symbol,
+                "Type": str(o.order.order_type),
+                "Side": side,
+                "Qty": abs(qty),
+                "Price": _format_price(total, currency=quote_ccy) if total is not None else "—",
+                "PnL": _format_price(o.pnl, currency=quote_ccy) if o.pnl is not None else "—",
+                "Commission": _format_price(o.commission or 0.0, currency=quote_ccy),
+                "Status": o.status,
+            }
+        )
 
-            if not run.orders:
-                st.warning("The strategy didn't execute any orders.", icon=":material/warning:")
+    df = pd.DataFrame(rows).sort_values("Datetime", ascending=False).reset_index(drop=True)
 
-            rows = []
-            for o in run.orders:
-                qty = o.order.quantity
-                side = "Buy" if qty > 0 else ("Sell" if qty < 0 else "—")
-                px = o.fill_price if o.fill_price is not None else o.order.price
+    if logokit_key:
+        df.insert(
+            0,
+            "Logo",
+            df.apply(
+                lambda row: _get_logokit_url(
+                    row["Symbol"], symbol_to_it[row["Symbol"]], logokit_key
+                ),
+                axis=1,
+            ),
+        )
 
-                # Settle each fill in the instrument's quote currency
-                # (matches what the engine actually debited / credited).
-                quote_ccy = symbol_to_ccy.get(o.order.symbol, run.base_currency)
+    column_config = {}
+    if logokit_key:
+        column_config["Logo"] = st.column_config.ImageColumn(label="", width="small")
 
-                total = (px * abs(qty)) if px is not None else None
+    def _color_side(val: str) -> str:
+        if val == "Buy":
+            return "color: #2ecc71; font-weight: 600;"
+        if val == "Sell":
+            return "color: #e74c3c; font-weight: 600;"
+        return ""
 
-                rows.append(
-                    {
-                        "Datetime": dt.fromtimestamp(o.timestamp),
-                        "Symbol": o.order.symbol,
-                        "Type": str(o.order.order_type),
-                        "Side": side,
-                        "Qty": abs(qty),
-                        "Price": (
-                            _format_price(total, currency=quote_ccy) if total is not None else "—"
-                        ),
-                        "PnL": (
-                            _format_price(o.pnl, currency=quote_ccy) if o.pnl is not None else "—"
-                        ),
-                        "Commission": _format_price(o.commission or 0.0, currency=quote_ccy),
-                    }
-                )
+    def _color_pnl(val: str | None) -> str:
+        if not val:
+            return ""
+        s = val.replace(",", "")
+        if not any(ch.isdigit() for ch in s):
+            return ""
+        return "color: #e74c3c;" if "-" in s else "color: #2ecc71;"
 
-            df = pd.DataFrame(rows).sort_values("Datetime", ascending=False).reset_index(drop=True)
-
-            if logokit_key:
-                df.insert(
-                    0,
-                    "Logo",
-                    df.apply(
-                        lambda row: _get_logokit_url(
-                            row["Symbol"], symbol_to_it[row["Symbol"]], logokit_key
-                        ),
-                        axis=1,
-                    ),
-                )
-
-            def _color_side(val: str) -> str:
-                if val == "Buy":
-                    return "color: #2ecc71; font-weight: 600;"
-                if val == "Sell":
-                    return "color: #e74c3c; font-weight: 600;"
-                return ""
-
-            def _color_pnl(val: str | None) -> str:
-                if not val:
-                    return ""
-                s = val.replace(",", "")
-                if not any(ch.isdigit() for ch in s):
-                    return ""
-                return "color: #e74c3c;" if "-" in s else "color: #2ecc71;"
-
-            column_config = {}
-            if logokit_key:
-                column_config["Logo"] = st.column_config.ImageColumn(label="", width="small")
-
-            st.dataframe(
-                df.style.map(_color_side, subset=["Side"]).map(_color_pnl, subset=["PnL"]),
-                width="stretch",
-                column_config=column_config,
-                hide_index=True,
-            )
+    st.dataframe(
+        df.style.map(_color_side, subset=["Side"]).map(_color_pnl, subset=["PnL"]),
+        width="stretch",
+        column_order=["", *df.columns[:-1]],
+        column_config=column_config,
+        hide_index=True,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1024,5 +1073,6 @@ for _, row in df.iterrows():
             for i, run in enumerate(query_strategy_runs(exp_id)):
                 if i > 0:
                     st.markdown("<div style='margin-top:1.25rem'></div>", unsafe_allow_html=True)
-                st.markdown(f"**:material/psychology: {run.strategy_name}**")
-                _render_strategy_summary(run)
+                icon = "bar_chart" if _is_benchmark(run) else "psychology"
+                st.markdown(f"**:material/{icon}: {run.strategy_name}**")
+                _render_run_metrics(run)

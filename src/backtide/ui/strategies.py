@@ -25,7 +25,7 @@ from backtide.ui.utils import (
     _default,
     _persist,
 )
-from backtide.utils.constants import INVALID_FILENAME_CHARS
+from backtide.utils.constants import BENCHMARK_NAME, INVALID_FILENAME_CHARS
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities
@@ -333,6 +333,11 @@ if mode == "builtin":
                 f"The following characters are not allowed in strategy names: "
                 f"**{' '.join(sorted(set(chars)))}** "
             )
+        elif strat_name.strip().lower() == BENCHMARK_NAME.lower():
+            name_error = (
+                f"The name **{BENCHMARK_NAME}** is reserved for the auto-injected "
+                "benchmark strategy. Choose a different name."
+            )
         elif strat_name in stored_strat:
             name_error = f"A strategy with name **{strat_name}** already exists."
 
@@ -437,6 +442,11 @@ elif mode == "custom":
         elif INVALID_FILENAME_CHARS.findall(strat_name):
             chars = INVALID_FILENAME_CHARS.findall(strat_name)
             name_error = f"Invalid characters: {' '.join(repr(c) for c in sorted(set(chars)))}"
+        elif strat_name.strip().lower() == BENCHMARK_NAME.lower():
+            name_error = (
+                f"The name **{BENCHMARK_NAME}** is reserved for the auto-injected "
+                "benchmark strategy. Choose a different name."
+            )
         elif strat_name in stored_strat:
             name_error = f"A strategy with name **{strat_name}** already exists."
 

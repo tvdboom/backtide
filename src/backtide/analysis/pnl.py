@@ -35,7 +35,7 @@ def plot_pnl(
     drawdown: bool = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -47,7 +47,7 @@ def plot_pnl(
     drawdown: bool = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -60,7 +60,7 @@ def plot_pnl(
     drawdown: bool = True,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
-    figsize: tuple[int, int] | None = (900, 600),
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -105,7 +105,7 @@ def plot_pnl(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -175,7 +175,7 @@ def plot_pnl(
         if is_benchmark := _is_benchmark(run):
             line = BENCHMARK_LINE
         else:
-            line = {"color": cfg.plots.palette[idx % len(cfg.plots.palette)], "width": 2}
+            line = {"color": cfg.plots.palette[idx % len(cfg.plots.palette)], "width": cfg.plots.line_width}
 
         equity_trace = go.Scatter(
             x=ts,
@@ -229,7 +229,7 @@ def plot_pnl(
     if drawdown:
         fig.add_hline(
             y=0,
-            line_width=1,
+            line_width=cfg.plots.line_width / 2,
             line_dash="dot",
             line_color="rgba(128,128,128,0.6)",
             row=1,
@@ -243,7 +243,7 @@ def plot_pnl(
             col=1,
         )
     else:
-        fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="rgba(128,128,128,0.6)")
+        fig.add_hline(y=0, line_width=cfg.plots.line_width / 2, line_dash="dot", line_color="rgba(128,128,128,0.6)")
 
     return _plot(
         fig,

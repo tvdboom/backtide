@@ -31,7 +31,7 @@ def plot_returns(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -42,7 +42,7 @@ def plot_returns(
     *,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -54,7 +54,7 @@ def plot_returns(
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
-    figsize: tuple[int, int] | None = (900, 600),
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
@@ -88,7 +88,7 @@ def plot_returns(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -188,7 +188,7 @@ def plot_returns(
                     name=f"{symbol} (normal fit)",
                     legendgroup=symbol,
                     showlegend=False,
-                    line={"color": color, "width": 2, "dash": "dot"},
+                    line={"color": color, "width": cfg.plots.line_width / 2, "dash": "dot"},
                     hoverinfo="skip",
                 )
             )
@@ -196,7 +196,7 @@ def plot_returns(
     # Reference line at zero return.
     fig.add_vline(
         x=0,
-        line_width=2,
+        line_width=cfg.plots.line_width / 2,
         line_dash="dash",
         line_color="rgba(120, 120, 120, 0.7)",
     )

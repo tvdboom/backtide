@@ -13,6 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import _plot, _resolve_runs_currency
+from backtide.config import get_config
 from backtide.storage import query_bars
 from backtide.utils.utils import _format_price
 
@@ -21,7 +22,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from backtide.backtest import RunResult
-    from backtide.core.data import Currency
+
+cfg = get_config()
 
 
 @overload
@@ -30,10 +32,9 @@ def plot_mae_mfe(
     *,
     interval: str | None = ...,
     symbols: Iterable[str] | None = ...,
-    currency: str | Currency | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: None = ...,
 ) -> go.Figure: ...
@@ -43,10 +44,9 @@ def plot_mae_mfe(
     *,
     interval: str | None = ...,
     symbols: Iterable[str] | None = ...,
-    currency: str | Currency | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
-    figsize: tuple[int, int] | None = ...,
+    figsize: tuple[int, int] = ...,
     filename: str | Path | None = ...,
     display: bool = ...,
 ) -> None: ...
@@ -57,28 +57,25 @@ def plot_mae_mfe(
     *,
     interval: str | None = None,
     symbols: Iterable[str] | None = None,
-    currency: str | Currency | None = None,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
-    figsize: tuple[int, int] | None = (900, 600),
+    figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
 ) -> go.Figure | None:
     """Plot Maximum Adverse Excursion vs Maximum Favourable Excursion per trade.
 
-    For each closed trade in `run`, the bars between entry and exit are
-    fetched from storage and the maximum unrealised loss (MAE) and gain
-    (MFE) versus the entry price are computed. Markers are coloured by
-    final PnL sign (green = winner, red = loser). The diagonal reference
-    line marks `mfe == mae`.
+    For each closed trade in `run`, compute the maximum unrealized loss (MAE)
+    and gain (MFE) versus the entry price. Markers are colored by final PnL sign
+    (green = winner, red = loser). The diagonal reference line marks `mfe == mae`.
 
     Parameters
     ----------
     run : [RunResult]
-        The strategy run whose trades will be analysed.
+        The strategy run whose trades will be analyzed.
 
-    interval : str | None, default=None
-        Bar interval to load (e.g. ``"1d"``, ``"1h"``). When `None`, the
+    interval : str | [Interval] | None, default=None
+        Bar interval to load (e.g., `1d`, `1h`). When `None`, the
         function lets `query_bars` pick whatever is available.
 
     symbols : Iterable[str] | None, default=None
@@ -99,7 +96,7 @@ def plot_mae_mfe(
         * If str: Position to display the legend.
         * If dict: Legend configuration.
 
-    figsize : tuple[int, int] | None, default=(900, 600)
+    figsize : tuple[int, int], default=(900, 600)
         Figure's size in pixels, format as (x, y).
 
     filename : str | Path | None, default=None
@@ -133,34 +130,14 @@ def plot_mae_mfe(
     ```
 
     """
+    ccy = _resolve_runs_currency([run])
+
     fig = go.Figure()
-    ccy = _resolve_runs_currency(run)
-    xlabel = f"MAE per share ({ccy.symbol})" if ccy else "MAE per share"
-    ylabel = f"MFE per share ({ccy.symbol})" if ccy else "MFE per share"
 
     trades = list(getattr(run, "trades", None) or [])
     if symbols is not None:
         wanted = set(symbols)
         trades = [t for t in trades if getattr(t, "symbol", "") in wanted]
-    if not trades:
-        fig.add_annotation(
-            text="No trades to plot.",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-        )
-        return _plot(
-            fig,
-            title=title,
-            legend=legend,
-            xlabel=xlabel,
-            ylabel=ylabel,
-            figsize=figsize,
-            filename=filename,
-            display=display,
-        )
 
     # Cache bars per symbol so we only hit storage once per traded symbol.
     bars_cache: dict[str, pd.DataFrame] = {}
@@ -172,7 +149,7 @@ def plot_mae_mfe(
     loss_text: list[str] = []
 
     for t in trades:
-        sym = str(getattr(t, "symbol", ""))
+        sym = t.symbol
         if sym not in bars_cache:
             try:
                 df = query_bars(symbol=sym, interval=interval)
@@ -218,18 +195,16 @@ def plot_mae_mfe(
             loss_mfe.append(mfe)
             loss_text.append(label)
 
-    # y = x reference: any trade above the line gave back less than its
-    # max favourable move; below the line means more downside than upside.
     max_axis = max(win_mae + win_mfe + loss_mae + loss_mfe + [1.0])
     fig.add_trace(
         go.Scatter(
             x=[0, max_axis],
             y=[0, max_axis],
             mode="lines",
-            line={"color": "rgba(128,128,128,0.5)", "dash": "dash", "width": 1},
+            line={"color": "rgba(128,128,128,0.5)", "dash": "dash", "width": cfg.plots.line_width / 2},
             name="MFE = MAE",
             hoverinfo="skip",
-            showlegend=True,
+            showlegend=False,
         )
     )
 
@@ -240,11 +215,13 @@ def plot_mae_mfe(
                 y=win_mfe,
                 mode="markers",
                 name="Winners",
-                marker={"color": "#2ecc71", "size": 8, "line": {"width": 0}},
+                marker={"color": "#2ecc71", "size": cfg.plots.marker_size, "line": {"width": 0}},
                 customdata=win_text,
                 hovertemplate="%{customdata}<extra></extra>",
+                showlegend=False,
             )
         )
+
     if loss_mae:
         fig.add_trace(
             go.Scatter(
@@ -252,9 +229,10 @@ def plot_mae_mfe(
                 y=loss_mfe,
                 mode="markers",
                 name="Losers",
-                marker={"color": "#e74c3c", "size": 8, "line": {"width": 0}},
+                marker={"color": "#e74c3c", "size": cfg.plots.marker_size, "line": {"width": 0}},
                 customdata=loss_text,
                 hovertemplate="%{customdata}<extra></extra>",
+                showlegend=False,
             )
         )
 
@@ -262,8 +240,8 @@ def plot_mae_mfe(
         fig,
         title=title,
         legend=legend,
-        xlabel=xlabel,
-        ylabel=ylabel,
+        xlabel=f"MAE per share{f' ({ccy.symbol})' if ccy else ''}",
+        ylabel=f"MFE per share{f' ({ccy.symbol})' if ccy else ''}",
         figsize=figsize,
         filename=filename,
         display=display,

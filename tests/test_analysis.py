@@ -591,7 +591,8 @@ class _StubRun:
         self.strategy_name = name
         # 1-day spacing (in seconds) so the x axis renders sensibly.
         self.equity_curve = [
-            _StubSample(start + i * 86_400, e, cash={base_currency: e}) for i, e in enumerate(equity)
+            _StubSample(start + i * 86_400, e, cash={base_currency: e})
+            for i, e in enumerate(equity)
         ]
         self.trades = trades or []
         self.orders = orders or []
@@ -816,7 +817,6 @@ class TestPlotCashHoldings:
 
     def test_single_currency_labels_strategy_and_axis(self):
         """Single-currency strategies use strategy names and currency in y label."""
-
         base = 1_700_000_000
         run_a = _StubRun(
             "S1",
@@ -838,8 +838,6 @@ class TestPlotCashHoldings:
 
     def test_multi_currency_groups_by_strategy(self):
         """Multi-currency strategies show currency labels under a strategy legend group."""
-
-        base = 1_700_000_000
         run = _StubRun(
             "Global",
             [10_000.0, 10_100.0],

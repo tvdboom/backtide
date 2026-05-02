@@ -581,6 +581,13 @@ impl DisplayConfig {
 /// tick_fontsize : int, default=14
 ///     Font size in pixels for axis tick labels.
 ///
+/// line_width : float, default=2.0
+///     Default line width in pixels for data traces. Reference/identity lines
+///     and band boundaries use half this value.
+///
+/// marker_size : float, default=8.0
+///     Default marker size in pixels for scatter plots.
+///
 /// See Also
 /// --------
 /// - backtide.config:get_config
@@ -595,6 +602,8 @@ pub struct PlotsConfig {
     pub title_fontsize: u16,
     pub label_fontsize: u16,
     pub tick_fontsize: u16,
+    pub line_width: f32,
+    pub marker_size: f32,
 }
 
 impl Default for PlotsConfig {
@@ -612,6 +621,8 @@ impl Default for PlotsConfig {
             title_fontsize: 22,
             label_fontsize: 20,
             tick_fontsize: 14,
+            line_width: 2.0,
+            marker_size: 8.0,
         }
     }
 }
@@ -627,7 +638,9 @@ impl PlotsConfig {
         palette: "list[str] | None"=None,
         title_fontsize: "int"=22,
         label_fontsize: "int"=20,
-        tick_fontsize: "int"=14
+        tick_fontsize: "int"=14,
+        line_width: "float"=2.0,
+        marker_size: "float"=8.0
     ))]
     fn new(
         template: &str,
@@ -635,6 +648,8 @@ impl PlotsConfig {
         title_fontsize: u16,
         label_fontsize: u16,
         tick_fontsize: u16,
+        line_width: f32,
+        marker_size: f32,
     ) -> Self {
         Self {
             template: template.to_owned(),
@@ -642,17 +657,21 @@ impl PlotsConfig {
             title_fontsize,
             label_fontsize,
             tick_fontsize,
+            line_width,
+            marker_size,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "PlotsConfig(template={:?}, palette=[{:?}], title_fontsize={}, label_fontsize={}, tick_fontsize={})",
+            "PlotsConfig(template={:?}, palette=[{:?}], title_fontsize={}, label_fontsize={}, tick_fontsize={}, line_width={}, marker_size={})",
             self.template,
             self.palette.iter().map(|c| format!("{c:?}")).collect::<Vec<String>>().join(", "),
             self.title_fontsize,
             self.label_fontsize,
             self.tick_fontsize,
+            self.line_width,
+            self.marker_size,
         )
     }
 

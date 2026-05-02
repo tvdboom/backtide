@@ -15,6 +15,7 @@ use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
 pub mod engine;
+pub mod fx;
 pub mod indicators;
 pub mod interface;
 pub mod models;
