@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot
+from backtide.utils.utils import _to_list
 from backtide.config import get_config
 
 if TYPE_CHECKING:
@@ -28,8 +29,8 @@ cfg = get_config()
 @overload
 def plot_rolling_sharpe(
     runs: RunResult | Sequence[RunResult],
-    *,
     window: int = ...,
+    *,
     periods_per_year: int = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -40,8 +41,8 @@ def plot_rolling_sharpe(
 @overload
 def plot_rolling_sharpe(
     runs: RunResult | Sequence[RunResult],
-    *,
     window: int = ...,
+    *,
     periods_per_year: int = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
@@ -53,8 +54,8 @@ def plot_rolling_sharpe(
 
 def plot_rolling_sharpe(
     runs: RunResult | Sequence[RunResult],
-    *,
     window: int = 60,
+    *,
     periods_per_year: int = 252,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper left",
@@ -64,9 +65,9 @@ def plot_rolling_sharpe(
 ) -> go.Figure | None:
     """Create a rolling Sharpe-ratio chart for one or more strategy runs.
 
-    Each line plots the trailing-`window` Sharpe ratio annualised by
-    `periods_per_year`. Useful to spot when a strategy's risk-adjusted
-    edge erodes or strengthens over time.
+    Each line plots the Sharpe ratio over a trailing `window` of samples,
+    annualized by `periods_per_year`. Useful to spot when a strategy's
+    risk-adjusted edge erodes or strengthens over time.
 
     Parameters
     ----------
@@ -74,11 +75,11 @@ def plot_rolling_sharpe(
         The per-strategy results to plot.
 
     window : int, default=60
-        Number of equity samples used in the trailing Sharpe window.
+        Number of samples used in the trailing window.
 
     periods_per_year : int, default=252
-        Annualisation factor. Use ~252 for daily, ~52 for weekly,
-        ~12 for monthly, ~365 for crypto-daily.
+        Annualization factor (number of periods/bars per year). Use 252 for
+        daily intervals (or 365 for crypto) and 52 for weekly.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -129,31 +130,33 @@ def plot_rolling_sharpe(
     ```
 
     """
-    fig = go.Figure()
+    if not runs:
+        raise ValueError("Parameter runs cannot be empty.")
+
+    runs = _to_list(runs)
     scale = float(np.sqrt(periods_per_year))
-    plotted = 0
+
+    fig = go.Figure()
     for idx, run in enumerate(runs):
-        curve = getattr(run, "equity_curve", None)
+        curve = run.equity_curve
         if not curve or len(curve) <= window:
             continue
 
         equity = pd.Series(
-            [float(s.equity) for s in curve],
+            [s.equity for s in curve],
             index=pd.to_datetime([s.timestamp for s in curve], unit="s"),
         )
-        rets = equity.pct_change()
-        roll = rets.rolling(window)
+
+        roll = equity.pct_change().rolling(window)
         sharpe = (roll.mean() / roll.std()) * scale
         sharpe = sharpe.replace([np.inf, -np.inf], np.nan).dropna()
         if sharpe.empty:
             continue
 
-        is_benchmark = _is_benchmark(run.strategy_name)
-        if is_benchmark:
-            line: dict[str, Any] = BENCHMARK_LINE
+        if is_benchmark := _is_benchmark(run):
+            line = BENCHMARK_LINE
         else:
-            color = cfg.plots.palette[idx % len(cfg.plots.palette)]
-            line = {"color": color, "width": 2}
+            line = {"color": cfg.plots.palette[idx % len(cfg.plots.palette)], "width": 2}
 
         fig.add_trace(
             go.Scatter(
@@ -162,22 +165,9 @@ def plot_rolling_sharpe(
                 mode="lines",
                 name=run.strategy_name,
                 line=line,
+                hovertemplate="%{x}<br>Sharpe ratio: %{y:.2f}%<extra>%{fullData.name}</extra>",
                 showlegend=not is_benchmark,
-                hovertemplate=(
-                    "<b>%{fullData.name}</b><br>%{x|%Y-%m-%d}<br>Sharpe: %{y:+.2f}<extra></extra>"
-                ),
             )
-        )
-        plotted += 1
-
-    if plotted == 0:
-        fig.add_annotation(
-            text="Not enough equity data to compute rolling Sharpe.",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
         )
 
     fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="rgba(128,128,128,0.6)")
@@ -188,7 +178,7 @@ def plot_rolling_sharpe(
         title=title,
         legend=legend,
         xlabel="Date",
-        ylabel=f"Rolling Sharpe ({window})",
+        ylabel="Rolling Sharpe",
         figsize=figsize,
         filename=filename,
         display=display,

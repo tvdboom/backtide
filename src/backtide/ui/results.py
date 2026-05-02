@@ -20,6 +20,8 @@ from backtide.analysis import (
     plot_trade_duration,
     plot_trade_pnl,
 )
+from backtide.analysis import plot_mae_mfe, plot_position_size, plot_price
+from backtide.storage import query_bars
 from backtide.analysis.utils import _is_benchmark
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
@@ -283,13 +285,13 @@ def _confirm_delete_experiment(exp_id: str, name: str):
         try:
             delete_experiment(exp_id)
         except Exception as ex:  # noqa: BLE001
-            st.session_state["_delete_error"] = str(ex)
+            st.session_state["_error"] = f"Failed to delete experiment: {ex}."
         else:
             if st.session_state.get("results_expanded") == exp_id:
                 st.session_state.pop("results_expanded", None)
             if (sel := st.session_state.get("selected_experiment")) and sel.get("id") == exp_id:
                 st.session_state.pop("selected_experiment", None)
-            st.session_state["_delete_success"] = name
+            st.session_state["_success"] = name
         st.rerun()
 
 
@@ -334,9 +336,7 @@ def _render_analysis_tabs(runs: list[RunResult]):
     with tab_map[all_labels[0]]:
         if active_tab == all_labels[0]:
             col1, col2 = st.columns([10, 1])
-
             col1.caption("Cumulative profit and loss over time for each strategy.")
-
             with col2.popover(":material/tune:", help="PnL chart options"):
                 normalize = st.toggle(
                     "Normalize",
@@ -360,9 +360,9 @@ def _render_analysis_tabs(runs: list[RunResult]):
 
     with tab_map[all_labels[1]]:
         if active_tab == all_labels[1]:
-            vol1, c2 = st.columns([10, 1])
-            vol1.caption("Distribution of realized trade PnL across strategies.")
-            with c2.popover(":material/tune:", help="PnL histogram options"):
+            col1, col2 = st.columns([10, 1])
+            col1.caption("Distribution of realized trade PnL across strategies.")
+            with col2.popover(":material/tune:", help="PnL histogram options"):
                 set_bins = st.toggle(
                     "Set bins",
                     key=(key := "results_pnl_histogram_set_bins"),
@@ -394,7 +394,7 @@ def _render_analysis_tabs(runs: list[RunResult]):
                 window = st.slider(
                     "Window",
                     min_value=2,
-                    max_value=252,
+                    max_value=365,
                     step=1,
                     key=(key := "results_rolling_returns_window"),
                     value=_default(key, fallback=30),
@@ -406,11 +406,24 @@ def _render_analysis_tabs(runs: list[RunResult]):
 
     with tab_map[all_labels[3]]:
         if active_tab == all_labels[3]:
-            vol1, c2 = st.columns([10, 1])
-            vol1.caption("Rolling Sharpe ratio showing risk-adjusted performance.")
-            with c2.popover(":material/tune:"):
-                st.caption("No options available for this plot.")
-            st.plotly_chart(plot_rolling_sharpe(runs, display=None), width="stretch")
+            col1, col2 = st.columns([10, 1])
+            col1.caption("Rolling Sharpe ratio showing risk-adjusted performance.")
+            with col2.popover(":material/tune:", help="Rolling Sharpe options"):
+                window = st.slider(
+                    "Window",
+                    min_value=2,
+                    max_value=365,
+                    step=1,
+                    key=(key := "results_rolling_returns_window"),
+                    value=_default(key, fallback=30),
+                    on_change=lambda k=key: _persist(k),
+                    help="Number of bars used for the rolling return window.",
+                )
+
+            # Number of bars per year for the experiment's interval
+            ppy = 365 * 24 * 60 / exp_cfg.data.interval.minutes()
+
+            st.plotly_chart(plot_rolling_sharpe(runs, window, ppy, display=None), width="stretch")
 
     with tab_map[all_labels[4]]:
         if active_tab == all_labels[4]:
@@ -429,27 +442,16 @@ def _render_analysis_tabs(runs: list[RunResult]):
             st.plotly_chart(plot_trade_pnl(runs, display=None), width="stretch")
 
 
-def _render_strategy_plots(
-    run: RunResult,
-    exp_cfg: ExperimentConfig | None,
-) -> None:
-    """Render per-strategy plot tabs (MAE/MFE, Position size, Price).
-
-    These plots take a single `RunResult` as input, so the
-    surrounding strategy tab provides the context — no extra strategy
-    selector is needed. Tabs are ordered alphabetically.
-
-    """
-    from backtide.analysis import plot_mae_mfe, plot_position_size, plot_price
-    from backtide.storage import query_bars
-
-    interval = str(exp_cfg.data.interval) if exp_cfg is not None else None
+def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
+    """Render per-strategy plots."""
+    interval = str(exp_cfg.data.interval)
 
     labels = [
         ":material/compare_arrows: MAE / MFE",
         ":material/inventory: Position size",
         ":material/show_chart: Price",
     ]
+
     # Use a per-strategy key so each tab group remembers its active selection.
     key = f"plot_tabs_strategy_{run.strategy_name}"
     tabs = st.tabs(
@@ -488,8 +490,8 @@ def _render_strategy_plots(
             # the experiment's configured universe so the user can still load
             # a chart for a non-traded benchmark.
             traded = sorted({getattr(t, "symbol", "") for t in (run.trades or [])})
-            if not traded and exp_cfg is not None:
-                traded = list(exp_cfg.data.symbols)
+            if not traded:
+                traded = exp_cfg.data.symbols
             if not traded:
                 st.info("No symbols available for this run.")
             else:
@@ -526,8 +528,12 @@ def _render_full_analysis(row: pd.Series):
     name = row["name"] or exp_id
     cfg_path = Path(cfg.data.storage_path) / "experiments" / exp_id / "config.toml"
     log_path = Path(cfg.data.storage_path) / "experiments" / exp_id / "logs.txt"
-    export_disabled = not cfg_path.is_file()
-    logs_disabled = not log_path.is_file()
+
+    try:
+        exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
+    except Exception as ex:  # noqa: BLE001
+        st.session_state["_error"] = f"Failed to load configuration: {ex}"
+        st.rerun()
 
     with st.container(key="full_results_toolbar"):
         col1, col2, _, col4, col5, col6 = st.columns([1.2, 0.7, 4.6, 0.7, 0.7, 0.7], gap="xxsmall")
@@ -543,10 +549,10 @@ def _render_full_analysis(row: pd.Series):
         with col2.popover(
             "",
             icon=":material/article:",
-            disabled=logs_disabled,
+            disabled=not log_path.is_file(),
             help=(
                 "Show the engine logs captured for this experiment."
-                if not logs_disabled
+                if log_path.is_file()
                 else "No log file found for this experiment."
             ),
         ):
@@ -592,21 +598,15 @@ def _render_full_analysis(row: pd.Series):
             icon=":material/upload:",
             type="secondary",
             width="stretch",
-            disabled=export_disabled,
+            disabled=not cfg_path.is_file(),
             help=(
                 "Open this experiment's configuration in the **Experiment** page."
-                if not export_disabled
+                if cfg_path.is_file()
                 else "No saved configuration found for this experiment."
             ),
         ):
-            try:
-                exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
-            except Exception as ex:  # noqa: BLE001
-                st.session_state["_delete_error"] = f"Failed to load configuration: {ex}"
-                st.rerun()
-            else:
-                st.session_state["_pending_experiment_config"] = exp_cfg
-                st.switch_page("experiment.py")
+            st.session_state["_pending_experiment_config"] = exp_cfg
+            st.switch_page("experiment.py")
 
         if col6.button(
             "",
@@ -654,12 +654,6 @@ def _render_full_analysis(row: pd.Series):
         icon, label, tone = ":material/cancel:", "Failed", "red"
     _colored_metric(c4, f"{icon} Status", label, tone)
 
-    try:
-        cfg_path = Path(cfg.data.storage_path) / "experiments" / row["id"] / "config.toml"
-        exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        exp_cfg = None
-
     runs = query_strategy_runs(row["id"])
 
     if failed_runs := [r for r in runs if getattr(r, "error", None)]:
@@ -688,15 +682,14 @@ def _render_full_analysis(row: pd.Series):
         start_ts = first if start_ts is None else min(start_ts, first)
         end_ts = last if end_ts is None else max(end_ts, last)
 
-    date_fmt = _moment_to_strftime(cfg.display.date_format)
-    period_str = "?"
     length_str = "?"
+    date_fmt = _moment_to_strftime(cfg.display.date_format)
     if start_ts is not None and end_ts is not None:
         d0 = dt.fromtimestamp(start_ts).date()
         d1 = dt.fromtimestamp(end_ts).date()
         period_str = f"{d0.strftime(date_fmt)} → {d1.strftime(date_fmt)}"
         length_str = _fmt_period(d0, d1)
-    elif exp_cfg is not None:
+    else:
         # Fall back to the requested config range when no equity curves are
         # available (e.g., a failed experiment with no completed runs).
         start = str(exp_cfg.data.start_date) if exp_cfg.data.start_date else None
@@ -717,11 +710,8 @@ def _render_full_analysis(row: pd.Series):
         else:
             period_str = "Full history"
 
-    if exp_cfg is not None:
-        n_symbols = len(exp_cfg.data.symbols)
-        interval_str = str(exp_cfg.data.interval)
-    else:
-        n_symbols, interval_str = "?", "?"
+    n_symbols = len(exp_cfg.data.symbols)
+    interval_str = str(exp_cfg.data.interval)
 
     c1, c2, c3 = st.columns([0.8, 2.2, 1])
     _colored_metric(c1, ":material/finance: Symbols", str(n_symbols))
@@ -883,10 +873,10 @@ if status_filter == "Succeeded":
 elif status_filter == "Failed":
     df = df[df["status"] == "failed"]
 
-if del_ok := st.session_state.pop("_delete_success", None):
-    st.success(f"Deleted experiment **{del_ok}**.", icon=":material/check_circle:")
-if del_err := st.session_state.pop("_delete_error", None):
-    st.error(f"Failed to delete experiment: {del_err}", icon=":material/error:")
+if ok := st.session_state.pop("_success", None):
+    st.success(f"Deleted experiment **{ok}**.", icon=":material/check_circle:")
+if err := st.session_state.pop("_error", None):
+    st.error(err, icon=":material/error:")
 
 if df.empty:
     if search or status_filter != "All":
@@ -943,7 +933,7 @@ for _, row in df.iterrows():
             try:
                 exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
             except Exception as ex:  # noqa: BLE001
-                st.session_state["_delete_error"] = f"Failed to load configuration: {ex}"
+                st.session_state["_error"] = f"Failed to load configuration: {ex}"
                 st.rerun()
             else:
                 st.session_state["_pending_experiment_config"] = exp_cfg

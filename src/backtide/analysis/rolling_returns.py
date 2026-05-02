@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, Any, overload
 
 import pandas as pd
 import plotly.graph_objects as go
-from backtide.utils.utils import _format_price, _to_list
-from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot, _resolve_runs_currency
+from backtide.utils.utils import _to_list
+from backtide.analysis.utils import BENCHMARK_LINE, _is_benchmark, _plot
 from backtide.config import get_config
 
 if TYPE_CHECKING:
@@ -70,7 +70,7 @@ def plot_rolling_returns(
         The per-strategy results to plot.
 
     window : int, default=30
-        Number of samples used in the trailing return window.
+        Number of samples used in the trailing window.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -125,7 +125,6 @@ def plot_rolling_returns(
         raise ValueError("Parameter runs cannot be empty.")
 
     runs = _to_list(runs)
-    ccy = _resolve_runs_currency(runs)
 
     fig = go.Figure()
     for idx, run in enumerate(runs):
@@ -156,7 +155,7 @@ def plot_rolling_returns(
                 mode="lines",
                 name=run.strategy_name,
                 line=line,
-                hovertemplate="%{x}<br>%{y:.2f}%<extra>%{fullData.name}</extra>",
+                hovertemplate="%{x}<br>Return: %{y:.2f}%<extra>%{fullData.name}</extra>",
                 showlegend=not is_benchmark,
             )
         )
