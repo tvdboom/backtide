@@ -131,7 +131,7 @@ def plot_position_size(
         fig.add_trace(
             go.Scatter(
                 x=pd.to_datetime([r[0] for r in rows], unit="s"),
-                y=accumulate(q for _, q in rows),
+                y=list(accumulate(q for _, q in rows)),
                 mode="lines",
                 name=sym,
                 line={
