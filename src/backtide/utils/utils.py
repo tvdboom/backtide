@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 import importlib
 import re
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import numpy as np
 import pandas as pd
@@ -182,17 +182,27 @@ def _moment_to_strftime(fmt: str) -> str:
     return regex.sub(replace, fmt)
 
 
-def _to_list(item: T | Iterable[T]) -> list[T]:
+@overload
+def _to_list(item: str) -> list[str]: ...
+@overload
+def _to_list(item: bytes) -> list[bytes]: ...
+@overload
+def _to_list(item: T | Iterable[T]) -> list[T]: ...
+@overload
+def _to_list(item: Iterable[T]) -> list[T]: ...
+@overload
+def _to_list(item: T) -> list[T]: ...
+def _to_list(item: object) -> list[Any]:
     """Convert an item to a list with just the one item if not already.
 
     Parameters
     ----------
-    item : T | Iterable[T]
+    item : object
         Item to convert.
 
     Returns
     -------
-    list[T]
+    list[Any]
         List of item.
 
     """

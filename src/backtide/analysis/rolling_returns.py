@@ -125,12 +125,12 @@ def plot_rolling_returns(
     if not runs:
         raise ValueError("Parameter runs cannot be empty.")
 
-    runs = _to_list(runs)
+    runs_l = _to_list(runs)
 
     fig = go.Figure()
     fig.add_hline(y=0, line=REFERENCE_LINE)
 
-    for idx, run in enumerate(runs):
+    for idx, run in enumerate(runs_l):
         curve = run.equity_curve
         if not curve or len(curve) <= window:
             continue

@@ -153,8 +153,8 @@ def plot_pnl(
     if not runs:
         raise ValueError("Parameter runs cannot be empty.")
 
-    runs = _to_list(runs)
-    ccy = None if normalize else _resolve_runs_currency(runs)
+    runs_l = _to_list(runs)
+    ccy = None if normalize else _resolve_runs_currency(runs_l)
 
     if drawdown:
         fig = make_subplots(
@@ -169,7 +169,7 @@ def plot_pnl(
         fig = go.Figure()
         fig.add_hline(y=0, line=REFERENCE_LINE)
 
-    for idx, run in enumerate(runs):
+    for idx, run in enumerate(runs_l):
         if not run.equity_curve:
             continue
 

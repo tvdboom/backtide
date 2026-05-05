@@ -67,13 +67,13 @@ def plot_cash_holdings(
     if not runs:
         raise ValueError("Parameter runs cannot be empty.")
 
-    runs = _to_list(runs)
+    runs_l = _to_list(runs)
 
     dash = ("solid", "dash", "dashdot", "dot", "longdash", "longdashdot")
 
     fig = go.Figure()
     all_currencies = {}
-    for idx, run in enumerate(runs):
+    for idx, run in enumerate(runs_l):
         if _is_benchmark(run) or not run.equity_curve:
             continue
 

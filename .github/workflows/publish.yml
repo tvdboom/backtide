@@ -1,0 +1,47 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      # Publish on any tag starting with a `v`, e.g., v0.1.0
+      - v*
+
+jobs:
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # Fetch all commits/branches
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install dependencies
+        run: |
+          uv sync --group docs
+      - name: Update documentation
+        run: |
+          DOC_VERSION="${GITHUB_REF_NAME%.*}"
+          echo "Deploying documentation for release ${DOC_VERSION}"
+          mike deploy --push --update-aliases "${DOC_VERSION}" latest
+
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install Python 3.14
+        run: uv python install 3.14
+      - name: Build
+        run: uv build
+      - name: Check artifacts
+        run: uv tool run twine check dist/*
+      - name: Publish
+        run: uv publish

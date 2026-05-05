@@ -125,13 +125,13 @@ def plot_pnl_histogram(
     if not runs:
         raise ValueError("Parameter runs cannot be empty.")
 
-    runs = _to_list(runs)
-    ccy = _resolve_runs_currency(runs)
+    runs_l = _to_list(runs)
+    ccy = _resolve_runs_currency(runs_l)
 
     fig = go.Figure()
     fig.add_vline(x=0, line=REFERENCE_LINE)
 
-    for idx, run in enumerate(runs):
+    for idx, run in enumerate(runs_l):
         if _is_benchmark(run) or not run.trades:
             continue
 

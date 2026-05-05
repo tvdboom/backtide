@@ -133,10 +133,10 @@ def plot_trade_duration(
     if not runs:
         raise ValueError("Parameter runs cannot be empty.")
 
-    runs = _to_list(runs)
+    runs_l = _to_list(runs)
 
     durations = {}
-    for run in runs:
+    for run in runs_l:
         if _is_benchmark(run) or not run.trades:
             continue
 
@@ -155,7 +155,7 @@ def plot_trade_duration(
     factor = {"minutes": 60.0, "hours": 3_600.0, "days": 86_400.0}[unit_s]
 
     fig = go.Figure()
-    for idx, run in enumerate(runs):
+    for idx, run in enumerate(runs_l):
         if (secs := durations.get(run.strategy_name)) is None:
             continue
 

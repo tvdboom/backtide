@@ -86,10 +86,16 @@ utils = [
 [project.scripts]
 backtide = "backtide.cli:main"
 
+[tool.uv]
+required-version = ">=0.11.9"
+
 [tool.maturin]
 python-source = "src"
 module-name = "backtide.core"
 manifest-path = "src/backtide_core/Cargo.toml"
+include = [
+    { path = "tests/**", format = ["sdist"] },
+]
 
 [tool.ruff]
 cache-dir = ".cache/ruff"

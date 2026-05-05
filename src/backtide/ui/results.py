@@ -502,7 +502,7 @@ def _render_analysis_tabs(runs: list[RunResult], exp_cfg: ExperimentConfig):
 
             with st.spinner("Loading plot..."):
                 st.plotly_chart(
-                    plot_trade_duration(runs, bins=bins, unit_s=unit or "auto", display=None),
+                    plot_trade_duration(runs, bins=bins, unit=unit or "auto", display=None),
                     width="stretch",
                 )
 

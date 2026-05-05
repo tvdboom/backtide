@@ -2395,15 +2395,15 @@ class Order:
         Primary price for the order. The exact meaning depends on
         `order_type`:
 
-        - ``Market`` / ``CancelOrder`` / ``SettlePosition``: ignored.
-        - ``Limit`` / ``TakeProfit``: the limit / target price.
-        - ``StopLoss``: the stop (trigger) price.
-        - ``StopLossLimit`` / ``TakeProfitLimit``: the stop (trigger)
-          price; once hit the order converts to a limit at
-          ``limit_price``.
-        - ``TrailingStop`` / ``TrailingStopLimit``: the trail amount in
-          price units (positive). The engine maintains the running
-          extreme internally.
+    - `Market` / `CancelOrder` / `SettlePosition`: ignored.
+    - `Limit` / `TakeProfit`: the limit / target price.
+    - `StopLoss`: the stop (trigger) price.
+    - `StopLossLimit` / `TakeProfitLimit`: the stop (trigger)
+      price; once hit the order converts to a limit at
+      `limit_price`.
+    - `TrailingStop` / `TrailingStopLimit`: the trail amount in
+      price units (positive). The engine maintains the running
+      extreme internally.
 
     limit_price : float | None
         Secondary limit price used by the ``StopLossLimit``,

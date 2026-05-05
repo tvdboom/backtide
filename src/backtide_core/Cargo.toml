@@ -3,6 +3,14 @@ name = "backtide_core"
 version = "0.1.0"
 edition = "2021"
 description = "A refreshingly simple trading backtester for beginner retail investors"
+authors = ["Mavs <m.524687@gmail.com>"]
+license = "MIT"
+readme = "../../README.md"
+homepage = "https://tvdboom.github.io/backtide/"
+documentation = "https://tvdboom.github.io/backtide/"
+repository = "https://github.com/tvdboom/backtide"
+keywords = ["trading", "backtesting", "finance", "stocks", "crypto"]
+categories = ["finance", "simulation"]
 
 [lib]
 name = "backtide_core"
