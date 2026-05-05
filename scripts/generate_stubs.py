@@ -346,12 +346,30 @@ def _generate_class_stub(name: str, cls: type, all_doc_types: dict[str, str]) ->
     doc_types = _parse_attributes_from_doc(doc)
     enum_variants = _get_enum_variants(cls)
 
+    # PyO3 `#[classattr]` values are plain class attributes (not descriptors).
+    classattr_names: set[str] = set()
+    for attr_name in doc_types:
+        if attr_name in descriptor_names or attr_name in enum_variants:
+            continue
+        if not hasattr(cls, attr_name):
+            continue
+        try:
+            member = getattr(cls, attr_name)
+        except AttributeError:
+            continue
+        if not callable(member):
+            classattr_names.add(attr_name)
+
     for attr_name in sorted(descriptor_names):
         # 1st: own docstring, 2nd: cross-class lookup, 3rd: Any
         attr_type = doc_types.get(attr_name) or all_doc_types.get(attr_name, "Any")
         lines.append(f"    {attr_name}: {attr_type}\n")
 
-    if descriptor_names:
+    for attr_name in sorted(classattr_names):
+        attr_type = doc_types.get(attr_name) or all_doc_types.get(attr_name, "Any")
+        lines.append(f"    {attr_name}: ClassVar[{attr_type}]\n")
+
+    if descriptor_names or classattr_names:
         lines.append("\n")
 
     # ── Enum variants ───────────────────────────────────────────────────
@@ -387,6 +405,14 @@ def _generate_class_stub(name: str, cls: type, all_doc_types: dict[str, str]) ->
         raw = inspect.getattr_static(cls, member_name, None)
         is_classmethod = isinstance(raw, classmethod)
         is_staticmethod = isinstance(raw, staticmethod)
+
+        # PyO3 classmethods may appear as plain callables to getattr_static.
+        # Infer classmethod when the text signature starts with `(cls`.
+        if not is_classmethod and not is_staticmethod and not member_name.startswith("__"):
+            text_sig = getattr(member, "__text_signature__", None)
+            sig = _parse_text_signature(text_sig, member_name)
+            if sig and sig.startswith("(cls"):
+                is_classmethod = True
 
         if is_classmethod:
             lines.append("    @classmethod\n")

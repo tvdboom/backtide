@@ -692,7 +692,7 @@ class TestPlotPnl:
         """The auto-injected benchmark run is rendered with a dashed line."""
         runs = [
             _run_result("S1", [10_000.0, 10_500.0]),
-            _run_result("Benchmark (SPY)", [10_000.0, 10_100.0]),
+            _run_result(BENCHMARK_NAME, [10_000.0, 10_100.0]),
         ]
         fig = plot_pnl(runs, drawdown=False, display=None)
         bench = next(t for t in fig.data if t.name == BENCHMARK_NAME)

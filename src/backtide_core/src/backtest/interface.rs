@@ -10,14 +10,12 @@ use pyo3::prelude::*;
 /// Performs the full pipeline end-to-end:
 ///
 /// 1. Resolves and downloads any missing market data (skipped if already
-///    present in the local DuckDB cache).
-/// 2. Computes every selected indicator once over the entire dataset, in
-///    parallel across symbols. Custom (Python) indicators are dispatched
-///    via PyO3.
-/// 3. Runs every selected strategy fully in parallel — each strategy has
-///    its own independent portfolio, order book and equity curve.
-/// 4. Persists the aggregated [`ExperimentResult`] (and per-strategy
-///    artifacts) into the experiment tables in DuckDB.
+///    present in the local database).
+/// 2. Computes every selected indicator once over the entire dataset.
+/// 3. Runs every selected strategy in parallel — each strategy has its own
+///    independent portfolio, order book and equity curve.
+/// 4. Persists the aggregated [`ExperimentResult`] (and per-strategy artifacts)
+///    into the database.
 ///
 /// Parameters
 /// ----------

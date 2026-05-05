@@ -300,7 +300,7 @@ if mode == "builtin":
                     else:
                         cast_params[k] = v
 
-            _save_indicator(ind(**cast_params), ind_name, cfg)
+            _save_indicator(ind(**cast_params), ind_name, cfg)  # ty: ignore[invalid-argument-type]
             st.session_state.pop("_add_indicator_mode", None)
             st.rerun()
 

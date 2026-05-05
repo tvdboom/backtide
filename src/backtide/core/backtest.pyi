@@ -100,6 +100,8 @@ class AdaptiveRsi:
 
     max_period: Any
     min_period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -125,6 +127,7 @@ class AdaptiveRsi:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -186,6 +189,8 @@ class AlphaRsiPro:
 
     period: Any
     vol_window: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -211,6 +216,7 @@ class AlphaRsiPro:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -279,6 +285,8 @@ class AverageDirectionalIndex:
     """
 
     period: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -319,6 +327,7 @@ class AverageDirectionalIndex:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -370,6 +379,8 @@ class AverageTrueRange:
     """
 
     period: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -410,6 +421,7 @@ class AverageTrueRange:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -466,6 +478,8 @@ class BollingerBands:
 
     period: Any
     std_dev: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -506,6 +520,7 @@ class BollingerBands:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -551,6 +566,8 @@ class BollingerMeanReversion:
 
     period: Any
     std_dev: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -576,6 +593,7 @@ class BollingerMeanReversion:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -632,6 +650,8 @@ class BuyAndHold:
     """
 
     symbol: str
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -657,6 +677,7 @@ class BuyAndHold:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -790,6 +811,8 @@ class CommodityChannelIndex:
     """
 
     period: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -830,6 +853,7 @@ class CommodityChannelIndex:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -1080,6 +1104,8 @@ class DoubleTop:
     """
 
     lookback: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -1105,6 +1131,7 @@ class DoubleTop:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -1674,6 +1701,8 @@ class ExponentialMovingAverage:
     """
 
     period: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -1714,6 +1743,7 @@ class ExponentialMovingAverage:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -1821,6 +1851,8 @@ class HybridAlphaRsi:
     max_period: Any
     min_period: Any
     vol_window: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -1846,6 +1878,7 @@ class HybridAlphaRsi:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -1964,6 +1997,8 @@ class Macd:
     fast_period: Any
     signal_period: Any
     slow_period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -1989,6 +2024,7 @@ class Macd:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -2048,6 +2084,8 @@ class Momentum:
 
     ma_period: Any
     period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -2073,6 +2111,7 @@ class Momentum:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -2148,6 +2187,8 @@ class MovingAverageConvergenceDivergence:
     fast_period: Any
     signal_period: Any
     slow_period: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -2188,6 +2229,7 @@ class MovingAverageConvergenceDivergence:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -2241,6 +2283,8 @@ class MultiBollingerRotation:
     rebalance_interval: Any
     std_dev: Any
     top_k: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -2266,6 +2310,7 @@ class MultiBollingerRotation:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -2321,6 +2366,9 @@ class OnBalanceVolume:
 
     """
 
+    acronym: ClassVar[str]
+    name: ClassVar[str]
+
     def __eq__(self, value, /):
         ...
     def __ge__(self, value, /):
@@ -2360,6 +2408,7 @@ class OnBalanceVolume:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -2761,6 +2810,8 @@ class RelativeStrengthIndex:
     """
 
     period: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -2801,6 +2852,7 @@ class RelativeStrengthIndex:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -2846,6 +2898,8 @@ class RiskAverse:
 
     breakout_period: Any
     vol_period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -2871,6 +2925,7 @@ class RiskAverse:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -2926,6 +2981,8 @@ class Roc:
     """
 
     period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -2951,6 +3008,7 @@ class Roc:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -3014,6 +3072,8 @@ class RocRotation:
     period: Any
     rebalance_interval: Any
     top_k: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -3039,6 +3099,7 @@ class RocRotation:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -3104,6 +3165,8 @@ class Rsi:
     bb_period: Any
     bb_std: Any
     rsi_period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -3129,6 +3192,7 @@ class Rsi:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -3185,6 +3249,8 @@ class Rsrs:
     """
 
     period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -3210,6 +3276,7 @@ class Rsrs:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -3274,6 +3341,8 @@ class RsrsRotation:
     period: Any
     rebalance_interval: Any
     top_k: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -3299,6 +3368,7 @@ class RsrsRotation:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -3440,6 +3510,8 @@ class SimpleMovingAverage:
     """
 
     period: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -3480,6 +3552,7 @@ class SimpleMovingAverage:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -3525,6 +3598,8 @@ class SmaCrossover:
 
     fast_period: Any
     slow_period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -3550,6 +3625,7 @@ class SmaCrossover:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -3606,6 +3682,8 @@ class SmaNaive:
     """
 
     period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -3631,6 +3709,7 @@ class SmaNaive:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -3767,6 +3846,8 @@ class StochasticOscillator:
 
     d_period: Any
     k_period: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -3807,6 +3888,7 @@ class StochasticOscillator:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -3989,6 +4071,8 @@ class TripleRsiRotation:
     rebalance_interval: Any
     short_period: Any
     top_k: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -4014,6 +4098,7 @@ class TripleRsiRotation:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -4078,6 +4163,8 @@ class TurtleTrading:
     atr_period: Any
     entry_period: Any
     exit_period: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -4103,6 +4190,7 @@ class TurtleTrading:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -4163,6 +4251,8 @@ class Vcp:
 
     contractions: Any
     lookback: Any
+    is_multi_asset: ClassVar[bool]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -4188,6 +4278,7 @@ class Vcp:
         ...
     def __str__(self, /):
         ...
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the strategy does.
 
@@ -4243,6 +4334,9 @@ class VolumeWeightedAveragePrice:
 
     """
 
+    acronym: ClassVar[str]
+    name: ClassVar[str]
+
     def __eq__(self, value, /):
         ...
     def __ge__(self, value, /):
@@ -4282,6 +4376,7 @@ class VolumeWeightedAveragePrice:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -4328,6 +4423,8 @@ class WeightedMovingAverage:
     """
 
     period: Any
+    acronym: ClassVar[str]
+    name: ClassVar[str]
 
     def __eq__(self, value, /):
         ...
@@ -4368,6 +4465,7 @@ class WeightedMovingAverage:
             and lower bounds), return a 2d structure.
 
         """
+    @classmethod
     def description(cls) -> str:
         """Short explanation of what the indicator measures.
 
@@ -4384,14 +4482,12 @@ def run_experiment(config, *, verbose=True) -> ExperimentResult:
     Performs the full pipeline end-to-end:
 
     1. Resolves and downloads any missing market data (skipped if already
-       present in the local DuckDB cache).
-    2. Computes every selected indicator once over the entire dataset, in
-       parallel across symbols. Custom (Python) indicators are dispatched
-       via PyO3.
-    3. Runs every selected strategy fully in parallel — each strategy has
-       its own independent portfolio, order book and equity curve.
-    4. Persists the aggregated [`ExperimentResult`] (and per-strategy
-       artifacts) into the experiment tables in DuckDB.
+       present in the local database).
+    2. Computes every selected indicator once over the entire dataset.
+    3. Runs every selected strategy in parallel — each strategy has its own
+       independent portfolio, order book and equity curve.
+    4. Persists the aggregated [`ExperimentResult`] (and per-strategy artifacts)
+       into the database.
 
     Parameters
     ----------

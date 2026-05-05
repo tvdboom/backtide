@@ -8,7 +8,7 @@ Description: Module containing the trade-duration histogram chart.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, overload
 
 import numpy as np
 import plotly.graph_objects as go
@@ -31,7 +31,7 @@ def plot_trade_duration(
     runs: RunResult | Sequence[RunResult],
     *,
     bins: int | None = ...,
-    unit: Literal["auto", "minutes", "hours", "days"] = ...,
+    unit: str = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -43,7 +43,7 @@ def plot_trade_duration(
     runs: RunResult | Sequence[RunResult],
     *,
     bins: int | None = ...,
-    unit: Literal["auto", "minutes", "hours", "days"] = ...,
+    unit: str = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,
@@ -56,7 +56,7 @@ def plot_trade_duration(
     runs: RunResult | Sequence[RunResult],
     *,
     bins: int | None = None,
-    unit: Literal["auto", "minutes", "hours", "days"] = "auto",
+    unit: str = "auto",
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "upper right",
     figsize: tuple[int, int] = (900, 600),

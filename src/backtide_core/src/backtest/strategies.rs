@@ -2,10 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyType;
 use std::collections::HashMap;
 
-use crate::backtest::indicators::{
-    AverageTrueRange, BollingerBands, MovingAverageConvergenceDivergence, RelativeStrengthIndex,
-    SimpleMovingAverage,
-};
+use crate::backtest::indicators::*;
 use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
