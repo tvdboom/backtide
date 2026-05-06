@@ -19,6 +19,7 @@ from backtide.backtest import (
     ExperimentConfig,
     ExperimentResult,
     GeneralExpConfig,
+    IndicatorExpConfig,
     Order,
     OrderRecord,
     OrderType,
@@ -28,6 +29,9 @@ from backtide.backtest import (
     Trade,
     run_experiment,
 )
+from backtide.indicators import SimpleMovingAverage
+from backtide.strategies import BuyAndHold
+from tests.conftest import fixture_db_available
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sub-configs
@@ -353,3 +357,265 @@ class TestRunExperiment:
             return
         assert isinstance(result, ExperimentResult)
         assert result.status in ("failed", "completed")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# run_experiment kwargs forms
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRunExperimentKwargs:
+    """Tests for the kwargs-based ``run_experiment`` invocation forms.
+
+    All tests rely on the no-symbols / empty-data guard rails so they
+    never need network access to verify that the kwargs translation
+    layer correctly populates an ``ExperimentConfig``.
+    """
+
+    # ── Backward compatibility ──────────────────────────────────────
+
+    def test_positional_experiment_config_still_works(self):
+        """Passing an ExperimentConfig positionally is backward compatible."""
+        cfg = ExperimentConfig(
+            general=GeneralExpConfig(name="legacy"),
+            data=DataExpConfig(symbols=[]),
+        )
+        with pytest.raises(RuntimeError):
+            run_experiment(cfg, verbose=False)
+
+    def test_positional_dict_works(self):
+        """Passing a (nested) dict positionally builds an ExperimentConfig."""
+        # An empty dict is fine because every section has #[serde(default)].
+        with pytest.raises(RuntimeError):
+            run_experiment({}, verbose=False)
+        # Round-tripping through ``to_dict`` is also accepted.
+        d = ExperimentConfig(data=DataExpConfig(symbols=[])).to_dict()
+        with pytest.raises(RuntimeError):
+            run_experiment(d, verbose=False)
+
+    def test_positional_invalid_type_raises(self):
+        """A non-config, non-dict positional raises ValueError."""
+        with pytest.raises(ValueError, match="ExperimentConfig"):
+            run_experiment(123, verbose=False)
+
+    def test_no_args_uses_defaults(self):
+        """Calling without args uses defaults (no symbols → RuntimeError)."""
+        with pytest.raises(RuntimeError):
+            run_experiment(verbose=False)
+
+    # ── Flat kwargs ──────────────────────────────────────────────────
+
+    def test_flat_kwargs_route_to_general(self):
+        """Flat ``name`` / ``description`` kwargs route to ``general``."""
+        with pytest.raises(RuntimeError):
+            run_experiment(
+                name="flat-name",
+                description="flat-desc",
+                tags=["a", "b"],
+                verbose=False,
+            )
+
+    def test_flat_kwargs_route_to_data(self):
+        """Flat ``symbols`` / ``interval`` kwargs route to ``data``."""
+        with pytest.raises(RuntimeError):
+            run_experiment(
+                symbols=[],
+                interval="1d",
+                instrument_type="stocks",
+                full_history=False,
+                start_date="2024-01-01",
+                end_date="2024-03-01",
+                verbose=False,
+            )
+
+    def test_flat_kwargs_route_to_portfolio(self):
+        """Flat ``initial_cash`` / ``base_currency`` kwargs route to portfolio."""
+        with pytest.raises(RuntimeError):
+            run_experiment(
+                initial_cash=50_000,
+                base_currency="USD",
+                verbose=False,
+            )
+
+    def test_flat_kwargs_route_to_exchange(self):
+        """Flat exchange-section kwargs route to ``exchange``."""
+        with pytest.raises(RuntimeError):
+            run_experiment(
+                commission_type="Fixed",
+                commission_fixed=2.5,
+                slippage=0.1,
+                allow_short_selling=False,
+                verbose=False,
+            )
+
+    def test_flat_kwargs_route_to_engine(self):
+        """Flat engine-section kwargs route to ``engine``."""
+        with pytest.raises(RuntimeError):
+            run_experiment(
+                warmup_period=5,
+                trade_on_close=True,
+                risk_free_rate=0.02,
+                empty_bar_policy="Skip",
+                random_seed=42,
+                verbose=False,
+            )
+
+    def test_unknown_flat_kwarg_raises_value_error(self):
+        """Unknown kwargs raise ValueError with a helpful message."""
+        with pytest.raises(ValueError, match="Unknown keyword argument"):
+            run_experiment(not_a_field=123, verbose=False)
+
+    def test_enum_string_alias_via_kwargs(self):
+        """Enum aliases like ``interval='1d'`` work through kwargs.
+
+        Regression test: serde-based round-tripping doesn't honour these
+        aliases; the implementation must use Python-level setattr.
+        """
+        with pytest.raises(RuntimeError):
+            run_experiment(interval="1d", verbose=False)
+        with pytest.raises(RuntimeError):
+            run_experiment(interval="1h", verbose=False)
+
+    # ── Sub-config kwargs ────────────────────────────────────────────
+
+    def test_sub_config_instance_kwargs(self):
+        """Each sub-config can be passed as a typed instance kwarg."""
+        with pytest.raises(RuntimeError):
+            run_experiment(
+                general=GeneralExpConfig(name="sub"),
+                data=DataExpConfig(symbols=[]),
+                portfolio=PortfolioExpConfig(initial_cash=20_000),
+                strategy=StrategyExpConfig(strategies=[]),
+                indicators=IndicatorExpConfig(indicators=[]),
+                exchange=ExchangeExpConfig(),
+                engine=EngineExpConfig(warmup_period=3),
+                verbose=False,
+            )
+
+    def test_sub_config_dict_kwargs(self):
+        """Each sub-config can be passed as a dict kwarg."""
+        with pytest.raises(RuntimeError):
+            run_experiment(
+                general={"name": "as-dict", "tags": ["x"]},
+                data={"symbols": [], "interval": "1d"},
+                engine={"warmup_period": 7},
+                verbose=False,
+            )
+
+    # ── Mixing positional and kwargs ─────────────────────────────────
+
+    def test_positional_config_with_kwargs_overrides(self):
+        """Kwargs override fields of a positional ExperimentConfig."""
+        cfg = ExperimentConfig(
+            general=GeneralExpConfig(name="orig"),
+            data=DataExpConfig(symbols=[]),
+        )
+        # If kwargs were ignored, this would still hit the no-symbols guard
+        # (it does anyway). We just verify no error is raised by the
+        # kwargs translation itself.
+        with pytest.raises(RuntimeError):
+            run_experiment(cfg, name="overridden", verbose=False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# run_experiment polymorphic strategies / indicators
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# Date range matching the pre-built test fixture (see ``tests/bootstrap_data.py``).
+# Bars come from ``tests/_data/database.duckdb`` so these tests are fully offline.
+_RUN_KW = {
+    "symbols": ["AAPL"],
+    "instrument_type": "stocks",
+    "interval": "1d",
+    "full_history": False,
+    "start_date": "2024-01-01",
+    "end_date": "2024-03-01",
+}
+
+
+@pytest.mark.skipif(
+    not fixture_db_available(),
+    reason=(
+        "Offline DuckDB fixture missing. Run `python tests/bootstrap_data.py` "
+        "once to populate tests/_data/database.duckdb."
+    ),
+)
+class TestRunExperimentPolymorphicForms:
+    """Tests for the polymorphic ``strategies`` / ``indicators`` kwargs.
+
+    Each test runs a real (small) backtest against the pre-built
+    ``tests/_data/database.duckdb`` fixture and inspects the
+    [`RunResult`] entries returned in ``result.strategies`` to verify
+    that inline instances and dict forms are honoured by the engine.
+    """
+
+    def test_strategies_single_instance_uses_class_name(self):
+        """A single ``BaseStrategy`` instance is run under its class name."""
+        result = run_experiment(strategies=BuyAndHold(), verbose=False, **_RUN_KW)
+        assert isinstance(result, ExperimentResult)
+        assert result.status == "completed"
+        assert len(result.strategies) == 1
+        run = result.strategies[0]
+        assert isinstance(run, RunResult)
+        assert run.strategy_name == "BuyAndHold"
+
+    def test_strategies_list_of_instances(self):
+        """A list of instances yields one ``RunResult`` per instance."""
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **_RUN_KW,
+        )
+        assert {r.strategy_name for r in result.strategies} == {"BuyAndHold"}
+        assert all(isinstance(r, RunResult) for r in result.strategies)
+
+    def test_strategies_dict_form_uses_explicit_name(self):
+        """``strategies={'name': instance}`` runs the instance under that name."""
+        result = run_experiment(
+            strategies={"My Strategy": BuyAndHold()},
+            verbose=False,
+            **_RUN_KW,
+        )
+        assert {r.strategy_name for r in result.strategies} == {"My Strategy"}
+
+    def test_strategies_mixed_list(self):
+        """A list mixing instances and dicts produces one run per entry."""
+        result = run_experiment(
+            strategies=[BuyAndHold(), {"named": BuyAndHold(symbol="AAPL")}],
+            verbose=False,
+            **_RUN_KW,
+        )
+        names = {r.strategy_name for r in result.strategies}
+        assert names == {"BuyAndHold", "named"}
+
+    def test_strategies_via_strategy_sub_config_dict(self):
+        """Instances inside ``strategy={'strategies': [...]}`` are honoured."""
+        result = run_experiment(
+            strategy={"strategies": [BuyAndHold()]},
+            verbose=False,
+            **_RUN_KW,
+        )
+        assert {r.strategy_name for r in result.strategies} == {"BuyAndHold"}
+
+    def test_indicators_instance_runs_successfully(self):
+        """An indicator instance is computed and the strategy completes."""
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            indicators=[SimpleMovingAverage(20)],
+            verbose=False,
+            **_RUN_KW,
+        )
+        assert result.status == "completed"
+        assert len(result.strategies) == 1
+        assert result.strategies[0].strategy_name == "BuyAndHold"
+
+    def test_indicators_sub_config_form(self):
+        """``indicators=IndicatorExpConfig(...)`` is treated as the sub-config."""
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            indicators=IndicatorExpConfig(indicators=[]),
+            verbose=False,
+            **_RUN_KW,
+        )
+        assert result.status == "completed"

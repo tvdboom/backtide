@@ -138,7 +138,7 @@ def plot_pnl(
     from backtide.analysis import plot_pnl
     from backtide.storage import query_strategy_runs, query_experiments
 
-    exp = query_experiments()[0]
+    exp = query_experiments().iloc[0]
     runs = query_strategy_runs(exp.id)
 
     # Absolute PnL

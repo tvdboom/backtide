@@ -4492,26 +4492,44 @@ class WeightedMovingAverage:
 
         """
 
-def run_experiment(config, *, verbose=True) -> ExperimentResult:
+def run_experiment(config=None, *, verbose=True, **kwargs) -> ExperimentResult:
     """Run a backtest experiment with the provided configuration.
 
     Performs the full pipeline end-to-end:
 
-    1. Resolves and downloads any missing market data (skipped if already
-       present in the local database).
-    2. Computes every selected indicator once over the entire dataset.
-    3. Runs every selected strategy in parallel — each strategy has its own
-       independent portfolio, order book and equity curve.
-    4. Persists the aggregated [`ExperimentResult`] (and per-strategy artifacts)
-       into the database.
+    1. Resolves and downloads any missing market data (skipped if already present in the
+       database).
+    2. Computes every indicator once over the entire dataset.
+    3. Runs every strategy in parallel — each strategy has its own independent portfolio,
+       order book and equity curve.
+    4. Persists the aggregated [`ExperimentResult`] (and per-strategy artifacts) into the
+       database.
 
     Parameters
     ----------
-    config : [ExperimentConfig]
-        The complete experiment configuration.
+    config : [ExperimentConfig], optional
+        The complete experiment configuration. If omitted, defaults are
+        used and `kwargs` populate the configuration.
 
     verbose : bool, default=True
         Whether to display a progress bar while running.
+
+    **kwargs
+        Any combination of:
+
+        * Sub-config objects via keyword (`general`, `data`, `portfolio`, `strategy`,
+          `indicators`, `exchange`, `engine`).
+        * Flat keyword arguments matching any field of the sub-configs (e.g., `name`,
+         `symbols`, `interval`, `initial_cash`, etc...).
+
+        The `strategies` and `indicators` keyword arguments additionally accept — beyond
+        a list of stored names — any of:
+
+        * A single string (name of a stored strategy / indicator).
+        * A `BaseStrategy` / `BaseIndicator` subclass instance (the class name is used
+          as the display name).
+        * A `dict[str, instance]` mapping explicit names to instances.
+        * A list mixing any of the forms above.
 
     Returns
     -------
@@ -4527,21 +4545,15 @@ def run_experiment(config, *, verbose=True) -> ExperimentResult:
     Examples
     --------
     ```pycon
-    from backtide.backtest import ExperimentConfig, GeneralExpConfig, run_experiment
+    from backtide.backtest import run_experiment
+    from backtide.strategies import BuyAndHold
 
-    cfg = ExperimentConfig(
-        general=GeneralExpConfig(
-                name="Apple and Microsoft",
-                tags=["stocks", "technology"],
-            ),
-            data=DataExpConfig(
-                symbols=["AAPL", "MSFT"],
-                interval="1d",
-            ),
-            strategy=StrategyExpConfig(strategies=[DOCS_STRATEGY_NAME]),
-        )
-
-    result = run_experiment(cfg)
+    result = run_experiment(
+        name="Apple and Microsoft",
+        symbols=["AAPL", "MSFT"],
+        interval="1d",
+        strategies=[BuyAndHold()],
+    )
     print(result)
     ```
 

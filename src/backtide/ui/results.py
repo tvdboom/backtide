@@ -5,6 +5,8 @@ Description: Backtest results page.
 
 """
 
+from __future__ import annotations
+
 from datetime import datetime as dt
 from pathlib import Path
 from typing import TYPE_CHECKING

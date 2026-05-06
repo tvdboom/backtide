@@ -110,7 +110,7 @@ def plot_trade_pnl(
     from backtide.analysis import plot_trade_pnl
     from backtide.storage import query_experiments, query_strategy_runs
 
-    exp = query_experiments()[0]
+    exp = query_experiments().iloc[0]
     runs = query_strategy_runs(exp.id)
     plot_trade_pnl(runs)
     ```

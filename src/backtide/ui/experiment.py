@@ -766,11 +766,10 @@ with tab4:
                     accept_new_options=not _default("use_storage", fallback=False),
                     on_change=lambda k=key: _persist(k),
                     help=(
-                        "Symbol used as a passive (buy-and-hold) baseline. Its bars are "
-                        "downloaded alongside the selected symbols and a ``BuyAndHold`` "
-                        "strategy on this symbol is auto-injected into the experiment, "
-                        "from which the alpha (excess return) of every other strategy "
-                        "is computed."
+                        "Symbol used as a passive (buy-and-hold) baseline from which the "
+                        "alpha (excess return) of every other strategy other strategy is "
+                        "computed. The default value is a ETF consisting of major equities "
+                        "for the selected base currency, e.g., SPY (S&P 500) for USD."
                     ),
                 )
 
@@ -787,20 +786,17 @@ with tab4:
                         st.error(err_benchmark, icon=":material/error:")
 
         elif bench_mode == bench_strategy:
-            strat_options = list(_default("strategies", []) or [])
+            strat_options = _default("strategies", [])
             if strat_options:
                 bench_strat = st.selectbox(
                     label="Benchmark strategy",
                     key=(key := "benchmark"),
                     options=strat_options,
-                    index=strat_options.index(_default("benchmark"))
-                    if _default("benchmark") in strat_options
-                    else 0,
+                    index=strat_options.index(_default("benchmark")),
                     on_change=lambda k=key: _persist(k),
                     help=(
                         "Use the selected strategy as the benchmark. Alpha is computed "
-                        "relative to this strategy's results instead of a passive "
-                        "buy-and-hold on a ticker symbol."
+                        "relative to this strategy's results."
                     ),
                 )
             else:
@@ -812,7 +808,6 @@ with tab4:
                 st.session_state["_benchmark"] = None
 
         else:
-            # No benchmark
             st.session_state["benchmark"] = None
             st.session_state["_benchmark"] = None
 

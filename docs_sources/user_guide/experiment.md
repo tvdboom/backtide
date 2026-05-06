@@ -10,6 +10,30 @@ and re-analysed long after the original run finished.
 You configure an experiment in the **Experiment** tab of the [application][application],
 or programmatically via [`ExperimentConfig`] and [`run_experiment`].
 
+[`run_experiment`] also accepts every field of every sub-config as a flat
+keyword argument, so a one-liner is often enough for ad-hoc runs:
+
+```python
+from backtide.backtest import run_experiment
+from backtide.indicators import SimpleMovingAverage
+from backtide.strategies import BuyAndHold
+
+result = run_experiment(
+    name="Apple buy-and-hold",
+    symbols=["AAPL"],
+    interval="1d",
+    start_date="2020-01-01",
+    end_date="2024-12-31",
+    full_history=False,
+    strategies=[BuyAndHold()],
+    indicators=[SimpleMovingAverage(20)],
+)
+```
+
+Strategies and indicators can be passed as a stored name, an instance (the
+class name is used as display name), a `dict[name, instance]`, or any list
+mixing those forms. Instances are used directly and **not** persisted to disk.
+
 <br>
 
 ## Lifecycle
@@ -27,14 +51,12 @@ do not stop the run unless they leave it without a single tradeable bar.
 4. **Compute indicators** once over the full dataset, in parallel across
    `(symbol, indicator)`. Strategies declare their required indicators via
    `required_indicators()` and the engine deduplicates them automatically — see
-   [auto-injected indicators][auto-injected].
+   [auto-injected indicators].
 5. **Run strategies in parallel** (rayon for built-in Rust strategies, sequential
    under the GIL for custom Python strategies). Each strategy gets its own
    portfolio, order book, equity log and trade log.
 6. **Persist** the aggregate result and per-strategy artefacts to DuckDB and
    return them to the caller.
-
-[auto-injected]: strategies.md#auto-injected-indicators
 
 <br>
 
@@ -61,7 +83,7 @@ disk with `ExperimentConfig.from_toml(...)`.
 
 ## Benchmark
 
-If [`StrategyExpConfig.benchmark`][`StrategyExpConfig`] is non-empty, the engine:
+If [`StrategyExpConfig.benchmark`][StrategyExpConfig] is non-empty, the engine:
 
 - Folds the benchmark symbol into the data download list so its bars are
   available for every strategy.
@@ -94,7 +116,7 @@ The experiment page surfaces an interactive **PnL-over-time** chart between
 the high-level metrics and the per-strategy breakdown. It plots one line per
 strategy on a shared time axis so the user can compare the cumulative
 performance of every strategy at a glance — the auto-injected
-`Benchmark (<SYMBOL>)` run is drawn as a dashed line for easy distinction.
+`Benchmark` run is drawn as a dashed line for easy distinction.
 
 A *Relative* toggle in the chart's options switches between absolute PnL
 (the default) and a percentage return relative to each strategy's starting
@@ -116,23 +138,10 @@ plot_pnl(runs, normalize=True)
 [plot_pnl]: ../api/analysis/plot_pnl.md
 
 In the **Results** page the same set of plots is rendered in a tabbed
-container right below the PnL chart. The available tabs (alphabetical
-order) are:
+container right below the PnL chart. See [plots] for the full list of
+result-analysis plots together with their data-analysis counterparts.
 
-| Tab | Function | Multi-run? |
-|---|---|---|
-| Cash holdings | [`plot_cash_holdings`](../api/analysis/plot_cash_holdings.md) | multi |
-| MAE / MFE | [`plot_mae_mfe`](../api/analysis/plot_mae_mfe.md) | single |
-| PnL histogram | [`plot_pnl_histogram`](../api/analysis/plot_pnl_histogram.md) | multi |
-| Position size | [`plot_position_size`](../api/analysis/plot_position_size.md) | single |
-| Price | [`plot_price`](../api/analysis/plot_price.md) (with `strategy_run=`) | single |
-| Rolling returns | [`plot_rolling_returns`](../api/analysis/plot_rolling_returns.md) | multi |
-| Rolling Sharpe | [`plot_rolling_sharpe`](../api/analysis/plot_rolling_sharpe.md) | multi |
-| Trade duration | [`plot_trade_duration`](../api/analysis/plot_trade_duration.md) | multi |
-| Trade PnL | [`plot_trade_pnl`](../api/analysis/plot_trade_pnl.md) | multi |
-
-Tabs are rendered lazily (only the active tab's plot is computed) and
-the single-run tabs include a strategy selector at the top.
+[plots]: plots.md
 
 ### Orders
 
@@ -174,12 +183,8 @@ separate buys becomes two `Trade` rows — one per cost-basis lot consumed.
 ## Metrics
 
 Every strategy run carries a `metrics` dict of named scalars. They are
-computed in [`compute_metrics`][compute_metrics] from the equity curve and the
-trade log, plus an extra alignment pass for `alpha` and `excess_return`. All
-return-flavoured metrics are stored as **fractions** (e.g., `0.12` = 12 %); the
-UI multiplies by 100 for display.
-
-[compute_metrics]: https://github.com/tvdboom/backtide/blob/master/src/backtide_core/src/backtest/engine.rs
+computed from the equity curve and the trade log, plus an extra alignment pass for `alpha` and `excess_return`. All
+return-flavored metrics are stored as fractions (e.g., `0.12` = 12 %).
 
 ### Final equity & PnL
 
@@ -196,8 +201,12 @@ $$
 $$
 
 `final_equity` is the last value of the equity curve, which itself is the sum
-of cash (across all currencies, treated 1:1) plus the mark-to-market value of
-every open position at every bar's close.
+of every cash bucket converted to the portfolio base currency at each bar via
+the FX table (forward-filled to the latest known rate ≤ the bar's
+timestamp), plus the mark-to-market value of every open position at every
+bar's close. Buckets or positions for which no FX rate is available at a
+given timestamp fall back to a 1:1 conversion so equity stays a finite,
+comparable number.
 
 ### `n_trades` & `win_rate`
 
@@ -216,7 +225,7 @@ do flow into the trade list, so they are included as well.
 
 ### `cagr` & `ann_volatility`
 
-These come from [`compute_series_stats`][analysis.rs] applied to the equity
+These come from `compute_series_stats` applied to the equity
 curve, so the analysis page and the backtest engine produce identical numbers.
 
 The annualisation factor `ann` is derived from the equity-curve density:
@@ -251,8 +260,6 @@ by $\sqrt{\text{ann}}$:
 $$
 \text{ann\_volatility} = \sigma(r) \cdot \sqrt{\text{ann}}
 $$
-
-[analysis.rs]: https://github.com/tvdboom/backtide/blob/master/src/backtide_core/src/analysis.rs
 
 ### `sharpe`
 
@@ -329,7 +336,7 @@ and $r_f$ the configured `risk_free_rate / 100`.
 
 ## Reproducibility
 
-Set [`EngineExpConfig.random_seed`][`EngineExpConfig`] to a fixed integer to
+Set [`EngineExpConfig.random_seed`][EngineExpConfig] to a fixed integer to
 make stochastic strategies and any RNG-dependent fills deterministic. With a
 seed set, two runs of the same `ExperimentConfig` against the same stored bars
 produce identical equity curves, orders and trades. Saving the

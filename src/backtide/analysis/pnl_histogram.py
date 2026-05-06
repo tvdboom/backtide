@@ -116,7 +116,7 @@ def plot_pnl_histogram(
     from backtide.analysis import plot_pnl_histogram
     from backtide.storage import query_experiments, query_strategy_runs
 
-    exp = query_experiments()[0]
+    exp = query_experiments().iloc[0]
     runs = query_strategy_runs(exp.id)
     plot_pnl_histogram(runs)
     ```

@@ -116,7 +116,7 @@ def plot_rolling_returns(
     from backtide.analysis import plot_rolling_returns
     from backtide.storage import query_experiments, query_strategy_runs
 
-    exp = query_experiments()[0]
+    exp = query_experiments().iloc[0]
     runs = query_strategy_runs(exp.id)
     plot_rolling_returns(runs, window=60)
     ```

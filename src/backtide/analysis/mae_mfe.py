@@ -125,7 +125,7 @@ def plot_mae_mfe(
     from backtide.analysis import plot_mae_mfe
     from backtide.storage import query_experiments, query_strategy_runs
 
-    exp = query_experiments()[0]
+    exp = query_experiments().iloc[0]
     runs = query_strategy_runs(exp.id)
     plot_mae_mfe(runs[0], interval="1d")
     ```

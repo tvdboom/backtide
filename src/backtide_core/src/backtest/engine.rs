@@ -62,6 +62,8 @@ impl Engine {
         &self,
         config: &ExperimentConfig,
         verbose: bool,
+        strategy_overrides: &HashMap<String, Py<PyAny>>,
+        indicator_overrides: &HashMap<String, Py<PyAny>>,
     ) -> EngineResult<ExperimentResult> {
         let started_at = now_secs();
         let started_instant = Instant::now();
@@ -305,7 +307,7 @@ impl Engine {
         // ── Phase 3a: load strategies (so we can collect their auto indicators) ──
         info!("Phase 3: loading {} strategy definition(s)...", config.strategy.strategies.len());
 
-        let mut strategy_objs = load_strategies(&config.strategy.strategies)?;
+        let mut strategy_objs = load_strategies(&config.strategy.strategies, strategy_overrides)?;
 
         // Auto-inject a Buy & Hold of the benchmark symbol as a regular strategy,
         // but only when benchmark_from_strategy is false (i.e. the benchmark is an
@@ -342,7 +344,13 @@ impl Engine {
         let mut seen_inds: HashSet<String> = HashSet::new();
 
         for name in &config.indicators.indicators {
-            match Python::attach(|py| load_indicator(py, name)) {
+            match Python::attach(|py| -> PyResult<Py<PyAny>> {
+                if let Some(o) = indicator_overrides.get(name) {
+                    Ok(o.clone_ref(py))
+                } else {
+                    load_indicator(py, name)
+                }
+            }) {
                 Ok(obj) => {
                     if seen_inds.insert(name.clone()) {
                         indicator_objs.push((name.clone(), obj));
@@ -1061,11 +1069,28 @@ fn auto_indicator_name_for(py: Python<'_>, ind: &Py<PyAny>) -> PyResult<String> 
 }
 
 /// Load every requested strategy. Returns `(name, obj, is_custom)` triples.
-fn load_strategies(names: &[String]) -> EngineResult<Vec<(String, Py<PyAny>, bool)>> {
+///
+/// Names present in `overrides` use the supplied in-memory instance
+/// directly (nothing is read from disk). Other names are resolved from
+/// the local strategies directory.
+fn load_strategies(
+    names: &[String],
+    overrides: &HashMap<String, Py<PyAny>>,
+) -> EngineResult<Vec<(String, Py<PyAny>, bool)>> {
     Python::attach(|py| -> PyResult<_> {
         let mut out = Vec::with_capacity(names.len());
         for name in names {
-            let (obj, is_custom) = load_strategy(py, name)?;
+            let (obj, is_custom) = if let Some(o) = overrides.get(name) {
+                let obj = o.clone_ref(py);
+                let is_custom = {
+                    let cls = obj.bind(py).get_type();
+                    let module: String = cls.getattr("__module__")?.extract()?;
+                    !module.starts_with("backtide.")
+                };
+                (obj, is_custom)
+            } else {
+                load_strategy(py, name)?
+            };
             out.push((name.clone(), obj, is_custom));
         }
         Ok(out)
