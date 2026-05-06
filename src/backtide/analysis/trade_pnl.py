@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, overload
 import pandas as pd
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import REFERENCE_LINE, _is_benchmark, _plot, _resolve_runs_currency
+from backtide.analysis.utils import REFERENCE_LINE, _plot, _resolve_runs_currency
 from backtide.config import get_config
 from backtide.utils.utils import _format_price, _to_list
 
@@ -126,7 +126,7 @@ def plot_trade_pnl(
     fig.add_hline(y=0, line=REFERENCE_LINE)
 
     for idx, run in enumerate(runs_l):
-        if _is_benchmark(run) or not run.trades:
+        if run.is_benchmark or not run.trades:
             continue
 
         exit_ts, pnls, symbols = [], [], []

@@ -106,7 +106,7 @@ impl GeneralExpConfig {
 ///     ISO-8601 start date. Ignored when `full_history` is `True`.
 ///
 /// end_date : str | None, default=None
-///     ISO-8601 end date.
+///     ISO-8601 end date. Ignored when `full_history` is `True`.
 ///
 /// interval : [Interval], default="1d"
 ///     Bar interval.
@@ -285,9 +285,11 @@ impl PortfolioExpConfig {
 ///
 /// Attributes
 /// ----------
-/// benchmark : str
-///     Benchmark ticker symbol used with a passive Buy & Hold experiment as
-///     a side-car alongside the selected strategies and used to compute alpha.
+/// benchmark : str | None, default=None
+///     Benchmark identifier. If it matches the name of one of the selected
+///     strategies it is treated as a strategy benchmark; otherwise it is
+///     assumed to be a ticker symbol and a passive Buy & Hold strategy is
+///     injected automatically. If `None`, no benchmark is used.
 ///
 /// strategies : list[str], default=[]
 ///     Names of the strategies to use in this experiment. Each name must
@@ -301,7 +303,7 @@ impl PortfolioExpConfig {
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StrategyExpConfig {
-    pub benchmark: String,
+    pub benchmark: Option<String>,
     pub strategies: Vec<String>,
 }
 
@@ -311,10 +313,10 @@ impl StrategyExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (benchmark: "str", strategies: "list[str]"=vec![]))]
-    fn new(benchmark: &str, strategies: Vec<String>) -> Self {
+    #[pyo3(signature = (benchmark: "str | None"=None, strategies: "list[str]"=vec![]))]
+    fn new(benchmark: Option<&str>, strategies: Vec<String>) -> Self {
         Self {
-            benchmark: benchmark.to_owned(),
+            benchmark: benchmark.map(str::to_owned),
             strategies,
         }
     }

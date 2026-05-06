@@ -39,9 +39,20 @@ use pyo3::prelude::*;
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.backtest import ExperimentConfig, run_experiment
+/// from backtide.backtest import ExperimentConfig, GeneralExpConfig, run_experiment
 ///
-/// cfg = ExperimentConfig()
+/// cfg = ExperimentConfig(
+///     general=GeneralExpConfig(
+///             name="Apple and Microsoft",
+///             tags=["stocks", "technology"],
+///         ),
+///         data=DataExpConfig(
+///             symbols=["AAPL", "MSFT"],
+///             interval="1d",
+///         ),
+///         strategy=StrategyExpConfig(strategies=[DOCS_STRATEGY_NAME]),
+///     )
+///
 /// result = run_experiment(cfg)
 /// print(result)
 /// ```

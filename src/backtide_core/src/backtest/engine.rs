@@ -123,9 +123,16 @@ impl Engine {
 
         // Augment the symbol list with the benchmark (if any) so its bars
         // get downloaded & loaded just like any user symbol.
+        // If the benchmark matches a strategy name, it refers to that strategy
+        // — no extra download needed. Otherwise treat it as a ticker symbol.
         let mut symbols = config.data.symbols.clone();
-        let benchmark = config.strategy.benchmark.trim().to_owned();
-        if !benchmark.is_empty() && !symbols.iter().any(|s| s == &benchmark) {
+        let benchmark = config.strategy.benchmark.as_deref().unwrap_or("").trim().to_owned();
+        let benchmark_from_strategy =
+            !benchmark.is_empty() && config.strategy.strategies.iter().any(|s| s == &benchmark);
+        if !benchmark.is_empty()
+            && !benchmark_from_strategy
+            && !symbols.iter().any(|s| s == &benchmark)
+        {
             info!("Folding benchmark symbol {:?} into symbol list", benchmark);
             symbols.push(benchmark.clone());
         }
@@ -300,9 +307,11 @@ impl Engine {
 
         let mut strategy_objs = load_strategies(&config.strategy.strategies)?;
 
-        // Auto-inject a Buy & Hold of the benchmark symbol as a regular strategy.
+        // Auto-inject a Buy & Hold of the benchmark symbol as a regular strategy,
+        // but only when benchmark_from_strategy is false (i.e. the benchmark is an
+        // external ticker symbol, not one of the user's strategies).
         let benchmark_name = BENCHMARK.to_owned();
-        if !benchmark.is_empty() {
+        if !benchmark.is_empty() && !benchmark_from_strategy {
             match Python::attach(|py| -> PyResult<Py<PyAny>> {
                 let bh = BuyAndHold {
                     symbol: Some(benchmark.clone()),
@@ -330,7 +339,7 @@ impl Engine {
         // RSI, BB Mean Reversion, …) would silently place zero orders
         // because the lookups in ``decide_inner`` return ``None``.
         let mut indicator_objs: Vec<(String, Py<PyAny>)> = Vec::new();
-        let mut seen_inds: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut seen_inds: HashSet<String> = HashSet::new();
 
         for name in &config.indicators.indicators {
             match Python::attach(|py| load_indicator(py, name)) {
@@ -517,8 +526,22 @@ impl Engine {
         let rf = config.engine.risk_free_rate / 100.0;
 
         // Snapshot of the benchmark's equity curve (ts, equity), if any.
+        // When benchmark_from_strategy is true, the benchmark strategy is the
+        // user strategy whose name matches the benchmark field; mark it now.
+        if benchmark_from_strategy && !benchmark.is_empty() {
+            for r in &mut results {
+                if r.strategy_name == benchmark {
+                    r.is_benchmark = true;
+                    break;
+                }
+            }
+        }
         let bench_run = if !benchmark.is_empty() {
-            results.iter().find(|r| r.strategy_name == benchmark_name)
+            if benchmark_from_strategy {
+                results.iter().find(|r| r.strategy_name == benchmark)
+            } else {
+                results.iter().find(|r| r.strategy_name == benchmark_name)
+            }
         } else {
             None
         };
@@ -580,7 +603,12 @@ impl Engine {
 
             // Alpha is only meaningful for non-benchmark runs.
             if let Some(bench) = bench_snapshot.as_ref() {
-                if r.strategy_name != benchmark_name {
+                let is_bench = if benchmark_from_strategy {
+                    r.strategy_name == benchmark
+                } else {
+                    r.strategy_name == benchmark_name
+                };
+                if !is_bench {
                     // If benchmark never became investable, alpha is unavailable.
                     let alpha = bench_start_ts.and_then(|_| {
                         strat_ret
@@ -600,7 +628,12 @@ impl Engine {
 
         // Ensure the benchmark run is always the first entry in the results.
         if !benchmark.is_empty() {
-            if let Some(idx) = results.iter().position(|r| r.strategy_name == benchmark_name) {
+            let bench_name_to_find = if benchmark_from_strategy {
+                &benchmark
+            } else {
+                &benchmark_name
+            };
+            if let Some(idx) = results.iter().position(|r| r.strategy_name == *bench_name_to_find) {
                 if idx != 0 {
                     let bench = results.remove(idx);
                     results.insert(0, bench);
@@ -1070,7 +1103,7 @@ fn run_one_strategy(
     // friends would silently trade the benchmark too. The auto-injected
     // benchmark strategy is detected by name and gets a closes view
     // restricted to just the benchmark symbol.
-    let benchmark = cfg.strategy.benchmark.trim().to_owned();
+    let benchmark = cfg.strategy.benchmark.as_deref().unwrap_or("").trim().to_owned();
     let is_benchmark_run = !benchmark.is_empty() && name == BENCHMARK;
     let allowed_symbols: HashSet<String> = if is_benchmark_run {
         std::iter::once(benchmark.clone()).collect()
@@ -1714,6 +1747,7 @@ fn run_one_strategy(
         metrics,
         base_currency: cfg.portfolio.base_currency,
         error: run_error,
+        is_benchmark: is_benchmark_run,
     }
 }
 
@@ -2521,7 +2555,8 @@ mod tests {
                     });
                     continue;
                 }
-                let bar = match aligned.get(&order.symbol).and_then(|r| r[bar_index].clone()) {
+                let symbol = order.symbol.clone();
+                let bar = match aligned.get(&symbol).and_then(|r| r[bar_index].clone()) {
                     Some(b) => b,
                     None => {
                         open_orders.push(order);
@@ -2647,12 +2682,13 @@ mod tests {
                             format!("{fill_reason}; partial: shrunk to fit cash")
                         };
                     }
-                    *positions.entry(order.symbol.clone()).or_insert(0.0) += filled_qty;
-                    update_open_trade_buy(&mut open_trades, &order.symbol, ts, filled_qty, fill_px);
+                    *positions.entry(symbol.clone()).or_insert(0.0) += filled_qty;
+                    update_open_trade_buy(&mut open_trades, &symbol, ts, filled_qty, fill_px);
                 } else if qty < 0.0 {
                     let abs_qty = qty.abs();
-                    let cur = *positions.get(&order.symbol).unwrap_or(&0.0);
+                    let cur = *positions.get(&symbol).unwrap_or(&0.0);
                     if !cfg.exchange.allow_short_selling && cur < abs_qty {
+                        warn!(strategy="test", order_id=%order.id, "Short selling disabled and not enough position, skipping.");
                         order_records.push(OrderRecord {
                             order: order.clone(),
                             timestamp: ts,
@@ -2678,10 +2714,10 @@ mod tests {
                         });
                         continue;
                     }
-                    *positions.entry(order.symbol.clone()).or_insert(0.0) -= abs_qty;
+                    *positions.entry(symbol.clone()).or_insert(0.0) -= abs_qty;
                     let realised = close_open_trade_sell(
                         &mut open_trades,
-                        &order.symbol,
+                        &symbol,
                         ts,
                         abs_qty,
                         fill_px,
@@ -2713,7 +2749,9 @@ mod tests {
             let mut equity: f64 = cash.values().sum();
             for (sym, qty) in &positions {
                 if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
-                    equity += *qty * b.close;
+                    let value = *qty * b.close;
+                    let pos_ccy = quote_ccy.get(sym).copied().unwrap_or(base_ccy);
+                    equity += fx.convert(value, pos_ccy, base_ccy, ts).unwrap_or(value);
                 }
             }
             if equity > peak {
@@ -2744,6 +2782,7 @@ mod tests {
             metrics,
             base_currency: cfg.portfolio.base_currency,
             error: None,
+            is_benchmark: false,
         }
     }
 
@@ -2845,7 +2884,7 @@ mod tests {
     fn foreign_currency_falls_back_to_base() {
         let mut cfg = mk_cfg("VOD.L");
         cfg.portfolio.base_currency = Currency::USD;
-        let aligned = mk_aligned("VOD.L", &[10.0, 11.0]);
+        let aligned = mk_aligned("VOD.L", &[100.0, 101.0]);
         // Quote is GBP; we have only USD cash, so it must fall back.
         let order = Order {
             id: "b".into(),
@@ -2856,7 +2895,7 @@ mod tests {
             limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("VOD.L", "GBP")], vec![(0, order)]);
-        // Without GBP/USD FX data, the engine cannot fund this cross-currency buy.
+        // Without GBP/USD FX path is provided in this unit setup, so funding fails.
         assert_eq!(r.orders[0].status, "rejected");
         assert_eq!(r.orders[0].reason, "insufficient funds");
     }
@@ -3161,6 +3200,7 @@ mod tests {
         let r =
             run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sl)]);
         let sl_rec = r.orders.iter().find(|o| o.order.id == "sl").expect("sl missing");
+        assert_eq!(sl_rec.status, "filled");
         assert_eq!(sl_rec.fill_price, Some(99.5));
     }
 
@@ -3227,8 +3267,7 @@ mod tests {
         // Stop at 95, limit at 95. Bar 2 has open=90 → stop fires (gap-down),
         // but as a limit-sell at 95 with bar.high=90.9, the limit can't be
         // reached this same bar (sell-limit needs price >= 95). It rests
-        // pending. Bar 3 opens at 96 → sell-limit fills at 96 (open through
-        // limit) since open >= 95.
+        // pending. Bar 3 opens at 96 → sell-limit fills at the open.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
             vec![OrderType::Market, OrderType::StopLossLimit, OrderType::CancelOrder];

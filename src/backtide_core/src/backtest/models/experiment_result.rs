@@ -6,6 +6,7 @@
 use crate::backtest::models::order::Order;
 use crate::data::models::currency::Currency;
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -24,7 +25,7 @@ use std::collections::HashMap;
 ///
 /// drawdown : float
 ///     Running drawdown (negative or zero) versus the all-time high
-///     equity, expressed as a fraction (e.g. -0.12 = -12 %).
+///     equity, expressed as a fraction (e.g., -0.12 = -12 %).
 ///
 /// See Also
 /// --------
@@ -53,6 +54,26 @@ impl EquitySample {
             self.cash.len(),
             self.drawdown,
         )
+    }
+
+    fn __getstate__(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        let bytes = serde_json::to_vec(self)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(PyBytes::new(py, &bytes).unbind())
+    }
+
+    fn __setstate__(&mut self, state: &Bound<'_, PyBytes>) -> PyResult<()> {
+        *self = serde_json::from_slice(state.as_bytes())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(())
+    }
+
+    fn __reduce__(&self, py: Python<'_>) -> PyResult<(Py<PyAny>, (Py<PyAny>,), Py<PyAny>)> {
+        let cls = PyModule::import(py, "backtide.backtest")?.getattr("EquitySample")?.unbind();
+        let state = self.__getstate__(py)?;
+        let copyreg = py.import("copyreg")?;
+        let reconstruct = copyreg.getattr("__newobj__")?.unbind();
+        Ok((reconstruct, (cls,), state.into_any()))
     }
 }
 
@@ -107,6 +128,26 @@ impl Trade {
     fn __repr__(&self) -> String {
         format!("Trade(symbol={:?}, qty={}, pnl={:.2})", self.symbol, self.quantity, self.pnl,)
     }
+
+    fn __getstate__(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        let bytes = serde_json::to_vec(self)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(PyBytes::new(py, &bytes).unbind())
+    }
+
+    fn __setstate__(&mut self, state: &Bound<'_, PyBytes>) -> PyResult<()> {
+        *self = serde_json::from_slice(state.as_bytes())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(())
+    }
+
+    fn __reduce__(&self, py: Python<'_>) -> PyResult<(Py<PyAny>, (Py<PyAny>,), Py<PyAny>)> {
+        let cls = PyModule::import(py, "backtide.backtest")?.getattr("Trade")?.unbind();
+        let state = self.__getstate__(py)?;
+        let copyreg = py.import("copyreg")?;
+        let reconstruct = copyreg.getattr("__newobj__")?.unbind();
+        Ok((reconstruct, (cls,), state.into_any()))
+    }
 }
 
 /// A record of an order as resolved by the engine.
@@ -120,7 +161,7 @@ impl Trade {
 ///     The bar timestamp at which the order was processed.
 ///
 /// status : str
-///     ``"filled"``, ``"cancelled"``, ``"rejected"`` or ``"pending"``.
+///     `"filled"`, `"cancelled"`, `"rejected"` or `"pending"`.
 ///
 /// fill_price : float | None
 ///     Average fill price (None if not filled).
@@ -168,6 +209,26 @@ impl OrderRecord {
             self.order.id, self.status, self.timestamp,
         )
     }
+
+    fn __getstate__(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        let bytes = serde_json::to_vec(self)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(PyBytes::new(py, &bytes).unbind())
+    }
+
+    fn __setstate__(&mut self, state: &Bound<'_, PyBytes>) -> PyResult<()> {
+        *self = serde_json::from_slice(state.as_bytes())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(())
+    }
+
+    fn __reduce__(&self, py: Python<'_>) -> PyResult<(Py<PyAny>, (Py<PyAny>,), Py<PyAny>)> {
+        let cls = PyModule::import(py, "backtide.backtest")?.getattr("OrderRecord")?.unbind();
+        let state = self.__getstate__(py)?;
+        let copyreg = py.import("copyreg")?;
+        let reconstruct = copyreg.getattr("__newobj__")?.unbind();
+        Ok((reconstruct, (cls,), state.into_any()))
+    }
 }
 
 /// Result of running a single strategy as part of an experiment.
@@ -199,12 +260,15 @@ impl OrderRecord {
 ///     don't need to look the experiment config up to label axes.
 ///
 /// error : str | None
-///     ``None`` on success. Otherwise the first error raised by the
-///     strategy during the run (e.g. an exception thrown by
-///     ``evaluate(...)``). Strategies that fail still produce a result
+///     `None` on success. Otherwise, the first error raised by the
+///     strategy during the run (e.g., an exception thrown by
+///     `evaluate(...)`). Strategies that fail still produce a result
 ///     row so the rest of the experiment isn't lost — the engine simply
 ///     records the error and reports the experiment status as
-///     ``"failed"``.
+///     `"failed"`.
+///
+/// is_benchmark : bool
+///     Whether this run is the benchmark run for the experiment.
 ///
 /// See Also
 /// --------
@@ -225,6 +289,8 @@ pub struct RunResult {
     pub base_currency: Currency,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub is_benchmark: bool,
 }
 
 #[pymethods]
@@ -234,13 +300,34 @@ impl RunResult {
 
     fn __repr__(&self) -> String {
         format!(
-            "RunResult(id={:?}, strategy={:?}, n_bars={}, n_trades={}, error={:?})",
+            "RunResult(id={:?}, strategy={:?}, n_bars={}, n_trades={}, is_benchmark={}, error={:?})",
             self.strategy_id,
             self.strategy_name,
             self.equity_curve.len(),
             self.trades.len(),
+            self.is_benchmark,
             self.error,
         )
+    }
+
+    fn __getstate__(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        let bytes = serde_json::to_vec(self)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(PyBytes::new(py, &bytes).unbind())
+    }
+
+    fn __setstate__(&mut self, state: &Bound<'_, PyBytes>) -> PyResult<()> {
+        *self = serde_json::from_slice(state.as_bytes())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(())
+    }
+
+    fn __reduce__(&self, py: Python<'_>) -> PyResult<(Py<PyAny>, (Py<PyAny>,), Py<PyAny>)> {
+        let cls = PyModule::import(py, "backtide.backtest")?.getattr("RunResult")?.unbind();
+        let state = self.__getstate__(py)?;
+        let copyreg = py.import("copyreg")?;
+        let reconstruct = copyreg.getattr("__newobj__")?.unbind();
+        Ok((reconstruct, (cls,), state.into_any()))
     }
 }
 
@@ -264,7 +351,7 @@ impl RunResult {
 ///     UTC timestamp (seconds) when the run finished.
 ///
 /// status : str
-///     ``"completed"`` if every strategy succeeded, ``"failed"`` otherwise.
+///     `"completed"` if every strategy succeeded, `"failed"` otherwise.
 ///
 /// strategies : list[[RunResult]]
 ///     One result entry per evaluated strategy.
@@ -303,5 +390,25 @@ impl ExperimentResult {
             self.status,
             self.strategies.len(),
         )
+    }
+
+    fn __getstate__(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        let bytes = serde_json::to_vec(self)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(PyBytes::new(py, &bytes).unbind())
+    }
+
+    fn __setstate__(&mut self, state: &Bound<'_, PyBytes>) -> PyResult<()> {
+        *self = serde_json::from_slice(state.as_bytes())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(())
+    }
+
+    fn __reduce__(&self, py: Python<'_>) -> PyResult<(Py<PyAny>, (Py<PyAny>,), Py<PyAny>)> {
+        let cls = PyModule::import(py, "backtide.backtest")?.getattr("ExperimentResult")?.unbind();
+        let state = self.__getstate__(py)?;
+        let copyreg = py.import("copyreg")?;
+        let reconstruct = copyreg.getattr("__newobj__")?.unbind();
+        Ok((reconstruct, (cls,), state.into_any()))
     }
 }

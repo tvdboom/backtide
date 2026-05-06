@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, overload
 from backtide.core.config import get_config
 from backtide.core.data import Currency
 from backtide.ui.utils import _get_timezone
-from backtide.utils.constants import BENCHMARK_NAME
 from backtide.utils.utils import _ts_to_datetime
 
 if TYPE_CHECKING:
@@ -43,11 +42,6 @@ REFERENCE_LINE = {
     "width": cfg.plots.line_width / 2,
     "dash": "dash",
 }
-
-
-def _is_benchmark(run: RunResult) -> bool:
-    """Whether this run is the benchmark run or not."""
-    return run.strategy_name == BENCHMARK_NAME
 
 
 def _resolve_runs_currency(runs: list[RunResult]) -> Currency | None:

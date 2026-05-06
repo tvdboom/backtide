@@ -105,6 +105,7 @@ impl Storage for DuckDb {
                 metrics           VARCHAR NOT NULL,
                 base_currency     VARCHAR,
                 error             VARCHAR,
+                is_benchmark      BOOLEAN NOT NULL DEFAULT FALSE,
                 UNIQUE (experiment_id, strategy_id)
             );
 
@@ -706,8 +707,8 @@ impl Storage for DuckDb {
             let metrics_str = serde_json::to_string(&strat.metrics).unwrap_or_default();
             conn.execute(
                 "INSERT OR REPLACE INTO experiment_strategies
-                 (id, experiment_id, strategy_id, strategy_name, metrics, base_currency, error)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                 (id, experiment_id, strategy_id, strategy_name, metrics, base_currency, error, is_benchmark)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     strat.strategy_id,
                     result.experiment_id,
@@ -716,6 +717,7 @@ impl Storage for DuckDb {
                     metrics_str,
                     strat.base_currency.to_string(),
                     strat.error,
+                    strat.is_benchmark,
                 ],
             )?;
         }
@@ -879,13 +881,13 @@ impl Storage for DuckDb {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
-            "SELECT id, strategy_id, strategy_name, metrics, base_currency, error
+            "SELECT id, strategy_id, strategy_name, metrics, base_currency, error, is_benchmark
              FROM experiment_strategies
              WHERE experiment_id = ?
              ORDER BY rowid",
         )?;
-        let strats: Vec<(String, String, String, String, Option<String>, Option<String>)> = stmt
-            .query_map(params![experiment_id], |row| {
+        let strats: Vec<(String, String, String, String, Option<String>, Option<String>, bool)> =
+            stmt.query_map(params![experiment_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -893,12 +895,13 @@ impl Storage for DuckDb {
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
+                    row.get::<_, bool>(6).unwrap_or(false),
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut out = Vec::with_capacity(strats.len());
-        for (run_id, strategy_id, name, metrics_str, base_ccy_str, error) in strats {
+        for (run_id, strategy_id, name, metrics_str, base_ccy_str, error, is_benchmark) in strats {
             let metrics: HashMap<String, f64> =
                 serde_json::from_str(&metrics_str).unwrap_or_default();
             let base_currency =
@@ -983,6 +986,7 @@ impl Storage for DuckDb {
                 metrics,
                 base_currency,
                 error,
+                is_benchmark,
             });
         }
 

@@ -36,7 +36,6 @@ from backtide.analysis.utils import (
 )
 from backtide.backtest import RunResult
 from backtide.core.data import Currency
-from backtide.utils.constants import BENCHMARK_NAME
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -590,8 +589,11 @@ class _StubRun:
         trades: list | None = None,
         orders: list | None = None,
         base_currency: str = "USD",
+        *,
+        is_benchmark: bool = False,
     ):
         self.strategy_name = name
+        self.is_benchmark = is_benchmark
         # 1-day spacing (in seconds) so the x axis renders sensibly.
         self.equity_curve = [
             _StubSample(start + i * 86_400, e, cash={base_currency: e})
@@ -609,9 +611,14 @@ def _run_result(
     trades: list | None = None,
     orders: list | None = None,
     base_currency: str = "USD",
+    *,
+    is_benchmark: bool = False,
 ) -> RunResult:
     """Build a `_StubRun` and expose it as a `RunResult` for type checkers."""
-    return cast(RunResult, _StubRun(name, equity, start, trades, orders, base_currency))
+    return cast(
+        RunResult,
+        _StubRun(name, equity, start, trades, orders, base_currency, is_benchmark=is_benchmark),
+    )
 
 
 class TestPlotPnl:
@@ -692,12 +699,12 @@ class TestPlotPnl:
         """The auto-injected benchmark run is rendered with a dashed line."""
         runs = [
             _run_result("S1", [10_000.0, 10_500.0]),
-            _run_result(BENCHMARK_NAME, [10_000.0, 10_100.0]),
+            _run_result("Benchmark", [10_000.0, 10_100.0], is_benchmark=True),
         ]
         fig = plot_pnl(runs, drawdown=False, display=None)
-        bench = next(t for t in fig.data if t.name == BENCHMARK_NAME)
-        # Only the reserved exact benchmark name is treated as benchmark style.
-        assert bench.line.dash is None
+        bench = next(t for t in fig.data if t.name == "Benchmark")
+        # The reserved exact benchmark name is rendered with benchmark styling.
+        assert bench.line.dash == "dash"
 
     def test_empty_input_raises(self):
         """An empty `runs` list should raise a ValueError."""

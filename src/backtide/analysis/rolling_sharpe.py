@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import BENCHMARK_LINE, GREEN, RED, _is_benchmark, _plot
+from backtide.analysis.utils import BENCHMARK_LINE, GREEN, RED, _plot
 from backtide.config import get_config
 from backtide.utils.utils import _to_list
 
@@ -153,7 +153,7 @@ def plot_rolling_sharpe(
         if sharpe.empty:
             continue
 
-        if is_benchmark := _is_benchmark(run):
+        if is_benchmark := run.is_benchmark:
             line = BENCHMARK_LINE
         else:
             line = {

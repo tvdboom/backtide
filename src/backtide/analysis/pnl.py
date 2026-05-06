@@ -17,7 +17,6 @@ from plotly.subplots import make_subplots
 from backtide.analysis.utils import (
     BENCHMARK_LINE,
     REFERENCE_LINE,
-    _is_benchmark,
     _plot,
     _resolve_runs_currency,
 )
@@ -183,7 +182,7 @@ def plot_pnl(
         else:
             y = [e - base for e in equity]
 
-        if is_benchmark := _is_benchmark(run):
+        if is_benchmark := run.is_benchmark:
             line = BENCHMARK_LINE
         else:
             line = {

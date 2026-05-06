@@ -155,4 +155,25 @@ impl Order {
             ),
         }
     }
+
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (String, OrderType, f64, Option<f64>, Option<f64>, Option<String>),
+    )> {
+        let cls = PyModule::import(py, "backtide.backtest")?.getattr("Order")?;
+        Ok((
+            cls,
+            (
+                self.symbol.clone(),
+                self.order_type,
+                self.quantity,
+                self.price,
+                self.limit_price,
+                Some(self.id.clone()),
+            ),
+        ))
+    }
 }

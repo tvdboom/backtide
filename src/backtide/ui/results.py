@@ -24,7 +24,7 @@ from backtide.analysis import (
     plot_trade_duration,
     plot_trade_pnl,
 )
-from backtide.analysis.utils import GREEN, RED, YELLOW, _is_benchmark
+from backtide.analysis.utils import GREEN, RED, YELLOW
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
 from backtide.storage import (
@@ -43,7 +43,6 @@ from backtide.ui.utils import (
     _persist,
     _to_pandas,
 )
-from backtide.utils.constants import BENCHMARK_NAME
 from backtide.utils.utils import _format_price, _moment_to_strftime
 
 if TYPE_CHECKING:
@@ -215,7 +214,7 @@ def _render_run_metrics(run: RunResult):
     _colored_metric(
         mc5,
         ":material/compare_arrows: Alpha",
-        "--" if _is_benchmark(run) or alpha is None else _fmt_pct(alpha, signed=True),
+        "--" if run.is_benchmark or alpha is None else _fmt_pct(alpha, signed=True),
         _tone(alpha),
     )
     _colored_metric(
@@ -824,15 +823,16 @@ def _render_full_analysis(row: pd.Series):
     st.markdown("### Strategies", text_alignment="center")
 
     with st.container(key="strategy_picker"):
+        bench_names = {run.strategy_name for run in runs if run.is_benchmark}
         selected_strategy = st.segmented_control(
             label="Strategies",
             label_visibility="collapsed",
             key=(key := f"selected_strategy_{exp_id}"),
             required=True,
             options=(options := [run.strategy_name for run in runs]),
-            default=_default(key, next(r for r in options if r != BENCHMARK_NAME)),
+            default=_default(key, next((r for r in options if r not in bench_names), options[0])),
             format_func=lambda x: (
-                f":material/{'bar_chart' if x == BENCHMARK_NAME else 'psychology'}: **{x}**"
+                f":material/{'bar_chart' if x in bench_names else 'psychology'}: **{x}**"
             ),
             on_change=lambda k=key: _persist(k),
             help="Select the strategy to analyze.",
@@ -1090,6 +1090,6 @@ for _, row in df.iterrows():
             for i, run in enumerate(query_strategy_runs(exp_id)):
                 if i > 0:
                     st.markdown("<div style='margin-top:1.25rem'></div>", unsafe_allow_html=True)
-                icon = "bar_chart" if _is_benchmark(run) else "psychology"
+                icon = "bar_chart" if run.is_benchmark else "psychology"
                 st.markdown(f"**:material/{icon}: {run.strategy_name}**")
                 _render_run_metrics(run)

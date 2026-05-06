@@ -404,7 +404,7 @@ with tab2:
         format_func=lambda x: f"{x.icon()} {x}",
         on_change=lambda k=key: (
             _clear_state("symbols", default=[]),
-            _clear_state("currency", "benchmark"),
+            _clear_state("currency", "benchmark", "benchmark_mode"),
             _persist(k),
         ),
         help="Select the type of financial instrument you want to backtest.",
@@ -634,7 +634,7 @@ with tab3:
         key="base_currency",
         options=Currency.variants(),
         index=Currency.variants().index(_default("base_currency", cfg.general.base_currency)),
-        on_change=lambda: (_clear_state("benchmark"), _persist("base_currency")),
+        on_change=lambda: (_clear_state("benchmark", "benchmark_mode"), _persist("base_currency")),
         help=(
             "The currency your portfolio is denominated in during the backtest. All trades, "
             "P&L, margin, leverage and position sizing are tracked in this currency. Instrument "
@@ -695,68 +695,129 @@ with tab4:
         "create predefined (built-in) or custom strategies on the **Strategies** page.",
     )
 
+    stored_strat = _load_stored_strategies(cfg)
+    selected_strats = []
     err_benchmark = None
-    if default := _default_benchmark(base_currency, instrument_type, list(all_instruments)):
-        # Benchmarks for an equity experiment may be either a stock or an ETF
-        if instrument_type.is_equity:
-            if instrument_type == InstrumentType.Stocks:
-                other = InstrumentType.Etf
-            else:
-                other = InstrumentType.Stocks
 
-            if _default("use_storage", fallback=False):
-                bench_universe = {
-                    **all_instruments,
-                    **{x.symbol: x for x in query_instruments(other, cfg.data.providers[other])},
-                }
-            else:
-                bench_universe = {**all_instruments, **_list_instruments(other)}
-        else:
-            bench_universe = all_instruments
+    if not stored_strat:
+        st.info(
+            "No saved strategies yet. Create a strategy on the **Strategies** page first.",
+            icon=":material/info:",
+        )
+    else:
+        bench_none = ":material/block: None"
+        bench_symbol = ":material/toll: Symbol"
+        bench_strategy = ":material/psychology: Strategy"
 
-        if not _default("benchmark"):
-            st.session_state["benchmark"] = default
-            st.session_state["_benchmark"] = default
-
-        options = sorted({*bench_universe.keys(), _default("benchmark")})
-        benchmark = st.selectbox(
+        default = bench_none if instrument_type == InstrumentType.Forex else bench_symbol
+        bench_mode = st.segmented_control(  # ty: ignore[no-matching-overload]
             label="Benchmark",
-            key=(key := "benchmark"),
-            options=options,
-            index=options.index(_default("benchmark")),
-            format_func=lambda s: (
-                f"{s} - {bench_universe[s].name}"
-                if s in bench_universe and bench_universe[s].instrument_type.is_equity
-                else s
-            ),
-            accept_new_options=not _default("use_storage", fallback=False),
-            on_change=lambda k=key: _persist(k),
+            key=(key := "benchmark_mode"),
+            required=True,
+            options=[bench_none, bench_symbol, bench_strategy],
+            default=_default(key, default),
+            on_change=lambda k=key: (_clear_state("benchmark"), _persist(k)),
             help=(
-                "Symbol used as a passive (buy-and-hold) baseline. Its bars are "
-                "downloaded alongside the selected symbols and a ``BuyAndHold`` "
-                "strategy on this symbol is auto-injected into the experiment, "
-                "from which the alpha (excess return) of every other strategy "
-                "is computed."
+                "Choose how the benchmark is determined. **None** disables the benchmark. "
+                "**Symbol** uses a passive buy-and-hold on a symbol. **Strategy** uses one "
+                "of the selected strategies as the benchmark."
             ),
         )
 
-        # Validate the benchmark symbol
-        if benchmark and benchmark not in bench_universe:
-            for it in (InstrumentType.Stocks, InstrumentType.Etf):
-                try:
-                    resolve_profiles(benchmark, it, interval, verbose=False)
-                    resolved = True
-                    break
-                except RuntimeError as ex:
-                    err_benchmark = ex
+        if bench_mode == bench_symbol:
+            if default_sym := _default_benchmark(
+                base_currency, instrument_type, list(all_instruments)
+            ):
+                # Benchmarks for an equity experiment may be either a stock or an ETF
+                if instrument_type.is_equity:
+                    if instrument_type == InstrumentType.Stocks:
+                        other = InstrumentType.Etf
+                    else:
+                        other = InstrumentType.Stocks
 
-            if err_benchmark:
-                st.error(err_benchmark, icon=":material/error:")
+                    if _default("use_storage", fallback=False):
+                        bench_universe = {
+                            **all_instruments,
+                            **{
+                                x.symbol: x
+                                for x in query_instruments(other, cfg.data.providers[other])
+                            },
+                        }
+                    else:
+                        bench_universe = {**all_instruments, **_list_instruments(other)}
+                else:
+                    bench_universe = all_instruments
 
-    st.write("")
+                if not _default("benchmark"):
+                    st.session_state["benchmark"] = default_sym
+                    st.session_state["_benchmark"] = default_sym
 
-    selected_strats = []
-    if stored_strat := _load_stored_strategies(cfg):
+                options = sorted({*bench_universe.keys(), _default("benchmark")})
+                benchmark = st.selectbox(
+                    label="Benchmark symbol",
+                    key=(key := "benchmark"),
+                    options=options,
+                    index=options.index(_default("benchmark")),
+                    format_func=lambda s: (
+                        f"{s} - {bench_universe[s].name}"
+                        if s in bench_universe and bench_universe[s].instrument_type.is_equity
+                        else s
+                    ),
+                    accept_new_options=not _default("use_storage", fallback=False),
+                    on_change=lambda k=key: _persist(k),
+                    help=(
+                        "Symbol used as a passive (buy-and-hold) baseline. Its bars are "
+                        "downloaded alongside the selected symbols and a ``BuyAndHold`` "
+                        "strategy on this symbol is auto-injected into the experiment, "
+                        "from which the alpha (excess return) of every other strategy "
+                        "is computed."
+                    ),
+                )
+
+                # Validate the benchmark symbol
+                if benchmark and benchmark not in bench_universe:
+                    for it in (InstrumentType.Stocks, InstrumentType.Etf):
+                        try:
+                            resolve_profiles(benchmark, it, interval, verbose=False)
+                            break
+                        except RuntimeError as ex:
+                            err_benchmark = ex
+
+                    if err_benchmark:
+                        st.error(err_benchmark, icon=":material/error:")
+
+        elif bench_mode == bench_strategy:
+            strat_options = list(_default("strategies", []) or [])
+            if strat_options:
+                bench_strat = st.selectbox(
+                    label="Benchmark strategy",
+                    key=(key := "benchmark"),
+                    options=strat_options,
+                    index=strat_options.index(_default("benchmark"))
+                    if _default("benchmark") in strat_options
+                    else 0,
+                    on_change=lambda k=key: _persist(k),
+                    help=(
+                        "Use the selected strategy as the benchmark. Alpha is computed "
+                        "relative to this strategy's results instead of a passive "
+                        "buy-and-hold on a ticker symbol."
+                    ),
+                )
+            else:
+                st.info(
+                    "Select at least one strategy below to use as benchmark.",
+                    icon=":material/info:",
+                )
+                st.session_state["benchmark"] = None
+                st.session_state["_benchmark"] = None
+
+        else:
+            # No benchmark
+            st.session_state["benchmark"] = None
+            st.session_state["_benchmark"] = None
+
+        st.write("")
+
         selected_strats = st.multiselect(
             label="Strategies",
             key=(key := "strategies"),
@@ -770,11 +831,6 @@ with tab4:
         # Show a summary of selected strategies
         for name in selected_strats:
             st.caption(_get_strategy_label(name, stored_strat[name]))
-    else:
-        st.info(
-            "No saved strategies yet. Create a strategy on the **Strategies** page first.",
-            icon=":material/info:",
-        )
 
     if st.button("Create a new strategy", icon=":material/add:", type="secondary"):
         st.switch_page("strategies.py")
@@ -1244,14 +1300,19 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────────────
 
 running_experiment = st.session_state.get("running_experiment", False)
-can_run = profiles and start_ts and latest_ts and not err_benchmark and selected_strats
+
+# At least one non-benchmark strategy must be selected
+bench_val = st.session_state.get("benchmark") or _default("benchmark", None)
+non_bench = [s for s in selected_strats if s != bench_val or bench_val not in selected_strats]
+
+can_run = profiles and start_ts and latest_ts and not err_benchmark and non_bench
 
 if not running_experiment and not can_run:
     missing = []
     if not symbols:
         missing.append("select at least one **symbol**")
-    if not selected_strats:
-        missing.append("select at least one **strategy**")
+    if not non_bench:
+        missing.append("select at least one non-benchmark **strategy**")
     if err_benchmark:
         missing.append("fix the **benchmark** symbol error")
     if not start_ts or not latest_ts:

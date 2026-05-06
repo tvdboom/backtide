@@ -1022,7 +1022,7 @@ class DataExpConfig:
         ISO-8601 start date. Ignored when `full_history` is `True`.
 
     end_date : str | None, default=None
-        ISO-8601 end date.
+        ISO-8601 end date. Ignored when `full_history` is `True`.
 
     interval : [Interval], default="1d"
         Bar interval.
@@ -1314,7 +1314,7 @@ class EquitySample:
 
     drawdown : float
         Running drawdown (negative or zero) versus the all-time high
-        equity, expressed as a fraction (e.g. -0.12 = -12 %).
+        equity, expressed as a fraction (e.g., -0.12 = -12 %).
 
     See Also
     --------
@@ -1333,7 +1333,7 @@ class EquitySample:
         ...
     def __ge__(self, value, /):
         ...
-    def __getstate__(self, /):
+    def __getstate__(self):
         ...
     def __gt__(self, value, /):
         ...
@@ -1348,6 +1348,8 @@ class EquitySample:
     def __new__(cls, *args, **kwargs):
         ...
     def __repr__(self, /):
+        ...
+    def __setstate__(self, state):
         ...
     def __str__(self, /):
         ...
@@ -1615,7 +1617,7 @@ class ExperimentResult:
         UTC timestamp (seconds) when the run finished.
 
     status : str
-        ``"completed"`` if every strategy succeeded, ``"failed"`` otherwise.
+        `"completed"` if every strategy succeeded, `"failed"` otherwise.
 
     strategies : list[[RunResult]]
         One result entry per evaluated strategy.
@@ -1644,7 +1646,7 @@ class ExperimentResult:
         ...
     def __ge__(self, value, /):
         ...
-    def __getstate__(self, /):
+    def __getstate__(self):
         ...
     def __gt__(self, value, /):
         ...
@@ -1661,6 +1663,8 @@ class ExperimentResult:
     def __new__(cls, *args, **kwargs):
         ...
     def __repr__(self, /):
+        ...
+    def __setstate__(self, state):
         ...
     def __str__(self, /):
         ...
@@ -2511,7 +2515,7 @@ class OrderRecord:
         The bar timestamp at which the order was processed.
 
     status : str
-        ``"filled"``, ``"cancelled"``, ``"rejected"`` or ``"pending"``.
+        `"filled"`, `"cancelled"`, `"rejected"` or `"pending"`.
 
     fill_price : float | None
         Average fill price (None if not filled).
@@ -2549,7 +2553,7 @@ class OrderRecord:
         ...
     def __ge__(self, value, /):
         ...
-    def __getstate__(self, /):
+    def __getstate__(self):
         ...
     def __gt__(self, value, /):
         ...
@@ -2564,6 +2568,8 @@ class OrderRecord:
     def __new__(cls, *args, **kwargs):
         ...
     def __repr__(self, /):
+        ...
+    def __setstate__(self, state):
         ...
     def __str__(self, /):
         ...
@@ -3424,12 +3430,15 @@ class RunResult:
         don't need to look the experiment config up to label axes.
 
     error : str | None
-        ``None`` on success. Otherwise the first error raised by the
-        strategy during the run (e.g. an exception thrown by
-        ``evaluate(...)``). Strategies that fail still produce a result
+        `None` on success. Otherwise, the first error raised by the
+        strategy during the run (e.g., an exception thrown by
+        `evaluate(...)`). Strategies that fail still produce a result
         row so the rest of the experiment isn't lost — the engine simply
         records the error and reports the experiment status as
-        ``"failed"``.
+        `"failed"`.
+
+    is_benchmark : bool
+        Whether this run is the benchmark run for the experiment.
 
     See Also
     --------
@@ -3442,6 +3451,7 @@ class RunResult:
     base_currency: Currency
     equity_curve: list[EquitySample]
     error: str | None
+    is_benchmark: bool
     metrics: dict[str, float]
     orders: list[OrderRecord]
     strategy_id: str
@@ -3452,7 +3462,7 @@ class RunResult:
         ...
     def __ge__(self, value, /):
         ...
-    def __getstate__(self, /):
+    def __getstate__(self):
         ...
     def __gt__(self, value, /):
         ...
@@ -3469,6 +3479,8 @@ class RunResult:
     def __new__(cls, *args, **kwargs):
         ...
     def __repr__(self, /):
+        ...
+    def __setstate__(self, state):
         ...
     def __str__(self, /):
         ...
@@ -3907,9 +3919,11 @@ class StrategyExpConfig:
 
     Attributes
     ----------
-    benchmark : str
-        Benchmark ticker symbol used with a passive Buy & Hold experiment as
-        a side-car alongside the selected strategies and used to compute alpha.
+    benchmark : str | None, default=None
+        Benchmark identifier. If it matches the name of one of the selected
+        strategies it is treated as a strategy benchmark; otherwise it is
+        assumed to be a ticker symbol and a passive Buy & Hold strategy is
+        injected automatically. If `None`, no benchmark is used.
 
     strategies : list[str], default=[]
         Names of the strategies to use in this experiment. Each name must
@@ -3923,7 +3937,7 @@ class StrategyExpConfig:
 
     """
 
-    benchmark: str
+    benchmark: str | None
     strategies: list[str]
 
     def __eq__(self, value, /):
@@ -4005,7 +4019,7 @@ class Trade:
         ...
     def __ge__(self, value, /):
         ...
-    def __getstate__(self, /):
+    def __getstate__(self):
         ...
     def __gt__(self, value, /):
         ...
@@ -4020,6 +4034,8 @@ class Trade:
     def __new__(cls, *args, **kwargs):
         ...
     def __repr__(self, /):
+        ...
+    def __setstate__(self, state):
         ...
     def __str__(self, /):
         ...
@@ -4511,9 +4527,20 @@ def run_experiment(config, *, verbose=True) -> ExperimentResult:
     Examples
     --------
     ```pycon
-    from backtide.backtest import ExperimentConfig, run_experiment
+    from backtide.backtest import ExperimentConfig, GeneralExpConfig, run_experiment
 
-    cfg = ExperimentConfig()
+    cfg = ExperimentConfig(
+        general=GeneralExpConfig(
+                name="Apple and Microsoft",
+                tags=["stocks", "technology"],
+            ),
+            data=DataExpConfig(
+                symbols=["AAPL", "MSFT"],
+                interval="1d",
+            ),
+            strategy=StrategyExpConfig(strategies=[DOCS_STRATEGY_NAME]),
+        )
+
     result = run_experiment(cfg)
     print(result)
     ```

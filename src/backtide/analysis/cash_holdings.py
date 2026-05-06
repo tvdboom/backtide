@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, overload
 import pandas as pd
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import _is_benchmark, _plot
+from backtide.analysis.utils import _plot
 from backtide.config import get_config
 from backtide.data import Currency
 from backtide.utils.utils import _to_list
@@ -74,7 +74,7 @@ def plot_cash_holdings(
     fig = go.Figure()
     all_currencies = {}
     for idx, run in enumerate(runs_l):
-        if _is_benchmark(run) or not run.equity_curve:
+        if run.is_benchmark or not run.equity_curve:
             continue
 
         currencies = defaultdict(list)

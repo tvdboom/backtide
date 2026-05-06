@@ -20,11 +20,20 @@ from markdown import Markdown
 from pandas.io.formats.style import Styler
 from pymdownx.superfences import SuperFencesException
 
-from backtide.config import Config, DataConfig, set_config
+from backtide.backtest import (
+    DataExpConfig,
+    ExperimentConfig,
+    GeneralExpConfig,
+    StrategyExpConfig,
+    run_experiment,
+)
+from backtide.config import Config, DataConfig, get_config, set_config
+from backtide.storage import query_experiments
+from backtide.strategies import BuyAndHold
+from backtide.strategies.utils import _save_strategy
 
 # Set a deterministic config for all doc examples.
-# Uses a temporary directory for storage so docs never touch the real DB.
-# Uses yahoo as crypto provider since binance doesn't allow requests from CI.
+# Use yahoo as crypto provider since binance doesn't allow requests from CI.
 set_config(
     Config(
         data=DataConfig(
@@ -33,6 +42,37 @@ set_config(
         ),
     )
 )
+
+
+def bootstrap_docs_experiment():
+    """Ensure docs examples have at least one stored strategy and experiment."""
+    if len(query_experiments()) > 0:
+        return
+
+    cfg = get_config()
+    _save_strategy(BuyAndHold(), "Docs Example Strategy", cfg)
+
+    exp_cfg = ExperimentConfig(
+        general=GeneralExpConfig(
+            name="Docs Buy & Hold",
+            description="Bootstrap experiment used by runnable documentation examples.",
+            tags=["docs", "bootstrap"],
+        ),
+        data=DataExpConfig(
+            symbols=["AAPL"],
+            instrument_type="stocks",
+            interval="1d",
+            full_history=False,
+            start_date="2024-01-01",
+            end_date="2024-12-31",
+        ),
+        strategy=StrategyExpConfig(strategies=["Docs Example Strategy"]),
+    )
+
+    run_experiment(exp_cfg, verbose=False)
+
+
+bootstrap_docs_experiment()
 
 # Directory in which to store all plots from the examples
 shutil.rmtree(DIR_EXAMPLES := "docs_sources/img/examples/", ignore_errors=True)

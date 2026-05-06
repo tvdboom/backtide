@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, overload
 import numpy as np
 import plotly.graph_objects as go
 
-from backtide.analysis.utils import _is_benchmark, _plot
+from backtide.analysis.utils import _plot
 from backtide.config import get_config
 from backtide.utils.utils import _to_list
 
@@ -137,7 +137,7 @@ def plot_trade_duration(
 
     durations = {}
     for run in runs_l:
-        if _is_benchmark(run) or not run.trades:
+        if run.is_benchmark or not run.trades:
             continue
 
         durations[run.strategy_name] = [t.exit_ts - t.entry_ts for t in run.trades]
