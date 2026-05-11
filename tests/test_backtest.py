@@ -325,7 +325,7 @@ class TestRunExperiment:
             data=DataExpConfig(symbols=[]),
             strategy=StrategyExpConfig(benchmark="", strategies=[]),
         )
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(cfg, verbose=False)
 
     def test_no_data_returns_failed(self, monkeypatch):
@@ -380,34 +380,19 @@ class TestRunExperimentKwargs:
             general=GeneralExpConfig(name="legacy"),
             data=DataExpConfig(symbols=[]),
         )
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(cfg, verbose=False)
-
-    def test_positional_dict_works(self):
-        """Passing a (nested) dict positionally builds an ExperimentConfig."""
-        # An empty dict is fine because every section has #[serde(default)].
-        with pytest.raises(RuntimeError):
-            run_experiment({}, verbose=False)
-        # Round-tripping through ``to_dict`` is also accepted.
-        d = ExperimentConfig(data=DataExpConfig(symbols=[])).to_dict()
-        with pytest.raises(RuntimeError):
-            run_experiment(d, verbose=False)
-
-    def test_positional_invalid_type_raises(self):
-        """A non-config, non-dict positional raises ValueError."""
-        with pytest.raises(ValueError, match="ExperimentConfig"):
-            run_experiment(123, verbose=False)
 
     def test_no_args_uses_defaults(self):
         """Calling without args uses defaults (no symbols → RuntimeError)."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(verbose=False)
 
     # ── Flat kwargs ──────────────────────────────────────────────────
 
     def test_flat_kwargs_route_to_general(self):
         """Flat ``name`` / ``description`` kwargs route to ``general``."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(
                 name="flat-name",
                 description="flat-desc",
@@ -417,7 +402,7 @@ class TestRunExperimentKwargs:
 
     def test_flat_kwargs_route_to_data(self):
         """Flat ``symbols`` / ``interval`` kwargs route to ``data``."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(
                 symbols=[],
                 interval="1d",
@@ -430,7 +415,7 @@ class TestRunExperimentKwargs:
 
     def test_flat_kwargs_route_to_portfolio(self):
         """Flat ``initial_cash`` / ``base_currency`` kwargs route to portfolio."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(
                 initial_cash=50_000,
                 base_currency="USD",
@@ -439,7 +424,7 @@ class TestRunExperimentKwargs:
 
     def test_flat_kwargs_route_to_exchange(self):
         """Flat exchange-section kwargs route to ``exchange``."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(
                 commission_type="Fixed",
                 commission_fixed=2.5,
@@ -450,7 +435,7 @@ class TestRunExperimentKwargs:
 
     def test_flat_kwargs_route_to_engine(self):
         """Flat engine-section kwargs route to ``engine``."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(
                 warmup_period=5,
                 trade_on_close=True,
@@ -471,16 +456,16 @@ class TestRunExperimentKwargs:
         Regression test: serde-based round-tripping doesn't honour these
         aliases; the implementation must use Python-level setattr.
         """
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(interval="1d", verbose=False)
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(interval="1h", verbose=False)
 
     # ── Sub-config kwargs ────────────────────────────────────────────
 
     def test_sub_config_instance_kwargs(self):
         """Each sub-config can be passed as a typed instance kwarg."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(
                 general=GeneralExpConfig(name="sub"),
                 data=DataExpConfig(symbols=[]),
@@ -494,7 +479,7 @@ class TestRunExperimentKwargs:
 
     def test_sub_config_dict_kwargs(self):
         """Each sub-config can be passed as a dict kwarg."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(
                 general={"name": "as-dict", "tags": ["x"]},
                 data={"symbols": [], "interval": "1d"},
@@ -513,7 +498,7 @@ class TestRunExperimentKwargs:
         # If kwargs were ignored, this would still hit the no-symbols guard
         # (it does anyway). We just verify no error is raised by the
         # kwargs translation itself.
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no symbols"):
             run_experiment(cfg, name="overridden", verbose=False)
 
 

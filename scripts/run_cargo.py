@@ -6,7 +6,8 @@ by platform, so this launcher patches the appropriate environment variable
 before invoking `cargo`:
 
 * **POSIX** -- prepend `sysconfig['LIBDIR']` (which holds `libpython`) to
-  `LD_LIBRARY_PATH`.
+  both `LD_LIBRARY_PATH` (runtime loader) and `LIBRARY_PATH` (link-time
+  search, so the linker can resolve `-lpythonX.Y`).
 * **Windows** -- prepend the base interpreter directory (`sys.base_prefix`,
   where `pythonXY.dll` lives) to `PATH`. Without this, cargo-spawned bench/test
   `.exe` files fail with `STATUS_DLL_NOT_FOUND` because the venv's `Scripts`
@@ -59,7 +60,7 @@ def main(argv: list[str]) -> int:
     On Windows, the base interpreter directory (where `pythonXY.dll` lives)
     and the directory of `sys.executable` are prepended to `PATH`. On
     POSIX, `sysconfig['LIBDIR']` (where `libpython` lives) is prepended
-    to `LD_LIBRARY_PATH`.
+    to both `LD_LIBRARY_PATH` (runtime) and `LIBRARY_PATH` (link-time).
 
     Parameters
     ----------
@@ -91,7 +92,10 @@ def main(argv: list[str]) -> int:
         # `LD_LIBRARY_PATH`, which the loader silently ignores.
         for libdir in sysconfig.get_config_vars("LIBDIR", "LIBPL"):
             if libdir and os.path.isdir(libdir):
+                # LD_LIBRARY_PATH  -> runtime loader (needed to *run* the binary)
+                # LIBRARY_PATH     -> link-time search (needed to *find* -lpythonX.Y)
                 _prepend(env, "LD_LIBRARY_PATH", libdir)
+                _prepend(env, "LIBRARY_PATH", libdir)
 
     try:
         return subprocess.call(argv, env=env)

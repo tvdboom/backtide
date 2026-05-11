@@ -54,7 +54,6 @@ __all__ = [
     "Vcp",
     "VolumeWeightedAveragePrice",
     "WeightedMovingAverage",
-    "run_experiment",
 ]
 
 from typing import Any, ClassVar
@@ -4491,70 +4490,3 @@ class WeightedMovingAverage:
             The description.
 
         """
-
-def run_experiment(config=None, *, verbose=True, **kwargs) -> ExperimentResult:
-    """Run a backtest experiment with the provided configuration.
-
-    Performs the full pipeline end-to-end:
-
-    1. Resolves and downloads any missing market data (skipped if already present in the
-       database).
-    2. Computes every indicator once over the entire dataset.
-    3. Runs every strategy in parallel — each strategy has its own independent portfolio,
-       order book and equity curve.
-    4. Persists the aggregated [`ExperimentResult`] (and per-strategy artifacts) into the
-       database.
-
-    Parameters
-    ----------
-    config : [ExperimentConfig], optional
-        The complete experiment configuration. If omitted, defaults are
-        used and `kwargs` populate the configuration.
-
-    verbose : bool, default=True
-        Whether to display a progress bar while running.
-
-    **kwargs
-        Any combination of:
-
-        * Sub-config objects via keyword (`general`, `data`, `portfolio`, `strategy`,
-          `indicators`, `exchange`, `engine`).
-        * Flat keyword arguments matching any field of the sub-configs (e.g., `name`,
-         `symbols`, `interval`, `initial_cash`, etc...).
-
-        The `strategies` and `indicators` keyword arguments additionally accept — beyond
-        a list of stored names — any of:
-
-        * A single string (name of a stored strategy / indicator).
-        * A `BaseStrategy` / `BaseIndicator` subclass instance (the class name is used
-          as the display name).
-        * A `dict[str, instance]` mapping explicit names to instances.
-        * A list mixing any of the forms above.
-
-    Returns
-    -------
-    [ExperimentResult]
-        The aggregated result of the run.
-
-    See Also
-    --------
-    - backtide.backtest:ExperimentConfig
-    - backtide.backtest:ExperimentResult
-    - backtide.storage:query_experiments
-
-    Examples
-    --------
-    ```pycon
-    from backtide.backtest import run_experiment
-    from backtide.strategies import BuyAndHold
-
-    result = run_experiment(
-        name="Apple and Microsoft",
-        symbols=["AAPL", "MSFT"],
-        interval="1d",
-        strategies=[BuyAndHold()],
-    )
-    print(result)
-    ```
-
-    """
