@@ -30,8 +30,8 @@ pub fn new_order_id() -> String {
 ///
 /// quantity : float
 ///     Signed quantity. Positive for buy orders, negative for sell orders.
-///     Floating-point so fractional units (e.g. 0.0234 BTC) are supported
-///     for crypto and other instruments with high unit prices.
+///     Floating-point so fractional crypto units (e.g., 0.0234 BTC) are
+///     supported. Non-crypto instruments must use whole-number quantities.
 ///
 /// price : float | None
 ///     Primary price for the order. The exact meaning depends on
@@ -69,7 +69,7 @@ pub struct Order {
     /// The execution semantics.
     pub order_type: OrderType,
     /// Signed quantity (positive = buy, negative = sell). Fractional values
-    /// allowed for crypto-style instruments.
+    /// are allowed only for crypto instruments.
     pub quantity: f64,
     /// Primary price (limit / stop / trail amount).
     pub price: Option<f64>,
@@ -97,7 +97,7 @@ impl Order {
     ///
     /// quantity : float, default=0.0
     ///     Signed quantity (positive = buy, negative = sell). Fractional
-    ///     values are accepted for crypto-style instruments.
+    ///     values are accepted only for crypto instruments.
     ///
     /// price : float | None, default=None
     ///     Primary price (limit, stop or trail amount depending on

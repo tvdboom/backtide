@@ -1344,6 +1344,10 @@ if button_slot.button(
         except Exception as ex:  # noqa: BLE001
             st.error(f"Experiment failed: {ex}", icon=":material/error:")
         else:
+            if not use_storage:
+                # Invalidate the storage cache so new bars become visible.
+                st.cache_data.clear()
+
             n_strats = len(result.strategies)
 
             if result.status == "completed" and not result.warnings:

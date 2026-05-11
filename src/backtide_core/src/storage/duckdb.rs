@@ -1,6 +1,8 @@
 //! DuckDB storage solution.
 
-use crate::backtest::models::experiment_result::{EquitySample, OrderRecord, RunResult, Trade};
+use crate::backtest::models::experiment_result::{
+    EquitySample, ExperimentResult, OrderRecord, RunResult, Trade,
+};
 use crate::backtest::models::order::Order;
 use crate::backtest::models::order_type::OrderType;
 use crate::data::models::bar::Bar;
@@ -11,7 +13,7 @@ use crate::data::models::instrument::Instrument;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
-use crate::storage::errors::StorageResult;
+use crate::storage::errors::{StorageError, StorageResult};
 use crate::storage::models::bar_series::BarSeries;
 use crate::storage::models::bar_summary::BarSummary;
 use crate::storage::models::dividend_series::DividendSeries;
@@ -40,6 +42,58 @@ impl DuckDb {
         Ok(Self {
             conn: Mutex::new(Connection::open(path.join("database.duckdb"))?),
         })
+    }
+
+    fn begin_transaction(conn: &Connection) -> StorageResult<()> {
+        match conn.execute_batch("BEGIN TRANSACTION") {
+            Ok(()) => Ok(()),
+            Err(e)
+                if e.to_string().contains("cannot start a transaction within a transaction")
+                    || e.to_string().contains("Current transaction is aborted") =>
+            {
+                // A previous failing write/appender can leave DuckDB with an open
+                // (possibly aborted) transaction on this connection. Clear it and
+                // retry so the next operation is not poisoned by the earlier failure.
+                let _ = conn.execute_batch("ROLLBACK");
+                conn.execute_batch("BEGIN TRANSACTION")?;
+                Ok(())
+            },
+            Err(e) => Err(StorageError::from(e)),
+        }
+    }
+
+    fn run_transaction<T, F>(&self, f: F) -> StorageResult<T>
+    where
+        F: FnOnce(&Connection) -> StorageResult<T>,
+    {
+        let conn = self.conn.lock().unwrap();
+        Self::begin_transaction(&conn)?;
+
+        match f(&conn) {
+            Ok(value) => match conn.execute_batch("COMMIT") {
+                Ok(()) => Ok(value),
+                Err(e) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                    Err(StorageError::from(e))
+                },
+            },
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(e)
+            },
+        }
+    }
+
+    fn rollback_on_error<T, F>(&self, f: F) -> StorageResult<T>
+    where
+        F: FnOnce(&Connection) -> StorageResult<T>,
+    {
+        let conn = self.conn.lock().unwrap();
+        let result = f(&conn);
+        if result.is_err() {
+            let _ = conn.execute_batch("ROLLBACK");
+        }
+        result
     }
 }
 
@@ -460,33 +514,37 @@ impl Storage for DuckDb {
             return Ok(());
         }
 
-        let conn = self.conn.lock().unwrap();
-
         // Phase 1: Bulk-delete existing rows for the incoming pairs.
-        let pairs: Vec<String> = instruments
-            .iter()
-            .map(|i| format!("('{}', '{}')", i.symbol.replace('\'', "''"), i.provider))
-            .collect();
+        {
+            let conn = self.conn.lock().unwrap();
+            let pairs: Vec<String> = instruments
+                .iter()
+                .map(|i| format!("('{}', '{}')", i.symbol.replace('\'', "''"), i.provider))
+                .collect();
 
-        conn.execute_batch(&format!(
-            "DELETE FROM instruments WHERE (symbol, provider) IN ({})",
-            pairs.join(", "),
-        ))?;
+            conn.execute_batch(&format!(
+                "DELETE FROM instruments WHERE (symbol, provider) IN ({})",
+                pairs.join(", "),
+            ))?;
+        }
 
         // Phase 2: bulk-insert via the Appender.
-        let mut appender = conn.appender("instruments")?;
-        for inst in instruments {
-            appender.append_row(params![
-                &inst.symbol,
-                &inst.provider.to_string(),
-                &inst.instrument_type.to_string(),
-                &Some(&inst.name),
-                &inst.base,
-                &Some(&inst.quote),
-                &Some(&inst.exchange),
-            ])?;
-        }
-        appender.flush()?;
+        self.rollback_on_error(|conn| {
+            let mut appender = conn.appender("instruments")?;
+            for inst in instruments {
+                appender.append_row(params![
+                    &inst.symbol,
+                    &inst.provider.to_string(),
+                    &inst.instrument_type.to_string(),
+                    &Some(&inst.name),
+                    &inst.base,
+                    &Some(&inst.quote),
+                    &Some(&inst.exchange),
+                ])?;
+            }
+            appender.flush()?;
+            Ok(())
+        })?;
 
         Ok(())
     }
@@ -499,48 +557,50 @@ impl Storage for DuckDb {
             return Ok(());
         }
 
-        let conn = self.conn.lock().unwrap();
-
         // Phase 1: Delete all overlapping ranges in a single transaction.
-        conn.execute_batch("BEGIN TRANSACTION")?;
-        for s in &non_empty {
-            let iv = s.interval.to_string();
-            let prov = s.provider.to_string();
-            let min_ts = s.bars.iter().map(|b| b.open_ts).min().unwrap();
-            let max_ts = s.bars.iter().map(|b| b.open_ts).max().unwrap();
-            conn.execute(
-                "DELETE FROM bars
-                 WHERE symbol = ? AND interval = ? AND provider = ?
-                    AND open_ts >= ? AND open_ts <= ?",
-                params![&s.symbol, iv, prov, min_ts as i64, max_ts as i64],
-            )?;
-        }
-        conn.execute_batch("COMMIT")?;
+        self.run_transaction(|conn| {
+            for s in &non_empty {
+                let iv = s.interval.to_string();
+                let prov = s.provider.to_string();
+                let min_ts = s.bars.iter().map(|b| b.open_ts).min().unwrap();
+                let max_ts = s.bars.iter().map(|b| b.open_ts).max().unwrap();
+                conn.execute(
+                    "DELETE FROM bars
+                     WHERE symbol = ? AND interval = ? AND provider = ?
+                        AND open_ts >= ? AND open_ts <= ?",
+                    params![&s.symbol, iv, prov, min_ts as i64, max_ts as i64],
+                )?;
+            }
+            Ok(())
+        })?;
 
         // Phase 2: Bulk-insert every row via the Appender (one flush).
-        let mut appender = conn.appender("bars")?;
-        for s in &non_empty {
-            let iv = s.interval.to_string();
-            let prov = s.provider.to_string();
-            for bar in &s.bars {
-                appender.append_row(params![
-                    &s.symbol,
-                    &iv,
-                    &prov,
-                    bar.open_ts as i64,
-                    bar.close_ts as i64,
-                    bar.open_ts_exchange as i64,
-                    bar.open,
-                    bar.high,
-                    bar.low,
-                    bar.close,
-                    bar.adj_close,
-                    bar.volume,
-                    bar.n_trades,
-                ])?;
+        self.rollback_on_error(|conn| {
+            let mut appender = conn.appender("bars")?;
+            for s in &non_empty {
+                let iv = s.interval.to_string();
+                let prov = s.provider.to_string();
+                for bar in &s.bars {
+                    appender.append_row(params![
+                        &s.symbol,
+                        &iv,
+                        &prov,
+                        bar.open_ts as i64,
+                        bar.close_ts as i64,
+                        bar.open_ts_exchange as i64,
+                        bar.open,
+                        bar.high,
+                        bar.low,
+                        bar.close,
+                        bar.adj_close,
+                        bar.volume,
+                        bar.n_trades,
+                    ])?;
+                }
             }
-        }
-        appender.flush()?;
+            appender.flush()?;
+            Ok(())
+        })?;
 
         Ok(())
     }
@@ -554,41 +614,43 @@ impl Storage for DuckDb {
             return Ok(());
         }
 
-        let conn = self.conn.lock().unwrap();
-
         // Phase 1: Delete overlapping ranges.
-        conn.execute_batch("BEGIN TRANSACTION")?;
-        for s in &non_empty {
-            let prov = s.provider.to_string();
-            let min_ts = s.dividends.iter().map(|d| d.ex_date).min().unwrap();
-            let max_ts = s.dividends.iter().map(|d| d.ex_date).max().unwrap();
-            conn.execute(
-                "DELETE FROM dividends
-                 WHERE symbol = ? AND provider = ?
-                    AND ex_date >= ? AND ex_date <= ?",
-                params![&s.symbol, prov, min_ts as i64, max_ts as i64],
-            )?;
-        }
-        conn.execute_batch("COMMIT")?;
+        self.run_transaction(|conn| {
+            for s in &non_empty {
+                let prov = s.provider.to_string();
+                let min_ts = s.dividends.iter().map(|d| d.ex_date).min().unwrap();
+                let max_ts = s.dividends.iter().map(|d| d.ex_date).max().unwrap();
+                conn.execute(
+                    "DELETE FROM dividends
+                     WHERE symbol = ? AND provider = ?
+                        AND ex_date >= ? AND ex_date <= ?",
+                    params![&s.symbol, prov, min_ts as i64, max_ts as i64],
+                )?;
+            }
+            Ok(())
+        })?;
 
         // Phase 2: Bulk-insert every row via the Appender.
         // Deduplicate by (symbol, provider, ex_date), keeping the last occurrence.
-        let mut appender = conn.appender("dividends")?;
-        for s in &non_empty {
-            let prov = s.provider.to_string();
-            let mut seen = HashSet::new();
-            for div in s.dividends.iter().rev() {
-                if seen.insert(div.ex_date) {
-                    appender.append_row(params![
-                        &s.symbol,
-                        &prov,
-                        div.ex_date as i64,
-                        div.amount,
-                    ])?;
+        self.rollback_on_error(|conn| {
+            let mut appender = conn.appender("dividends")?;
+            for s in &non_empty {
+                let prov = s.provider.to_string();
+                let mut seen = HashSet::new();
+                for div in s.dividends.iter().rev() {
+                    if seen.insert(div.ex_date) {
+                        appender.append_row(params![
+                            &s.symbol,
+                            &prov,
+                            div.ex_date as i64,
+                            div.amount,
+                        ])?;
+                    }
                 }
             }
-        }
-        appender.flush()?;
+            appender.flush()?;
+            Ok(())
+        })?;
 
         Ok(())
     }
@@ -602,9 +664,6 @@ impl Storage for DuckDb {
             return Ok(0);
         }
 
-        let conn = self.conn.lock().unwrap();
-        conn.execute_batch("BEGIN TRANSACTION")?;
-
         // Phase 1: Bulk-delete bars, grouped by filter signature.
         let mut groups: [Vec<String>; 4] = Default::default();
         for (symbol, interval, provider) in series {
@@ -617,54 +676,58 @@ impl Storage for DuckDb {
             }
         }
 
-        let mut total_deleted = 0u64;
-        let columns =
-            ["symbol", "(symbol, interval)", "(symbol, provider)", "(symbol, interval, provider)"];
-        for (col, vals) in columns.iter().zip(&groups) {
-            if !vals.is_empty() {
-                let list = vals.iter().join(", ");
-                total_deleted +=
-                    conn.execute(&format!("DELETE FROM bars WHERE {col} IN ({list})"), [])? as u64;
+        self.run_transaction(|conn| {
+            let mut total_deleted = 0u64;
+            let columns = [
+                "symbol",
+                "(symbol, interval)",
+                "(symbol, provider)",
+                "(symbol, interval, provider)",
+            ];
+            for (col, vals) in columns.iter().zip(&groups) {
+                if !vals.is_empty() {
+                    let list = vals.iter().join(", ");
+                    total_deleted += conn
+                        .execute(&format!("DELETE FROM bars WHERE {col} IN ({list})"), [])?
+                        as u64;
+                }
             }
-        }
 
-        // Phase 2: bulk-cleanup orphaned dividends and instruments.
-        // Group by filter: symbol-only vs (symbol, provider).
-        let mut orphans: [HashSet<String>; 2] = Default::default();
-        for (symbol, _, provider) in series {
-            let s = symbol.replace('\'', "''");
-            match provider {
-                None => orphans[0].insert(format!("'{s}'")),
-                Some(p) => orphans[1].insert(format!("('{s}', '{p}')")),
-            };
-        }
-
-        let orphan_cols = ["symbol", "(symbol, provider)"];
-        let orphan_excl = [
-            "symbol NOT IN (SELECT DISTINCT symbol FROM bars)",
-            "(symbol, provider) NOT IN (SELECT DISTINCT symbol, provider FROM bars)",
-        ];
-        for ((col, excl), vals) in orphan_cols.iter().zip(&orphan_excl).zip(&orphans) {
-            if !vals.is_empty() {
-                let list = vals.iter().join(", ");
-                conn.execute_batch(&format!(
-                    "DELETE FROM dividends WHERE {col} IN ({list}) AND {excl};
-                     DELETE FROM instruments WHERE {col} IN ({list}) AND {excl};"
-                ))?;
+            // Phase 2: bulk-cleanup orphaned dividends and instruments.
+            // Group by filter: symbol-only vs (symbol, provider).
+            let mut orphans: [HashSet<String>; 2] = Default::default();
+            for (symbol, _, provider) in series {
+                let s = symbol.replace('\'', "''");
+                match provider {
+                    None => orphans[0].insert(format!("'{s}'")),
+                    Some(p) => orphans[1].insert(format!("('{s}', '{p}')")),
+                };
             }
-        }
 
-        conn.execute_batch("COMMIT")?;
-        Ok(total_deleted)
+            let orphan_cols = ["symbol", "(symbol, provider)"];
+            let orphan_excl = [
+                "symbol NOT IN (SELECT DISTINCT symbol FROM bars)",
+                "(symbol, provider) NOT IN (SELECT DISTINCT symbol, provider FROM bars)",
+            ];
+            for ((col, excl), vals) in orphan_cols.iter().zip(&orphan_excl).zip(&orphans) {
+                if !vals.is_empty() {
+                    let list = vals.iter().join(", ");
+                    conn.execute_batch(&format!(
+                        "DELETE FROM dividends WHERE {col} IN ({list}) AND {excl};
+                         DELETE FROM instruments WHERE {col} IN ({list}) AND {excl};"
+                    ))?;
+                }
+            }
+
+            Ok(total_deleted)
+        })
     }
 
     fn write_experiment(
         &self,
         config: &crate::backtest::models::experiment_config::ExperimentConfig,
-        result: &crate::backtest::models::experiment_result::ExperimentResult,
+        result: &ExperimentResult,
     ) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
-
         // Use the inner serializable representation for TOML.
         let inner = crate::backtest::models::experiment_config::ExperimentConfigInner {
             general: config.general.clone(),
@@ -679,63 +742,59 @@ impl Storage for DuckDb {
         let tags_str = result.tags.join(",");
 
         // ── Phase 1: parent rows + idempotent cleanup of child rows ─────
-        //
-        // Equity curves / orders / trades for any run_id we are
-        // about to (re-)insert are wiped in a single statement each, so an
-        // experiment with N strategies costs 3 DELETEs total instead of
-        // 3·N. Wrapped in a transaction with the parent upserts so the
-        // database never observes a half-rewritten experiment.
-        conn.execute_batch("BEGIN TRANSACTION")?;
-
-        conn.execute(
-            "INSERT OR REPLACE INTO experiments
-             (id, name, tags, description, config_toml, started_at, finished_at, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            params![
-                result.experiment_id,
-                result.name,
-                tags_str,
-                config.general.description,
-                cfg_toml,
-                result.started_at,
-                result.finished_at,
-                result.status,
-            ],
-        )?;
-
-        for strat in &result.strategies {
-            let metrics_str = serde_json::to_string(&strat.metrics).unwrap_or_default();
+        self.run_transaction(|conn| {
             conn.execute(
-                "INSERT OR REPLACE INTO experiment_strategies
-                 (id, experiment_id, strategy_id, strategy_name, metrics, base_currency, error, is_benchmark)
+                "INSERT OR REPLACE INTO experiments
+                 (id, name, tags, description, config_toml, started_at, finished_at, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
-                    strat.strategy_id,
                     result.experiment_id,
-                    strat.strategy_id,
-                    strat.strategy_name,
-                    metrics_str,
-                    strat.base_currency.to_string(),
-                    strat.error,
-                    strat.is_benchmark,
+                    result.name,
+                    tags_str,
+                    config.general.description,
+                    cfg_toml,
+                    result.started_at,
+                    result.finished_at,
+                    result.status,
                 ],
             )?;
-        }
 
-        // Bulk-delete child rows for every run_id we are about
-        // to repopulate. Building the IN (?, ?, …) list dynamically keeps
-        // it to a single round trip per child table.
-        if !result.strategies.is_empty() {
-            let placeholders =
-                std::iter::repeat_n("?", result.strategies.len()).collect::<Vec<_>>().join(", ");
-            let ids: Vec<&str> = result.strategies.iter().map(|s| s.strategy_id.as_str()).collect();
-            for table in ["experiment_equity", "experiment_orders", "experiment_trades"] {
-                let sql = format!("DELETE FROM {table} WHERE run_id IN ({placeholders})");
-                conn.execute(&sql, params_from_iter(ids.iter()))?;
+            for strat in &result.strategies {
+                let metrics_str = serde_json::to_string(&strat.metrics).unwrap_or_default();
+                conn.execute(
+                    "INSERT OR REPLACE INTO experiment_strategies
+                     (id, experiment_id, strategy_id, strategy_name, metrics, base_currency, error, is_benchmark)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    params![
+                        strat.strategy_id,
+                        result.experiment_id,
+                        strat.strategy_id,
+                        strat.strategy_name,
+                        metrics_str,
+                        strat.base_currency.to_string(),
+                        strat.error,
+                        strat.is_benchmark,
+                    ],
+                )?;
             }
-        }
 
-        conn.execute_batch("COMMIT")?;
+            // Bulk-delete child rows for every run_id we are about
+            // to repopulate. Building the IN (?, ?, …) list dynamically keeps
+            // it to a single round trip per child table.
+            if !result.strategies.is_empty() {
+                let placeholders = std::iter::repeat_n("?", result.strategies.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ids: Vec<&str> =
+                    result.strategies.iter().map(|s| s.strategy_id.as_str()).collect();
+                for table in ["experiment_equity", "experiment_orders", "experiment_trades"] {
+                    let sql = format!("DELETE FROM {table} WHERE run_id IN ({placeholders})");
+                    conn.execute(&sql, params_from_iter(ids.iter()))?;
+                }
+            }
+
+            Ok(())
+        })?;
 
         // ── Phase 2: bulk-append child rows via the DuckDB Appender ─────
         //
@@ -744,63 +803,73 @@ impl Storage for DuckDb {
         // curve / orders / trades, which can run into the tens-of-thousands
         // of rows on a long backtest.
         if result.strategies.iter().any(|s| !s.equity_curve.is_empty()) {
-            let mut appender = conn.appender("experiment_equity")?;
-            for strat in &result.strategies {
-                for s in &strat.equity_curve {
-                    let cash_json = serde_json::to_string(&s.cash).unwrap_or_else(|_| "{}".into());
-                    appender.append_row(params![
-                        strat.strategy_id,
-                        s.timestamp,
-                        s.equity,
-                        cash_json,
-                        s.drawdown,
-                    ])?;
+            self.rollback_on_error(|conn| {
+                let mut appender = conn.appender("experiment_equity")?;
+                for strat in &result.strategies {
+                    for s in &strat.equity_curve {
+                        let cash_json =
+                            serde_json::to_string(&s.cash).unwrap_or_else(|_| "{}".into());
+                        appender.append_row(params![
+                            strat.strategy_id,
+                            s.timestamp,
+                            s.equity,
+                            cash_json,
+                            s.drawdown,
+                        ])?;
+                    }
                 }
-            }
-            appender.flush()?;
+                appender.flush()?;
+                Ok(())
+            })?;
         }
 
         if result.strategies.iter().any(|s| !s.orders.is_empty()) {
-            let mut appender = conn.appender("experiment_orders")?;
-            for strat in &result.strategies {
-                for o in &strat.orders {
-                    appender.append_row(params![
-                        strat.strategy_id,
-                        o.order.id,
-                        o.timestamp,
-                        o.order.symbol,
-                        o.order.order_type.to_string(),
-                        o.order.quantity,
-                        o.order.price,
-                        o.order.limit_price,
-                        o.status,
-                        o.fill_price,
-                        o.reason,
-                        o.commission,
-                        o.pnl,
-                    ])?;
+            self.rollback_on_error(|conn| {
+                let mut appender = conn.appender("experiment_orders")?;
+                for strat in &result.strategies {
+                    for o in &strat.orders {
+                        appender.append_row(params![
+                            strat.strategy_id,
+                            o.order.id,
+                            o.timestamp,
+                            o.order.symbol,
+                            o.order.order_type.to_string(),
+                            o.order.quantity,
+                            o.order.price,
+                            o.order.limit_price,
+                            o.status,
+                            o.fill_price,
+                            o.reason,
+                            o.commission,
+                            o.pnl,
+                        ])?;
+                    }
                 }
-            }
-            appender.flush()?;
+                appender.flush()?;
+                Ok(())
+            })?;
         }
 
         if result.strategies.iter().any(|s| !s.trades.is_empty()) {
-            let mut appender = conn.appender("experiment_trades")?;
-            for strat in &result.strategies {
-                for t in &strat.trades {
-                    appender.append_row(params![
-                        strat.strategy_id,
-                        t.symbol,
-                        t.quantity,
-                        t.entry_ts,
-                        t.exit_ts,
-                        t.entry_price,
-                        t.exit_price,
-                        t.pnl,
-                    ])?;
+            self.rollback_on_error(|conn| {
+                let mut appender = conn.appender("experiment_trades")?;
+                for strat in &result.strategies {
+                    for t in &strat.trades {
+                        appender.append_row(params![
+                            strat.strategy_id,
+                            t.symbol,
+                            t.quantity,
+                            t.entry_ts,
+                            t.exit_ts,
+                            t.entry_price,
+                            t.exit_price,
+                            t.pnl,
+                        ])?;
+                    }
                 }
-            }
-            appender.flush()?;
+                appender.flush()?;
+                Ok(())
+            })?;
         }
 
         Ok(())
@@ -816,10 +885,9 @@ impl Storage for DuckDb {
 
         let mut sql = String::from(
             "SELECT e.id, e.name, e.tags, e.description, e.started_at, e.finished_at, e.status,
-                    (SELECT MAX(CAST(json_extract(metrics, '$.sharpe') AS DOUBLE))
+                    (SELECT MAX(CAST(regexp_extract(s.metrics, '\"sharpe\"\\s*:\\s*(-?[0-9.eE+\\-]+)', 1) AS DOUBLE))
                        FROM experiment_strategies s
                       WHERE s.experiment_id = e.id
-                        AND NOT regexp_matches(s.strategy_name, '^Benchmark\\s*\\(.+\\)$')
                     ) AS best_sharpe,
                     (SELECT COUNT(*) FROM experiment_strategies s WHERE s.experiment_id = e.id) AS n_strategies
              FROM experiments e",
@@ -994,34 +1062,32 @@ impl Storage for DuckDb {
     }
 
     fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute_batch("BEGIN TRANSACTION")?;
+        self.run_transaction(|conn| {
+            // Delete dependent rows first (no FK cascade in DuckDB).
+            conn.execute(
+                "DELETE FROM experiment_equity WHERE run_id IN
+                    (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
+                params![experiment_id],
+            )?;
+            conn.execute(
+                "DELETE FROM experiment_orders WHERE run_id IN
+                    (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
+                params![experiment_id],
+            )?;
+            conn.execute(
+                "DELETE FROM experiment_trades WHERE run_id IN
+                    (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
+                params![experiment_id],
+            )?;
+            conn.execute(
+                "DELETE FROM experiment_strategies WHERE experiment_id = ?",
+                params![experiment_id],
+            )?;
+            let removed =
+                conn.execute("DELETE FROM experiments WHERE id = ?", params![experiment_id])?;
 
-        // Delete dependent rows first (no FK cascade in DuckDB).
-        conn.execute(
-            "DELETE FROM experiment_equity WHERE run_id IN
-                (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
-            params![experiment_id],
-        )?;
-        conn.execute(
-            "DELETE FROM experiment_orders WHERE run_id IN
-                (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
-            params![experiment_id],
-        )?;
-        conn.execute(
-            "DELETE FROM experiment_trades WHERE run_id IN
-                (SELECT id FROM experiment_strategies WHERE experiment_id = ?)",
-            params![experiment_id],
-        )?;
-        conn.execute(
-            "DELETE FROM experiment_strategies WHERE experiment_id = ?",
-            params![experiment_id],
-        )?;
-        let removed =
-            conn.execute("DELETE FROM experiments WHERE id = ?", params![experiment_id])?;
-
-        conn.execute_batch("COMMIT")?;
-        Ok(removed as u64)
+            Ok(removed as u64)
+        })
     }
 }
 
@@ -1064,6 +1130,80 @@ mod tests {
         }
     }
 
+    fn sample_experiment_config() -> crate::backtest::models::experiment_config::ExperimentConfig {
+        crate::backtest::models::experiment_config::ExperimentConfig {
+            general: crate::backtest::models::experiment_config::GeneralExpConfig {
+                name: "storage regression".to_owned(),
+                tags: vec!["custom".to_owned()],
+                description: "custom strategy persistence".to_owned(),
+            },
+            data: crate::backtest::models::experiment_config::DataExpConfig::default(),
+            portfolio: crate::backtest::models::experiment_config::PortfolioExpConfig::default(),
+            strategy: crate::backtest::models::experiment_config::StrategyExpConfig::default(),
+            indicators: crate::backtest::models::experiment_config::IndicatorExpConfig::default(),
+            exchange: crate::backtest::models::experiment_config::ExchangeExpConfig::default(),
+            engine: crate::backtest::models::experiment_config::EngineExpConfig::default(),
+        }
+    }
+
+    fn sample_experiment_result() -> ExperimentResult {
+        let mut cash = HashMap::new();
+        cash.insert(Currency::USD, 9_900.0);
+
+        let mut metrics = HashMap::new();
+        metrics.insert("total_return".to_owned(), 0.01);
+        metrics.insert("final_equity".to_owned(), 10_100.0);
+
+        ExperimentResult {
+            experiment_id: "exp-custom".to_owned(),
+            name: "storage regression".to_owned(),
+            tags: vec!["custom".to_owned()],
+            started_at: 1_700_000_000,
+            finished_at: 1_700_000_100,
+            status: "completed".to_owned(),
+            warnings: Vec::new(),
+            strategies: vec![RunResult {
+                strategy_id: "run-custom".to_owned(),
+                strategy_name: "CustomSma".to_owned(),
+                equity_curve: vec![EquitySample {
+                    timestamp: 1_700_000_000,
+                    equity: 10_100.0,
+                    cash,
+                    drawdown: 0.0,
+                }],
+                orders: vec![OrderRecord {
+                    order: Order {
+                        id: "order-1".to_owned(),
+                        symbol: "AAPL".to_owned(),
+                        order_type: OrderType::Market,
+                        quantity: 1.0,
+                        price: None,
+                        limit_price: None,
+                    },
+                    timestamp: 1_700_000_000,
+                    status: "filled".to_owned(),
+                    fill_price: Some(100.0),
+                    reason: String::new(),
+                    commission: 0.0,
+                    pnl: None,
+                }],
+                trades: vec![Trade {
+                    symbol: "AAPL".to_owned(),
+                    quantity: 1.0,
+                    entry_ts: 1_700_000_000,
+                    exit_ts: 1_700_086_400,
+                    entry_price: 100.0,
+                    exit_price: 101.0,
+                    pnl: 1.0,
+                }],
+                metrics,
+                base_currency: Currency::USD,
+                error: None,
+                is_benchmark: false,
+            }],
+        }
+    }
+
     // ── init ──────────────────────────────────────────────────────────────
 
     #[test]
@@ -1071,6 +1211,47 @@ mod tests {
         let (_dir, db) = make_db();
         // init() already called in make_db; calling again is idempotent
         db.init().unwrap();
+    }
+
+    #[test]
+    fn test_write_and_query_experiment() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let experiments = db
+            .query_experiments(Some(std::slice::from_ref(&result.experiment_id)), None, None)
+            .unwrap();
+        assert_eq!(experiments.len(), 1);
+        assert_eq!(experiments[0].id, result.experiment_id);
+
+        let runs = db.query_strategy_runs(&result.experiment_id).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].strategy_name, "CustomSma");
+        assert_eq!(runs[0].equity_curve.len(), 1);
+        assert_eq!(runs[0].orders.len(), 1);
+        assert_eq!(runs[0].trades.len(), 1);
+    }
+
+    #[test]
+    fn test_write_experiment_recovers_from_open_transaction() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("BEGIN TRANSACTION").unwrap();
+        }
+
+        db.write_experiment(&cfg, &result).unwrap();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let runs = db.query_strategy_runs(&result.experiment_id).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].orders.len(), 1);
     }
 
     // ── write_bars_bulk / query_bars ──────────────────────────────────────

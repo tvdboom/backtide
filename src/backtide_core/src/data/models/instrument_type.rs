@@ -103,6 +103,12 @@ impl InstrumentType {
         matches!(self, InstrumentType::Stocks | InstrumentType::Etf)
     }
 
+    /// Whether orders and positions may use fractional quantities.
+    #[getter]
+    pub fn allows_fractional_quantities(&self) -> bool {
+        matches!(self, Self::Crypto)
+    }
+
     /// Material icon to visually represent this instrument type.
     ///
     /// Returns

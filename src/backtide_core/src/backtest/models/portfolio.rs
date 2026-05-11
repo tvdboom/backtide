@@ -19,7 +19,7 @@ use std::collections::HashMap;
 /// positions : dict[str, float]
 ///     Open positions keyed by ticker symbol. Positive values are long
 ///     positions, negative values are short positions. Fractional values
-///     are supported (e.g. 0.0234 BTC).
+///     are supported only for crypto instruments (e.g., 0.0234 BTC).
 ///
 /// orders : list[[Order]]
 ///     Currently open (unfilled) orders.

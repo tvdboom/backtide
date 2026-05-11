@@ -18,6 +18,7 @@ use crate::constants::BENCHMARK;
 use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
 use crate::data::models::instrument_profile::InstrumentProfile;
+use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
@@ -158,6 +159,8 @@ impl Engine {
             p.finish_and_clear();
         }
 
+        validate_starting_position_quantities(config, &profiles)?;
+
         let pb = verbose.then(|| progress_spinner("Downloading missing bars..."));
         let start_clamp = config.data.start_date.as_deref().and_then(parse_iso_date_to_ts);
         let end_clamp = config.data.end_date.as_deref().and_then(parse_iso_date_to_ts);
@@ -240,8 +243,7 @@ impl Engine {
         // them into an `FxTable` keyed by `(from_ccy, to_ccy)` so the
         // run loop can convert any cash/MTM amount at any timestamp via
         // forward-fill (latest known rate ≤ ts).
-        let primary_set: std::collections::HashSet<&str> =
-            symbols.iter().map(String::as_str).collect();
+        let primary_set: HashSet<&str> = symbols.iter().map(String::as_str).collect();
         let leg_profiles: Vec<&InstrumentProfile> = profiles
             .iter()
             .filter(|p| !primary_set.contains(p.instrument.symbol.as_str()))
@@ -659,15 +661,14 @@ impl Engine {
                 warnings.push(format!("Strategy {:?} failed: {}", r.strategy_name, err));
             } else if r.orders.is_empty() {
                 // No error, no orders — most often happens when the initial
-                // cash is too low to afford a single whole unit of the
-                // configured symbol(s). Quantities are tracked as integers,
-                // so e.g. a $10k portfolio buying a $60k BTC benchmark
-                // would round to 0 shares and never trade. Surface this
-                // explicitly so it doesn't look like a silent failure.
+                // cash is too low to afford a single whole unit of a
+                // non-crypto symbol. Surface this explicitly so it doesn't
+                // look like a silent failure.
                 let msg = format!(
                     "Strategy {:?} placed no orders. The initial cash may be too low \
-                     to afford a single whole unit of the targeted symbol(s) \
-                     (quantities are integer). Consider increasing initial_cash.",
+                     to afford the targeted symbol(s). Non-crypto quantities must be \
+                     whole numbers; crypto quantities may be fractional. Consider \
+                     increasing initial_cash.",
                     r.strategy_name
                 );
                 warn!(strategy = %r.strategy_name, "{msg}");
@@ -821,6 +822,79 @@ fn parse_iso_date_to_ts(s: &str) -> Option<u64> {
         .ok()
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|dt| dt.and_utc().timestamp() as u64)
+}
+
+const QUANTITY_EPS: f64 = 1e-9;
+
+fn is_whole_quantity(qty: f64) -> bool {
+    qty.is_finite() && (qty - qty.round()).abs() <= QUANTITY_EPS
+}
+
+fn profile_instrument_types(profiles: &[InstrumentProfile]) -> HashMap<String, InstrumentType> {
+    profiles.iter().map(|p| (p.instrument.symbol.clone(), p.instrument.instrument_type)).collect()
+}
+
+fn instrument_type_for_symbol(
+    symbol: &str,
+    instrument_types: &HashMap<String, InstrumentType>,
+    fallback: InstrumentType,
+) -> InstrumentType {
+    instrument_types.get(symbol).copied().unwrap_or(fallback)
+}
+
+fn quantity_rejection_reason(
+    symbol: &str,
+    qty: f64,
+    instrument_type: InstrumentType,
+) -> Option<String> {
+    if !qty.is_finite() {
+        return Some(format!("quantity for {symbol} must be finite"));
+    }
+    if !instrument_type.allows_fractional_quantities() && !is_whole_quantity(qty) {
+        return Some(format!(
+            "fractional quantity {qty} is not allowed for {instrument_type} instrument {symbol}; \
+             only crypto instruments support fractional quantities"
+        ));
+    }
+    None
+}
+
+fn validate_starting_position_quantities(
+    config: &ExperimentConfig,
+    profiles: &[InstrumentProfile],
+) -> EngineResult<()> {
+    let instrument_types = profile_instrument_types(profiles);
+    for (symbol, qty) in &config.portfolio.starting_positions {
+        let instrument_type =
+            instrument_type_for_symbol(symbol, &instrument_types, config.data.instrument_type);
+        if let Some(reason) = quantity_rejection_reason(symbol, *qty, instrument_type) {
+            return Err(EngineError::Experiment(format!("Invalid starting position: {reason}.")));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_builtin_order_quantity(
+    order: &mut Order,
+    instrument_type: InstrumentType,
+) -> Option<String> {
+    if matches!(order.order_type, OrderType::CancelOrder | OrderType::SettlePosition) {
+        return None;
+    }
+    if !order.quantity.is_finite() {
+        return Some(format!("quantity for {} must be finite", order.symbol));
+    }
+    if !instrument_type.allows_fractional_quantities() && !is_whole_quantity(order.quantity) {
+        let whole_abs = order.quantity.abs().floor();
+        if whole_abs <= 0.0 {
+            return Some(format!(
+                "quantity for {} is less than one whole {instrument_type} unit",
+                order.symbol
+            ));
+        }
+        order.quantity = whole_abs.copysign(order.quantity);
+    }
+    None
 }
 
 /// Align bars to a master timeline using the configured empty-bar policy.
@@ -1178,6 +1252,7 @@ fn run_one_strategy(
             p.instrument.quote.parse::<Currency>().ok().map(|c| (p.instrument.symbol.clone(), c))
         })
         .collect();
+    let instrument_types = profile_instrument_types(profiles);
 
     // Try to take a Rust-only snapshot of the strategy. If this succeeds
     // (every built-in strategy succeeds), the bar loop runs entirely
@@ -1442,14 +1517,24 @@ fn run_one_strategy(
                         },
                         CommissionType::Percentage => 0.0,
                     };
-                    // Solve for the largest fractional quantity q such that
+                    // Solve for the largest quantity q such that
                     //   fill_px * q * (1 + pct_part) + fixed_part <= avail.
+                    // Non-crypto instruments must settle whole units, so
+                    // floor the cash-fit quantity before retrying the debit.
                     let denom = fill_px * (1.0 + pct_part);
-                    let max_qty: f64 = if denom > 0.0 && avail > fixed_part {
+                    let mut max_qty: f64 = if denom > 0.0 && avail > fixed_part {
                         ((avail - fixed_part) / denom).max(0.0)
                     } else {
                         0.0
                     };
+                    let instrument_type = instrument_type_for_symbol(
+                        &symbol,
+                        &instrument_types,
+                        cfg.data.instrument_type,
+                    );
+                    if !instrument_type.allows_fractional_quantities() {
+                        max_qty = max_qty.floor();
+                    }
                     if max_qty <= 0.0 {
                         warn!(
                             strategy=%name, order_id=%order.id,
@@ -1658,8 +1743,9 @@ fn run_one_strategy(
                         }
                         open_orders.clear();
                     }
-                    // Validate allowed types & ensure ids are populated.
+                    // Validate allowed types/quantities & ensure ids are populated.
                     let allowed = &cfg.exchange.allowed_order_types;
+                    let is_builtin_strategy = builtin.is_some();
                     ords.retain_mut(|o| {
                         if o.id.is_empty() {
                             o.id = new_order_id();
@@ -1678,6 +1764,42 @@ fn run_one_strategy(
                                 pnl: None,
                             });
                             return false;
+                        }
+                        if !matches!(o.order_type, OrderType::CancelOrder | OrderType::SettlePosition) {
+                            let instrument_type = instrument_type_for_symbol(
+                                &o.symbol,
+                                &instrument_types,
+                                cfg.data.instrument_type,
+                            );
+                            if is_builtin_strategy {
+                                if let Some(reason) = normalize_builtin_order_quantity(o, instrument_type) {
+                                    warn!(strategy=%name, "Invalid built-in order quantity, dropping: {reason}.");
+                                    order_records.push(OrderRecord {
+                                        order: o.clone(),
+                                        timestamp: ts,
+                                        status: "rejected".into(),
+                                        fill_price: None,
+                                        reason,
+                                        commission: 0.0,
+                                        pnl: None,
+                                    });
+                                    return false;
+                                }
+                            } else if let Some(reason) =
+                                quantity_rejection_reason(&o.symbol, o.quantity, instrument_type)
+                            {
+                                warn!(strategy=%name, "Invalid order quantity, dropping: {reason}.");
+                                order_records.push(OrderRecord {
+                                    order: o.clone(),
+                                    timestamp: ts,
+                                    status: "rejected".into(),
+                                    fill_price: None,
+                                    reason,
+                                    commission: 0.0,
+                                    pnl: None,
+                                });
+                                return false;
+                            }
                         }
                         true
                     });
@@ -2468,13 +2590,21 @@ mod tests {
     }
 
     fn mk_profile(symbol: &str, quote: &str) -> InstrumentProfile {
+        mk_profile_with_type(symbol, quote, InstrumentType::Stocks)
+    }
+
+    fn mk_profile_with_type(
+        symbol: &str,
+        quote: &str,
+        instrument_type: InstrumentType,
+    ) -> InstrumentProfile {
         InstrumentProfile {
             instrument: Instrument {
                 symbol: symbol.to_owned(),
                 name: symbol.to_owned(),
                 base: None,
                 quote: quote.to_owned(),
-                instrument_type: InstrumentType::Stocks,
+                instrument_type,
                 exchange: "TEST".to_owned(),
                 provider: Provider::Yahoo,
             },
@@ -2531,6 +2661,7 @@ mod tests {
                     .map(|c| (p.instrument.symbol.clone(), c))
             })
             .collect();
+        let instrument_types = profile_instrument_types(profiles);
 
         let allowed = &cfg.exchange.allowed_order_types;
 
@@ -2559,6 +2690,27 @@ mod tests {
                             pnl: None,
                         });
                         continue;
+                    }
+                    if !matches!(o.order_type, OrderType::CancelOrder | OrderType::SettlePosition) {
+                        let instrument_type = instrument_type_for_symbol(
+                            &o.symbol,
+                            &instrument_types,
+                            cfg.data.instrument_type,
+                        );
+                        if let Some(reason) =
+                            quantity_rejection_reason(&o.symbol, o.quantity, instrument_type)
+                        {
+                            order_records.push(OrderRecord {
+                                order: o.clone(),
+                                timestamp: ts,
+                                status: "rejected".into(),
+                                fill_price: None,
+                                reason,
+                                commission: 0.0,
+                                pnl: None,
+                            });
+                            continue;
+                        }
                     }
                     open_orders.push(o.clone());
                 }
@@ -2659,11 +2811,19 @@ mod tests {
                             CommissionType::Percentage => 0.0,
                         };
                         let denom = fill_px * (1.0 + pct_part);
-                        let max_qty: f64 = if denom > 0.0 && avail > fixed_part {
+                        let mut max_qty: f64 = if denom > 0.0 && avail > fixed_part {
                             ((avail - fixed_part) / denom).max(0.0)
                         } else {
                             0.0
                         };
+                        let instrument_type = instrument_type_for_symbol(
+                            &symbol,
+                            &instrument_types,
+                            cfg.data.instrument_type,
+                        );
+                        if !instrument_type.allows_fractional_quantities() {
+                            max_qty = max_qty.floor();
+                        }
                         if max_qty <= 0.0 {
                             order_records.push(OrderRecord {
                                 order: order.clone(),
@@ -2855,7 +3015,7 @@ mod tests {
     #[test]
     fn insufficient_funds_is_rejected_not_errored() {
         let mut cfg = mk_cfg("AAPL");
-        cfg.portfolio.initial_cash = 50; // can't afford 10 @ 100
+        cfg.portfolio.initial_cash = 150; // can afford only 1 whole share @ 100
         let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
         let order = Order {
             id: "buy1".into(),
@@ -2866,10 +3026,34 @@ mod tests {
             limit_price: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, order)]);
-        // Current behavior auto-shrinks to the largest buy that fits cash.
+        // Non-crypto auto-shrinks to the largest whole-unit buy that fits cash.
         assert_eq!(r.orders[0].status, "filled");
-        assert!(r.orders[0].order.quantity > 0.0);
-        assert!(r.orders[0].order.quantity < 10.0);
+        assert_eq!(r.orders[0].order.quantity, 1.0);
+        assert!(r.orders[0].reason.contains("partial"));
+    }
+
+    #[test]
+    fn crypto_buy_auto_shrinks_fractionally_to_fit_cash() {
+        let mut cfg = mk_cfg("BTC-USD");
+        cfg.data.instrument_type = InstrumentType::Crypto;
+        cfg.portfolio.initial_cash = 50;
+        let aligned = mk_aligned("BTC-USD", &[100.0, 101.0]);
+        let order = Order {
+            id: "buy1".into(),
+            symbol: "BTC-USD".into(),
+            order_type: OrderType::Market,
+            quantity: 10.0,
+            price: None,
+            limit_price: None,
+        };
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile_with_type("BTC-USD", "USD", InstrumentType::Crypto)],
+            vec![(0, order)],
+        );
+        assert_eq!(r.orders[0].status, "filled");
+        assert_eq!(r.orders[0].order.quantity, 0.5);
         assert!(r.orders[0].reason.contains("partial"));
     }
 
@@ -2974,6 +3158,130 @@ mod tests {
         let ts = parse_iso_date_to_ts("2024-01-15").unwrap();
         // 2024-01-15 00:00 UTC
         assert_eq!(ts, 1_705_276_800);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Quantity granularity
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn stock_starting_position_rejects_fractional_quantity() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.portfolio.starting_positions.insert("AAPL".into(), 1.5);
+
+        let err = validate_starting_position_quantities(&cfg, &[mk_profile("AAPL", "USD")])
+            .expect_err("fractional stock starting position should fail");
+
+        assert!(err.to_string().contains("fractional quantity"));
+        assert!(err.to_string().contains("only crypto"));
+    }
+
+    #[test]
+    fn crypto_starting_position_allows_fractional_quantity() {
+        let mut cfg = mk_cfg("BTC-USD");
+        cfg.data.instrument_type = InstrumentType::Crypto;
+        cfg.portfolio.starting_positions.insert("BTC-USD".into(), 0.25);
+
+        validate_starting_position_quantities(
+            &cfg,
+            &[mk_profile_with_type("BTC-USD", "USD", InstrumentType::Crypto)],
+        )
+        .expect("fractional crypto starting position should be valid");
+    }
+
+    #[test]
+    fn custom_stock_order_rejects_fractional_quantity() {
+        let cfg = mk_cfg("AAPL");
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
+        let order = Order {
+            id: "frac".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 1.5,
+            price: None,
+            limit_price: None,
+        };
+
+        let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, order)]);
+
+        assert_eq!(r.orders[0].status, "rejected");
+        assert!(r.orders[0].reason.contains("fractional quantity"));
+    }
+
+    #[test]
+    fn crypto_order_allows_fractional_quantity() {
+        let mut cfg = mk_cfg("BTC-USD");
+        cfg.data.instrument_type = InstrumentType::Crypto;
+        let aligned = mk_aligned("BTC-USD", &[100.0, 101.0]);
+        let order = Order {
+            id: "frac".into(),
+            symbol: "BTC-USD".into(),
+            order_type: OrderType::Market,
+            quantity: 1.5,
+            price: None,
+            limit_price: None,
+        };
+
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile_with_type("BTC-USD", "USD", InstrumentType::Crypto)],
+            vec![(0, order)],
+        );
+
+        assert_eq!(r.orders[0].status, "filled");
+        assert_eq!(r.orders[0].order.quantity, 1.5);
+    }
+
+    #[test]
+    fn builtin_stock_order_is_floored_to_whole_quantity() {
+        let mut order = Order {
+            id: "builtin".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 3.75,
+            price: None,
+            limit_price: None,
+        };
+
+        let err = normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks);
+
+        assert!(err.is_none());
+        assert_eq!(order.quantity, 3.0);
+    }
+
+    #[test]
+    fn builtin_crypto_order_keeps_fractional_quantity() {
+        let mut order = Order {
+            id: "builtin".into(),
+            symbol: "BTC-USD".into(),
+            order_type: OrderType::Market,
+            quantity: 0.125,
+            price: None,
+            limit_price: None,
+        };
+
+        let err = normalize_builtin_order_quantity(&mut order, InstrumentType::Crypto);
+
+        assert!(err.is_none());
+        assert_eq!(order.quantity, 0.125);
+    }
+
+    #[test]
+    fn builtin_stock_order_below_one_whole_unit_is_rejected() {
+        let mut order = Order {
+            id: "builtin".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 0.75,
+            price: None,
+            limit_price: None,
+        };
+
+        let err = normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks)
+            .expect("sub-one stock order should be rejected");
+
+        assert!(err.contains("less than one whole"));
     }
 
     // ─────────────────────────────────────────────────────────────────

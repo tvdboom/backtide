@@ -347,8 +347,8 @@ elif mode == "custom":
                 ],
             )
 
-            st.session_state[f"_{key}"] = resp["text"]
-            code = resp["text"]
+            if text := resp["text"]:
+                code = st.session_state[f"_{key}"] = text
         else:
             st.caption(
                 "The uploaded file must contain a class that inherits from `BaseIndicator` "

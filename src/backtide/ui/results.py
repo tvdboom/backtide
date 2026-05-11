@@ -152,20 +152,15 @@ def _tone(value: float | None, *, good_above: float = 0.0, bad_below: float = 0.
     if value is None or pd.isna(value):
         return ""
     if value > good_above:
-        return "green"
+        return GREEN
     if value < bad_below:
-        return "red"
+        return RED
     return ""
 
 
-def _colored_metric(container, label: str, value: str, tone: str = ""):
-    """Render an `st.metric` with the value tinted using Streamlit's color palette.
-
-    `tone` should be one of Streamlit's color names (e.g., "green", "red") or an
-     empty string for the default/neutral color.
-
-    """
-    container.metric(label, f":{tone}[{value}]" if tone else value)
+def _colored_metric(container, label: str, value: str, color: str = ""):
+    """Render an `st.metric` with the value tinted using Streamlit's color palette."""
+    container.metric(label, f":color[{value}]{{foreground='{color}'}}" if color else value)
 
 
 def _render_run_metrics(run: RunResult):

@@ -64,7 +64,7 @@ def plot_price(
     price_col: str = ...,
     *,
     indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = ...,
-    strategy_run: RunResult | None = ...,
+    run: RunResult | None = ...,
     title: str | dict[str, Any] | None = ...,
     legend: str | dict[str, Any] | None = ...,
     figsize: tuple[int, int] = ...,

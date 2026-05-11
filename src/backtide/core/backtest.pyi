@@ -2441,8 +2441,8 @@ class Order:
 
     quantity : float
         Signed quantity. Positive for buy orders, negative for sell orders.
-        Floating-point so fractional units (e.g. 0.0234 BTC) are supported
-        for crypto and other instruments with high unit prices.
+        Floating-point so fractional crypto units (e.g., 0.0234 BTC) are
+        supported. Non-crypto instruments must use whole-number quantities.
 
     price : float | None
         Primary price for the order. The exact meaning depends on
@@ -2679,7 +2679,7 @@ class Portfolio:
     positions : dict[str, float]
         Open positions keyed by ticker symbol. Positive values are long
         positions, negative values are short positions. Fractional values
-        are supported (e.g. 0.0234 BTC).
+        are supported only for crypto instruments (e.g., 0.0234 BTC).
 
     orders : list[[Order]]
         Currently open (unfilled) orders.
@@ -2732,7 +2732,7 @@ class PortfolioExpConfig:
 
     starting_positions : dict[str, float], default={}
         Pre-loaded positions `{symbol: quantity}`. Fractional values are
-        accepted for crypto-style instruments.
+        accepted only for crypto instruments.
 
     See Also
     --------

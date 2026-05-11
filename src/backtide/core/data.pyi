@@ -17,7 +17,7 @@ __all__ = [
     "resolve_profiles",
 ]
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 class Bar:
     """A single OHLCV candle for one symbol at one interval.
@@ -855,6 +855,7 @@ class InstrumentType:
 
     """
 
+    allows_fractional_quantities: Any
     is_equity: bool
 
     Crypto: ClassVar[InstrumentType]

@@ -52,7 +52,7 @@ You don't need to think about this for built-in strategies. For [custom strategi
 you can declare auto-included indicators yourself by overriding the `required_indicators`
 method on your subclass (note the `__auto_` prefix to avoid naming conflicts with
 user-defined indicators). The engine will then compute and inject those indicators
-into your strategy's `evaluate` method just like it does for built-in ones.:
+into your strategy's `evaluate` method just like it does for built-in ones.
 
 ```python
 from backtide.indicators import SimpleMovingAverage
@@ -68,7 +68,7 @@ class MyStrategy(BaseStrategy):
 
     def evaluate(self, data, portfolio, state, indicators):
         # Read the auto-injected SMA via its deterministic key.
-        sma = indicators[f"__auto_SMA_{self.period}"]
+        sma = indicators[f"__auto_SMA_{self.period}"][-1]
         ...
 ```
 
@@ -80,20 +80,47 @@ You can create your own strategies by subclassing `BaseStrategy`. Custom
 strategies can be written directly in the [application's][application] code
 editor or uploaded as `.py` files.
 
-```python
+```python title="Simple SMA trend strategy"
+from math import floor
+
+from backtide.backtest import Order
+from backtide.indicators import SimpleMovingAverage
 from backtide.strategies import BaseStrategy
 
 
-class MyStrategy(BaseStrategy):
+class SimpleSmaTrend(BaseStrategy):
+    def __init__(self, symbol="AAPL", period=20, cash_fraction=0.95):
+        self.symbol = symbol
+        self.period = period
+        self.cash_fraction = cash_fraction
+
+    def required_indicators(self):
+        return [SimpleMovingAverage(self.period)]
+
     def evaluate(self, data, portfolio, state, indicators):
-        orders = []
+        if self.symbol not in data:
+            return []
 
-        # Your logic here ...
+        close = data[self.symbol]["close"].iloc[-1]
+        sma = indicators[f"__auto_SMA_{self.period}"][self.symbol].iloc[-1]
+        current_qty = portfolio.positions.get(self.symbol, 0)
 
-        return orders
+        # Enter long when price is above the SMA.
+        if close > sma and current_qty <= 0:
+            cash = sum(portfolio.cash.values()) * self.cash_fraction
+            quantity = floor(cash / close)  # stocks/ETFs/forex require whole units
+            if quantity <= 0:
+                return []
+            return [Order(symbol=self.symbol, order_type="market", quantity=quantity)]
+
+        # Exit when price drops below the SMA.
+        if close < sma and current_qty > 0:
+            return [Order(symbol=self.symbol, order_type="market", quantity=-current_qty)]
+
+        return []
 
 
-MyStrategy()
+SimpleSmaTrend(symbol="AAPL", period=20)
 ```
 
 <br>

@@ -207,7 +207,7 @@ impl DataExpConfig {
 ///
 /// starting_positions : dict[str, float], default={}
 ///     Pre-loaded positions `{symbol: quantity}`. Fractional values are
-///     accepted for crypto-style instruments.
+///     accepted only for crypto instruments.
 ///
 /// See Also
 /// --------
