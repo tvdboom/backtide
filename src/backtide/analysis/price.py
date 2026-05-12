@@ -95,7 +95,7 @@ def plot_price(
         Input data containing columns `symbol`, `open`, `high`, `low`, `close`
         and `dt` with the datetime.
 
-    price_col : str, default="adj_close"
+    price_col : str, default="close"
         Column name in `data` to plot on the y-axis.
 
     indicators : [BaseIndicator] | Sequence[[BaseIndicator]] | dict[str, [BaseIndicator]] or None, default=None
@@ -203,12 +203,7 @@ def plot_price(
 
         if ind_dict:
             for name, ind in ind_dict.items():
-                # Ensure the indicator computes from the same price series being plotted
-                indicator_data = subset.copy()
-                if price_col != "close":
-                    indicator_data["close"] = subset[price_col]
-
-                values = _to_pandas(ind.compute(indicator_data))  # ty: ignore[unresolved-attribute]
+                values = _to_pandas(ind.compute(subset))  # ty: ignore[unresolved-attribute]
 
                 if values.shape[1] == 1:
                     fig.add_trace(
@@ -266,6 +261,20 @@ def plot_price(
 
     if run:
 
+        def _chart_y(sym: str, ts_seconds: float) -> float:
+            """Return the plotted price at the bar nearest to `ts_seconds`."""
+            series = sym_price.get(str(sym))
+            if series is None or series.empty:
+                return float("nan")
+            idx_tz = getattr(series.index, "tz", None)
+            target = pd.to_datetime(int(ts_seconds), unit="s", utc=idx_tz is not None)
+            if idx_tz is None:
+                target = target.tz_localize(None)
+            else:
+                target = target.tz_convert(idx_tz)
+            idx = series.index.get_indexer([target], method="nearest")[0]
+            return float(series.iloc[idx])
+
         def _hover_data(sym: str, px: float, qty: float, pnl: float) -> tuple[str, str, str, str]:
             """Convert the data for the hovertemplate to nicely formatted strings."""
             return (
@@ -274,6 +283,13 @@ def plot_price(
                 _format_price(pnl, signed=True, currency=ccy),
                 sym,
             )
+
+        # Build a per-symbol price lookup for snapping markers to the plotted
+        # price column at the nearest bar on the chart's y-axis.
+        sym_price = {
+            sym: data[data["symbol"] == sym].sort_values("dt").set_index("dt")[price_col]
+            for sym in symbols
+        }
 
         long_x, long_y, short_x, short_y = [], [], [], []
         win_x, win_y, loss_x, loss_y = [], [], [], []
@@ -285,20 +301,20 @@ def plot_price(
 
             if t.quantity >= 0:
                 long_x.append(pd.to_datetime(t.entry_ts, unit="s"))
-                long_y.append(t.entry_price)
+                long_y.append(_chart_y(sym, t.entry_ts))
                 long_data.append(_hover_data(sym, t.entry_price, t.quantity, t.pnl))
             else:
                 short_x.append(pd.to_datetime(t.entry_ts, unit="s"))
-                short_y.append(t.entry_price)
+                short_y.append(_chart_y(sym, t.entry_ts))
                 short_data.append(_hover_data(sym, t.entry_price, t.quantity, t.pnl))
 
             if t.pnl >= 0:
                 win_x.append(pd.to_datetime(t.exit_ts, unit="s"))
-                win_y.append(t.exit_price)
+                win_y.append(_chart_y(sym, t.exit_ts))
                 win_data.append(_hover_data(sym, t.exit_price, t.quantity, t.pnl))
             else:
                 loss_x.append(pd.to_datetime(t.exit_ts, unit="s"))
-                loss_y.append(t.exit_price)
+                loss_y.append(_chart_y(sym, t.exit_ts))
                 loss_data.append(_hover_data(sym, t.exit_price, t.quantity, t.pnl))
 
         if long_x:

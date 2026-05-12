@@ -323,7 +323,7 @@ PRICE_COL_KEYS = [
 ]
 
 if "_price_col" not in st.session_state:
-    st.session_state["_price_col"] = _default("_price_col", "adj_close")
+    st.session_state["_price_col"] = _default("_price_col", "close")
 
 
 def _sync_price_col(key: str):

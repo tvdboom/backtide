@@ -29,6 +29,7 @@ from backtide.analysis import (
 from backtide.analysis.utils import GREEN, RED, YELLOW
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
+from backtide.core.data import InstrumentType
 from backtide.storage import (
     delete_experiment,
     query_bars,
@@ -861,6 +862,8 @@ def _render_full_analysis(row: pd.Series):
 
     rows = []
     for o in run.orders:
+        it = symbol_to_it.get(o.order.symbol)
+
         qty = cast(float, o.order.quantity)  # Sizers have been converted to a numerical quantity
         side = "Buy" if qty > 0 else ("Sell" if qty < 0 else "—")
         px = o.fill_price if o.fill_price is not None else o.order.price
@@ -877,7 +880,7 @@ def _render_full_analysis(row: pd.Series):
                 "Symbol": o.order.symbol,
                 "Type": str(o.order.order_type),
                 "Side": side,
-                "Qty": abs(qty),
+                "Qty": abs(qty) if it == InstrumentType.Crypto else int(abs(qty)),
                 "Price": _format_price(total, currency=quote_ccy) if total is not None else "—",
                 "PnL": _format_price(o.pnl, currency=quote_ccy) if o.pnl is not None else "—",
                 "Commission": _format_price(o.commission or 0.0, currency=quote_ccy),

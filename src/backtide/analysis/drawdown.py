@@ -69,7 +69,7 @@ def plot_drawdown(
         Input data containing columns `symbol`, the column specified by
         `price_col`, and `dt` with the datetime.
 
-    price_col : str, default="adj_close"
+    price_col : str, default="close"
         Column name used to compute the drawdown.
 
     title : str | dict | None, default=None
