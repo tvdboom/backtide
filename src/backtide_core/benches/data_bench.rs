@@ -5,9 +5,12 @@
 //!
 //! **These benchmarks hit real network endpoints.** Results are inherently
 //! noisier than the storage benchmarks and may vary with network conditions
-//! and provider rate-limits. Each benchmark uses [`Bencher::iter_custom`]
-//! to make exactly one API call per measured iteration, keeping the total
-//! request count low enough to avoid rate-limiting.
+//! and provider rate-limits. To keep regular `cargo bench` / tox runs
+//! reproducible, the live Yahoo benchmarks are opt-in: set
+//! `BACKTIDE_LIVE_BENCH=1` to enable them. Each benchmark uses
+//! [`Bencher::iter_custom`] to make exactly one API call per measured
+//! iteration, keeping the total request count low enough to avoid
+//! rate-limiting.
 //!
 //! Benchmarks included:
 //!
@@ -22,6 +25,7 @@
 //! cargo bench --manifest-path backtide_core/Cargo.toml --bench data_bench
 //! ```
 
+use std::env;
 use std::time::{Duration, Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -31,6 +35,18 @@ use backtide_core::data::models::instrument_type::InstrumentType;
 use backtide_core::data::models::interval::Interval;
 use backtide_core::data::providers::traits::DataProvider;
 use backtide_core::data::providers::yahoo::YahooFinance;
+
+const LIVE_BENCH_ENV: &str = "BACKTIDE_LIVE_BENCH";
+
+fn live_benches_enabled() -> bool {
+    env::var(LIVE_BENCH_ENV)
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
+fn skip_live_benchmark(name: &str, reason: impl std::fmt::Display) {
+    eprintln!("Skipping {name}: {reason}");
+}
 
 /// Build a [`Criterion`] instance tuned for network-bound benchmarks.
 ///
@@ -52,8 +68,25 @@ fn network_criterion() -> Criterion {
 /// so that each of the 10 samples performs exactly `iters` sequential
 /// API calls, keeping the total request count predictable.
 fn bench_ohlc_download_1sym_1m(c: &mut Criterion) {
+    if !live_benches_enabled() {
+        skip_live_benchmark(
+            "ohlc_download/1sym_1m",
+            format!("set {LIVE_BENCH_ENV}=1 to run live Yahoo benchmarks"),
+        );
+        return;
+    }
+
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
-    let yahoo = rt.block_on(YahooFinance::new()).expect("failed to init Yahoo provider");
+    let yahoo = match rt.block_on(YahooFinance::new()) {
+        Ok(provider) => provider,
+        Err(err) => {
+            skip_live_benchmark(
+                "ohlc_download/1sym_1m",
+                format!("failed to init Yahoo provider: {err}"),
+            );
+            return;
+        },
+    };
 
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let start = now - 7 * 86_400;
@@ -63,7 +96,7 @@ fn bench_ohlc_download_1sym_1m(c: &mut Criterion) {
             rt.block_on(async {
                 let t = Instant::now();
                 for _ in 0..iters {
-                    yahoo
+                    if let Err(err) = yahoo
                         .download_bars(
                             "AAPL",
                             InstrumentType::Stocks,
@@ -72,7 +105,13 @@ fn bench_ohlc_download_1sym_1m(c: &mut Criterion) {
                             now,
                         )
                         .await
-                        .expect("yahoo download failed");
+                    {
+                        skip_live_benchmark(
+                            "ohlc_download/1sym_1m",
+                            format!("Yahoo download failed: {err}"),
+                        );
+                        break;
+                    }
                 }
                 t.elapsed()
             })
@@ -87,8 +126,25 @@ fn bench_ohlc_download_1sym_1m(c: &mut Criterion) {
 /// concurrently via [`futures::future::join_all`] within each measured
 /// iteration, mirroring real-world multi-symbol ingestion.
 fn bench_ohlc_download_10sym_1d(c: &mut Criterion) {
+    if !live_benches_enabled() {
+        skip_live_benchmark(
+            "ohlc_download/10sym_1d",
+            format!("set {LIVE_BENCH_ENV}=1 to run live Yahoo benchmarks"),
+        );
+        return;
+    }
+
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
-    let yahoo = rt.block_on(YahooFinance::new()).expect("failed to init Yahoo provider");
+    let yahoo = match rt.block_on(YahooFinance::new()) {
+        Ok(provider) => provider,
+        Err(err) => {
+            skip_live_benchmark(
+                "ohlc_download/10sym_1d",
+                format!("failed to init Yahoo provider: {err}"),
+            );
+            return;
+        },
+    };
 
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let start = now - 30 * 86_400;
@@ -111,7 +167,13 @@ fn bench_ohlc_download_10sym_1d(c: &mut Criterion) {
                     });
                     let results = join_all(futures).await;
                     for r in results {
-                        r.expect("yahoo download failed");
+                        if let Err(err) = r {
+                            skip_live_benchmark(
+                                "ohlc_download/10sym_1d",
+                                format!("Yahoo download failed: {err}"),
+                            );
+                            return t.elapsed();
+                        }
                     }
                 }
                 t.elapsed()

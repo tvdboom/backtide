@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime as dt
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pandas as pd
 import streamlit as st
@@ -218,7 +218,7 @@ def _render_run_metrics(run: RunResult):
         mc6,
         ":material/trending_down: Max DD",
         _fmt_pct(max_dd),
-        "red" if max_dd and not pd.isna(max_dd) else "",  # Any non-zero drawdown is bad.
+        RED if max_dd and not pd.isna(max_dd) else "",  # Any non-zero drawdown is bad.
     )
 
     wr_pct = _fmt_metric(win_rate * 100, suffix="%")
@@ -861,7 +861,7 @@ def _render_full_analysis(row: pd.Series):
 
     rows = []
     for o in run.orders:
-        qty = o.order.quantity
+        qty = cast(float, o.order.quantity)  # Sizers have been converted to a numerical quantity
         side = "Buy" if qty > 0 else ("Sell" if qty < 0 else "—")
         px = o.fill_price if o.fill_price is not None else o.order.price
 

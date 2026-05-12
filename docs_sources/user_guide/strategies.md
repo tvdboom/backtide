@@ -11,7 +11,7 @@ for creating custom strategies.
 
 ## How they work
 
-Every strategy inherits from `BaseStrategy` and implements an `evaluate` method
+Every strategy inherits from [`BaseStrategy`] and implements a `evaluate` method
 that receives data, state, and indicators, and returns a list of orders:
 
 - **Single-asset** strategies operate on one instrument at a time, making
@@ -26,13 +26,6 @@ bar. It receives:
 - `portfolio` — the current [portfolio] (cash, positions and open orders).
 - `state` — the current [state] (timestamp, bar index, warmup flag, etc...).
 - `indicators` — pre-computed [indicator values][indicators] (only up to the current bar).
-
-```python
-from backtide.strategies import SmaCrossover
-
-strategy = SmaCrossover(fast_period=20, slow_period=50)
-orders = strategy.evaluate(data, portfolio, state, indicators)
-```
 
 <br>
 
@@ -123,6 +116,36 @@ class SimpleSmaTrend(BaseStrategy):
 SimpleSmaTrend(symbol="AAPL", period=20)
 ```
 
+Custom strategies can either compute a numeric quantity for every order or attach
+a [sizer][sizers] directly to an `Order` by passing it as `quantity`. Attached sizers
+are resolved by the engine just before the order is queued. The engine converts
+current portfolio equity into the order instrument's quote currency.
+
+### Performance
+
+Backtide is fast because the hot path is deliberately kept out of Python. The
+experiment engine, order matching, portfolio accounting, currency conversion,
+metrics and built-in strategies are implemented in Rust.
+
+A custom strategy's performance is mostly determined by what happens inside
+`evaluate()`, because that method is called once per bar. Recommended patterns
+are:
+
+| Do                                                                                            | Avoid                                                                      |
+|-----------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
+| Declare expensive rolling features in `required_indicators()`.                                | Recomputing SMA/RSI/ATR/rolling statistics inside `evaluate()`.            |
+| Keep state on the strategy object for incremental logic.                                      | Rebuilding large temporary lists, dicts or dataframes every bar.           |
+| Use built-in indicators and built-in strategies when they match your idea.                    | Reimplementing existing Rust-backed functionality in Python.               |
+| Vectorize heavy array calculations with NumPy, Polars or pandas outside the hot loop.         | Python `for` loops over long histories inside `evaluate()`.                |
+| Use `numba.njit` for expensive custom numeric kernels, and compile them outside `evaluate()`. | Decorating/compiling functions dynamically inside `evaluate()`.            |
+| Return only the orders you actually want to place.                                            | Returning duplicate orders every bar when a position/order already exists. |
+
+!!! tip
+    If a custom strategy is still slow, profile the `evaluate()` method first.
+    In most cases, the fix is to move historical calculations into an indicator,
+    replace Python loops with vectorized operations, or precompile numeric
+    helpers with [Numba].
+
 <br>
 
 ## Built-in strategies
@@ -135,37 +158,19 @@ parameters, attributes, and logic.
 
 ### Position sizing
 
-Built-in strategies don't take a `quantity` parameter — they size every order
-automatically from the portfolio's current cash, so the same strategy works
-unchanged across different starting capitals and prices. The exact rule depends
-on the strategy family:
+Backtide uses [sizers] to turn a trading signal into an order quantity:
 
-- **Single-asset strategies.** When a buy signal fires for a symbol, the
-  strategy allocates an equal-weight slice of the *current* cash balance to it:
-  `cash / N`, where `N` is the number of symbols configured in the experiment.
-  That cash is divided by the next-bar fill price to obtain the integer share
-  quantity. Symbols enter independently — a slow-history symbol that becomes
-  available later still gets its `1 / N` slice of whatever cash is left at that
-  point. Sell signals always close the full position for the symbol.
-
-  - [`BuyAndHold`] is the only exception: it buys once on each symbol's first
-    available bar and never re-sizes.
-  - [`TurtleTrading`] sizes by **risk parity** instead: the per-trade quantity
-    is `(risk_per_trade × equity) / (ATR × price_per_unit)`, capping
-    volatile instruments and scaling up calmer ones to the same dollar risk.
-
-- **Portfolio-rotation strategies.** On each rebalance, the strategy ranks the
-  universe, picks the top `K` symbols, and targets an equal-weight allocation
-  of `equity / K` per slot. Existing positions outside the new top-`K` are
-  fully liquidated; remaining positions are resized up or down to match the
-  new target weight, so the portfolio is always close to fully invested across
-  the current `K` winners.
-
-In every case, if the next-bar fill price plus slippage and commission would
-push an order over the available cash, the engine **auto-shrinks** the
-quantity to whatever fits rather than rejecting it outright. This keeps
-equal-weight strategies from silently dropping their last leg when fees nibble
-into the budget.
+- **Signal-following strategies** size buys with [`FixedNotional`]: the strategy
+  computes a target cash allocation for the symbol, then converts that notional
+  into units at the latest known close. Sells use [`FixedQuantity`] to close the
+  current position.
+- **Equal-weight entries and rotation strategies** use [`EqualWeight`]: selected
+  symbols receive an equal slice of current equity/cash. Rotation strategies
+  liquidate symbols that leave the selected set and rebalance into the current
+  winners.
+- **[`BuyAndHold`]** enters each symbol once, as soon as that symbol has data, and
+  does not resize afterward. If a single benchmark symbol is configured, it only
+  buys that symbol.
 
 ### Single-asset strategies
 
@@ -185,7 +190,7 @@ into the budget.
 | [`Rsrs`] | Trend | Uses regression of high/low prices for support detection.          |
 | [`SmaCrossover`] | Trend | Golden cross / death cross with two moving averages.               |
 | [`SmaNaive`] | Trend | Buys above MA, sells below.                                        |
-| [`TurtleTrading`] | Trend | Breakout-based trend-following with ATR position sizing.           |
+| [`TurtleTrading`] | Trend | Channel breakout trend-following with equal-weight entries.        |
 | [`Vcp`] | Breakout | Volatility Contraction Pattern breakout.                           |
 
 ### Portfolio-rotation strategies

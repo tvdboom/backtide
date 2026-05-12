@@ -606,6 +606,16 @@ def generate_submodule_stub(submodule_name: str) -> str:
     if cross_imports:
         lines.append("\n")
 
+    # ── Imports from `backtide.sizers` (Python-side) ────────────────────
+    #
+    # `BaseSizer` is the abstract base class that lives in the pure-Python
+    # `backtide.sizers` package — it isn't a pyclass in any core submodule,
+    # so the cross-module import logic above doesn't pick it up. Inject the
+    # import explicitly when the symbol appears in the body.
+    sizers_imports = [name for name in ("BaseSizer",) if re.search(rf"\b{name}\b", body_no_docs)]
+    if sizers_imports:
+        lines.append(f"from backtide.sizers import {', '.join(sizers_imports)}\n\n")
+
     lines.append(body)
     return "".join(lines).rstrip("\n") + "\n"
 

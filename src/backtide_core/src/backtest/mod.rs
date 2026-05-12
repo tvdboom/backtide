@@ -4,13 +4,12 @@ use crate::backtest::models::conversion_period::ConversionPeriod;
 use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
 use crate::backtest::models::experiment_config::*;
-use crate::backtest::models::experiment_result::{
-    EquitySample, ExperimentResult, OrderRecord, RunResult, Trade,
-};
+use crate::backtest::models::experiment_result::*;
 use crate::backtest::models::order::Order;
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
+use crate::backtest::sizers::*;
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
@@ -19,6 +18,7 @@ pub mod fx;
 pub mod indicators;
 pub mod interface;
 pub mod models;
+pub mod sizers;
 pub mod strategies;
 
 /// Register the Python interface for `backtide.core.backtest`.
@@ -34,6 +34,15 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OrderType>()?;
     m.add_class::<Portfolio>()?;
     m.add_class::<State>()?;
+
+    // Sizers
+    m.add_class::<EqualWeight>()?;
+    m.add_class::<FixedFractional>()?;
+    m.add_class::<FixedNotional>()?;
+    m.add_class::<FixedQuantity>()?;
+    m.add_class::<KellyCriterion>()?;
+    m.add_class::<RiskBased>()?;
+    m.add_class::<VolatilityScaled>()?;
 
     // Experiment config
     m.add_class::<DataExpConfig>()?;

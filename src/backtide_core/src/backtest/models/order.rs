@@ -3,14 +3,71 @@
 //! Represents a single order submitted to the simulated exchange
 //! during a backtest.
 
+use pyo3::exceptions::PyTypeError;
 use crate::backtest::models::order_type::OrderType;
 use pyo3::prelude::*;
+use pyo3::types::PyFloat;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Generate a fresh short order id.
 pub fn new_order_id() -> String {
     Uuid::new_v4().simple().to_string()[..12].to_owned()
+}
+
+/// Wrapper around a Python sizer object stored on an [`Order`].
+///
+/// Implements the standard derives by delegating: `Clone` clones the
+/// reference-counted `Py<PyAny>`, `Debug` prints a placeholder, and
+/// `Serialize`/`Deserialize` skip the field (sizers are transient —
+/// once the engine resolves them the slot is cleared).
+pub struct SizerSlot(pub Py<PyAny>);
+
+impl Clone for SizerSlot {
+    fn clone(&self) -> Self {
+        Python::attach(|py| SizerSlot(self.0.clone_ref(py)))
+    }
+}
+
+impl std::fmt::Debug for SizerSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<sizer>")
+    }
+}
+
+impl PartialEq for SizerSlot {
+    fn eq(&self, _other: &Self) -> bool {
+        false // sizers are never structurally equal
+    }
+}
+
+impl Serialize for SizerSlot {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_none()
+    }
+}
+
+impl<'de> Deserialize<'de> for SizerSlot {
+    fn deserialize<D: serde::Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
+        Err(serde::de::Error::custom("SizerSlot cannot be deserialized"))
+    }
+}
+
+// PyO3 conversions so `get_all` / `set_all` work on the `sizer` field.
+impl<'py> IntoPyObject<'py> for SizerSlot {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(self.0.into_bound(py))
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for SizerSlot {
+    type Error = PyErr;
+    fn extract(ob: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        Ok(SizerSlot(ob.as_any().clone().unbind()))
+    }
 }
 
 /// A trading order submitted during the simulation.
@@ -20,18 +77,20 @@ pub fn new_order_id() -> String {
 /// id : str
 ///     Unique identifier of the order. Auto-generated if not provided.
 ///     For [`OrderType.CancelOrder`][OrderType] orders, the `id` field
-///     identifies the *target* order that should be cancelled.
+///     identifies the target order that should be canceled.
 ///
 /// symbol : str
 ///     The ticker symbol this order targets.
 ///
-/// order_type : [OrderType]
-///     The execution semantics (market, limit, stop-loss, etc.).
+/// quantity : int | float | [BaseSizer], default=1
+///     Signed quantity (positive = buy, negative = sell). Fractional values
+///     are accepted only for crypto instruments. When a _sizer_ is passed, the
+///     engine resolves the quantity automatically at order-processing time using
+///     portfolio equity converted to the asset's quote currency and the asset's
+///     price.
 ///
-/// quantity : float
-///     Signed quantity. Positive for buy orders, negative for sell orders.
-///     Floating-point so fractional crypto units (e.g., 0.0234 BTC) are
-///     supported. Non-crypto instruments must use whole-number quantities.
+/// order_type : [OrderType]
+///     The execution semantics (market, limit, stop-loss, etc...).
 ///
 /// price : float | None
 ///     Primary price for the order. The exact meaning depends on
@@ -66,16 +125,22 @@ pub struct Order {
     pub id: String,
     /// The ticker symbol this order targets.
     pub symbol: String,
+    /// Signed quantity (positive = buy, negative = sell). Fractional values
+    /// are allowed only for crypto instruments. When a sizer is attached this
+    /// is ``0.0`` until the engine resolves it.
+    pub quantity: f64,
     /// The execution semantics.
     pub order_type: OrderType,
-    /// Signed quantity (positive = buy, negative = sell). Fractional values
-    /// are allowed only for crypto instruments.
-    pub quantity: f64,
     /// Primary price (limit / stop / trail amount).
     pub price: Option<f64>,
     /// Secondary limit price for `*Limit` stop-style orders.
     #[serde(default)]
     pub limit_price: Option<f64>,
+    /// Optional position sizer. The engine resolves it into a concrete
+    /// quantity at order-processing time using current equity converted to
+    /// the instrument quote currency and price.
+    #[serde(skip)]
+    pub sizer: Option<SizerSlot>,
 }
 
 #[pymethods]
@@ -83,75 +148,68 @@ impl Order {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 
-    /// Create a new order.
-    ///
-    /// Parameters
-    /// ----------
-    /// symbol : str
-    ///     The ticker symbol this order targets. For ``CancelOrder``
-    ///     orders this can be left empty; the `id` field identifies
-    ///     the order to cancel.
-    ///
-    /// order_type : str | OrderType, default="market"
-    ///     The execution semantics.
-    ///
-    /// quantity : float, default=0.0
-    ///     Signed quantity (positive = buy, negative = sell). Fractional
-    ///     values are accepted only for crypto instruments.
-    ///
-    /// price : float | None, default=None
-    ///     Primary price (limit, stop or trail amount depending on
-    ///     `order_type`). ``None`` for market orders.
-    ///
-    /// limit_price : float | None, default=None
-    ///     Secondary limit price for `*Limit` stop-style orders. Once
-    ///     the stop triggers, the order rests as a limit at this price.
-    ///
-    /// id : str | None, default=None
-    ///     Optional explicit order id. When ``None`` (default) a fresh
-    ///     short uuid is generated. When the `order_type` is
-    ///     ``CancelOrder`` this should be set to the id of the order
-    ///     that you want to cancel.
     #[new]
     #[pyo3(signature = (
-        symbol: "str" = "",
-        order_type: "str | OrderType" = OrderType::default(),
-        quantity: "float" = 0.0,
-        price: "float | None" = None,
-        limit_price: "float | None" = None,
-        id: "str | None" = None,
+        symbol = "",
+        quantity = None,
+        order_type = OrderType::Market,
+        price = None,
+        limit_price = None,
+        id = None,
     ))]
     fn new(
+        _py: Python<'_>,
         symbol: &str,
+        quantity: Option<Bound<'_, PyAny>>,
         order_type: OrderType,
-        quantity: f64,
         price: Option<f64>,
         limit_price: Option<f64>,
         id: Option<String>,
-    ) -> Self {
-        Self {
+    ) -> PyResult<Self> {
+        let (qty, sizer) = match quantity {
+            None => (1.0, None),
+            Some(q) => {
+                if let Ok(f) = q.extract::<f64>() {
+                    (f, None)
+                } else if q.hasattr("calculate")? {
+                    (0.0, Some(SizerSlot(q.unbind())))
+                } else {
+                    return Err(PyErr::new::<PyTypeError, _>(
+                        "quantity must be an int, float, or a Sizer with a calculate() method",
+                    ));
+                }
+            },
+        };
+
+        Ok(Self {
             id: id.unwrap_or_else(new_order_id),
             symbol: symbol.to_owned(),
+            quantity: qty,
             order_type,
-            quantity,
             price,
             limit_price,
-        }
+            sizer,
+        })
     }
 
     fn __repr__(&self) -> String {
+        let sizer_str = if self.sizer.is_some() {
+            ", sizer=<attached>"
+        } else {
+            ""
+        };
         match (self.price, self.limit_price) {
             (Some(p), Some(l)) => format!(
-                "Order(id={:?}, symbol={:?}, type={}, qty={}, price={}, limit={})",
-                self.id, self.symbol, self.order_type, self.quantity, p, l,
+                "Order(id={:?}, symbol={:?}, qty={}, type={}, price={}, limit={}{})",
+                self.id, self.symbol, self.quantity, self.order_type, p, l, sizer_str,
             ),
             (Some(p), None) => format!(
-                "Order(id={:?}, symbol={:?}, type={}, qty={}, price={})",
-                self.id, self.symbol, self.order_type, self.quantity, p,
+                "Order(id={:?}, symbol={:?}, qty={}, type={}, price={}{})",
+                self.id, self.symbol, self.quantity, self.order_type, p, sizer_str,
             ),
             _ => format!(
-                "Order(id={:?}, symbol={:?}, type={}, qty={})",
-                self.id, self.symbol, self.order_type, self.quantity,
+                "Order(id={:?}, symbol={:?}, qty={}, type={}{})",
+                self.id, self.symbol, self.quantity, self.order_type, sizer_str,
             ),
         }
     }
@@ -161,15 +219,19 @@ impl Order {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        (String, OrderType, f64, Option<f64>, Option<f64>, Option<String>),
+        (String, Py<PyAny>, OrderType, Option<f64>, Option<f64>, Option<String>),
     )> {
         let cls = PyModule::import(py, "backtide.backtest")?.getattr("Order")?;
+        // For pickling, serialize the resolved quantity as a float.
+        // Sizers are lost on (de)serialization — by that point the quantity
+        // has already been resolved by the engine.
+        let qty_obj: Py<PyAny> = PyFloat::new(py, self.quantity).into_any().unbind();
         Ok((
             cls,
             (
                 self.symbol.clone(),
+                qty_obj,
                 self.order_type,
-                self.quantity,
                 self.price,
                 self.limit_price,
                 Some(self.id.clone()),

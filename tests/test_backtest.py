@@ -247,6 +247,11 @@ class TestCommissionType:
 class TestOrder:
     """Tests for the Order model."""
 
+    def test_order_type_defaults_to_market(self):
+        """Omitting order_type creates a market order."""
+        order = Order(symbol="AAPL", quantity=10)
+        assert order.order_type == OrderType.Market
+
     def test_default_id_is_generated(self):
         """A fresh Order receives an auto-generated id."""
         o1 = Order(symbol="AAPL", order_type="market", quantity=10)

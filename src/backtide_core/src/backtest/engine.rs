@@ -42,23 +42,6 @@ use uuid::Uuid;
 
 impl Engine {
     /// Run a single backtest experiment end-to-end.
-    ///
-    /// Phases:
-    /// 1. Resolve & download required data (skipped if already in storage).
-    ///    The configured ``strategy.benchmark`` symbol (if any) is folded
-    ///    into the symbol list so its bars flow through the standard
-    ///    pipeline and become available to every strategy.
-    /// 2. Load OHLCV bars for every primary symbol on the chosen interval.
-    /// 3. Compute every requested indicator (built-in or custom Python) once
-    ///    over the full dataset, in parallel across (symbol, indicator).
-    /// 4. Run every selected strategy in parallel, each with its own
-    ///    portfolio, order book and equity log. When a benchmark is
-    ///    configured, a ``BuyAndHold(symbol=benchmark)`` strategy is
-    ///    auto-injected under the name returned by
-    ///    [`benchmark_strategy_name`] so alpha can be derived from real
-    ///    backtest results.
-    /// 5. Persist the aggregate result (and per-strategy artefacts) to
-    ///    DuckDB, then return it to the caller.
     pub fn run_experiment(
         &self,
         config: &ExperimentConfig,
@@ -659,17 +642,54 @@ impl Engine {
             if let Some(err) = &r.error {
                 warn!(strategy = %r.strategy_name, "Strategy failed: {err}");
                 warnings.push(format!("Strategy {:?} failed: {}", r.strategy_name, err));
-            } else if r.orders.is_empty() {
-                // No error, no orders — most often happens when the initial
-                // cash is too low to afford a single whole unit of a
-                // non-crypto symbol. Surface this explicitly so it doesn't
-                // look like a silent failure.
+                continue;
+            }
+
+            // Diagnose the two "no fills" cases separately:
+            //
+            // 1. The strategy never produced an order at all — it simply
+            //    did not signal during the backtest window (data range too
+            //    short, indicators never crossed, parameters too tight,
+            //    etc.). `initial_cash` is irrelevant here.
+            //
+            // 2. The strategy produced orders but *every* one was rejected
+            //    or cancelled — typically because the initial cash was
+            //    too small to afford a single whole unit of a non-crypto
+            //    instrument, or because the broker ran out of cash. In
+            //    that case we surface the (first) rejection reason and
+            //    point the user at `initial_cash`.
+            let n_filled = r.orders.iter().filter(|o| o.status == "filled").count();
+            if n_filled > 0 {
+                continue;
+            }
+            if r.orders.is_empty() {
                 let msg = format!(
-                    "Strategy {:?} placed no orders. The initial cash may be too low \
-                     to afford the targeted symbol(s). Non-crypto quantities must be \
-                     whole numbers; crypto quantities may be fractional. Consider \
-                     increasing initial_cash.",
+                    "Strategy {:?} produced no orders — no buy/sell signal was triggered \
+                     during the backtest window. Try a longer date range, different \
+                     strategy parameters, or different symbols.",
                     r.strategy_name
+                );
+                warn!(strategy = %r.strategy_name, "{msg}");
+                warnings.push(msg);
+            } else {
+                // All orders rejected/cancelled. Use the first non-empty
+                // reason as the headline cause; fall back to a generic
+                // message when no reason was recorded.
+                let first_reason = r
+                    .orders
+                    .iter()
+                    .find(|o| !o.reason.is_empty())
+                    .map(|o| o.reason.as_str())
+                    .unwrap_or("see per-order rejection reasons");
+                let msg = format!(
+                    "Strategy {:?} produced {} order(s) but none filled ({}). \
+                     If the rejection is about quantity or insufficient funds, the \
+                     initial cash may be too low: non-crypto quantities must be whole \
+                     numbers (crypto allows fractional), so per-symbol allocation must \
+                     be ≥ price. Consider increasing initial_cash.",
+                    r.strategy_name,
+                    r.orders.len(),
+                    first_reason,
                 );
                 warn!(strategy = %r.strategy_name, "{msg}");
                 warnings.push(msg);
@@ -1743,6 +1763,67 @@ fn run_one_strategy(
                         }
                         open_orders.clear();
                     }
+
+                    // ── Resolve sizer-based quantities ──────────────────
+                    //
+                    // Orders that carry a sizer instead of a numeric
+                    // quantity get resolved here using the portfolio's
+                    // current equity and the symbol's latest close price.
+                    // After this block every order has a concrete f64
+                    // quantity and the sizer field is cleared.
+                    for o in &mut ords {
+                        if let Some(sizer_slot) = o.sizer.take() {
+                            let order_ccy = quote_ccy.get(&o.symbol).copied().unwrap_or(base_ccy);
+                            // Compute mark-to-market equity in the same currency
+                            // as the symbol's price. Sizers divide equity/risk by
+                            // price-like inputs, so `equity`, `price`,
+                            // `stop_distance`, and `atr` must share a currency.
+                            let eq = portfolio_equity_in_currency(
+                                &cash, &positions, aligned, bar_index, &quote_ccy, base_ccy,
+                                order_ccy, fx, ts,
+                            );
+
+                            // Get the current close price for this symbol.
+                            let sym_price = aligned
+                                .get(&o.symbol)
+                                .and_then(|r| r[bar_index].as_ref())
+                                .map(|b| b.close)
+                                .unwrap_or(0.0);
+
+                            // Call sizer.calculate(equity, price, stop_distance, atr).
+                            // stop_distance is derived from the order's price
+                            // field (for stop-style orders) and the current price.
+                            let stop_distance: Option<f64> = o.price.and_then(|p| {
+                                let d = (sym_price - p).abs();
+                                if d > 0.0 {
+                                    Some(d)
+                                } else {
+                                    None
+                                }
+                            });
+
+                            let resolved = Python::attach(|py| -> PyResult<f64> {
+                                sizer_slot
+                                    .0
+                                    .bind(py)
+                                    .call_method1(
+                                        "calculate",
+                                        (eq, sym_price, stop_distance, Option::<f64>::None),
+                                    )?
+                                    .extract()
+                            });
+                            match resolved {
+                                Ok(qty) => {
+                                    o.quantity = qty;
+                                },
+                                Err(e) => {
+                                    warn!(strategy=%name, order_id=%o.id, "Sizer resolution failed: {e}");
+                                    o.quantity = 0.0; // Will be rejected by the qty check below.
+                                },
+                            }
+                        }
+                    }
+
                     // Validate allowed types/quantities & ensure ids are populated.
                     let allowed = &cfg.exchange.allowed_order_types;
                     let is_builtin_strategy = builtin.is_some();
@@ -1896,6 +1977,34 @@ fn run_one_strategy(
         error: run_error,
         is_benchmark: is_benchmark_run,
     }
+}
+
+fn portfolio_equity_in_currency(
+    cash: &HashMap<Currency, f64>,
+    positions: &HashMap<String, f64>,
+    aligned: &HashMap<String, Vec<Option<Bar>>>,
+    bar_index: usize,
+    quote_ccy: &HashMap<String, Currency>,
+    base_ccy: Currency,
+    target_ccy: Currency,
+    fx: &FxTable,
+    ts: i64,
+) -> f64 {
+    let mut equity = 0.0_f64;
+    for (ccy, amount) in cash {
+        equity += fx.convert(*amount, *ccy, target_ccy, ts).unwrap_or(*amount);
+    }
+    for (sym, qty) in positions {
+        if qty.abs() < 1e-12 {
+            continue;
+        }
+        if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
+            let value = *qty * b.close;
+            let pos_ccy = quote_ccy.get(sym).copied().unwrap_or(base_ccy);
+            equity += fx.convert(value, pos_ccy, target_ccy, ts).unwrap_or(value);
+        }
+    }
+    equity
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -2614,6 +2723,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn portfolio_equity_for_sizer_uses_target_currency() {
+        let mut aligned = HashMap::new();
+        aligned.insert("AAPL".to_owned(), vec![Some(mk_bar(1_700_000_000, 50.0))]);
+
+        let cash = HashMap::from([(Currency::EUR, 1_000.0)]);
+        let positions = HashMap::from([("AAPL".to_owned(), 2.0)]);
+        let quote_ccy = HashMap::from([("AAPL".to_owned(), Currency::USD)]);
+        let mut fx = FxTable::new(Currency::EUR);
+        fx.add_series(Currency::EUR, Currency::USD, vec![(1_700_000_000, 1.20)]);
+
+        let equity_usd = portfolio_equity_in_currency(
+            &cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::EUR,
+            Currency::USD,
+            &fx,
+            1_700_000_000,
+        );
+        assert!((equity_usd - 1_300.0).abs() < 1e-12);
+
+        let equity_eur = portfolio_equity_in_currency(
+            &cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::EUR,
+            Currency::EUR,
+            &fx,
+            1_700_000_000,
+        );
+        assert!((equity_eur - (1_000.0 + 100.0 / 1.20)).abs() < 1e-12);
+    }
+
     /// Tiny helper that emits a single market buy on the first bar
     /// after warmup, then nothing else. Implemented in pure Rust so the
     /// tests don't need the GIL.
@@ -3004,6 +3151,7 @@ mod tests {
             quantity: 10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, order)]);
         assert_eq!(r.orders.len(), 1);
@@ -3024,6 +3172,7 @@ mod tests {
             quantity: 10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, order)]);
         // Non-crypto auto-shrinks to the largest whole-unit buy that fits cash.
@@ -3045,6 +3194,7 @@ mod tests {
             quantity: 10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(
             &cfg,
@@ -3068,6 +3218,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let cancel = Order {
             id: "buy1".into(),
@@ -3076,6 +3227,7 @@ mod tests {
             quantity: 0.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         // Both injected on bar 0, cancel comes first in the open-order
         // list so the cancel removes the buy before it fills.
@@ -3102,6 +3254,7 @@ mod tests {
             quantity: 100.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("VOD.L", "GBP")], vec![(0, order)]);
         // Without GBP/USD FX path is provided in this unit setup, so funding fails.
@@ -3120,6 +3273,7 @@ mod tests {
             quantity: 10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         assert!(r.metrics.contains_key("sharpe"));
@@ -3139,6 +3293,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let buy_b = Order {
             id: "b".into(),
@@ -3147,6 +3302,7 @@ mod tests {
             quantity: 10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let ra = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy_a)]);
         let rb = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy_b)]);
@@ -3200,6 +3356,7 @@ mod tests {
             quantity: 1.5,
             price: None,
             limit_price: None,
+            sizer: None,
         };
 
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, order)]);
@@ -3220,6 +3377,7 @@ mod tests {
             quantity: 1.5,
             price: None,
             limit_price: None,
+            sizer: None,
         };
 
         let r = run_with_orders(
@@ -3242,6 +3400,7 @@ mod tests {
             quantity: 3.75,
             price: None,
             limit_price: None,
+            sizer: None,
         };
 
         let err = normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks);
@@ -3259,6 +3418,7 @@ mod tests {
             quantity: 0.125,
             price: None,
             limit_price: None,
+            sizer: None,
         };
 
         let err = normalize_builtin_order_quantity(&mut order, InstrumentType::Crypto);
@@ -3276,6 +3436,7 @@ mod tests {
             quantity: 0.75,
             price: None,
             limit_price: None,
+            sizer: None,
         };
 
         let err = normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks)
@@ -3309,6 +3470,7 @@ mod tests {
             quantity: 5.0,
             price: Some(95.0),
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
         assert_eq!(r.orders.len(), 1);
@@ -3334,6 +3496,7 @@ mod tests {
             quantity: 5.0,
             price: Some(50.0),
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
         // No order record at all — the limit stayed pending across both bars.
@@ -3354,6 +3517,7 @@ mod tests {
             quantity: 5.0,
             price: Some(110.0),
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
         assert_eq!(r.orders[0].status, "filled");
@@ -3375,6 +3539,7 @@ mod tests {
             quantity: 5.0,
             price: Some(99.5),
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
         assert_eq!(r.orders[0].status, "filled");
@@ -3396,6 +3561,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         // Inject buy at bar 0, then a sell-limit also at bar 0; the buy
         // settles first (queue order preserved), so the limit sees +5 long.
@@ -3406,6 +3572,7 @@ mod tests {
             quantity: -5.0,
             price: Some(100.5),
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(
             &cfg,
@@ -3435,6 +3602,7 @@ mod tests {
             quantity: 5.0,
             price: Some(99.5),
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, limit)]);
         assert_eq!(r.orders[0].status, "filled");
@@ -3459,6 +3627,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let sl = Order {
             id: "sl".into(),
@@ -3467,6 +3636,7 @@ mod tests {
             quantity: -5.0,
             price: Some(90.0),
             limit_price: None,
+            sizer: None,
         };
         let r =
             run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sl)]);
@@ -3489,6 +3659,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let sl = Order {
             id: "sl".into(),
@@ -3497,6 +3668,7 @@ mod tests {
             quantity: -5.0,
             price: Some(95.0),
             limit_price: None,
+            sizer: None,
         };
         let r =
             run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sl)]);
@@ -3521,6 +3693,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let sl = Order {
             id: "sl".into(),
@@ -3529,6 +3702,7 @@ mod tests {
             quantity: -5.0,
             price: Some(99.5),
             limit_price: None,
+            sizer: None,
         };
         let r =
             run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sl)]);
@@ -3555,6 +3729,7 @@ mod tests {
             quantity: 5.0,
             price: Some(110.0),
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, stop_buy)]);
         assert_eq!(r.orders[0].status, "filled");
@@ -3576,6 +3751,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let tp = Order {
             id: "tp".into(),
@@ -3584,6 +3760,7 @@ mod tests {
             quantity: -5.0,
             price: Some(100.5),
             limit_price: None,
+            sizer: None,
         };
         let r =
             run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, tp)]);
@@ -3612,6 +3789,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let sll = Order {
             id: "sll".into(),
@@ -3620,6 +3798,7 @@ mod tests {
             quantity: -5.0,
             price: Some(95.0),       // stop trigger
             limit_price: Some(95.0), // limit price after trigger
+            sizer: None,
         };
         let r =
             run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sll)]);
@@ -3645,6 +3824,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let sll = Order {
             id: "sll".into(),
@@ -3653,6 +3833,7 @@ mod tests {
             quantity: -5.0,
             price: Some(90.0),
             limit_price: Some(89.5),
+            sizer: None,
         };
         let r =
             run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy), (0, sll)]);
@@ -3678,6 +3859,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let trail = Order {
             id: "t".into(),
@@ -3686,6 +3868,7 @@ mod tests {
             quantity: -5.0,
             price: Some(5.0),
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(
             &cfg,
@@ -3712,6 +3895,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let trail = Order {
             id: "t".into(),
@@ -3720,6 +3904,7 @@ mod tests {
             quantity: -5.0,
             price: Some(5.0),
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(
             &cfg,
@@ -3750,6 +3935,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let trail = Order {
             id: "t".into(),
@@ -3758,6 +3944,7 @@ mod tests {
             quantity: -5.0,
             price: Some(5.0),
             limit_price: Some(105.0),
+            sizer: None,
         };
         let r = run_with_orders(
             &cfg,
@@ -3788,6 +3975,7 @@ mod tests {
             quantity: 7.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let settle = Order {
             id: "s".into(),
@@ -3796,6 +3984,7 @@ mod tests {
             quantity: 0.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(
             &cfg,
@@ -3824,6 +4013,7 @@ mod tests {
             quantity: 0.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, settle)]);
         assert_eq!(r.orders[0].status, "cancelled");
@@ -3844,6 +4034,7 @@ mod tests {
             quantity: -3.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let settle = Order {
             id: "s".into(),
@@ -3852,6 +4043,7 @@ mod tests {
             quantity: 0.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(
             &cfg,
@@ -3881,6 +4073,7 @@ mod tests {
             quantity: -5.0, // no prior position → naked short.
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, sell)]);
         assert_eq!(r.orders[0].status, "rejected");
@@ -3901,6 +4094,7 @@ mod tests {
             quantity: 5.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let sell = Order {
             id: "s".into(),
@@ -3909,6 +4103,7 @@ mod tests {
             quantity: -3.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(
             &cfg,
@@ -3933,6 +4128,7 @@ mod tests {
             quantity: -10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, sell)]);
         assert_eq!(r.orders[0].status, "filled");
@@ -3965,6 +4161,7 @@ mod tests {
             quantity: -10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, sell)]);
         assert_eq!(r.orders[0].status, "filled");
@@ -3989,6 +4186,7 @@ mod tests {
             quantity: 9_000.0, // 9,000 * $1 = $9,000 (within $10,000 cash)
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         assert_eq!(r.orders[0].status, "filled");
@@ -4011,6 +4209,7 @@ mod tests {
             quantity: 1.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         // Buy fills at open * (1 + slip) = 100 * 1.01 = 101.
@@ -4030,6 +4229,7 @@ mod tests {
             quantity: -1.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, sell)]);
         // Sell fills at open * (1 - slip) = 100 * 0.99 = 99.
@@ -4053,6 +4253,7 @@ mod tests {
             quantity: 10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         // Notional = 10 * 100 = 1000, commission = 1000 * 0.5 % = 5.
@@ -4072,6 +4273,7 @@ mod tests {
             quantity: 10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         assert!((r.orders[0].commission - 7.5).abs() < 1e-9);
@@ -4091,6 +4293,7 @@ mod tests {
             quantity: 10.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         // 1000 * 0.5 % + 1.0 = 5.0 + 1.0 = 6.0.
@@ -4120,6 +4323,7 @@ mod tests {
             quantity: 11.0,
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("VOD.L", "GBP")], vec![(0, buy)]);
         // No GBP/USD FX path is provided in this unit setup, so funding fails.
@@ -4145,6 +4349,7 @@ mod tests {
             quantity: 11.0, // 11 * 100 = 1,100 > 1,000 cash
             price: None,
             limit_price: None,
+            sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         assert_eq!(r.orders[0].status, "filled");

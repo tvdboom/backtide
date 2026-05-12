@@ -144,7 +144,8 @@ def plot_trade_duration(
 
     unit_s = unit.lower()
     if unit_s == "auto":
-        median_secs = np.median([d for v in durations.values() for d in v])
+        all_secs = [d for v in durations.values() for d in v]
+        median_secs = float(np.median(all_secs)) if all_secs else 0.0
         if median_secs >= 2 * 86_400:
             unit_s = "days"
         elif median_secs >= 2 * 3_600:

@@ -384,7 +384,7 @@ impl ExperimentResult {
 
     fn __repr__(&self) -> String {
         format!(
-            "ExperimentResult(id={:?}, name={:?}, status={}, n_strategies={})",
+            "ExperimentResult(id={:?}, name={:?}, status={:?}, n_strategies={})",
             self.experiment_id,
             self.name,
             self.status,

@@ -51,14 +51,14 @@ class BaseStrategy(ABC):
         data : np.array | pd.DataFrame | pl.DataFrame
             Historical OHLCV data available up to the current bar.
 
-        portfolio : Portfolio
+        portfolio : [Portfolio]
             Current portfolio holdings (cash, positions and open orders).
 
-        state : State
+        state : [State]
             Current simulation state.
 
         indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Pre-computed indicator values. None if no indicators were
+            Pre-computed indicator values. `None` if no indicators were
             selected.
 
         Returns

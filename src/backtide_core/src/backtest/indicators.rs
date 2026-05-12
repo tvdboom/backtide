@@ -41,18 +41,31 @@ fn extract_ohlcv_from_bars(bars: &[Bar]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f
 /// Compute a simple rolling mean over `data` with the given `period`.
 ///
 /// The first `period - 1` elements are [`f64::NAN`]. Uses an incremental
-/// sum for O(n) performance.
+/// sum for O(n) performance. Windows containing non-finite values remain
+/// `NAN`, then recover once a full finite window is available.
 fn rolling_mean(data: &[f64], period: usize) -> Vec<f64> {
     let n = data.len();
     let mut out = vec![f64::NAN; n];
     if period == 0 || n < period {
         return out;
     }
-    let mut sum: f64 = data[..period].iter().sum();
-    out[period - 1] = sum / period as f64;
-    for i in period..n {
-        sum += data[i] - data[i - period];
-        out[i] = sum / period as f64;
+    let mut sum = 0.0;
+    let mut finite = 0usize;
+    for i in 0..n {
+        if data[i].is_finite() {
+            sum += data[i];
+            finite += 1;
+        }
+        if i >= period {
+            let old = data[i - period];
+            if old.is_finite() {
+                sum -= old;
+                finite -= 1;
+            }
+        }
+        if i + 1 >= period && finite == period {
+            out[i] = sum / period as f64;
+        }
     }
     out
 }
@@ -91,6 +104,9 @@ fn rolling_std(data: &[f64], period: usize) -> Vec<f64> {
     }
     for i in (period - 1)..n {
         let window = &data[i + 1 - period..=i];
+        if !window.iter().all(|x| x.is_finite()) {
+            continue;
+        }
         let mean: f64 = window.iter().sum::<f64>() / period as f64;
         let var: f64 = window.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (period - 1) as f64;
         out[i] = var.sqrt();
@@ -104,13 +120,25 @@ fn rolling_std(data: &[f64], period: usize) -> Vec<f64> {
 /// The first element uses `high[0] − low[0]` since there is no previous close.
 fn true_range(high: &[f64], low: &[f64], close: &[f64]) -> Vec<f64> {
     let n = high.len();
-    let mut tr = vec![0.0; n];
-    tr[0] = high[0] - low[0];
+    let mut tr = vec![f64::NAN; n];
+    if n == 0 {
+        return tr;
+    }
+    if high[0].is_finite() && low[0].is_finite() {
+        tr[0] = high[0] - low[0];
+    }
     for i in 1..n {
+        if !high[i].is_finite() || !low[i].is_finite() {
+            continue;
+        }
         let hl = high[i] - low[i];
-        let hc = (high[i] - close[i - 1]).abs();
-        let lc = (low[i] - close[i - 1]).abs();
-        tr[i] = hl.max(hc).max(lc);
+        tr[i] = if close[i - 1].is_finite() {
+            let hc = (high[i] - close[i - 1]).abs();
+            let lc = (low[i] - close[i - 1]).abs();
+            hl.max(hc).max(lc)
+        } else {
+            hl
+        };
     }
     tr
 }
@@ -1249,6 +1277,10 @@ impl Indicator for WeightedMovingAverage {
         if p > 0 && n >= p {
             let w_sum: f64 = (1..=p).map(|x| x as f64).sum();
             for i in (p - 1)..n {
+                let window = &c[i + 1 - p..=i];
+                if !window.iter().all(|x| x.is_finite()) {
+                    continue;
+                }
                 let mut val = 0.0;
                 for j in 0..p {
                     val += c[i + 1 - p + j] * (j + 1) as f64;
@@ -1272,3 +1304,64 @@ indicator_pymethods!(SimpleMovingAverage);
 indicator_pymethods!(StochasticOscillator);
 indicator_pymethods!(VolumeWeightedAveragePrice);
 indicator_pymethods!(WeightedMovingAverage);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bar(close: f64) -> Bar {
+        Bar {
+            open_ts: 0,
+            close_ts: 0,
+            open_ts_exchange: 0,
+            open: close,
+            high: close + 1.0,
+            low: close - 1.0,
+            close,
+            adj_close: close,
+            volume: 1.0,
+            n_trades: None,
+        }
+    }
+
+    #[test]
+    fn rolling_mean_recovers_after_leading_nans() {
+        let out = rolling_mean(&[f64::NAN, f64::NAN, 10.0, 12.0, 14.0, 16.0], 3);
+
+        assert!(out[0].is_nan());
+        assert!(out[3].is_nan());
+        assert_eq!(out[4], 12.0);
+        assert_eq!(out[5], 14.0);
+    }
+
+    #[test]
+    fn sma_recovers_for_later_starting_symbol() {
+        let bars =
+            [f64::NAN, f64::NAN, 10.0, 12.0, 14.0, 16.0].into_iter().map(bar).collect::<Vec<_>>();
+        let sma = SimpleMovingAverage::new(3).compute_inner(&bars);
+
+        assert!(sma[0][3].is_nan());
+        assert_eq!(sma[0][4], 12.0);
+        assert_eq!(sma[0][5], 14.0);
+    }
+
+    #[test]
+    fn rolling_std_and_wma_recover_after_leading_nans() {
+        let std = rolling_std(&[f64::NAN, 1.0, 2.0, 3.0], 3);
+        assert!(std[2].is_nan());
+        assert!(std[3].is_finite());
+
+        let bars = [f64::NAN, 1.0, 2.0, 3.0].into_iter().map(bar).collect::<Vec<_>>();
+        let wma = WeightedMovingAverage::new(3).compute_inner(&bars);
+        assert!(wma[0][2].is_nan());
+        assert_eq!(wma[0][3], (1.0 * 1.0 + 2.0 * 2.0 + 3.0 * 3.0) / 6.0);
+    }
+
+    #[test]
+    fn true_range_uses_high_low_when_previous_close_is_nan() {
+        let tr = true_range(&[f64::NAN, 12.0], &[f64::NAN, 10.0], &[f64::NAN, 11.0]);
+
+        assert!(tr[0].is_nan());
+        assert_eq!(tr[1], 2.0);
+    }
+}

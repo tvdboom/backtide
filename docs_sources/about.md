@@ -3,52 +3,56 @@
 
 ## What is it?
 
-Automated Tool for Optimized Modeling (ATOM) is an open-source
-Python package designed to help data scientists fasten up the
-exploration phase of their machine learning projects. ATOM is a
-low-code, easy-to-use library, capable of running experiments
-quickly and efficiently, enabling the user to go from raw data
-to generating insights in just a few lines of code. Click
-[here][getting-started] to get started.
+Backtide is an open-source backtesting platform for Python, built for retail
+investors who want to test trading ideas without drowning in infrastructure.
+It combines a fast Rust simulation engine with a friendly Python API, interactive
+UI, local storage, market-data integrations, built-in indicators, strategy
+templates, position sizers and analysis plots.
+
+The goal is simple: go from market data to a reproducible backtest in minutes,
+while still keeping every important setting configurable when you want more
+control. Click [here][getting-started] to get started.
 
 <br>
 
 ## What can I do with it?
 
-ATOM is an end-to-end solution for machine learning pipelines. It supports
-the user from raw data ingestion to the final results' analysis and model
-deployment. Click on the icons to read more about its main functionalities.
+Backtide covers the complete workflow for testing rule-based trading ideas:
+download and store market data, configure an experiment, run one or more
+strategies, benchmark the results, and inspect what happened with plots and
+trade-level analytics. Click on the icons to read more about its main
+functionalities.
 
 <div class="row">
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/data_cleaning" draggable="false">
-        <img src="../img/icons/icon_1.svg" alt="Data cleaning" draggable="false">
-        <figcaption style="margin-top: -8px"><strong>Data cleaning</strong></figcaption>
+      <a href="../user_guide/application" draggable="false">
+        <img src="../img/icons/application.svg" alt="Application" draggable="false">
+        <figcaption style="margin-top: -8px"><strong>Application</strong></figcaption>
       </a>
     </div>
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/feature_engineering" draggable="false">
-          <img src="../img/icons/icon_2.svg" alt="Feature engineering" draggable="false">
-          <figcaption style="margin-top: -8px"><strong>Feature engineering</strong></figcaption>
+      <a href="../user_guide/data" draggable="false">
+        <img src="../img/icons/market_data.svg" alt="Market data" draggable="false">
+        <figcaption style="margin-top: -8px"><strong>Market data</strong></figcaption>
       </a>
     </div>
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/models" draggable="false">
-        <img src="../img/icons/icon_3.svg" alt="Model selection" draggable="false">
-        <figcaption style="margin-top: -8px"><strong>Model selection</strong></figcaption>
+      <a href="../user_guide/experiment" draggable="false">
+          <img src="../img/icons/experiments.svg" alt="Experiments" draggable="false">
+          <figcaption style="margin-top: -8px"><strong>Experiments</strong></figcaption>
       </a>
     </div>
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/training/#hyperparameter-tuning" draggable="false">
-        <img src="../img/icons/icon_4.svg" alt="Hyperparameter tuning" draggable="false">
-        <figcaption style="margin-top: -8px"><strong>Hyperparameter<br>tuning</strong></figcaption>
+      <a href="../user_guide/strategies" draggable="false">
+        <img src="../img/icons/strategies.svg" alt="Strategies" draggable="false">
+        <figcaption style="margin-top: -8px"><strong>Strategies</strong></figcaption>
       </a>
     </div>
   </div>
@@ -56,33 +60,33 @@ deployment. Click on the icons to read more about its main functionalities.
 <div class="row">
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/training" draggable="false">
-        <img src="../img/icons/icon_5.svg" alt="Model training" draggable="false">
-        <figcaption style="margin-top: -8px"><strong>Model training</strong></figcaption>
+      <a href="../user_guide/strategies#performance" draggable="false">
+        <img src="../img/icons/performance.svg" alt="Performance" draggable="false">
+        <figcaption style="margin-top: -8px"><strong>Performance</strong></figcaption>
       </a>
     </div>
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/predicting" draggable="false">
-        <img src="../img/icons/icon_6.svg" alt="Model predictions" draggable="false">
-        <figcaption style="margin-top: -8px"><strong>Model predictions</strong></figcaption>
+      <a href="../user_guide/plots" draggable="false">
+        <img src="../img/icons/plots.svg" alt="Plots" draggable="false">
+        <figcaption style="margin-top: -8px"><strong>Plots</strong></figcaption>
       </a>
     </div>
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/logging" draggable="false">
-        <img src="../img/icons/icon_7.svg" alt="Experiment logging" draggable="false">
-        <figcaption style="margin-top: -8px"><strong>Experiment logging</strong></figcaption>
+      <a href="../user_guide/storage" draggable="false">
+        <img src="../img/icons/storage.svg" alt="Storage" draggable="false">
+        <figcaption style="margin-top: -8px"><strong>Storage</strong></figcaption>
       </a>
     </div>
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/analysis" draggable="false">
-        <img src="../img/icons/icon_8.svg" alt="Analysis and Interpretability" draggable="false">
-        <figcaption style="margin-top: -8px"><strong>Analysis &<br>Interpretability</strong></figcaption>
+      <a href="../user_guide/configuration" draggable="false">
+        <img src="../img/icons/configuration.svg" alt="Configuration" draggable="false">
+        <figcaption style="margin-top: -8px"><strong>Configuration</strong></figcaption>
       </a>
     </div>
   </div>
@@ -91,17 +95,24 @@ deployment. Click on the icons to read more about its main functionalities.
 
 ## Who is it intended for?
 
-* Data scientists that want to fasten up the exploration phase of their machine
-  learning projects.
-* Data scientists that want to run a simple modeling experiment without having
-  to spend too much time on coding.
-* Data scientists that are new to Python and are not (yet) familiar with all
-  the relevant machine learning packages.
-* Data analysts without extensive knowledge of machine learning that want to
-  try out model-based solutions.
-* Anyone who wants to rapidly build a Proof of Concept, for example during a hackathon.
-* Anyone who is new to the field of machine learning and wants a low-code,
-  easy to learn package, to get started building predictive pipelines.
+* **Beginner retail investors** who want to learn whether a trading idea would
+  have worked historically before risking real money.
+* **Python users** who want a clean API for market-data ingestion, technical
+  indicators, strategy execution, storage and plotting without stitching
+  together many separate tools.
+* **Tinkerers and strategy builders** who want to compare built-in strategies,
+  write custom strategies, test position sizing rules and inspect every order
+  and trade.
+* **Data-minded investors** who care about reproducibility: experiment configs,
+  results, equity curves, orders and trades are persisted locally for later
+  analysis.
+* **Educators and learners** who want an approachable sandbox for portfolio
+  mechanics, indicators, drawdowns, risk, currency conversion and benchmark
+  comparisons.
+
+!!! warning
+    Backtide is intended for research and education. It helps you test assumptions;
+    it does not provide financial advice nor guarantee future returns.
 
 
 <br>

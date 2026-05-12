@@ -27,7 +27,7 @@ code. Every setting can still be fine-tuned when needed, but you never have to.
 - **Flexible** — Every parameter is exposed and customizable when you need full control.
 - **Multi-exchange** — Stocks, ETFs, forex and crypto from Yahoo, Binance, Kraken and more.
 - **Batteries included** — Built-in strategies and technical indicators out of the box.
-- **Rich analytics** — 20+ plots and performance metrics cover PnL, returns, drawdown and more.
+- **Rich analytics** — 20+ plots cover PnL, returns, drawdown and more.
 - **Interactive UI** — Professional UI to configure, run and analyze experiments visually.
 - **Open source** — MIT-licensed, community-driven and free forever.
 

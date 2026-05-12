@@ -592,7 +592,7 @@ with tab2:
         st.divider()
 
         with st.expander(
-            label="Backtest details",
+            label="Data details",
             key=(key := "details_expander"),
             icon=":material/candlestick_chart:",
             expanded=bool(_default(key)),

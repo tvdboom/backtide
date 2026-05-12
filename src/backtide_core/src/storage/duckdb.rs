@@ -885,7 +885,7 @@ impl Storage for DuckDb {
 
         let mut sql = String::from(
             "SELECT e.id, e.name, e.tags, e.description, e.started_at, e.finished_at, e.status,
-                    (SELECT MAX(CAST(regexp_extract(s.metrics, '\"sharpe\"\\s*:\\s*(-?[0-9.eE+\\-]+)', 1) AS DOUBLE))
+                    (SELECT MAX(TRY_CAST(regexp_extract(s.metrics, '\"sharpe\"\\s*:\\s*(-?[0-9.eE+\\-]+)', 1) AS DOUBLE))
                        FROM experiment_strategies s
                       WHERE s.experiment_id = e.id
                     ) AS best_sharpe,
@@ -1016,6 +1016,7 @@ impl Storage for DuckDb {
                             quantity: row.get(4)?,
                             price: row.get(5)?,
                             limit_price: row.get(6)?,
+                            sizer: None,
                         },
                         timestamp: row.get(1)?,
                         status: row.get(7)?,
@@ -1179,6 +1180,7 @@ mod tests {
                         quantity: 1.0,
                         price: None,
                         limit_price: None,
+                        sizer: None,
                     },
                     timestamp: 1_700_000_000,
                     status: "filled".to_owned(),

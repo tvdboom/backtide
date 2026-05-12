@@ -7,6 +7,7 @@ use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
+use crate::backtest::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
 
 /// Cheap, pure-Rust indicator-snapshot view passed to strategies on each
 /// bar. The engine pre-computes every auto-injected indicator into a
@@ -96,21 +97,17 @@ pub trait Strategy {
     }
 }
 
-/// Build a market buy order sized to spend `target_cash` (capped at
-/// `max_position_size%` of equity).
+/// Build a market buy order whose quantity is determined by `sizer`.
 ///
-/// Strategies size their orders against `portfolio.cash`, but the
-/// actual fill happens on the *next* bar with slippage and commission
-/// applied — so the cost frequently exceeds the requested
-/// `target_cash` by a small margin. The engine handles that by
-/// auto-shrinking the qty at fill time so equal-weight allocations
-/// like `cash / n_symbols` don't lose their last leg to a fractional
-/// overshoot.
-fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
-    if price <= 0.0 || target_cash <= 0.0 {
+/// `capital` is the cash / equity amount the sizer should size against
+/// (interpretation depends on the concrete sizer — `EqualWeight` divides
+/// it by `n_positions`, `FixedNotional` ignores it, etc.). Returns `None`
+/// when the sizer would yield a non-positive quantity.
+fn buy_with_sizer<S: Sizer>(symbol: &str, sizer: &S, capital: f64, price: f64) -> Option<Order> {
+    if price <= 0.0 {
         return None;
     }
-    let qty = target_cash / price;
+    let qty = sizer.calculate(capital, price, None, None).ok()?;
     if qty <= 0.0 {
         return None;
     }
@@ -121,21 +118,54 @@ fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
         quantity: qty,
         price: None,
         limit_price: None,
+        sizer: None,
     })
 }
 
-/// Build a market sell order to flatten an existing long position.
+/// Build a market buy order sized to spend `target_cash` (uses the
+/// [`FixedNotional`] sizer under the hood). Strategies size their orders
+/// against `portfolio.cash`, but the actual fill happens on the *next*
+/// bar with slippage and commission applied — so the cost frequently
+/// exceeds the requested `target_cash` by a small margin. The engine
+/// handles that by auto-shrinking the qty at fill time so equal-weight
+/// allocations like `cash / n_symbols` don't lose their last leg to a
+/// fractional overshoot.
+fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
+    if target_cash <= 0.0 {
+        return None;
+    }
+    buy_with_sizer(symbol, &FixedNotional::new(target_cash), 0.0, price)
+}
+
+/// Build a market buy order that allocates `capital / n_positions` worth
+/// of `price` to one slot of an equal-weight portfolio. Uses the
+/// [`EqualWeight`] sizer under the hood.
+fn buy_equal_weight(symbol: &str, n_positions: usize, capital: f64, price: f64) -> Option<Order> {
+    if n_positions == 0 || capital <= 0.0 {
+        return None;
+    }
+    buy_with_sizer(symbol, &EqualWeight::new(n_positions as u32), capital, price)
+}
+
+/// Build a market sell order to flatten an existing long position. Uses
+/// the [`FixedQuantity`] sizer under the hood (negated).
 fn sell_order(symbol: &str, quantity: f64) -> Option<Order> {
     if quantity <= 0.0 {
+        return None;
+    }
+    let sizer = FixedQuantity::new(quantity);
+    let qty = sizer.calculate(0.0, 1.0, None, None).ok()?;
+    if qty <= 0.0 {
         return None;
     }
     Some(Order {
         id: new_order_id(),
         symbol: symbol.to_owned(),
         order_type: OrderType::Market,
-        quantity: -quantity,
+        quantity: -qty,
         price: None,
         limit_price: None,
+        sizer: None,
     })
 }
 
@@ -224,7 +254,7 @@ fn rotation_orders(
     scores: &[(String, f64)],
     top_k: usize,
     portfolio: &Portfolio,
-    last_prices: &std::collections::HashMap<String, f64>,
+    last_prices: &HashMap<String, f64>,
 ) -> Vec<Order> {
     use std::collections::HashSet;
 
@@ -246,14 +276,14 @@ fn rotation_orders(
     // Open new positions equal-weight.
     if !target.is_empty() {
         let cash = portfolio_cash(portfolio);
-        let per = cash / target.len() as f64;
+        let n = target.len();
         for sym in &target {
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if cur > 0.0 {
                 continue;
             }
             if let Some(px) = last_prices.get(sym).copied() {
-                if let Some(o) = buy_order(sym, per, px) {
+                if let Some(o) = buy_equal_weight(sym, n, cash, px) {
                     orders.push(o);
                 }
             }
@@ -428,7 +458,8 @@ impl Strategy for AdaptiveRsi {
             let last = *c.last().unwrap_or(&0.0);
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if r < 30.0 && cur <= 0.0 {
-                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
+                {
                     orders.push(o);
                 }
             } else if r > 70.0 && cur > 0.0 {
@@ -541,7 +572,8 @@ impl Strategy for AlphaRsiPro {
 
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if r < oversold && cur <= 0.0 {
-                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
+                {
                     orders.push(o);
                 }
             } else if r > overbought && cur > 0.0 {
@@ -643,7 +675,8 @@ impl Strategy for BollingerMeanReversion {
             let last = *c.last().unwrap_or(&0.0);
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if last < lower && cur <= 0.0 {
-                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
+                {
                     orders.push(o);
                 }
             } else if last > upper && cur > 0.0 {
@@ -746,7 +779,7 @@ impl Strategy for BuyAndHold {
                 Some(&p) if p.is_finite() && p > 0.0 => p,
                 _ => return Vec::new(),
             };
-            return buy_order(target, portfolio_cash(portfolio), px)
+            return buy_equal_weight(target, 1, portfolio_cash(portfolio), px)
                 .map(|o| vec![o])
                 .unwrap_or_default();
         }
@@ -779,10 +812,10 @@ impl Strategy for BuyAndHold {
             return Vec::new();
         }
         let n_remaining = closes.len().saturating_sub(already_entered).max(1);
-        let per = portfolio_cash(portfolio) / n_remaining as f64;
+        let cash = portfolio_cash(portfolio);
         let mut orders = Vec::new();
         for (sym, px) in needs_entry {
-            if let Some(o) = buy_order(sym, per, px) {
+            if let Some(o) = buy_equal_weight(sym, n_remaining, cash, px) {
                 orders.push(o);
             }
         }
@@ -882,7 +915,8 @@ impl Strategy for DoubleTop {
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
 
             if level_match && last > resistance && cur <= 0.0 {
-                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
+                {
                     orders.push(o);
                 }
             } else if cur > 0.0 && last < neckline {
@@ -1014,7 +1048,8 @@ impl Strategy for HybridAlphaRsi {
 
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if r < oversold && in_uptrend && cur <= 0.0 {
-                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
+                {
                     orders.push(o);
                 }
             } else if (r > overbought || !in_uptrend) && cur > 0.0 {
@@ -1352,7 +1387,7 @@ impl Strategy for MultiBollingerRotation {
                 (s.clone(), score)
             })
             .collect();
-        let last_prices: std::collections::HashMap<String, f64> =
+        let last_prices: HashMap<String, f64> =
             closes.iter().map(|(s, c)| (s.clone(), *c.last().unwrap_or(&0.0))).collect();
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
     }
@@ -1456,7 +1491,8 @@ impl Strategy for RiskAverse {
 
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if low_vol && last >= high && cur <= 0.0 {
-                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
+                {
                     orders.push(o);
                 }
             } else if cur > 0.0 && last <= low {
@@ -1652,7 +1688,7 @@ impl Strategy for RocRotation {
                 (s.clone(), score)
             })
             .collect();
-        let last_prices: std::collections::HashMap<String, f64> =
+        let last_prices: HashMap<String, f64> =
             closes.iter().map(|(s, c)| (s.clone(), *c.last().unwrap_or(&0.0))).collect();
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
     }
@@ -1756,7 +1792,7 @@ impl Strategy for Rsi {
             // Dual confirmation: oversold RSI + price at/below lower band.
             if r < 30.0 && last <= lower && cur <= 0.0 {
                 let cash = portfolio_cash(portfolio);
-                if let Some(o) = buy_order(sym, cash / n, last) {
+                if let Some(o) = buy_equal_weight(sym, n as usize, cash, last) {
                     orders.push(o);
                 }
             } else if (r > 70.0 || last >= upper) && cur > 0.0 {
@@ -1963,7 +1999,7 @@ impl Strategy for RsrsRotation {
                 (s.clone(), score)
             })
             .collect();
-        let last_prices: std::collections::HashMap<String, f64> =
+        let last_prices: HashMap<String, f64> =
             closes.iter().map(|(s, c)| (s.clone(), *c.last().unwrap_or(&0.0))).collect();
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
     }
@@ -2026,7 +2062,7 @@ impl SmaCrossover {
 }
 
 impl Strategy for SmaCrossover {
-    const NAME: &'static str = "SMA (Crossover)";
+    const NAME: &'static str = "Crossover SMA";
     const DESCRIPTION: &'static str =
         "Buys on a golden cross (fast MA over slow MA), sells on a death cross.";
     const IS_MULTI_ASSET: bool = false;
@@ -2116,7 +2152,7 @@ impl SmaNaive {
 }
 
 impl Strategy for SmaNaive {
-    const NAME: &'static str = "SMA (Naive)";
+    const NAME: &'static str = "Naive SMA";
     const DESCRIPTION: &'static str =
         "Buys when price is above a moving average, sells when below.";
     const IS_MULTI_ASSET: bool = false;
@@ -2278,7 +2314,7 @@ impl Strategy for TripleRsiRotation {
                 (s.clone(), score)
             })
             .collect();
-        let last_prices: std::collections::HashMap<String, f64> =
+        let last_prices: HashMap<String, f64> =
             closes.iter().map(|(s, c)| (s.clone(), *c.last().unwrap_or(&0.0))).collect();
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
     }
@@ -2385,7 +2421,9 @@ impl Strategy for TurtleTrading {
                 c[c.len() - self.exit_period..].iter().cloned().fold(f64::INFINITY, f64::min);
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if last >= entry_high && cur <= 0.0 {
-                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n_syms, last) {
+                if let Some(o) =
+                    buy_equal_weight(sym, n_syms as usize, portfolio_cash(portfolio), last)
+                {
                     orders.push(o);
                 }
             } else if last <= exit_low && cur > 0.0 {
@@ -2507,7 +2545,8 @@ impl Strategy for Vcp {
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
 
             if last > ceiling && cur <= 0.0 {
-                if let Some(o) = buy_order(sym, portfolio_cash(portfolio) / n, last) {
+                if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
+                {
                     orders.push(o);
                 }
             } else if cur > 0.0 && last < ceiling * 0.92 {

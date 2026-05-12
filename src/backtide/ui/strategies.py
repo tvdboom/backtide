@@ -108,11 +108,11 @@ STRATEGY_PARAMS: dict[str, dict[str, tuple]] = {
         "top_k": ("Top K", 5, 1, 100, 1, "Number of top-ranked assets to hold."),
         "rebalance_interval": ("Rebalance", 20, 1, 500, 1, "Bars between rebalancing."),
     },
-    "SMA (Crossover)": {
+    "Crossover SMA": {
         "fast_period": ("Fast period", 20, 2, 500, 1, "Fast moving average period."),
         "slow_period": ("Slow period", 50, 2, 500, 1, "Slow moving average period."),
     },
-    "SMA (Naive)": {
+    "Naive SMA": {
         "period": ("Period", 20, 2, 500, 1, "Moving average period."),
     },
     "Triple RSI Rotation": {

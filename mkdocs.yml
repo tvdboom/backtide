@@ -116,12 +116,13 @@ nav:
     - User guide:
         - Nomenclature: user_guide/nomenclature.md
         - Application: user_guide/application.md
-        - Experiment: user_guide/experiment.md
         - Data: user_guide/data.md
-        - Storage: user_guide/storage.md
-        - Indicators: user_guide/indicators.md
+        - Experiment: user_guide/experiment.md
         - Strategies: user_guide/strategies.md
+        - Indicators: user_guide/indicators.md
+        - Sizers: user_guide/sizers.md
         - Plots: user_guide/plots.md
+        - Storage: user_guide/storage.md
         - Configuration: user_guide/configuration.md
     - API:
         - config:
@@ -221,6 +222,15 @@ nav:
                 - StochasticOscillator: api/models/indicators/stochasticoscillator.md
                 - VolumeWeightedAveragePrice: api/models/indicators/volumeweightedaverageprice.md
                 - WeightedMovingAverage: api/models/indicators/weightedmovingaverage.md
+            - sizers:
+                - BaseSizer: api/models/sizers/basesizer.md
+                - EqualWeight: api/models/sizers/equalweight.md
+                - FixedFractional: api/models/sizers/fixedfractional.md
+                - FixedNotional: api/models/sizers/fixednotional.md
+                - FixedQuantity: api/models/sizers/fixedquantity.md
+                - KellyCriterion: api/models/sizers/kellycriterion.md
+                - RiskBased: api/models/sizers/riskbased.md
+                - VolatilityScaled: api/models/sizers/volatilityscaled.md
             - strategies:
                 - AdaptiveRsi: api/models/strategies/adaptiversi.md
                 - AlphaRsiPro: api/models/strategies/alpharsipro.md

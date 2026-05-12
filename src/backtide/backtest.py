@@ -52,8 +52,7 @@ def run_experiment(
     2. Computes indicators over the entire dataset.
     3. Runs every strategy in parallel. Each strategy has its own independent
        portfolio, order book and equity curve.
-    4. Persists the [`ExperimentResult`] (and per-strategy artifacts) into the
-       database.
+    4. Persists the results into the database.
 
     Parameters
     ----------
@@ -91,16 +90,18 @@ def run_experiment(
 
     Examples
     --------
-    >>> from backtide.backtest import run_experiment
-    >>> from backtide.strategies import BuyAndHold
-    >>>
-    >>> result = run_experiment(
-    ...     name="Apple and Microsoft",
-    ...     symbols=["AAPL", "MSFT"],
-    ...     interval="1d",
-    ...     strategies=[BuyAndHold()],
-    ... )
-    >>> print(result)
+    ```pycon
+    from backtide.backtest import run_experiment
+    from backtide.strategies import BuyAndHold
+
+    result = run_experiment(
+        name="Apple and Microsoft",
+        symbols=["AAPL", "MSFT"],
+        interval="1d",
+        strategies=[BuyAndHold()],
+    )
+    print(result)
+    ```
     """
 
     def resolve_polymorphic_param(values: Any) -> tuple[list[str], dict[str, Any]]:
