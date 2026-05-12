@@ -58,7 +58,7 @@ def plot_position_size(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a position-size over time chart for a single strategy run.
 
     Reconstructs the held quantity per symbol from the run's filled
@@ -118,8 +118,8 @@ def plot_position_size(
     from backtide.storage import query_experiments, query_strategy_runs
 
     exp = query_experiments().iloc[0]
-    runs = query_strategy_runs(exp.id)
-    plot_position_size(runs[0])
+    run = query_strategy_runs(exp.id)[-1]
+    plot_position_size(run)
     ```
 
     """

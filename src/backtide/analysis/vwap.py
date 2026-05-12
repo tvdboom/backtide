@@ -57,12 +57,12 @@ def plot_vwap(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a VWAP (Volume-Weighted Average Price) chart.
 
-    Displays the cumulative VWAP alongside the closing price for one or
-    more symbols. VWAP is a key benchmark used to assess whether a security
-    was bought or sold at a favorable price relative to volume.
+    Displays the cumulative VWAP alongside the closing price (dashed line)
+    for one or more symbols. VWAP is a key benchmark used to assess whether
+    a security was bought or sold at a favorable price relative to volume.
 
     Parameters
     ----------
@@ -142,22 +142,22 @@ def plot_vwap(
         else:
             vwap = tp_vol.cumsum() / subset["volume"].cumsum()
 
-        # Close price as a thin line
+        # Close price as a dashed line
         fig.add_trace(
             go.Scatter(
                 x=subset["dt"],
                 y=subset["close"],
                 mode="lines",
                 name="Close",
-                line={"color": color, "width": cfg.plots.line_width, "dash": "dot"},
+                line={"color": color, "width": cfg.plots.line_width / 2, "dash": "dash"},
                 opacity=0.8,
                 legendgroup=symbol,
-                legendgrouptitle_text=symbol,
                 customdata=[
                     _format_price(x["close"], currency=x.get("currency"))
                     for _, x in subset.iterrows()
                 ],
                 hovertemplate=f"%{{x}}<br>Close: %{{customdata}}<extra>{symbol}</extra>",
+                showlegend=False,
             )
         )
 
@@ -167,7 +167,7 @@ def plot_vwap(
                 x=subset["dt"],
                 y=vwap,
                 mode="lines",
-                name="VWAP",
+                name=symbol,
                 line={"color": color, "width": cfg.plots.line_width},
                 legendgroup=symbol,
                 customdata=[

@@ -62,7 +62,7 @@ def plot_trade_duration(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a histogram of trade durations for one or more strategy runs.
 
     Each strategy gets its own translucent histogram overlaid on the same

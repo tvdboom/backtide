@@ -58,7 +58,7 @@ def plot_rolling_returns(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a rolling-return chart for one or more strategy runs.
 
     Each line plots the compounded return over a trailing `window` of samples.

@@ -85,11 +85,11 @@ class TestFixedFractional:
     def test_fixed_fractional_invalid_fraction(self):
         """Fraction must be between 0 and 1."""
         sizer = FixedFractional(1.5)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="fraction must be between 0 and 1"):
             sizer.calculate(equity=10000, price=100)
 
         sizer = FixedFractional(-0.05)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="fraction must be between 0 and 1"):
             sizer.calculate(equity=10000, price=100)
 
 
@@ -119,10 +119,10 @@ class TestRiskBased:
     def test_risk_based_invalid_stop_distance(self):
         """stop_distance must be positive."""
         sizer = RiskBased(0.01)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="stop_distance must be positive"):
             sizer.calculate(equity=10000, price=100, stop_distance=-5)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="stop_distance must be positive"):
             sizer.calculate(equity=10000, price=100, stop_distance=0)
 
 
@@ -152,10 +152,10 @@ class TestVolatilityScaled:
     def test_volatility_scaled_invalid_atr(self):
         """ATR must be positive."""
         sizer = VolatilityScaled(0.02)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="atr must be positive"):
             sizer.calculate(equity=10000, price=100, atr=-1.0)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="atr must be positive"):
             sizer.calculate(equity=10000, price=100, atr=0)
 
 
@@ -216,7 +216,7 @@ class TestKellyCriterion:
             avg_loss=100,
             fraction=1.0,
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="win_rate must be 0-1"):
             sizer.calculate(equity=10000, price=100)
 
         # Invalid avg_win
@@ -226,7 +226,7 @@ class TestKellyCriterion:
             avg_loss=100,
             fraction=1.0,
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="avg_win and avg_loss must be positive"):
             sizer.calculate(equity=10000, price=100)
 
 
@@ -259,7 +259,7 @@ class TestEqualWeight:
     def test_equal_weight_invalid_n_positions(self):
         """n_positions must be > 0."""
         sizer = EqualWeight(0)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="n_positions must be > 0"):
             sizer.calculate(equity=100000, price=100)
 
 
@@ -269,19 +269,19 @@ class TestInputValidation:
     def test_invalid_equity_fixed_fractional(self):
         """Equity must be positive for sizers that use it."""
         sizer = FixedFractional(0.02)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="equity and price must be positive"):
             sizer.calculate(equity=-10000, price=100)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="equity and price must be positive"):
             sizer.calculate(equity=0, price=100)
 
     def test_invalid_price_fixed_fractional(self):
         """Price must be positive for sizers that use it."""
         sizer = FixedFractional(0.02)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="equity and price must be positive"):
             sizer.calculate(equity=10000, price=-100)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="equity and price must be positive"):
             sizer.calculate(equity=10000, price=0)
 
 

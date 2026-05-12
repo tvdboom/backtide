@@ -84,7 +84,7 @@ def plot_price(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a price line chart.
 
     Optionally, overlay the prices with indicators.
@@ -208,7 +208,7 @@ def plot_price(
                 if price_col != "close":
                     indicator_data["close"] = subset[price_col]
 
-                values = _to_pandas(ind.compute(indicator_data))
+                values = _to_pandas(ind.compute(indicator_data))  # ty: ignore[unresolved-attribute]
 
                 if values.shape[1] == 1:
                     fig.add_trace(

@@ -987,14 +987,12 @@ class TestPlotMaeMfe:
         bars = pd.DataFrame(
             {
                 "open_ts": [t.entry_ts for t in run.trades] + [t.exit_ts for t in run.trades],
+                "interval": ["1d", "1d", "1d", "1d"],
                 "high": [110.0, 105.0, 110.0, 105.0],
                 "low": [95.0, 90.0, 95.0, 90.0],
             }
         )
-        monkeypatch.setattr(
-            "backtide.analysis.mae_mfe.query_bars",
-            lambda **_: bars,
-        )
+        monkeypatch.setattr("backtide.analysis.mae_mfe.query_bars", lambda **_: bars)
         fig = plot_mae_mfe(run, display=None)
         names = {t.name for t in fig.data}
         # Diagonal reference is rendered as a layout shape.

@@ -55,7 +55,7 @@ def plot_trade_pnl(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a per-trade PnL over time plot for one or more strategy runs.
 
     Each marker represents a single closed trade plotted at its exit

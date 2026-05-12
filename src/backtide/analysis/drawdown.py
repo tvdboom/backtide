@@ -56,7 +56,7 @@ def plot_drawdown(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a drawdown chart.
 
     Plots the percentage drawdown from the running peak over time for

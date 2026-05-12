@@ -73,7 +73,7 @@ def plot_seasonality(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a seasonality heatmap.
 
     For daily or longer intervals, aggregates returns into calendar months and

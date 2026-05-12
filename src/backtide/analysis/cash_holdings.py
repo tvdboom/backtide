@@ -57,7 +57,7 @@ def plot_cash_holdings(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a cash-holdings-over-time chart for one or more strategy runs.
 
     For multi-currency strategies, one line is drawn per `(strategy, currency)`

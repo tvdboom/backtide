@@ -21,7 +21,7 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     **Coinbase** and **Kraken**. Yahoo covers stocks, ETFs, forex and crypto.
     Binance and Coinbase are crypto-only. Kraken supports crypto and major
     forex pairs. You can configure which provider is used for each instrument type
-    in the [configuration].
+    in the [configuration]. Read more in the [user guide][providers].
 
 ??? faq "Can I use Backtide without an API key?"
     Yes. All four bundled providers use public REST endpoints that do not
@@ -45,6 +45,10 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
 ??? faq "How do I clear or reset the local database?"
     You can delete specific series through the Python API using [`delete_symbols`],
     or simply delete the `.backtide/` directory to start fresh.
+
+??? faq "How do I show the symbol logos in the application?"
+    Backtide fetches symbol logos from [logokit]. Create an API key and add it to
+    the [configuration]. The logos will appear automatically in the Streamlit app.
 
 ??? faq "Can I use multiple providers for the same instrument type?"
     Not within a single configuration. Each instrument type maps to exactly one
@@ -76,7 +80,6 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     `tox -e bench`. See the [contributing] page for more details.
 
 ??? faq "How do I report a bug or request a feature?"
-    Open an [issue](https://github.com/tvdboom/backtide/issues) on GitHub.
-    For bugs, include a minimal reproduction scenario. For features, describe
-    the use case and expected behavior. See the [contributing] guidelines for
-    more details.
+    Open an [issue](https://github.com/tvdboom/backtide/issues) on GitHub. For bugs, include a minimal reproduction scenario.
+    For features, describe the use case and expected behavior. See the [contributing]
+    guidelines for more details.

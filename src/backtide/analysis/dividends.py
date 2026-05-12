@@ -57,7 +57,7 @@ def plot_dividends(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a dividend history chart.
 
     Displays dividend payments over time for one or more symbols as a bar

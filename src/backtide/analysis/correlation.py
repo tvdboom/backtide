@@ -56,7 +56,7 @@ def plot_correlation(
     figsize: tuple[int, int] = (700, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Create a correlation heatmap.
 
     Computes pairwise Pearson correlation of period-over-period returns

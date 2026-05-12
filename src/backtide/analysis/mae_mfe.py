@@ -62,7 +62,7 @@ def plot_mae_mfe(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> [go.Figure] | None:
+) -> go.Figure | None:
     """Plot Maximum Adverse Excursion vs Maximum Favourable Excursion per trade.
 
     For each closed trade, compute the maximum unrealized loss (MAE) and gain (MFE)
