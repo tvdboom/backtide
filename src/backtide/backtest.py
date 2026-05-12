@@ -30,7 +30,9 @@ from backtide.core.backtest import (
     State,
     StrategyExpConfig,
     Trade,
-    _run_experiment,
+)
+from backtide.core.backtest import (
+    run_experiment as _run_experiment,
 )
 from backtide.utils.utils import _to_list
 
@@ -116,71 +118,100 @@ def run_experiment(
         return elements, overrides
 
     kwargs = kwargs.copy()
-    cfg = config or GeneralExpConfig()
+    cfg = config or ExperimentConfig()
 
     # Retrieve a config parameter from the arguments
-    get = lambda k, s: kwargs.pop(k, kwargs.get(s, {}).get(k)) or getattr(getattr(cfg, s), k)
+    get = lambda k, s: (
+        kwargs.pop(k, getattr(kwargs.get(s), k, None)) or getattr(getattr(cfg, s), k)
+    )
 
     strategies, strategy_overrides = resolve_polymorphic_param(get("strategies", "strategy"))
     indicators, indicator_overrides = resolve_polymorphic_param(get("indicators", "indicators"))
 
     cfg = ExperimentConfig(
-        general=GeneralExpConfig(
-            name=get("name", "general"),
-            tags=get("tags", "general"),
-            description=get("description", "general"),
+        general=kwargs.pop(
+            "general",
+            GeneralExpConfig(
+                name=get("name", "general"),
+                tags=get("tags", "general"),
+                description=get("description", "general"),
+            ),
         ),
-        data=DataExpConfig(
-            instrument_type=get("instrument_type", "data"),
-            symbols=get("symbols", "data"),
-            full_history=get("full_history", "data"),
-            start_date=get("start_date", "data"),
-            end_date=get("end_date", "data"),
-            interval=get("interval", "data"),
+        data=kwargs.pop(
+            "data",
+            DataExpConfig(
+                instrument_type=get("instrument_type", "data"),
+                symbols=get("symbols", "data"),
+                full_history=get("full_history", "data"),
+                start_date=get("start_date", "data"),
+                end_date=get("end_date", "data"),
+                interval=get("interval", "data"),
+            ),
         ),
-        portfolio=PortfolioExpConfig(
-            initial_cash=get("initial_cash", "portfolio"),
-            base_currency=get("base_currency", "portfolio"),
-            starting_positions=get("starting_positions", "portfolio"),
+        portfolio=kwargs.pop(
+            "portfolio",
+            PortfolioExpConfig(
+                initial_cash=get("initial_cash", "portfolio"),
+                base_currency=get("base_currency", "portfolio"),
+                starting_positions=get("starting_positions", "portfolio"),
+            ),
         ),
-        strategy=StrategyExpConfig(
-            benchmark=get("benchmark", "strategy"),
-            strategies=strategies,
+        strategy=kwargs.pop(
+            "strategy",
+            StrategyExpConfig(
+                benchmark=get("benchmark", "strategy"),
+                strategies=strategies,
+            ),
         ),
-        indicators=IndicatorExpConfig(
-            indicators=indicators,
+        indicators=kwargs.pop(
+            "indicators",
+            IndicatorExpConfig(
+                indicators=indicators,
+            ),
         ),
-        exchange=ExchangeExpConfig(
-            commission_type=get("commission_type", "exchange"),
-            commission_pct=get("commission_pct", "exchange"),
-            commission_fixed=get("commission_fixed", "exchange"),
-            slippage=get("slippage", "exchange"),
-            allowed_order_types=get("allowed_order_types", "exchange"),
-            partial_fills=get("partial_fills", "exchange"),
-            allow_margin=get("allow_margin", "exchange"),
-            max_leverage=get("max_leverage", "exchange"),
-            initial_margin=get("initial_margin", "exchange"),
-            maintenance_margin=get("maintenance_margin", "exchange"),
-            margin_interest=get("margin_interest", "exchange"),
-            allow_short_selling=get("allow_short_selling", "exchange"),
-            borrow_rate=get("borrow_rate", "exchange"),
-            max_position_size=get("max_position_size", "exchange"),
-            conversion_mode=get("conversion_mode", "exchange"),
-            conversion_threshold=get("conversion_threshold", "exchange"),
-            conversion_period=get("conversion_period", "exchange"),
-            conversion_interval=get("conversion_interval", "exchange"),
+        exchange=kwargs.pop(
+            "exchange",
+            ExchangeExpConfig(
+                commission_type=get("commission_type", "exchange"),
+                commission_pct=get("commission_pct", "exchange"),
+                commission_fixed=get("commission_fixed", "exchange"),
+                slippage=get("slippage", "exchange"),
+                allowed_order_types=get("allowed_order_types", "exchange"),
+                partial_fills=get("partial_fills", "exchange"),
+                allow_margin=get("allow_margin", "exchange"),
+                max_leverage=get("max_leverage", "exchange"),
+                initial_margin=get("initial_margin", "exchange"),
+                maintenance_margin=get("maintenance_margin", "exchange"),
+                margin_interest=get("margin_interest", "exchange"),
+                allow_short_selling=get("allow_short_selling", "exchange"),
+                borrow_rate=get("borrow_rate", "exchange"),
+                max_position_size=get("max_position_size", "exchange"),
+                conversion_mode=get("conversion_mode", "exchange"),
+                conversion_threshold=get("conversion_threshold", "exchange"),
+                conversion_period=get("conversion_period", "exchange"),
+                conversion_interval=get("conversion_interval", "exchange"),
+            ),
         ),
-        engine=EngineExpConfig(
-            warmup_period=get("warmup_period", "engine"),
-            trade_on_close=get("trade_on_close", "engine"),
-            risk_free_rate=get("risk_free_rate", "engine"),
-            exclusive_orders=get("exclusive_orders", "engine"),
-            random_seed=get("random_seed", "engine"),
-            empty_bar_policy=get("empty_bar_policy", "engine"),
+        engine=kwargs.pop(
+            "engine",
+            EngineExpConfig(
+                warmup_period=get("warmup_period", "engine"),
+                trade_on_close=get("trade_on_close", "engine"),
+                risk_free_rate=get("risk_free_rate", "engine"),
+                exclusive_orders=get("exclusive_orders", "engine"),
+                random_seed=get("random_seed", "engine"),
+                empty_bar_policy=get("empty_bar_policy", "engine"),
+            ),
         ),
     )
 
     if kwargs:
         raise ValueError(f"Unknown keyword arguments: {', '.join(kwargs)}")
+
+    if not cfg.data.symbols:
+        raise ValueError("Experiment configuration has no symbols.")
+
+    if not cfg.strategy.strategies and not strategy_overrides:
+        raise ValueError("Experiment configuration has no strategies.")
 
     return _run_experiment(cfg, verbose, strategy_overrides, indicator_overrides)

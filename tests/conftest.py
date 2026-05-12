@@ -23,30 +23,24 @@ from backtide.data import (
 # Storage path: every pytest run gets a fresh tempdir.
 #
 # A pre-built DuckDB containing AAPL daily bars (2024-01-01 → 2024-03-01)
-# lives at ``tests/_data/database.duckdb`` and is copied into the
-# tempdir so tests can run real backtests fully offline. Run
-# ``python tests/bootstrap_data.py`` once to create the fixture.
+# lives at `tests/_data/database.duckdb` and is copied into the tempdir so
+# tests can run real backtests fully offline.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_FIXTURE_DB = Path(__file__).resolve().parent / "_data" / "database.duckdb"
-_TEST_STORAGE = Path(tempfile.mkdtemp(prefix="backtide_test_storage_"))
+db_location = Path(__file__).resolve().parent / "data" / "database.duckdb"
+temp_location = Path(tempfile.mkdtemp(prefix="backtide_test_storage_"))
 
-if _FIXTURE_DB.exists():
-    shutil.copy(_FIXTURE_DB, _TEST_STORAGE / "database.duckdb")
+# Copy test database to temp location to not overwrite.
+shutil.copy(db_location, temp_location / "database.duckdb")
 
 set_config(
     Config(
         data=DataConfig(
-            storage_path=str(_TEST_STORAGE),
+            storage_path=str(temp_location),
             providers={"crypto": "yahoo"},
         ),
     )
 )
-
-
-def fixture_db_available() -> bool:
-    """Return True iff the pre-built test DuckDB fixture is present."""
-    return _FIXTURE_DB.exists()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

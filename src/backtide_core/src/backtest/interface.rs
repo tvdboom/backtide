@@ -15,7 +15,6 @@ use std::collections::HashMap;
 /// delegating here.
 #[pyfunction]
 #[pyo3(
-    name = "_run_experiment",
     signature = (
         config,
         verbose = true,
@@ -23,7 +22,7 @@ use std::collections::HashMap;
         indicator_overrides = None,
     )
 )]
-pub fn run_experiment_inner(
+pub fn run_experiment(
     py: Python<'_>,
     config: PyRef<'_, ExperimentConfig>,
     verbose: bool,

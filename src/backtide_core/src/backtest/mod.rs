@@ -1,4 +1,4 @@
-use crate::backtest::interface::run_experiment_inner;
+use crate::backtest::interface::run_experiment;
 use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::conversion_period::ConversionPeriod;
 use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
@@ -89,7 +89,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<strategies::Vcp>()?;
 
     // Functions
-    m.add_function(wrap_pyfunction!(run_experiment_inner, &m)?)?;
+    m.add_function(wrap_pyfunction!(run_experiment, &m)?)?;
 
     parent.add_submodule(&m)?;
 

@@ -54,6 +54,7 @@ __all__ = [
     "Vcp",
     "VolumeWeightedAveragePrice",
     "WeightedMovingAverage",
+    "run_experiment",
 ]
 
 from typing import Any, ClassVar
@@ -4490,3 +4491,14 @@ class WeightedMovingAverage:
             The description.
 
         """
+
+def run_experiment(config, verbose=True, strategy_overrides=None, indicator_overrides=None):
+    """Low-level entry point that runs an already-built experiment
+    configuration.
+
+    This is **not** the public API — Python callers should use
+    `backtide.backtest.run_experiment`, which handles kwargs
+    translation and polymorphic strategies/indicators before
+    delegating here.
+
+    """
