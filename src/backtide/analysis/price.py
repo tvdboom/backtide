@@ -84,7 +84,7 @@ def plot_price(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Create a price line chart.
 
     Optionally, overlay the prices with indicators.
@@ -136,7 +136,7 @@ def plot_price(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also
@@ -203,7 +203,12 @@ def plot_price(
 
         if ind_dict:
             for name, ind in ind_dict.items():
-                values = _to_pandas(ind.compute(subset))  # ty: ignore[unresolved-attribute]
+                # Ensure the indicator computes from the same price series being plotted
+                indicator_data = subset.copy()
+                if price_col != "close":
+                    indicator_data["close"] = subset[price_col]
+
+                values = _to_pandas(ind.compute(indicator_data))
 
                 if values.shape[1] == 1:
                     fig.add_trace(

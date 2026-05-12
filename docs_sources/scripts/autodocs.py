@@ -36,6 +36,7 @@ BACKTIDE_URL = "https://github.com/tvdboom/backtide/blob/master/"
 # Mapping of keywords to urls
 # Usage in docs: [anchor][key] or [key][] -> [anchor][value]
 CUSTOM_URLS = {
+    "figure": "https://plotly.com/python-api-reference/generated/plotly.graph_objects.Figure.html",
     "logokit": "https://logokit.com/",
     "momentjs": "https://momentjscom.readthedocs.io/en/latest/moment/04-displaying/01-format/",
     "numba": "https://numba.pydata.org/",

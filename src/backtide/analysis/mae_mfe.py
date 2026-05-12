@@ -62,12 +62,12 @@ def plot_mae_mfe(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Plot Maximum Adverse Excursion vs Maximum Favourable Excursion per trade.
 
-    For each closed trade in `run`, compute the maximum unrealized loss (MAE)
-    and gain (MFE) versus the entry price. Markers are colored by final PnL sign
-    (green = winner, red = loser). The diagonal reference line marks `mfe == mae`.
+    For each closed trade, compute the maximum unrealized loss (MAE) and gain (MFE)
+    versus the entry price. Markers are colored by final PnL sign (green = winner,
+    red = loser). The diagonal reference line marks `mfe == mae`.
 
     Parameters
     ----------
@@ -75,12 +75,12 @@ def plot_mae_mfe(
         The strategy run whose trades will be analyzed.
 
     interval : str | [Interval] | None, default=None
-        Bar interval to load (e.g., `1d`, `1h`). When `None`, the
-        function lets `query_bars` pick whatever is available.
+        Bar interval to load (e.g., "1d", "1h"). When `None`, the function uses
+        the first available interval in the database.
 
     symbols : list[str] | None, default=None
-        List of symbols to include in the plot. If `None` or empty,
-        all traded symbols are included.
+        List of symbols to include in the plot. If `None` or empty, all traded
+        symbols are included.
 
     title : str | dict | None, default=None
         Title for the plot.
@@ -110,7 +110,7 @@ def plot_mae_mfe(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also
@@ -126,8 +126,8 @@ def plot_mae_mfe(
     from backtide.storage import query_experiments, query_strategy_runs
 
     exp = query_experiments().iloc[0]
-    runs = query_strategy_runs(exp.id)
-    plot_mae_mfe(runs[0], interval="1d")
+    run = query_strategy_runs(exp.id)[-1]
+    plot_mae_mfe(run)
     ```
 
     """
@@ -135,11 +135,6 @@ def plot_mae_mfe(
 
     fig = go.Figure()
     ccy = _resolve_runs_currency([run])
-
-    if interval and not Interval(interval).is_intraday():
-        dt_fmt = _moment_to_strftime(cfg.display.date_format)
-    else:
-        dt_fmt = _moment_to_strftime(cfg.display.datetime_format())
 
     win_mae, win_mfe, win_text = [], [], []
     loss_mae, loss_mfe, loss_text = [], [], []
@@ -151,6 +146,13 @@ def plot_mae_mfe(
         if t.symbol not in cache:
             cache[t.symbol] = query_bars(symbol=t.symbol, interval=interval)
         df = cache[t.symbol]
+
+        # Pick up first available interval
+        interval = Interval(df["interval"][0])
+        if interval.is_intraday():
+            dt_fmt = _moment_to_strftime(cfg.display.datetime_format())
+        else:
+            dt_fmt = _moment_to_strftime(cfg.display.date_format)
 
         window = df.loc[(df["open_ts"] >= t.entry_ts) & (df["open_ts"] <= t.exit_ts)]
         if window.empty:

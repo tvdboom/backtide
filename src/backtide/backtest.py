@@ -113,8 +113,11 @@ def run_experiment(
                 elements.append(elem)
             elif isinstance(elem, dict):
                 overrides.update(elem)
+                elements.extend(elem.keys())
             else:
-                overrides.update({elem.__class__.__name__: elem})
+                name = elem.__class__.__name__
+                overrides[name] = elem
+                elements.append(name)
 
         return elements, overrides
 

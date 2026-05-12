@@ -24,7 +24,7 @@ from backtide.backtest import (
     run_experiment,
 )
 from backtide.config import Config, DataConfig, set_config
-from backtide.strategies import BuyAndHold, SmaNaive
+from backtide.strategies import AdaptiveRsi, SmaNaive
 
 # Set a deterministic config for all doc examples.
 # Use yahoo as crypto provider since binance doesn't allow requests from CI.
@@ -45,7 +45,7 @@ def bootstrap_docs_experiment():
         symbols=["AAPL", "MSFT"],
         interval="1d",
         benchmark="SPY",
-        strategies=[BuyAndHold(), SmaNaive()],
+        strategies=[SmaNaive(), AdaptiveRsi()],
         verbose=False,
     )
 

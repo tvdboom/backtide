@@ -68,7 +68,7 @@ def plot_pnl(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Create a PnL-over-time chart for one or more strategy runs.
 
     Each line tracks a strategy's running profit & loss (current equity minus
@@ -123,7 +123,7 @@ def plot_pnl(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also

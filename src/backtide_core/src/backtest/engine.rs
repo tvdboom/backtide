@@ -1979,6 +1979,7 @@ fn run_one_strategy(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn portfolio_equity_in_currency(
     cash: &HashMap<Currency, f64>,
     positions: &HashMap<String, f64>,
@@ -2352,7 +2353,14 @@ fn try_debit(
     let mut remaining = amount - avail.max(0.0);
 
     // 3) Cover the residual from the base currency at the current FX rate.
-    let base_avail = *cash.get(&base).unwrap_or(&0.0);
+    //    When `ccy == base` we already know step 1 failed (not enough in
+    //    that single bucket), so skip — otherwise the same bucket is
+    //    double-counted and cash goes negative.
+    let base_avail = if ccy == base {
+        0.0
+    } else {
+        *cash.get(&base).unwrap_or(&0.0)
+    };
     let needed_base = match fx.rate(ccy, base, ts) {
         Some(r) if r > 0.0 => remaining * r,
         _ => f64::INFINITY,
@@ -4309,7 +4317,7 @@ mod tests {
         // The auto-shrink path is triggered when `try_debit` returns
         // false. That only happens cross-currency (the same-currency
         // path silently allows cash to go negative — see
-        // `same_currency_buy_can_overdraw_cash` below for that quirk).
+        // `same_currency_buy_shrinks_to_fit_cash` below).
         // Here: base=USD, quote=GBP, no GBP cash, only $1,000 base.
         // A buy of 11 @ 100 GBP needs 1,100; the engine shrinks to 10.
         let mut cfg = mk_cfg("VOD.L");
@@ -4332,13 +4340,11 @@ mod tests {
     }
 
     #[test]
-    fn same_currency_buy_can_overdraw_cash() {
-        // GAP: when the order's quote currency equals the portfolio's
-        // base currency, `try_debit` falls back to "pay from base" and
-        // allows cash to go negative because the same map entry is
-        // first read for `avail` then re-read for `base_avail`. The
-        // auto-shrink branch is therefore never reached and the buy
-        // settles in full at a negative cash balance.
+    fn same_currency_buy_shrinks_to_fit_cash() {
+        // Previously a GAP: when the order's quote currency equalled the
+        // portfolio's base currency, `try_debit` double-counted the same
+        // bucket and allowed cash to go negative. Now fixed: the order is
+        // auto-shrunk so cash stays non-negative.
         let mut cfg = mk_cfg("AAPL");
         cfg.portfolio.initial_cash = 1_000;
         let aligned = mk_aligned("AAPL", &[100.0, 100.0]);
@@ -4353,14 +4359,14 @@ mod tests {
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, buy)]);
         assert_eq!(r.orders[0].status, "filled");
-        assert_eq!(r.orders[0].order.quantity, 11.0); // not shrunk
-                                                      // Cash went negative: 1,000 - 1,100 = -100.
+        // Order should be shrunk to fit the available $1,000.
+        assert!(r.orders[0].order.quantity <= 10.0);
         let last_cash = r
             .equity_curve
             .last()
             .and_then(|s| s.cash.get(&cfg.portfolio.base_currency))
             .copied()
             .unwrap_or(0.0);
-        assert!(last_cash < 0.0);
+        assert!(last_cash >= 0.0);
     }
 }

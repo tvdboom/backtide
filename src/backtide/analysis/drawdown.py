@@ -56,7 +56,7 @@ def plot_drawdown(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Create a drawdown chart.
 
     Plots the percentage drawdown from the running peak over time for
@@ -100,7 +100,7 @@ def plot_drawdown(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also
@@ -141,6 +141,7 @@ def plot_drawdown(
                 line={"color": color, "width": cfg.plots.line_width},
                 fill="tozeroy",
                 fillcolor=f"rgba{color[3:-1]}, 0.15)",
+                hovertemplate="%{x}<br>Drawdown: %{y:.2f}%<extra>%{fullData.name}</extra>",
             )
         )
 

@@ -62,7 +62,7 @@ def plot_rolling_sharpe(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Create a rolling Sharpe-ratio chart for one or more strategy runs.
 
     Each line plots the Sharpe ratio over a trailing `window` of samples,
@@ -109,7 +109,7 @@ def plot_rolling_sharpe(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also

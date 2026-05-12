@@ -58,7 +58,7 @@ def plot_pnl_histogram(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Create a histogram of per-trade PnL for one or more strategy runs.
 
     Each strategy plots its own histogram overlaid on the same axes, so the
@@ -101,7 +101,7 @@ def plot_pnl_histogram(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also

@@ -57,7 +57,7 @@ def plot_returns(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Create a returns distribution histogram.
 
     Shows the distribution of period-over-period percentage returns for
@@ -101,7 +101,7 @@ def plot_returns(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also

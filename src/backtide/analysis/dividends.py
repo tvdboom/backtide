@@ -57,7 +57,7 @@ def plot_dividends(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Create a dividend history chart.
 
     Displays dividend payments over time for one or more symbols as a bar
@@ -98,7 +98,7 @@ def plot_dividends(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also
@@ -113,8 +113,7 @@ def plot_dividends(
     from backtide.storage import query_dividends
     from backtide.analysis import plot_dividends
 
-    df = query_dividends(["AAPL", "MSFT"])
-
+    df = query_dividends("MSFT")
     plot_dividends(df)
     ```
 

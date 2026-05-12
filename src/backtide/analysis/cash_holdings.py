@@ -57,11 +57,64 @@ def plot_cash_holdings(
     figsize: tuple[int, int] = (900, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Create a cash-holdings-over-time chart for one or more strategy runs.
 
     For multi-currency strategies, one line is drawn per `(strategy, currency)`
     pair.
+
+    Parameters
+    ----------
+    runs : [RunResult] | list[[RunResult]]
+        The per-strategy results to plot.
+
+    title : str | dict | None, default=None
+        Title for the plot.
+
+        - If None, no title is shown.
+        - If str, text for the title.
+        - If dict, [title configuration][parameters].
+
+    legend : str | dict | None, default="upper left"
+        Legend for the plot. See the [user guide][parameters] for an extended
+        description of the choices.
+
+        * If None: No legend is shown.
+        * If str: Position to display the legend.
+        * If dict: Legend configuration.
+
+    figsize : tuple[int, int], default=(900, 600)
+        Figure's size in pixels, format as (x, y).
+
+    filename : str | Path | None, default=None
+        Save the plot using this name. The type of the file depends on the
+        provided name (`.html`, `.png`, `.pdf`, etc...). If `filename` has no
+        file type, the plot is saved as `.html`. If `None`, the plot isn't saved.
+
+    display : bool | None, default=True
+        Whether to render the plot. If `None`, it returns the figure.
+
+    Returns
+    -------
+    [Figure] | None
+        The Plotly figure object. Only returned if `display=None`.
+
+    See Also
+    --------
+    - backtide.analysis:plot_mae_mfe
+    - backtide.analysis:plot_price
+    - backtide.analysis:plot_rolling_sharpe
+
+    Examples
+    --------
+    ```pycon
+    from backtide.analysis import plot_cash_holdings
+    from backtide.storage import query_experiments, query_strategy_runs
+
+    exp = query_experiments().iloc[0]
+    runs = query_strategy_runs(exp.id)
+    plot_cash_holdings(runs)
+    ```
 
     """
     if not runs:

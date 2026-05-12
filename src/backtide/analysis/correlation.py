@@ -56,7 +56,7 @@ def plot_correlation(
     figsize: tuple[int, int] = (700, 600),
     filename: str | Path | None = None,
     display: bool | None = True,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Create a correlation heatmap.
 
     Computes pairwise Pearson correlation of period-over-period returns
@@ -96,7 +96,7 @@ def plot_correlation(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The Plotly figure object. Only returned if `display=None`.
 
     See Also
@@ -111,7 +111,7 @@ def plot_correlation(
     from backtide.storage import query_bars
     from backtide.analysis import plot_correlation
 
-    df = query_bars(["AAPL", "MSFT", "GOOG"], "1d")
+    df = query_bars(["AAPL", "MSFT"], "1d")
     plot_correlation(df)
     ```
 

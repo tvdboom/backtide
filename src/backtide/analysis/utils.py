@@ -174,7 +174,7 @@ def _plot(
     filename: str | Path | None = None,
     display: bool | None = True,
     **kwargs,
-) -> go.Figure | None:
+) -> [go.Figure] | None:
     """Apply consistent layout to a Plotly figure and optionally display/save it.
 
     This helper centralizes all styling decisions so that every plot in the
@@ -228,7 +228,7 @@ def _plot(
 
     Returns
     -------
-    go.Figure | None
+    [Figure] | None
         The figure object. Only returned when `display=None`.
 
     """

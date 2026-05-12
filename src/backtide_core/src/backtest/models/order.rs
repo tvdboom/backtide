@@ -3,8 +3,8 @@
 //! Represents a single order submitted to the simulated exchange
 //! during a backtest.
 
-use pyo3::exceptions::PyTypeError;
 use crate::backtest::models::order_type::OrderType;
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::PyFloat;
 use serde::{Deserialize, Serialize};

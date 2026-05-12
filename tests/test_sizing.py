@@ -37,7 +37,7 @@ class TestFixedNotional:
     """Test FixedNotional sizer."""
 
     def test_fixed_notional_basic(self):
-        """quantity = amount / price."""
+        """Quantity = amount / price."""
         sizer = FixedNotional(500)
         qty = sizer.calculate(equity=10000, price=100)
         assert qty == 5.0
@@ -62,7 +62,7 @@ class TestFixedFractional:
     """Test FixedFractional sizer."""
 
     def test_fixed_fractional_basic(self):
-        """quantity = (equity * fraction) / price."""
+        """Quantity = (equity * fraction) / price."""
         sizer = FixedFractional(0.02)
         qty = sizer.calculate(equity=10000, price=100)
         assert qty == 2.0
@@ -97,7 +97,7 @@ class TestRiskBased:
     """Test RiskBased sizer."""
 
     def test_risk_based_basic(self):
-        """quantity = (equity * risk_pct) / stop_distance."""
+        """Quantity = (equity * risk_pct) / stop_distance."""
         sizer = RiskBased(0.01)
         qty = sizer.calculate(equity=10000, price=100, stop_distance=5)
         # (10000 * 0.01) / 5 = 20
@@ -130,14 +130,14 @@ class TestVolatilityScaled:
     """Test VolatilityScaled sizer."""
 
     def test_volatility_scaled_basic(self):
-        """quantity = (equity * risk_pct) / atr."""
+        """Quantity = (equity * risk_pct) / atr."""
         sizer = VolatilityScaled(0.02)
         qty = sizer.calculate(equity=10000, price=100, atr=2.5)
         # (10000 * 0.02) / 2.5 = 80
         assert qty == 80.0
 
     def test_volatility_scaled_requires_atr(self):
-        """atr is required."""
+        """Atr is required."""
         sizer = VolatilityScaled(0.02)
         with pytest.raises(ValueError, match="atr"):
             sizer.calculate(equity=10000, price=100)
@@ -234,7 +234,7 @@ class TestEqualWeight:
     """Test EqualWeight sizer."""
 
     def test_equal_weight_basic(self):
-        """quantity = (equity / n_positions) / price."""
+        """Quantity = (equity / n_positions) / price."""
         sizer = EqualWeight(10)
         qty = sizer.calculate(equity=100000, price=100)
         # (100000 / 10) / 100 = 10000 / 100 = 100
@@ -287,9 +287,3 @@ class TestInputValidation:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-
-
-
-
-
-

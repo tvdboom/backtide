@@ -2837,13 +2837,10 @@ class Order:
     id : str
         Unique identifier of the order. Auto-generated if not provided.
         For [`OrderType.CancelOrder`][OrderType] orders, the `id` field
-        identifies the *target* order that should be cancelled.
+        identifies the target order that should be canceled.
 
     symbol : str
         The ticker symbol this order targets.
-
-    order_type : [OrderType]
-        The execution semantics (market, limit, stop-loss, etc.).
 
     quantity : int | float | [BaseSizer], default=1
         Signed quantity (positive = buy, negative = sell). Fractional values
@@ -2851,6 +2848,9 @@ class Order:
         engine resolves the quantity automatically at order-processing time using
         portfolio equity converted to the asset's quote currency and the asset's
         price.
+
+    order_type : [OrderType]
+        The execution semantics (market, limit, stop-loss, etc...).
 
     price : float | None
         Primary price for the order. The exact meaning depends on
