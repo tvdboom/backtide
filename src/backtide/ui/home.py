@@ -5,16 +5,16 @@ Description: Home dashboard page.
 
 """
 
-from datetime import datetime as dt
 from collections import defaultdict
+from datetime import datetime as dt
+
 import pandas as pd
 import streamlit as st
 
+from backtide.analysis.utils import GREEN, RED, YELLOW
 from backtide.core.config import get_config
 from backtide.core.data import Interval, download_bars, resolve_profiles
 from backtide.core.storage import query_bars, query_experiments, query_instruments
-
-from backtide.analysis.utils import GREEN, YELLOW, RED
 from backtide.ui.utils import (
     _fmt_number,
     _get_logokit_url,
@@ -71,7 +71,7 @@ st.markdown(
             flex-direction: column;
         }}
 
-        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > div:has(> [data-testid="stVerticalBlock"]) {{
+        [data-testid="stColumn"] > div:has([data-testid="stVerticalBlock"]) {{
             flex: 1;
         }}
 
@@ -255,7 +255,7 @@ def _load_daily_bars(symbols: list[str]) -> pd.DataFrame:
         try:
             profiles = resolve_profiles(syms, it, interval="1d", verbose=False)
             download_bars(profiles, start=start_ts, verbose=False)
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass  # Silently skip failures on the home page
 
     return (
@@ -296,7 +296,7 @@ st.markdown('<div class="home-hero"><h2>Welcome to Backtide</h2></div>', unsafe_
 if not experiments.empty:
     st.markdown('<div class="section-label">Recent experiments</div>', unsafe_allow_html=True)
 
-    for col, (_, row) in zip(st.columns(3), experiments.iloc[:3].iterrows()):
+    for col, (_, row) in zip(st.columns(3), experiments.iloc[:3].iterrows(), strict=True):
         with col:
             status = row["status"]
             n_strats = row["n_strategies"]
@@ -310,11 +310,11 @@ if not experiments.empty:
 
             status_lower = status.lower()
             if status_lower == "success":
-                color = f"rgba{GREEN[3:-1]}, 0.15)",
+                color = (f"rgba{GREEN[3:-1]}, 0.15)",)
             elif status_lower == "partial":
-                color = f"rgba{YELLOW[3:-1]}, 0.15)",
+                color = (f"rgba{YELLOW[3:-1]}, 0.15)",)
             else:
-                color = f"rgba{RED[3:-1]}, 0.15)",
+                color = (f"rgba{RED[3:-1]}, 0.15)",)
 
             with st.container(border=True):
                 st.markdown(
@@ -345,11 +345,11 @@ if not experiments.empty:
 
                 st.button(
                     "View results →",
-                    key=row['id'],
+                    key=row["id"],
                     width="stretch",
                     type="tertiary",
-                    on_click=lambda r=row.to_dict(): st.session_state.update(
-                        selected_experiment=r,
+                    on_click=lambda r=row: st.session_state.update(
+                        selected_experiment=r.to_dict(),
                         _home_nav="results.py",
                     ),
                 )
@@ -385,9 +385,9 @@ if not summary.empty:
                 if prev_close and prev_close != 0:
                     change_pct = ((last_close - prev_close) / prev_close) * 100
                 else:
-                    change_pct = 0.
+                    change_pct = 0.0
             else:
-                change_pct = 0.
+                change_pct = 0.0
 
             widgets.append(
                 {
@@ -401,7 +401,7 @@ if not summary.empty:
             )
 
     if widgets:
-        for col, w in zip(st.columns(3), widgets[:3]):
+        for col, w in zip(st.columns(3), widgets[:3], strict=True):
             with col:
                 change_cls = "positive" if w["change_pct"] >= 0 else "negative"
                 change_sign = "+" if w["change_pct"] >= 0 else ""
