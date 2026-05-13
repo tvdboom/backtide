@@ -20,6 +20,7 @@ from backtide.backtest import (
     ExchangeExpConfig,
     ExperimentConfig,
     ExperimentResult,
+    ExperimentStatus,
     GeneralExpConfig,
     IndicatorExpConfig,
     Order,
@@ -362,7 +363,7 @@ class TestRunExperiment:
         except (RuntimeError, ValueError):
             return
         assert isinstance(result, ExperimentResult)
-        assert result.status in ("failed", "completed")
+        assert result.status in (ExperimentStatus.Error, ExperimentStatus.Success)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -527,7 +528,7 @@ class TestRunExperimentPolymorphicForms:
         """A single ``BaseStrategy`` instance is accepted and the run completes."""
         result = run_experiment(strategies=BuyAndHold(), verbose=False, **run_kwargs)
         assert isinstance(result, ExperimentResult)
-        assert result.status == "completed"
+        assert result.status == ExperimentStatus.Success
 
     def test_strategies_list_of_instances(self):
         """A list of instances produces a completed result."""
@@ -536,7 +537,7 @@ class TestRunExperimentPolymorphicForms:
             verbose=False,
             **run_kwargs,
         )
-        assert result.status == "completed"
+        assert result.status == ExperimentStatus.Success
 
     def test_strategies_dict_form_uses_explicit_name(self):
         """``strategies=[{'name': instance}]`` passes the instance under that name."""
@@ -545,7 +546,7 @@ class TestRunExperimentPolymorphicForms:
             verbose=False,
             **run_kwargs,
         )
-        assert result.status == "completed"
+        assert result.status == ExperimentStatus.Success
 
     def test_strategies_mixed_list(self):
         """A list mixing instances and dicts produces a completed result."""
@@ -554,7 +555,7 @@ class TestRunExperimentPolymorphicForms:
             verbose=False,
             **run_kwargs,
         )
-        assert result.status == "completed"
+        assert result.status == ExperimentStatus.Success
 
     def test_strategies_via_strategy_sub_config_dict(self):
         """Strategies passed via flat ``strategies`` kwarg are honoured."""
@@ -563,7 +564,7 @@ class TestRunExperimentPolymorphicForms:
             verbose=False,
             **run_kwargs,
         )
-        assert result.status == "completed"
+        assert result.status == ExperimentStatus.Success
 
     def test_indicators_instance_runs_successfully(self):
         """An indicator instance is computed and the strategy completes."""
@@ -573,7 +574,7 @@ class TestRunExperimentPolymorphicForms:
             verbose=False,
             **run_kwargs,
         )
-        assert result.status == "completed"
+        assert result.status == ExperimentStatus.Success
 
     def test_indicators_sub_config_form(self):
         """``indicators=IndicatorExpConfig(...)`` is treated as the sub-config."""
@@ -583,4 +584,4 @@ class TestRunExperimentPolymorphicForms:
             verbose=False,
             **run_kwargs,
         )
-        assert result.status == "completed"
+        assert result.status == ExperimentStatus.Success

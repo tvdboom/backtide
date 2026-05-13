@@ -11,9 +11,11 @@ from collections.abc import Iterable
 import importlib
 import re
 from typing import TYPE_CHECKING, Any, TypeVar, overload
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+from tzlocal import get_localzone
 
 from backtide.config import DataFrameLibrary, get_config
 from backtide.core.data import Currency
@@ -21,7 +23,6 @@ from backtide.utils.constants import MOMENT_TO_STRFTIME
 
 if TYPE_CHECKING:
     from types import ModuleType
-    from zoneinfo import ZoneInfo
 
     import polars as pl
 
@@ -142,6 +143,14 @@ def _format_price(
             return f"{sign}{num} {currency.symbol}"
 
     return f"{sign}{_format_number(n) if compact else f'{n:,.{dec}f}'}"
+
+
+def _get_timezone(tz: str | None) -> ZoneInfo:
+    """Return the timezone from config or local."""
+    if tz:
+        return ZoneInfo(tz)
+    else:
+        return get_localzone()
 
 
 def _make_dummy_bars(

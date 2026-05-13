@@ -208,6 +208,12 @@ st.sidebar.markdown(
 st.sidebar.image("images/logo transparent.png", width=120)
 
 # Define pages
+home = st.Page(
+    "home.py",
+    title="Home",
+    icon=":material/home:",
+    default=True,
+)
 experiment = st.Page(
     "experiment.py",
     title="Experiment",
@@ -246,6 +252,7 @@ analysis = st.Page(
 
 pg = st.navigation(
     {
+        "": [home],
         "Backtest": [experiment, strategies, indicators, results],
         "Data": [download, storage, analysis],
     }

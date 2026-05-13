@@ -19,6 +19,7 @@ from backtide.core.backtest import (
     ExchangeExpConfig,
     ExperimentConfig,
     ExperimentResult,
+    ExperimentStatus,
     GeneralExpConfig,
     IndicatorExpConfig,
     Order,
@@ -137,6 +138,7 @@ def run_experiment(
             "general",
             GeneralExpConfig(
                 name=get("name", "general"),
+                icon=get("icon", "general"),
                 tags=get("tags", "general"),
                 description=get("description", "general"),
             ),

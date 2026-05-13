@@ -3,6 +3,7 @@
 //! Holds everything produced by a single backtest run: per-strategy
 //! equity curves, executed trades, order history, and summary metrics.
 
+use crate::backtest::models::experiment_status::ExperimentStatus;
 use crate::backtest::models::order::Order;
 use crate::data::models::currency::Currency;
 use pyo3::prelude::*;
@@ -350,8 +351,9 @@ impl RunResult {
 /// finished_at : int
 ///     UTC timestamp (seconds) when the run finished.
 ///
-/// status : str
-///     `"completed"` if every strategy succeeded, `"failed"` otherwise.
+/// status : [ExperimentStatus]
+///     `Success` if every strategy succeeded, `Partial` if some failed,
+///     `Error` if all failed or the experiment could not run.
 ///
 /// strategies : list[[RunResult]]
 ///     One result entry per evaluated strategy.
@@ -372,7 +374,7 @@ pub struct ExperimentResult {
     pub tags: Vec<String>,
     pub started_at: i64,
     pub finished_at: i64,
-    pub status: String,
+    pub status: ExperimentStatus,
     pub strategies: Vec<RunResult>,
     pub warnings: Vec<String>,
 }

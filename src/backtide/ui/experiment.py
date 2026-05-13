@@ -25,6 +25,7 @@ from backtide.backtest import (
     EngineExpConfig,
     ExchangeExpConfig,
     ExperimentConfig,
+    ExperimentStatus,
     GeneralExpConfig,
     IndicatorExpConfig,
     OrderType,
@@ -49,7 +50,6 @@ from backtide.ui.utils import (
     _default_benchmark,
     _draw_cards,
     _get_instrument_type_description,
-    _get_timezone,
     _list_instruments,
     _persist,
     _query_bars_summary,
@@ -60,6 +60,7 @@ from backtide.utils.constants import (
     MAX_INSTRUMENT_SELECTION,
     TAG_PATTERN,
 )
+from backtide.utils.utils import _get_timezone
 
 # Disable streamlit warnings spawned by the thread running _build_experiment_config
 logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(
@@ -79,6 +80,7 @@ def _apply_config_to_state(exp: ExperimentConfig, state: dict[str, Any] | Sessio
         state[f"_{key}"] = value
 
     _set("experiment_name", INVALID_FILENAME_CHARS.sub("", exp.general.name))
+    _set("experiment_icon", exp.general.icon or "🧪")
     _set("tags", exp.general.tags)
     _set("description", exp.general.description)
 
@@ -153,6 +155,7 @@ def _build_config_toml(
     cfg = ExperimentConfig(
         general=GeneralExpConfig(
             name=experiment_name or "",
+            icon=_get("experiment_icon", "🧪"),
             tags=_get("tags", default.general.tags),
             description=_get("description", default.general.description),
         ),
@@ -296,14 +299,80 @@ with tab1:
     if "experiment_id" not in st.session_state:
         st.session_state.experiment_id = str(uuid.uuid4())[:8]
 
-    col1, col2 = st.columns([2, 1], vertical_alignment="bottom")
+    ICONS = [
+        # Science & research
+        "🧪",
+        "🔬",
+        "🧬",
+        "🔭",
+        # Finance & charts
+        "📊",
+        "📈",
+        "📉",
+        "💹",
+        "🏦",
+        "💰",
+        "💎",
+        "💵",
+        "💳",
+        "🪙",
+        # Performance & goals
+        "🚀",
+        "⚡",
+        "🎯",
+        "🏆",
+        "⭐",
+        "🥇",
+        "🏅",
+        # Strategy & intelligence
+        "🧠",
+        "🎲",
+        "♟️",
+        "🧩",
+        # Signals & alerts
+        "📡",
+        "🔔",
+        "📣",
+        # Risk & protection
+        "🛡️",
+        # Nature & energy
+        "🔥",
+        "🌊",
+        "🌙",
+        "☀️",
+        "⛈️",
+        "🌿",
+        # Animals (bull/bear market)
+        "🐂",
+        "🐻",
+        "🦅",
+        "🐋",
+        # Misc
+        "🎰",
+        "⏱️",
+        "🗺️",
+        "🧭",
+        "⚙️",
+        "🔮",
+    ]
+
+    col_icon, col1, col2 = st.columns([0.44, 2, 1.2], vertical_alignment="bottom")
+
+    col_icon.selectbox(
+        label="Icon",
+        options=ICONS,
+        key=(key := "experiment_icon"),
+        index=ICONS.index(default) if (default := _default(key, "🧪")) in ICONS else 0,
+        on_change=lambda k=key: _persist(k),
+        help="Pick an icon for this experiment.",
+    )
 
     experiment_name = col1.text_input(
         label="Experiment name",
         key=(key := "experiment_name"),
         value=_default(key),
         placeholder=st.session_state.experiment_id,
-        max_chars=40,
+        max_chars=35,
         on_change=lambda k=key: _persist(k),
         help=(
             "A human-readable name to identify this experiment (optional). "
@@ -811,13 +880,13 @@ with tab4:
             st.session_state["benchmark"] = None
             st.session_state["_benchmark"] = None
 
-        st.write("")
+        st.markdown("")
 
         selected_strats = st.multiselect(
             label="Strategies",
             key=(key := "strategies"),
             options=stored_strat,
-            default=_default(key, []),
+            default=[x for x in _default(key, []) if x in stored_strat],
             placeholder="Select from the saved strategies...",
             on_change=lambda k=key: _persist(k),
             help="Choose which strategies to use in this experiment.",
@@ -849,7 +918,7 @@ with tab5:
             label="Indicators",
             key=(key := "indicators"),
             options=stored_ind,
-            default=_default(key, []),
+            default=[x for x in _default(key, []) if x in stored_ind],
             placeholder="Select from the saved indicators...",
             on_change=lambda k=key: _persist(k),
             help="Choose which indicators to use in this experiment.",
@@ -1350,13 +1419,13 @@ if button_slot.button(
 
             n_strats = len(result.strategies)
 
-            if result.status == "completed" and not result.warnings:
+            if result.status == ExperimentStatus.Success and not result.warnings:
                 st.success(
                     f"Experiment **{experiment_name}** finished successfully. "
                     f"Evaluated {n_strats} strateg{'y' if n_strats == 1 else 'ies'}.",
                     icon=":material/check_circle:",
                 )
-            elif result.status == "completed":
+            elif result.status == ExperimentStatus.Success:
                 st.warning(
                     f"Experiment **{experiment_name}** finished with {len(result.warnings)} "
                     f"warning{'s' if len(result.warnings) > 1 else ''}. Evaluated {n_strats} "

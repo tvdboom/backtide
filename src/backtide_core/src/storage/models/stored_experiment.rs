@@ -8,6 +8,7 @@
 pub struct StoredExperiment {
     pub id: String,
     pub name: String,
+    pub icon: String,
     pub tags: Vec<String>,
     pub description: String,
     pub started_at: i64,

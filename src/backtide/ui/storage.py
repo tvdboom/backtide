@@ -16,10 +16,10 @@ from backtide.core.storage import delete_symbols
 from backtide.ui.utils import (
     _fmt_number,
     _get_logokit_url,
-    _get_timezone,
     _parse_date,
     _query_bars_summary,
 )
+from backtide.utils.utils import _get_timezone
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functionalities

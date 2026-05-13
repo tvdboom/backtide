@@ -32,12 +32,11 @@ from backtide.ui.utils import (
     _default,
     _fmt_metric,
     _get_logokit_url,
-    _get_timezone,
     _persist,
     _query_bars_summary,
     _to_upper_values,
 )
-from backtide.utils.utils import _to_pandas, _ts_to_datetime
+from backtide.utils.utils import _get_timezone, _to_pandas, _ts_to_datetime
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility functions
@@ -56,6 +55,7 @@ def _load_bars(symbols: list[str], interval: Interval) -> pd.DataFrame:
 
 cfg = get_config()
 tz = _get_timezone(cfg.display.timezone)
+logokit_key = cfg.display.logokit_api_key
 
 st.set_page_config(page_title="Backtide - Analysis")
 
@@ -357,7 +357,6 @@ with tab_map[tab_summary]:
     if active_tab == tab_summary:
         st.markdown(_SUMMARY_CSS, unsafe_allow_html=True)
         stats_df = _to_pandas(compute_statistics(data=bars, price_col=price_col))
-        logokit_key = cfg.display.logokit_api_key
 
         n = len(stats_df)
 

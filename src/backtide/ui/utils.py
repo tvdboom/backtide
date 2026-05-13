@@ -15,7 +15,6 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
-from tzlocal import get_localzone
 
 from backtide.config import Config
 from backtide.core.data import (
@@ -249,14 +248,6 @@ def _fmt_period(start: date, end: date) -> str:
         return f"{n_years}y {remaining_days}d"
 
     return f"{remaining_days}d"
-
-
-def _get_timezone(tz: str | None) -> ZoneInfo:
-    """Return the timezone from config or local."""
-    if tz:
-        return ZoneInfo(tz)
-    else:
-        return get_localzone()
 
 
 def _get_instrument_type_description(instrument_type: InstrumentType) -> tuple[str, str]:

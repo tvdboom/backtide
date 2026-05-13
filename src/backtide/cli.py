@@ -12,7 +12,7 @@ import click
 from streamlit.web.bootstrap import run
 import yaml
 
-from backtide.backtest import ExperimentConfig
+from backtide.backtest import ExperimentConfig, ExperimentStatus
 from backtide.backtest import run_experiment as run_backtest
 from backtide.core.config import get_config
 from backtide.core.utils import init_logging
@@ -220,12 +220,12 @@ def run_experiment(config_file: Path, log_level: str, *, verbose: bool):
     result = run_backtest(exp_cfg, verbose=verbose)
 
     n = len(result.strategies)
-    if result.status == "completed" and not result.warnings:
+    if result.status == ExperimentStatus.Success and not result.warnings:
         click.echo(
             f"✅  Done — experiment {result.experiment_id} completed "
             f"({n} strateg{'y' if n == 1 else 'ies'})."
         )
-    elif result.status == "completed":
+    elif result.status == ExperimentStatus.Success:
         click.echo(
             f"⚠️  Experiment {result.experiment_id} completed with "
             f"{len(result.warnings)} warning(s):"

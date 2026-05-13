@@ -31,6 +31,9 @@ use std::collections::HashMap;
 /// name : str, default=""
 ///     A human-readable name to identify this experiment.
 ///
+/// icon : str, default=""
+///     An emoji icon to identify this experiment visually.
+///
 /// tags : list[str], default=[]
 ///     Descriptive tags for organizing and filtering experiments.
 ///
@@ -44,8 +47,10 @@ use std::collections::HashMap;
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GeneralExpConfig {
     pub name: String,
+    pub icon: String,
     pub tags: Vec<String>,
     pub description: String,
 }
@@ -56,10 +61,11 @@ impl GeneralExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (name: "str"="", tags: "list[str]"=vec![], description: "str"=""))]
-    fn new(name: &str, tags: Vec<String>, description: &str) -> Self {
+    #[pyo3(signature = (name: "str"="", icon: "str"="", tags: "list[str]"=vec![], description: "str"=""))]
+    fn new(name: &str, icon: &str, tags: Vec<String>, description: &str) -> Self {
         Self {
             name: name.to_owned(),
+            icon: icon.to_owned(),
             tags,
             description: description.to_owned(),
         }
@@ -67,8 +73,9 @@ impl GeneralExpConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "GeneralExpConfig(name={:?}, tags=[{:?}], description={:?})",
+            "GeneralExpConfig(name={:?}, icon={:?}, tags=[{:?}], description={:?})",
             self.name,
+            self.icon,
             self.tags.iter().map(|s| s.to_string()).join(", "),
             self.description,
         )

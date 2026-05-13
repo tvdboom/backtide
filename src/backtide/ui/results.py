@@ -30,6 +30,8 @@ from backtide.analysis.utils import GREEN, RED, YELLOW
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
 from backtide.core.data import InstrumentType
+
+from backtide.core.backtest import ExperimentStatus
 from backtide.storage import (
     delete_experiment,
     query_bars,
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
 
 
 cfg = get_config()
+logokit_key = cfg.display.logokit_api_key
 datetime_fmt = _moment_to_strftime(cfg.display.datetime_format())
 
 st.set_page_config(page_title="Backtide - Results")
@@ -96,9 +99,9 @@ st.markdown(
             top: -0.1em;
             margin-left: 4px;
         }}
-        .status-badge.success {{ background: {GREEN}; }}
-        .status-badge.warning {{ background: {YELLOW}; }}
-        .status-badge.error   {{ background: {RED}; }}
+        .status-badge.Success {{ background: {GREEN}; }}
+        .status-badge.Partial {{ background: {YELLOW}; }}
+        .status-badge.Error   {{ background: {RED}; }}
 
         /* Tighten dividers inside cards */
         hr {{
@@ -230,48 +233,6 @@ def _render_run_metrics(run: RunResult):
     else:
         wr_str = wr_pct
     _colored_metric(mc7, ":material/swap_vert: Trades (w/r)", f"{n_trades} ({wr_str})")
-
-
-def _status_icon(row: pd.Series) -> str:
-    """Return a Material icon shortcode based on the experiment's Sharpe ratio."""
-    status = row.get("status")
-    if status == "failed":
-        return ":material/error:"
-    if status == "partial":
-        return ":material/warning:"
-
-    sharpe = row.get("best_sharpe")
-    if sharpe is None or pd.isna(sharpe):
-        return ":material/help:"
-    elif sharpe < 0.0:
-        return ":material/sentiment_very_dissatisfied:"
-    elif sharpe < 0.5:
-        return ":material/sentiment_dissatisfied:"
-    elif sharpe < 1.0:
-        return ":material/sentiment_neutral:"
-    elif sharpe < 1.5:
-        return ":material/sentiment_satisfied:"
-    elif sharpe < 2.0:
-        return ":material/sentiment_very_satisfied:"
-    elif sharpe < 3.0:
-        return ":material/military_tech:"
-    else:
-        return ":material/trophy:"
-
-
-def _status_badge(row: pd.Series) -> str:
-    """Return a small colored status dot for the experiment."""
-    status = row.get("status")
-    if status == "failed":
-        cls, label = "error", "Failed"
-    elif status == "partial":
-        cls, label = "warning", "Some strategies failed"
-    elif (s := row.get("best_sharpe")) is None or pd.isna(s):
-        cls, label = "warning", "Succeeded with warnings"
-    else:
-        cls, label = "success", "Succeeded"
-
-    return f" <span class='status-badge {cls}' title='{label}'></span>"
 
 
 def _render_tags(tags: str, *, container=None):
@@ -521,7 +482,7 @@ def _render_strategy_plots(run: RunResult, exp_cfg: ExperimentConfig):
     labels = [
         ":material/compare_arrows: MAE / MFE",
         ":material/inventory: Position size",
-        ":material/show_chart: Price",
+        ":material/show_chart: Trades",
     ]
 
     # Use a per-strategy key so each tab group remembers its active selection.
@@ -618,7 +579,7 @@ def _render_full_analysis(row: pd.Series):
 
     """
     exp_id = row["id"]
-    name = row["name"] or exp_id
+    name = row["name"]
     cfg_path = Path(cfg.data.storage_path) / "experiments" / exp_id / "config.toml"
     log_path = Path(cfg.data.storage_path) / "experiments" / exp_id / "logs.txt"
 
@@ -629,7 +590,10 @@ def _render_full_analysis(row: pd.Series):
         st.rerun()
 
     with st.container(key="full_results_toolbar"):
-        col1, col2, _, col4, col5, col6 = st.columns([1.2, 0.7, 4.6, 0.7, 0.7, 0.7], gap="xxsmall")
+        col1, col2, _, col_id, col4, col5, col6 = st.columns(
+            [1.2, 0.7, 3.9, 0.7, 0.7, 0.7, 0.7],
+            gap="xxsmall",
+        )
 
         if col1.button(
             ":material/arrow_back: Back",
@@ -654,7 +618,7 @@ def _render_full_analysis(row: pd.Series):
                 log_text = log_path.read_text(encoding="utf-8", errors="replace")
             except OSError as ex:
                 st.markdown(f"**Logs — {name}**")
-                st.error(f"Failed to read log file: {ex}")
+                st.error(f"Failed to read log file:\n{ex}")
             else:
                 col1, col2 = st.columns([2.4, 1])
                 col1.markdown(f"**Logs — {name}**")
@@ -671,6 +635,10 @@ def _render_full_analysis(row: pd.Series):
                     st.code(log_text, language="log", line_numbers=True)
                 else:
                     st.info("Log file is empty.")
+
+        with col_id.popover("", icon=":material/tag:", width=400, help="Show the experiment ID."):
+            st.markdown("**Experiment ID**")
+            st.code(exp_id, language=None, width=300)
 
         with col4.popover(
             "",
@@ -711,7 +679,15 @@ def _render_full_analysis(row: pd.Series):
         ):
             _confirm_delete_experiment(exp_id, name)
 
-    st.markdown(f"<div class='experiment-title'>{name}</div>", unsafe_allow_html=True)
+    icon_html = " "
+    st.markdown(
+        f"""
+        <div class='experiment-title'>
+            <span style='font-size:0.7em'>{row["icon"]}</span> {icon_html}{name}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if row["tags"]:
         pills = " ".join(
@@ -738,18 +714,19 @@ def _render_full_analysis(row: pd.Series):
     duration = max(0, int(row["finished_at"]) - int(row["started_at"]))
     _colored_metric(c3, ":material/timer: Duration", _fmt_duration(duration))
 
-    status = str(row.get("status") or "").lower()
-    if status == "completed":
-        icon, label, tone = ":material/check_circle:", "Succeeded", "green"
-    elif status == "partial":
-        icon, label, tone = ":material/warning:", "Partial", "orange"
-    else:
-        icon, label, tone = ":material/cancel:", "Failed", "red"
-    _colored_metric(c4, f"{icon} Status", label, tone)
+    match ExperimentStatus(row["status"]):
+        case ExperimentStatus.Success:
+            icon, tone = ":material/check_circle:", GREEN
+        case ExperimentStatus.Partial:
+            icon, tone = ":material/warning:", YELLOW
+        case ExperimentStatus.Error:
+            icon, tone = ":material/cancel:", RED
+
+    _colored_metric(c4, f"{icon} Status", row["status"], tone)
 
     runs = query_strategy_runs(row["id"])
 
-    if failed_runs := [r for r in runs if getattr(r, "error", None)]:
+    if failed_runs := [r for r in runs if r.error]:
         names = ", ".join(f"**{r.strategy_name}**" for r in failed_runs)
         if len(failed_runs) == len(runs):
             st.error(
@@ -836,7 +813,6 @@ def _render_full_analysis(row: pd.Series):
             help="Select the strategy to analyze.",
         )
 
-    logokit_key = cfg.display.logokit_api_key
     run = next(r for r in runs if r.strategy_name == selected_strategy)
 
     st.markdown("##### Metrics")
@@ -975,9 +951,9 @@ status_filter = col2.selectbox(
 
 df = _to_pandas(query_experiments(search=search))
 if status_filter == "Succeeded":
-    df = df[df["status"] == "completed"]
+    df = df[df["status"].str.lower() == "success"]
 elif status_filter == "Failed":
-    df = df[df["status"] == "failed"]
+    df = df[df["status"].str.lower() == "error"]
 
 if ok := st.session_state.pop("_success", None):
     st.success(f"Deleted experiment **{ok}**.", icon=":material/check_circle:")
@@ -1001,14 +977,21 @@ expanded_id = st.session_state.get("results_expanded")
 
 for _, row in df.iterrows():
     exp_id = row["id"]
-    name = row["name"] or exp_id
     is_open = exp_id == expanded_id
-    icon = _status_icon(row)
 
     with st.container(border=True):
         col1, col2, col3, col4 = st.columns([6, 2, 0.7, 0.7], gap="xxsmall")
 
-        col1.markdown(f"##### {icon}&nbsp;{name}{_status_badge(row)}", unsafe_allow_html=True)
+        status = ExperimentStatus(row['status'])
+        col1.markdown(
+            f"""
+            <h4>
+                <span style='font-size:0.7em'>{row['icon']}</span>&nbsp;{row['name']}
+                <span class='status-badge {row['status']}' title='{status.description()}'></span>
+            </h4>
+            """,
+            unsafe_allow_html=True,
+        )
         _render_tags(row["tags"], container=col1)
 
         if col2.button(
@@ -1053,7 +1036,7 @@ for _, row in df.iterrows():
             width="stretch",
             help="Delete this experiment from the database.",
         ):
-            _confirm_delete_experiment(exp_id, name)
+            _confirm_delete_experiment(exp_id, row["name"])
 
         col1, col2 = st.columns([3, 1], vertical_alignment="center")
 

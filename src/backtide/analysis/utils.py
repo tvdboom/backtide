@@ -12,8 +12,7 @@ from typing import TYPE_CHECKING, Any, overload
 
 from backtide.core.config import get_config
 from backtide.core.data import Currency
-from backtide.ui.utils import _get_timezone
-from backtide.utils.utils import _ts_to_datetime
+from backtide.utils.utils import _get_timezone, _ts_to_datetime
 
 if TYPE_CHECKING:
     import pandas as pd

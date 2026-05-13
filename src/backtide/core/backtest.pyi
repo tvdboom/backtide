@@ -21,6 +21,7 @@ __all__ = [
     "ExchangeExpConfig",
     "ExperimentConfig",
     "ExperimentResult",
+    "ExperimentStatus",
     "ExponentialMovingAverage",
     "FixedFractional",
     "FixedNotional",
@@ -1702,8 +1703,9 @@ class ExperimentResult:
     finished_at : int
         UTC timestamp (seconds) when the run finished.
 
-    status : str
-        `"completed"` if every strategy succeeded, `"failed"` otherwise.
+    status : [ExperimentStatus]
+        `Success` if every strategy succeeded, `Partial` if some failed,
+        `Error` if all failed or the experiment could not run.
 
     strategies : list[[RunResult]]
         One result entry per evaluated strategy.
@@ -1723,7 +1725,7 @@ class ExperimentResult:
     finished_at: int
     name: str
     started_at: int
-    status: str
+    status: ExperimentStatus
     strategies: list[RunResult]
     tags: list[str]
     warnings: list[str]
@@ -1754,6 +1756,66 @@ class ExperimentResult:
         ...
     def __str__(self, /):
         ...
+
+class ExperimentStatus:
+    """The outcome status of a finished experiment.
+
+    See Also
+    --------
+    - backtide.backtest:ExperimentResult
+    - backtide.backtest:run_experiment
+
+    """
+
+    Error: ClassVar[ExperimentStatus]
+    Partial: ClassVar[ExperimentStatus]
+    Success: ClassVar[ExperimentStatus]
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __hash__(self, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __int__(self, /):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def description(self) -> str:
+        """A short human-readable description of this status.
+
+        Returns
+        -------
+        str
+            Description of the variant.
+
+        """
+    @staticmethod
+    def variants() -> list[ExperimentStatus]:
+        """Return all variants.
+
+        Returns
+        -------
+        list[self]
+            All variants of this type.
+
+        """
 
 class ExponentialMovingAverage:
     """Exponential Moving Average (EMA).
@@ -2081,6 +2143,9 @@ class GeneralExpConfig:
     name : str, default=""
         A human-readable name to identify this experiment.
 
+    icon : str, default=""
+        An emoji icon to identify this experiment visually.
+
     tags : list[str], default=[]
         Descriptive tags for organizing and filtering experiments.
 
@@ -2096,6 +2161,7 @@ class GeneralExpConfig:
     """
 
     description: str
+    icon: str
     name: str
     tags: list[str]
 

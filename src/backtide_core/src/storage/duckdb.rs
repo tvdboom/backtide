@@ -1,8 +1,7 @@
 //! DuckDB storage solution.
 
-use crate::backtest::models::experiment_result::{
-    EquitySample, ExperimentResult, OrderRecord, RunResult, Trade,
-};
+use crate::backtest::models::experiment_config::*;
+use crate::backtest::models::experiment_result::*;
 use crate::backtest::models::order::Order;
 use crate::backtest::models::order_type::OrderType;
 use crate::data::models::bar::Bar;
@@ -143,6 +142,7 @@ impl Storage for DuckDb {
             CREATE TABLE IF NOT EXISTS experiments (
                 id                VARCHAR PRIMARY KEY,
                 name              VARCHAR NOT NULL,
+                icon              VARCHAR NOT NULL,
                 tags              VARCHAR NOT NULL,
                 description       VARCHAR NOT NULL,
                 config_toml       VARCHAR NOT NULL,
@@ -725,11 +725,11 @@ impl Storage for DuckDb {
 
     fn write_experiment(
         &self,
-        config: &crate::backtest::models::experiment_config::ExperimentConfig,
+        config: &ExperimentConfig,
         result: &ExperimentResult,
     ) -> StorageResult<()> {
         // Use the inner serializable representation for TOML.
-        let inner = crate::backtest::models::experiment_config::ExperimentConfigInner {
+        let inner = ExperimentConfigInner {
             general: config.general.clone(),
             data: config.data.clone(),
             portfolio: config.portfolio.clone(),
@@ -745,17 +745,18 @@ impl Storage for DuckDb {
         self.run_transaction(|conn| {
             conn.execute(
                 "INSERT OR REPLACE INTO experiments
-                 (id, name, tags, description, config_toml, started_at, finished_at, status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 (id, name, icon, tags, description, config_toml, started_at, finished_at, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     result.experiment_id,
                     result.name,
+                    config.general.icon,
                     tags_str,
                     config.general.description,
                     cfg_toml,
                     result.started_at,
                     result.finished_at,
-                    result.status,
+                    result.status.to_string(),
                 ],
             )?;
 
@@ -884,7 +885,7 @@ impl Storage for DuckDb {
         let conn = self.conn.lock().unwrap();
 
         let mut sql = String::from(
-            "SELECT e.id, e.name, e.tags, e.description, e.started_at, e.finished_at, e.status,
+            "SELECT e.id, e.name, e.icon, e.tags, e.description, e.started_at, e.finished_at, e.status,
                     (SELECT MAX(TRY_CAST(regexp_extract(s.metrics, '\"sharpe\"\\s*:\\s*(-?[0-9.eE+\\-]+)', 1) AS DOUBLE))
                        FROM experiment_strategies s
                       WHERE s.experiment_id = e.id
@@ -923,7 +924,7 @@ impl Storage for DuckDb {
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(params_vec.iter()), |row| {
-                let tags_str: String = row.get(2)?;
+                let tags_str: String = row.get(3)?;
                 let tags = if tags_str.is_empty() {
                     Vec::new()
                 } else {
@@ -932,13 +933,14 @@ impl Storage for DuckDb {
                 Ok(StoredExperiment {
                     id: row.get(0)?,
                     name: row.get(1)?,
+                    icon: row.get(2)?,
                     tags,
-                    description: row.get(3)?,
-                    started_at: row.get(4)?,
-                    finished_at: row.get(5)?,
-                    status: row.get(6)?,
-                    best_sharpe: row.get::<_, Option<f64>>(7)?,
-                    n_strategies: row.get(8)?,
+                    description: row.get(4)?,
+                    started_at: row.get(5)?,
+                    finished_at: row.get(6)?,
+                    status: row.get(7)?,
+                    best_sharpe: row.get::<_, Option<f64>>(8)?,
+                    n_strategies: row.get(9)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1095,6 +1097,7 @@ impl Storage for DuckDb {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backtest::models::experiment_status::ExperimentStatus;
     use tempfile::TempDir;
 
     fn make_db() -> (TempDir, DuckDb) {
@@ -1131,19 +1134,20 @@ mod tests {
         }
     }
 
-    fn sample_experiment_config() -> crate::backtest::models::experiment_config::ExperimentConfig {
-        crate::backtest::models::experiment_config::ExperimentConfig {
-            general: crate::backtest::models::experiment_config::GeneralExpConfig {
+    fn sample_experiment_config() -> ExperimentConfig {
+        ExperimentConfig {
+            general: GeneralExpConfig {
                 name: "storage regression".to_owned(),
+                icon: "".to_string(),
                 tags: vec!["custom".to_owned()],
                 description: "custom strategy persistence".to_owned(),
             },
-            data: crate::backtest::models::experiment_config::DataExpConfig::default(),
-            portfolio: crate::backtest::models::experiment_config::PortfolioExpConfig::default(),
-            strategy: crate::backtest::models::experiment_config::StrategyExpConfig::default(),
-            indicators: crate::backtest::models::experiment_config::IndicatorExpConfig::default(),
-            exchange: crate::backtest::models::experiment_config::ExchangeExpConfig::default(),
-            engine: crate::backtest::models::experiment_config::EngineExpConfig::default(),
+            data: DataExpConfig::default(),
+            portfolio: PortfolioExpConfig::default(),
+            strategy: StrategyExpConfig::default(),
+            indicators: IndicatorExpConfig::default(),
+            exchange: ExchangeExpConfig::default(),
+            engine: EngineExpConfig::default(),
         }
     }
 
@@ -1161,7 +1165,7 @@ mod tests {
             tags: vec!["custom".to_owned()],
             started_at: 1_700_000_000,
             finished_at: 1_700_000_100,
-            status: "completed".to_owned(),
+            status: ExperimentStatus::Success,
             warnings: Vec::new(),
             strategies: vec![RunResult {
                 strategy_id: "run-custom".to_owned(),

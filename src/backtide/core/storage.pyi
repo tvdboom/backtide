@@ -225,7 +225,8 @@ def query_experiments(
 
     The `search` parameter does a case-insensitive substring match on
     experiment name and tags. When both `experiment_id` and `search` are
-    given they are combined with AND semantics.
+    given they are combined with AND semantics. Rows are returned ordered
+    by `started_at` desc, so `limit=3` returns the last 3 experiments.
 
     Parameters
     ----------

@@ -23,7 +23,7 @@ from backtide.analysis.utils import (
 )
 from backtide.config import get_config
 from backtide.utils.types import DataFrameLike
-from backtide.utils.utils import _format_price, _to_list, _to_pandas
+from backtide.utils.utils import _format_price, _get_timezone, _to_list, _to_pandas
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,6 +43,7 @@ PRICE_COLUMNS = {
 
 
 cfg = get_config()
+tz = _get_timezone(cfg.display.timezone)
 
 
 @overload
@@ -87,7 +88,7 @@ def plot_price(
 ) -> go.Figure | None:
     """Create a price line chart.
 
-    Optionally, overlay the prices with indicators.
+    Optionally, overlay the prices with indicators or with trade markers.
 
     Parameters
     ----------
@@ -151,6 +152,7 @@ def plot_price(
     from backtide.storage import query_bars
     from backtide.analysis import plot_price
     from backtide.indicators import BollingerBands, SimpleMovingAverage
+    from backtide.storage import query_strategy_runs, query_experiments
 
     df = query_bars(["AAPL", "MSFT"], "1d")
 
@@ -163,6 +165,11 @@ def plot_price(
 
     # Add a band indicator to the price chart
     plot_price(aapl, indicators=BollingerBands())
+
+    # Add trades to the chart
+    exp = query_experiments().iloc[0]
+    run = query_strategy_runs(exp.id)[-1]
+    plot_price(aapl, run=run)
     ```
 
     """
@@ -261,28 +268,24 @@ def plot_price(
 
     if run:
 
-        def _chart_y(sym: str, ts_seconds: float) -> float:
+        def _chart_y(sym: str, ts_seconds: int) -> float:
             """Return the plotted price at the bar nearest to `ts_seconds`."""
-            series = sym_price.get(str(sym))
+            series = sym_price.get(sym)
             if series is None or series.empty:
                 return float("nan")
-            idx_tz = getattr(series.index, "tz", None)
-            target = pd.to_datetime(int(ts_seconds), unit="s", utc=idx_tz is not None)
-            if idx_tz is None:
-                target = target.tz_localize(None)
-            else:
-                target = target.tz_convert(idx_tz)
-            idx = series.index.get_indexer([target], method="nearest")[0]
-            return float(series.iloc[idx])
 
-        def _hover_data(sym: str, px: float, qty: float, pnl: float) -> tuple[str, str, str, str]:
+            target = pd.to_datetime(ts_seconds, unit="s", utc=True).tz_convert(tz)
+            return series.iloc[series.index.get_indexer([target], method="nearest")[0]]
+
+        def _hover(label: str, sym: str, px: float, qty: float, pnl: float) -> list[str]:
             """Convert the data for the hovertemplate to nicely formatted strings."""
-            return (
+            return [
+                f"<b>{label}</b>",
                 _format_price(px, currency=ccy),
-                f"{qty:+,}",
+                f"{qty:+,}".rstrip("0").rstrip(".") if qty % 1 else f"{int(qty):+,}",
                 _format_price(pnl, signed=True, currency=ccy),
                 sym,
-            )
+            ]
 
         # Build a per-symbol price lookup for snapping markers to the plotted
         # price column at the nearest bar on the chart's y-axis.
@@ -302,20 +305,20 @@ def plot_price(
             if t.quantity >= 0:
                 long_x.append(pd.to_datetime(t.entry_ts, unit="s"))
                 long_y.append(_chart_y(sym, t.entry_ts))
-                long_data.append(_hover_data(sym, t.entry_price, t.quantity, t.pnl))
+                long_data.append(_hover("Long entry", sym, t.entry_price, t.quantity, t.pnl))
             else:
                 short_x.append(pd.to_datetime(t.entry_ts, unit="s"))
                 short_y.append(_chart_y(sym, t.entry_ts))
-                short_data.append(_hover_data(sym, t.entry_price, t.quantity, t.pnl))
+                short_data.append(_hover("Short entry", sym, t.entry_price, t.quantity, t.pnl))
 
             if t.pnl >= 0:
                 win_x.append(pd.to_datetime(t.exit_ts, unit="s"))
                 win_y.append(_chart_y(sym, t.exit_ts))
-                win_data.append(_hover_data(sym, t.exit_price, t.quantity, t.pnl))
+                win_data.append(_hover("Exit", sym, t.exit_price, -t.quantity, t.pnl))
             else:
                 loss_x.append(pd.to_datetime(t.exit_ts, unit="s"))
                 loss_y.append(_chart_y(sym, t.exit_ts))
-                loss_data.append(_hover_data(sym, t.exit_price, t.quantity, t.pnl))
+                loss_data.append(_hover("Exit", sym, t.exit_price, -t.quantity, t.pnl))
 
         if long_x:
             fig.add_trace(
@@ -332,8 +335,9 @@ def plot_price(
                     legendgroup="trades",
                     customdata=long_data,
                     hovertemplate=(
-                        "%{x}<br>Price: %{customdata[0]}<br>Qty: %{customdata[1]}"
-                        "<extra>%{customdata[3]}</extra>"
+                        "%{customdata[0]}<br>%{x}<br>"
+                        "Price: %{customdata[1]}<br>Qty: %{customdata[2]}"
+                        "<extra>%{customdata[4]}</extra>"
                     ),
                     showlegend=False,
                 )
@@ -354,8 +358,9 @@ def plot_price(
                     legendgroup="trades",
                     customdata=short_data,
                     hovertemplate=(
-                        "%{x}<br>Price: %{customdata[0]}<br>Qty: %{customdata[1]}"
-                        "<extra>%{customdata[3]}</extra>"
+                        "%{customdata[0]}<br>%{x}<br>"
+                        "Price: %{customdata[1]}<br>Qty: %{customdata[2]}"
+                        "<extra>%{customdata[4]}</extra>"
                     ),
                     showlegend=False,
                 )
@@ -377,9 +382,10 @@ def plot_price(
                     legendgroup="trades",
                     customdata=win_data,
                     hovertemplate=(
-                        "%{x}<br>Price: %{customdata[0]}<br>"
-                        "Qty: %{customdata[1]}<br>PnL: %{customdata[2]}"
-                        "<extra>%{customdata[3]}</extra>"
+                        "%{customdata[0]}<br>%{x}<br>"
+                        "Price: %{customdata[1]}<br>"
+                        "Qty: %{customdata[2]}<br>PnL: %{customdata[3]}"
+                        "<extra>%{customdata[4]}</extra>"
                     ),
                     showlegend=False,
                 )
@@ -401,9 +407,10 @@ def plot_price(
                     legendgroup="trades",
                     customdata=loss_data,
                     hovertemplate=(
-                        "%{x}<br>Price: %{customdata[0]}<br>"
-                        "Qty: %{customdata[1]}<br>PnL: %{customdata[2]}"
-                        "<extra>%{customdata[3]}</extra>"
+                        "%{customdata[0]}<br>%{x}<br>"
+                        "Price: %{customdata[1]}<br>"
+                        "Qty: %{customdata[2]}<br>PnL: %{customdata[3]}"
+                        "<extra>%{customdata[4]}</extra>"
                     ),
                     showlegend=False,
                 )

@@ -9,6 +9,7 @@ use crate::backtest::indicators::Indicator as BuiltinIndicator;
 use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::experiment_config::ExperimentConfig;
 use crate::backtest::models::experiment_result::*;
+use crate::backtest::models::experiment_status::ExperimentStatus;
 use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
@@ -206,7 +207,7 @@ impl Engine {
                 tags: config.general.tags.clone(),
                 started_at,
                 finished_at: started_at + started_instant.elapsed().as_secs() as i64,
-                status: "failed".into(),
+                status: ExperimentStatus::Error,
                 strategies: Vec::new(),
                 warnings,
             });
@@ -696,11 +697,11 @@ impl Engine {
             }
         }
         let status = if n_failed == 0 {
-            "completed".to_owned()
+            ExperimentStatus::Success
         } else if n_failed == results.len() {
-            "failed".to_owned()
+            ExperimentStatus::Error
         } else {
-            "partial".to_owned()
+            ExperimentStatus::Partial
         };
         info!(
             "All strategies completed in {}s ({} result(s), {} failed, status={}).",

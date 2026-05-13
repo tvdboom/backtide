@@ -24,12 +24,12 @@ from backtide.ui.utils import (
     _fmt_duration,
     _fmt_number,
     _get_instrument_type_description,
-    _get_timezone,
     _list_instruments,
     _persist,
     _to_upper_values,
 )
 from backtide.utils.constants import MAX_INSTRUMENT_SELECTION
+from backtide.utils.utils import _get_timezone
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Download interface

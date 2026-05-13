@@ -402,5 +402,5 @@ If your contribution requires a new **Rust** crate dependency:
 
 After submitting your pull request, GitHub will automatically run the tests
 on your changes and make sure that the updated code builds successfully.
-The checks run on all supported Python versions, on Ubuntu and Windows. We also
-use services that automatically check code style and test coverage.
+The checks run on all supported Python versions, on Ubuntu, macOS and Windows.
+We also use services that automatically check code style and test coverage.

@@ -177,6 +177,7 @@ nav:
                 - ExchangeExpConfig: api/models/backtest/exchangeexpconfig.md
                 - ExperimentConfig: api/models/backtest/experimentconfig.md
                 - ExperimentResult: api/models/backtest/experimentresult.md
+                - ExperimentStatus: api/models/backtest/experimentstatus.md
                 - GeneralExpConfig: api/models/backtest/generalexpconfig.md
                 - IndicatorExpConfig: api/models/backtest/indicatorexpconfig.md
                 - Order: api/models/backtest/order.md
