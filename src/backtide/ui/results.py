@@ -29,9 +29,8 @@ from backtide.analysis import (
 from backtide.analysis.utils import GREEN, RED, YELLOW
 from backtide.backtest import ExperimentConfig
 from backtide.config import get_config
-from backtide.core.data import InstrumentType
-
 from backtide.core.backtest import ExperimentStatus
+from backtide.core.data import InstrumentType
 from backtide.storage import (
     delete_experiment,
     query_bars,
@@ -872,7 +871,7 @@ def _render_full_analysis(row: pd.Series):
             "Logo",
             df.apply(
                 lambda row: _get_logokit_url(
-                    row["Symbol"], symbol_to_it[row["Symbol"]], logokit_key
+                    row["Symbol"], symbol_to_it[row["Symbol"]], str(logokit_key)
                 ),
                 axis=1,
             ),
@@ -982,12 +981,12 @@ for _, row in df.iterrows():
     with st.container(border=True):
         col1, col2, col3, col4 = st.columns([6, 2, 0.7, 0.7], gap="xxsmall")
 
-        status = ExperimentStatus(row['status'])
+        status = ExperimentStatus(row["status"])
         col1.markdown(
             f"""
             <h4>
-                <span style='font-size:0.7em'>{row['icon']}</span>&nbsp;{row['name']}
-                <span class='status-badge {row['status']}' title='{status.description()}'></span>
+                <span style='font-size:0.7em'>{row["icon"]}</span>&nbsp;{row["name"]}
+                <span class='status-badge {row["status"]}' title='{status.description()}'></span>
             </h4>
             """,
             unsafe_allow_html=True,

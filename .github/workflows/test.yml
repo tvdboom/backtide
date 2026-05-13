@@ -43,9 +43,12 @@ jobs:
         run: |
           uv sync --group tox
           uv run tox -m unit
-      - uses: codecov/codecov-action@v4
+      - name: Upload coverage reports to Codecov
         if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: tvdboom/backtide
           files: ./coverage.xml
 
   cargo-tests:

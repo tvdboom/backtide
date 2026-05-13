@@ -8,6 +8,34 @@
 
 <br>
 
+📜 Overview
+-----------
+
+**General Information** | |
+--- | ---
+**Repository** | [![Project Status: Active](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active) [![License: MIT](https://img.shields.io/github/license/tvdboom/ATOM)](https://opensource.org/licenses/MIT) [![Downloads](https://static.pepy.tech/badge/atom-ml)](https://pepy.tech/project/backtide) [![PyPI version](https://img.shields.io/pypi/v/backtide)](https://pypi.org/project/backtide/)
+**Build** | [![Build and release](https://github.com/tvdboom/backtide/actions/workflows/release.yml/badge.svg)](https://github.com/tvdboom/backtide/actions/workflows/release.yml) [![Linting and tests](https://github.com/tvdboom/backtide/actions/workflows/test.yml/badge.svg)](https://github.com/tvdboom/backtide/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/tvdboom/backtide/branch/master/graph/badge.svg)](https://codecov.io/gh/tvdboom/backtide)
+**Code** | [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue?logo=python)](https://www.python.org) [![uv-managed](https://img.shields.io/badge/uv-managed-blueviolet)](https://docs.astral.sh/uv/) [![PEP8](https://img.shields.io/badge/code%20style-pep8-orange.svg)](https://www.python.org/dev/peps/pep-0008/) [![ruff](https://custom-icon-badges.demolab.com/badge/Ruff-261230.svg?logo=ruff-logo)](https://docs.astral.sh/ruff/) [![ty](https://custom-icon-badges.demolab.com/badge/ty-261230.svg?logo=ty-astral-logo)](https://docs.astral.sh/ty/)
+
+<br>
+
+<table>
+<tr>
+<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/home.png?raw=true" alt="Home" width="100%"/></td>
+<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/experiment.png?raw=true" alt="Experiment" width="100%"/></td>
+</tr>
+<tr>
+<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/results.png?raw=true" alt="Results" width="100%"/></td>
+<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/stats.png?raw=true" alt="Stats" width="100%"/></td>
+</tr>
+<tr>
+<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/trades.png?raw=true" alt="Trades" width="100%"/></td>
+<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/analysis.png?raw=true" alt="Analysis" width="100%"/></td>
+</tr>
+</table>
+
+<br>
+
 💡 Introduction
 ---------------
 
