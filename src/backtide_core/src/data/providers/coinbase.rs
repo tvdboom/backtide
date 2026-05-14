@@ -569,4 +569,99 @@ mod tests {
         assert_eq!(inst.instrument_type, InstrumentType::Crypto);
         assert_eq!(inst.provider, Provider::Coinbase);
     }
+
+    // ── Coinbase::new ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn coinbase_new_initialises_client() {
+        let _c = Coinbase::new().await.expect("Coinbase::new should succeed");
+    }
+
+    // ── interval_granularity errors ─────────────────────────────────────
+
+    #[test]
+    fn interval_granularity_one_week_error_variant() {
+        let err = Coinbase::interval_granularity(Interval::OneWeek).unwrap_err();
+        assert!(matches!(err, DataError::UnsupportedInterval(Interval::OneWeek)));
+    }
+
+    // ── check_instrument_type error ─────────────────────────────────────
+
+    #[test]
+    fn check_instrument_type_forex_error() {
+        let err = Coinbase::check_instrument_type(InstrumentType::Forex).unwrap_err();
+        assert!(matches!(err, DataError::UnsupportedInstrumentType(InstrumentType::Forex)));
+    }
+
+    #[test]
+    fn check_instrument_type_stocks_error() {
+        let err = Coinbase::check_instrument_type(InstrumentType::Stocks).unwrap_err();
+        assert!(matches!(err, DataError::UnsupportedInstrumentType(InstrumentType::Stocks)));
+    }
+
+    // ── ProductInfo -> Instrument when status is None ───────────────────
+
+    #[test]
+    fn instrument_from_product_info_no_status() {
+        let info = ProductInfo {
+            product_id: "ETH-USDC".to_owned(),
+            base_currency_id: "ETH".to_owned(),
+            quote_currency_id: "USDC".to_owned(),
+            status: None,
+            new_at: None,
+        };
+        let inst = Instrument::try_from(info).unwrap();
+        assert_eq!(inst.symbol, "ETH-USDC");
+        assert_eq!(inst.base, Some("ETH".to_owned()));
+        assert_eq!(inst.quote, "USDC");
+    }
+
+    #[test]
+    fn instrument_from_product_info_with_new_at() {
+        let info = ProductInfo {
+            product_id: "SOL-USD".to_owned(),
+            base_currency_id: "SOL".to_owned(),
+            quote_currency_id: "USD".to_owned(),
+            status: Some("online".to_owned()),
+            new_at: Some("2020-01-01T00:00:00Z".to_owned()),
+        };
+        let inst = Instrument::try_from(info).unwrap();
+        assert_eq!(inst.symbol, "SOL-USD");
+    }
+
+    // ── CoinbaseCandle -> Bar fields ────────────────────────────────────
+
+    #[test]
+    fn bar_from_candle_fields() {
+        let candle = CoinbaseCandle {
+            start: 12345,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: 100.0,
+        };
+        let bar = Bar::from(candle);
+        assert_eq!(bar.open_ts, 12345);
+        assert_eq!(bar.close_ts, 12345);
+        assert_eq!(bar.open_ts_exchange, 12345);
+        assert_eq!(bar.open, 1.0);
+        assert_eq!(bar.high, 2.0);
+        assert_eq!(bar.low, 0.5);
+        assert_eq!(bar.close, 1.5);
+        assert_eq!(bar.adj_close, 1.5);
+        assert_eq!(bar.volume, 100.0);
+        assert_eq!(bar.n_trades, None);
+    }
+
+    // ── interval_granularity full table coverage ────────────────────────
+
+    #[test]
+    fn interval_granularity_all_supported() {
+        use Interval::*;
+        for iv in [OneMinute, FiveMinutes, FifteenMinutes, ThirtyMinutes, OneHour, FourHours, OneDay]
+        {
+            assert!(Coinbase::interval_granularity(iv).is_ok());
+        }
+    }
 }

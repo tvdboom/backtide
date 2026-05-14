@@ -5349,4 +5349,335 @@ mod tests {
     // testing happens via the Python test suite which exercises
     // `run_one_strategy` end-to-end.
     // ─────────────────────────────────────────────────────────────────
+
+    // ── apply_slippage additional ─────────────────────────────────────
+
+    #[test]
+    fn apply_slippage_zero_qty_treated_as_buy() {
+        let p = apply_slippage(100.0, 0.0, 0.01, None);
+        assert!((p - 101.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_slippage_zero_slippage_returns_raw() {
+        assert!((apply_slippage(50.0, 1.0, 0.0, None) - 50.0).abs() < 1e-9);
+        assert!((apply_slippage(50.0, -1.0, 0.0, None) - 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_slippage_sell_capped_at_floor() {
+        let p = apply_slippage(100.0, -1.0, 0.05, Some(98.0));
+        assert!((p - 98.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_slippage_sell_not_capped_when_above() {
+        let p = apply_slippage(100.0, -1.0, 0.01, Some(95.0));
+        assert!((p - 99.0).abs() < 1e-9);
+    }
+
+    // ── fill_limit / fill_stop additional ─────────────────────────────
+
+    #[test]
+    fn fill_limit_sell_fills_at_open_when_above_limit() {
+        let bar = mk_bar(0, 100.0);
+        match fill_limit(-1.0, &bar, 95.0) {
+            TriggerOutcome::Fill { raw_px, .. } => assert!((raw_px - 100.0).abs() < 1e-9),
+            _ => panic!("expected fill"),
+        }
+    }
+
+    #[test]
+    fn fill_limit_sell_pending_when_high_below() {
+        let mut bar = mk_bar(0, 100.0);
+        bar.open = 95.0;
+        bar.high = 97.0;
+        match fill_limit(-1.0, &bar, 100.0) {
+            TriggerOutcome::Pending => {},
+            _ => panic!("expected pending"),
+        }
+    }
+
+    #[test]
+    fn fill_limit_zero_qty_cancels() {
+        let bar = mk_bar(0, 100.0);
+        match fill_limit(0.0, &bar, 100.0) {
+            TriggerOutcome::Cancel { .. } => {},
+            _ => panic!("expected cancel"),
+        }
+    }
+
+    #[test]
+    fn fill_stop_sell_gap_down() {
+        let mut bar = mk_bar(0, 90.0);
+        bar.open = 88.0;
+        match fill_stop(-1.0, &bar, 90.0) {
+            TriggerOutcome::Fill { raw_px, reason, .. } => {
+                assert!((raw_px - 88.0).abs() < 1e-9);
+                assert!(reason.contains("gap-down"));
+            },
+            _ => panic!("expected fill"),
+        }
+    }
+
+    #[test]
+    fn fill_stop_zero_qty_cancels() {
+        let bar = mk_bar(0, 100.0);
+        match fill_stop(0.0, &bar, 100.0) {
+            TriggerOutcome::Cancel { .. } => {},
+            _ => panic!("expected cancel"),
+        }
+    }
+
+    // ── stop_triggered additional ─────────────────────────────────────
+
+    #[test]
+    fn stop_triggered_tp_sell_triggers_on_rise() {
+        let mut bar = mk_bar(0, 100.0);
+        bar.high = 110.0;
+        assert!(stop_triggered(-1.0, &bar, 105.0, true));
+    }
+
+    #[test]
+    fn stop_triggered_zero_qty_returns_false() {
+        let bar = mk_bar(0, 100.0);
+        assert!(!stop_triggered(0.0, &bar, 100.0, false));
+        assert!(!stop_triggered(0.0, &bar, 100.0, true));
+    }
+
+    // ── is_whole_quantity ──────────────────────────────────────────────
+
+    #[test]
+    fn is_whole_quantity_edge_cases() {
+        assert!(is_whole_quantity(5.0));
+        assert!(is_whole_quantity(0.0));
+        assert!(is_whole_quantity(-3.0));
+        assert!(!is_whole_quantity(3.5));
+        assert!(!is_whole_quantity(f64::NAN));
+        assert!(!is_whole_quantity(f64::INFINITY));
+    }
+
+    // ── quantity_rejection_reason ──────────────────────────────────────
+
+    #[test]
+    fn quantity_rejection_crypto_allows_fractional() {
+        assert!(quantity_rejection_reason("BTC", 0.5, InstrumentType::Crypto).is_none());
+    }
+
+    #[test]
+    fn quantity_rejection_nan_is_rejected() {
+        assert!(quantity_rejection_reason("X", f64::NAN, InstrumentType::Stocks).is_some());
+    }
+
+    // ── profile helpers ──────────────────────────────────────────────
+
+    #[test]
+    fn profile_types_maps_correctly() {
+        let profiles = vec![
+            mk_profile("AAPL", "USD"),
+            mk_profile_with_type("BTC", "USD", InstrumentType::Crypto),
+        ];
+        let types = profile_instrument_types(&profiles);
+        assert_eq!(*types.get("AAPL").unwrap(), InstrumentType::Stocks);
+        assert_eq!(*types.get("BTC").unwrap(), InstrumentType::Crypto);
+    }
+
+    #[test]
+    fn instrument_type_uses_map_then_fallback() {
+        let mut m = HashMap::new();
+        m.insert("AAPL".to_owned(), InstrumentType::Stocks);
+        assert_eq!(instrument_type_for_symbol("AAPL", &m, InstrumentType::Crypto), InstrumentType::Stocks);
+        assert_eq!(instrument_type_for_symbol("X", &m, InstrumentType::Forex), InstrumentType::Forex);
+    }
+
+    // ── align_bars additional ─────────────────────────────────────────
+
+    #[test]
+    fn align_bars_fill_with_nan_produces_nan_bar() {
+        let bar = mk_bar(1_700_000_000, 100.0);
+        let bars = HashMap::from([("X".to_owned(), vec![bar])]);
+        let timeline = vec![1_700_000_000_i64, 1_700_086_400];
+        let aligned = align_bars(&bars, &timeline, EmptyBarPolicy::FillWithNaN);
+        assert!(aligned.get("X").unwrap()[1].as_ref().unwrap().close.is_nan());
+    }
+
+    #[test]
+    fn align_bars_forward_fill_none_before_first_bar() {
+        let bar = mk_bar(1_700_086_400, 100.0);
+        let bars = HashMap::from([("X".to_owned(), vec![bar])]);
+        let timeline = vec![1_700_000_000_i64, 1_700_086_400];
+        let aligned = align_bars(&bars, &timeline, EmptyBarPolicy::ForwardFill);
+        assert!(aligned.get("X").unwrap()[0].is_none());
+    }
+
+    // ── compute_metrics additional ────────────────────────────────────
+
+    #[test]
+    fn compute_metrics_empty_curve() {
+        let m = compute_metrics(10_000.0, 0.0, &[], &[]);
+        assert_eq!(m["total_return"], 0.0);
+        assert_eq!(m["final_equity"], 10_000.0);
+    }
+
+    #[test]
+    fn compute_metrics_zero_initial_cash() {
+        let m = compute_metrics(0.0, 0.0, &[], &[]);
+        assert_eq!(m["total_return"], 0.0);
+    }
+
+    // ── update_open_trade_buy / close_open_trade_sell ────────────────
+
+    #[test]
+    fn update_open_trade_buy_averages_down() {
+        let mut trades = HashMap::new();
+        update_open_trade_buy(&mut trades, "X", 100, 10.0, 50.0);
+        update_open_trade_buy(&mut trades, "X", 200, 10.0, 30.0);
+        let (_, qty, avg) = trades["X"];
+        assert!((qty - 20.0).abs() < 1e-12);
+        assert!((avg - 40.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn close_open_trade_sell_none_for_missing() {
+        let mut trades = HashMap::new();
+        assert!(close_open_trade_sell(&mut trades, "X", 0, 1.0, 50.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn close_open_trade_sell_partial_keeps_remainder() {
+        let mut trades = HashMap::new();
+        trades.insert("X".to_owned(), (100_i64, 10.0, 50.0));
+        let t = close_open_trade_sell(&mut trades, "X", 200, 5.0, 60.0, 0.0).unwrap();
+        assert!((t.quantity - 5.0).abs() < 1e-12);
+        assert!(trades.contains_key("X"));
+    }
+
+    // ── persist & parse additional ─────────────────────────────────────
+
+    #[test]
+    fn persist_experiment_config_creates_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cfg = mk_cfg("AAPL");
+        let path = persist_experiment_config(dir.path(), "t1", &cfg).unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn parse_iso_date_to_ts_epoch() {
+        assert_eq!(parse_iso_date_to_ts("1970-01-01").unwrap(), 0);
+    }
+
+    #[test]
+    fn parse_iso_date_to_ts_invalid() {
+        assert!(parse_iso_date_to_ts("not-a-date").is_none());
+        assert!(parse_iso_date_to_ts("").is_none());
+    }
+
+    #[test]
+    fn now_secs_positive() {
+        assert!(now_secs() > 0);
+    }
+
+    // ── resolve_trigger additional ────────────────────────────────────
+
+    #[test]
+    fn resolve_trigger_cancel_order() {
+        let bar = mk_bar(0, 100.0);
+        let mut order = Order {
+            id: new_order_id(), symbol: "X".into(), quantity: 1.0,
+            price: None, limit_price: None, order_type: OrderType::CancelOrder,
+            sizer: None,
+        };
+        match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
+            TriggerOutcome::Cancel { .. } => {},
+            _ => panic!("expected cancel"),
+        }
+    }
+
+    #[test]
+    fn resolve_trigger_market_trade_on_close() {
+        let bar = mk_bar(0, 100.0);
+        let mut order = Order {
+            id: new_order_id(), symbol: "X".into(), quantity: 1.0,
+            price: None, limit_price: None, order_type: OrderType::Market,
+            sizer: None,
+        };
+        match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), true) {
+            TriggerOutcome::Fill { raw_px, .. } => assert!((raw_px - bar.close).abs() < 1e-9),
+            _ => panic!("expected fill"),
+        }
+    }
+
+    #[test]
+    fn resolve_trigger_settle_no_position_cancels() {
+        let bar = mk_bar(0, 100.0);
+        let mut order = Order {
+            id: new_order_id(), symbol: "X".into(), quantity: 0.0,
+            price: None, limit_price: None, order_type: OrderType::SettlePosition,
+            sizer: None,
+        };
+        match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
+            TriggerOutcome::Cancel { reason } => assert!(reason.contains("no position")),
+            _ => panic!("expected cancel"),
+        }
+    }
+
+    #[test]
+    fn resolve_trigger_limit_missing_price_cancels() {
+        let bar = mk_bar(0, 100.0);
+        let mut order = Order {
+            id: new_order_id(), symbol: "X".into(), quantity: 1.0,
+            price: None, limit_price: None, order_type: OrderType::Limit,
+            sizer: None,
+        };
+        match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
+            TriggerOutcome::Cancel { .. } => {},
+            _ => panic!("expected cancel"),
+        }
+    }
+
+    #[test]
+    fn resolve_trigger_stop_loss_missing_price_cancels() {
+        let bar = mk_bar(0, 100.0);
+        let mut order = Order {
+            id: new_order_id(), symbol: "X".into(), quantity: -1.0,
+            price: None, limit_price: None, order_type: OrderType::StopLoss,
+            sizer: None,
+        };
+        match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
+            TriggerOutcome::Cancel { .. } => {},
+            _ => panic!("expected cancel"),
+        }
+    }
+
+    #[test]
+    fn resolve_trigger_trailing_stop_missing_price_cancels() {
+        let bar = mk_bar(0, 100.0);
+        let mut order = Order {
+            id: new_order_id(), symbol: "X".into(), quantity: -1.0,
+            price: None, limit_price: None, order_type: OrderType::TrailingStop,
+            sizer: None,
+        };
+        match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
+            TriggerOutcome::Cancel { .. } => {},
+            _ => panic!("expected cancel"),
+        }
+    }
+
+    #[test]
+    fn period_bucket_same_day_same_bucket() {
+        use crate::backtest::models::conversion_period::ConversionPeriod;
+        let ts1 = 1_700_000_000_i64;
+        let ts2 = ts1 + 3600;
+        assert_eq!(period_bucket(ts1, ConversionPeriod::Day), period_bucket(ts2, ConversionPeriod::Day));
+    }
+
+    #[test]
+    fn period_bucket_week_and_month_differentiate() {
+        use crate::backtest::models::conversion_period::ConversionPeriod;
+        let ts1 = 1_672_531_200_i64; // 2023-01-01
+        let ts2 = ts1 + 14 * 86_400; // 2023-01-15
+        assert_eq!(period_bucket(ts1, ConversionPeriod::Month), period_bucket(ts2, ConversionPeriod::Month));
+        assert_ne!(period_bucket(ts1, ConversionPeriod::Week), period_bucket(ts2, ConversionPeriod::Week));
+    }
 }

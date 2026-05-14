@@ -612,4 +612,49 @@ mod tests {
         let s = compute_series_stats(&values, &ts, 0.0, None).unwrap();
         assert!(s.max_dd <= 0.0);
     }
+
+    #[test]
+    fn compute_series_stats_positive_trend_has_positive_return() {
+        let values = linear_prices(100, 100.0, 2.0);
+        let ts = daily_timestamps(100);
+        let s = compute_series_stats(&values, &ts, 0.0, Some(252)).unwrap();
+        assert!(s.ann_return > 0.0);
+        assert!(s.max_dd.abs() < 1e-9);
+        assert!((s.win_rate - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compute_series_stats_with_risk_free_rate_lowers_sharpe() {
+        let values = linear_prices(50, 100.0, 1.0);
+        let ts = daily_timestamps(50);
+        let no_rf = compute_series_stats(&values, &ts, 0.0, Some(252)).unwrap();
+        let hi_rf = compute_series_stats(&values, &ts, 0.5, Some(252)).unwrap();
+        assert!(hi_rf.sharpe < no_rf.sharpe);
+    }
+
+    #[test]
+    fn compute_series_stats_flat_series_zero_volatility() {
+        let values = vec![100.0; 20];
+        let ts = daily_timestamps(20);
+        let s = compute_series_stats(&values, &ts, 0.0, Some(252)).unwrap();
+        assert_eq!(s.ann_volatility, 0.0);
+        assert_eq!(s.sharpe, 0.0);
+    }
+
+    #[test]
+    fn compute_series_stats_volatile_series_has_drawdown() {
+        let values = vec![100.0, 110.0, 90.0, 95.0, 80.0, 85.0];
+        let ts = daily_timestamps(6);
+        let s = compute_series_stats(&values, &ts, 0.0, Some(252)).unwrap();
+        assert!(s.max_dd < -0.1);
+    }
+
+    #[test]
+    fn compute_single_populates_symbol() {
+        let prices = linear_prices(20, 10.0, 0.1);
+        let ts = daily_timestamps(20);
+        let stats = compute_single("TEST".into(), &prices, &ts, 0.0, None).unwrap();
+        assert_eq!(stats.symbol, "TEST");
+        assert_eq!(stats.total_bars, 20);
+    }
 }

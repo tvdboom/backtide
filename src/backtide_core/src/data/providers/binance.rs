@@ -572,4 +572,118 @@ mod tests {
         assert_eq!(inst.instrument_type, InstrumentType::Crypto);
         assert_eq!(inst.provider, Provider::Binance);
     }
+
+    // ── Binance::new ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn binance_new_initialises_client() {
+        let _b = Binance::new().await.expect("Binance::new should succeed");
+    }
+
+    // ── check_instrument_type error message ─────────────────────────────
+
+    #[test]
+    fn check_instrument_type_forex_unsupported() {
+        let err = Binance::check_instrument_type(InstrumentType::Forex).unwrap_err();
+        assert!(matches!(err, DataError::UnsupportedInstrumentType(InstrumentType::Forex)));
+    }
+
+    // ── BinanceKline TryFrom missing fields ─────────────────────────────
+
+    #[test]
+    fn kline_missing_open() {
+        let row = json!([1609459200000i64]);
+        assert!(BinanceKline::try_from(row).is_err());
+    }
+
+    #[test]
+    fn kline_missing_high() {
+        let row = json!([1609459200000i64, "1.0"]);
+        assert!(BinanceKline::try_from(row).is_err());
+    }
+
+    #[test]
+    fn kline_missing_low() {
+        let row = json!([1609459200000i64, "1.0", "2.0"]);
+        assert!(BinanceKline::try_from(row).is_err());
+    }
+
+    #[test]
+    fn kline_missing_close() {
+        let row = json!([1609459200000i64, "1.0", "2.0", "0.5"]);
+        assert!(BinanceKline::try_from(row).is_err());
+    }
+
+    #[test]
+    fn kline_missing_volume() {
+        let row = json!([1609459200000i64, "1.0", "2.0", "0.5", "1.5"]);
+        assert!(BinanceKline::try_from(row).is_err());
+    }
+
+    #[test]
+    fn kline_missing_close_time() {
+        let row = json!([1609459200000i64, "1.0", "2.0", "0.5", "1.5", "10.0"]);
+        assert!(BinanceKline::try_from(row).is_err());
+    }
+
+    #[test]
+    fn kline_n_trades_optional() {
+        // Missing index 8 -> n_trades is None.
+        let row =
+            json!([1609459200000i64, "1.0", "2.0", "0.5", "1.5", "10.0", 1609545600000i64, "100"]);
+        let k = BinanceKline::try_from(row).unwrap();
+        assert_eq!(k.n_trades, None);
+    }
+
+    #[test]
+    fn kline_negative_open_time_clamped_to_zero() {
+        // Negative timestamps are clamped to 0.
+        let row =
+            json!([-1000i64, "1.0", "2.0", "0.5", "1.5", "10.0", 1_000_000i64, "100", 5]);
+        let k = BinanceKline::try_from(row).unwrap();
+        assert_eq!(k.open_time, 0);
+    }
+
+    // ── unwrap_response with positive error code ────────────────────────
+
+    #[test]
+    fn unwrap_response_with_positive_code() {
+        let resp: BinanceResponse<i32> = BinanceResponse::Err {
+            code: 429,
+            msg: "Too many requests".to_owned(),
+        };
+        let err = Binance::unwrap_response(resp).unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("429"));
+        assert!(s.contains("Too many requests"));
+    }
+
+    // ── Bar::from kline with None n_trades ──────────────────────────────
+
+    #[test]
+    fn bar_from_kline_none_n_trades() {
+        let kline = BinanceKline {
+            open_time: 100,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: 10.0,
+            close_time: 200,
+            n_trades: None,
+        };
+        let bar = Bar::from(kline);
+        assert_eq!(bar.n_trades, None);
+        assert_eq!(bar.adj_close, 1.5);
+    }
+
+    // ── parse_canonical_symbol additional cases ─────────────────────────
+
+    #[rstest]
+    #[case("A-B-C", "ABC")]
+    #[case("BTC", "BTC")]
+    #[case("", "")]
+    fn parse_canonical_symbol_strips_all_dashes(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(Binance::parse_canonical_symbol(input), expected);
+    }
 }

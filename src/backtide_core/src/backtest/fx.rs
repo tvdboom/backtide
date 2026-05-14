@@ -237,6 +237,51 @@ mod tests {
         let s: Vec<(i64, f64)> = vec![];
         assert_eq!(ff(&s, 5), None);
     }
+
+    #[test]
+    fn convert_inverse_rate() {
+        let mut fx = FxTable::new(Currency::EUR);
+        fx.add_series(Currency::EUR, Currency::USD, vec![(0, 1.25)]);
+        let got = fx.convert(100.0, Currency::USD, Currency::EUR, 0).unwrap();
+        assert!((got - 80.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rate_same_currency_always_one() {
+        let fx = FxTable::new(Currency::USD);
+        assert_eq!(fx.rate(Currency::USD, Currency::USD, 999), Some(1.0));
+    }
+
+    #[test]
+    fn convert_amount_by_direct_rate() {
+        let mut fx = FxTable::new(Currency::EUR);
+        fx.add_series(Currency::EUR, Currency::USD, vec![(0, 2.0)]);
+        assert_eq!(fx.convert(50.0, Currency::EUR, Currency::USD, 0), Some(100.0));
+    }
+
+    #[test]
+    fn ff_before_all_samples_returns_first() {
+        let s = vec![(100, 5.0), (200, 10.0)];
+        assert_eq!(ff(&s, 50), Some(5.0));
+    }
+
+    #[test]
+    fn ff_between_samples_returns_earlier() {
+        let s = vec![(100, 5.0), (200, 10.0)];
+        assert_eq!(ff(&s, 150), Some(5.0));
+    }
+
+    #[test]
+    fn ff_after_all_samples_returns_last() {
+        let s = vec![(100, 5.0), (200, 10.0)];
+        assert_eq!(ff(&s, 300), Some(10.0));
+    }
+
+    #[test]
+    fn default_fx_table_is_empty() {
+        let fx = FxTable::default();
+        assert_eq!(fx.rate(Currency::EUR, Currency::USD, 0), None);
+    }
 }
 
 // Currency code reference: EUR, USD, CNY are guaranteed by

@@ -645,4 +645,159 @@ mod tests {
         assert_eq!(inst.base, Some("ETH".to_owned()));
         assert_eq!(inst.quote, "BTC");
     }
+
+    // ── parse_canonical_symbol ──────────────────────────────────────────
+
+    fn kraken_for_test() -> Kraken {
+        Kraken {
+            client: HttpClient::with_config(HttpClientConfig::default()).unwrap(),
+        }
+    }
+
+    #[rstest]
+    #[case("BTC-USD", "XBTUSD")]
+    #[case("DOGE-USD", "XDGUSD")]
+    #[case("ETH-USD", "ETHUSD")]
+    #[case("EUR-USD", "EURUSD")]
+    #[case("BTC-DOGE", "XBTXDG")]
+    #[case("SOL-USD", "SOLUSD")]
+    fn parse_canonical_symbol_maps_tickers(#[case] input: &str, #[case] expected: &str) {
+        let k = kraken_for_test();
+        assert_eq!(k.parse_canonical_symbol(input), expected);
+    }
+
+    // ── Kraken::new ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn kraken_new_initialises_client() {
+        // Just instantiation — no remote calls.
+        let k = Kraken::new().await.expect("Kraken::new should succeed");
+        // Round-trip a canonical symbol to confirm the instance is usable.
+        assert_eq!(k.parse_canonical_symbol("BTC-USD"), "XBTUSD");
+    }
+
+    // ── check_instrument_type errors ────────────────────────────────────
+
+    #[test]
+    fn check_instrument_type_stocks_error_message() {
+        let err = Kraken::check_instrument_type(InstrumentType::Stocks).unwrap_err();
+        assert!(matches!(err, DataError::UnsupportedInstrumentType(InstrumentType::Stocks)));
+    }
+
+    // ── unwrap_response with multiple errors ────────────────────────────
+
+    #[test]
+    fn unwrap_response_joins_multiple_errors() {
+        let resp: KrakenResponse<i32> = KrakenResponse {
+            error: vec!["EFirst:Boom".to_owned(), "ESecond:Oops".to_owned()],
+            result: None,
+        };
+        let err = Kraken::unwrap_response(resp, "TEST").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("EFirst:Boom"));
+        assert!(msg.contains("ESecond:Oops"));
+    }
+
+    // ── KrakenOHLC TryFrom missing fields ───────────────────────────────
+
+    #[test]
+    fn ohlc_missing_open_field() {
+        let row = json!([1000u64]);
+        // Has time but no open price
+        let row_with_partial = json!([1000u64, 123]); // non-string at index 1
+        assert!(KrakenOHLC::try_from(row).is_err());
+        assert!(KrakenOHLC::try_from(row_with_partial).is_err());
+    }
+
+    #[test]
+    fn ohlc_missing_high() {
+        let row = json!([1000u64, "1.0"]);
+        assert!(KrakenOHLC::try_from(row).is_err());
+    }
+
+    #[test]
+    fn ohlc_missing_low() {
+        let row = json!([1000u64, "1.0", "2.0"]);
+        assert!(KrakenOHLC::try_from(row).is_err());
+    }
+
+    #[test]
+    fn ohlc_missing_close() {
+        let row = json!([1000u64, "1.0", "2.0", "0.5"]);
+        assert!(KrakenOHLC::try_from(row).is_err());
+    }
+
+    #[test]
+    fn ohlc_missing_volume() {
+        // Has open/high/low/close/vwap but no volume at index 6.
+        let row = json!([1000u64, "1.0", "2.0", "0.5", "1.5", "1.4"]);
+        assert!(KrakenOHLC::try_from(row).is_err());
+    }
+
+    #[test]
+    fn ohlc_count_optional() {
+        // Volume present at index 6, no count at index 7.
+        let row = json!([1000u64, "1.0", "2.0", "0.5", "1.5", "1.4", "10.0"]);
+        let ohlc = KrakenOHLC::try_from(row).unwrap();
+        assert_eq!(ohlc.count, None);
+    }
+
+    #[test]
+    fn ohlc_non_string_numeric_open_rejected() {
+        let row = json!([1000u64, 1.0, "2.0", "0.5", "1.5", "1.4", "10.0", 5]);
+        // Kraken returns prices as strings; numeric must be rejected.
+        assert!(KrakenOHLC::try_from(row).is_err());
+    }
+
+    // ── PairInfo classification edge cases ──────────────────────────────
+
+    #[test]
+    fn instrument_from_pair_info_etheth_is_crypto() {
+        // Non-fiat base + non-fiat quote -> Crypto
+        let info = PairInfo {
+            wsname: Some("ETH/BTC".to_owned()),
+            altname: "ETHXBT".to_owned(),
+            base: "ETH".to_owned(),
+            quote: "XBT".to_owned(),
+            status: "online".to_owned(),
+        };
+        let inst = Instrument::try_from(info).unwrap();
+        assert_eq!(inst.instrument_type, InstrumentType::Crypto);
+        // XBT must be normalized to BTC for the quote.
+        assert_eq!(inst.quote, "BTC");
+    }
+
+    #[test]
+    fn instrument_from_pair_info_wsname_single_segment() {
+        // wsname without `/` separator falls back to quote on missing part.
+        let info = PairInfo {
+            wsname: Some("BROKEN".to_owned()),
+            altname: "BROKEN".to_owned(),
+            base: "ETH".to_owned(),
+            quote: "USD".to_owned(),
+            status: "online".to_owned(),
+        };
+        let inst = Instrument::try_from(info).unwrap();
+        // base = "BROKEN" (first segment), quote = fallback "USD"
+        assert_eq!(inst.base, Some("BROKEN".to_owned()));
+        assert_eq!(inst.quote, "USD");
+    }
+
+    // ── Bar::from(KrakenOHLC) with None count ───────────────────────────
+
+    #[test]
+    fn bar_from_ohlc_none_count() {
+        let ohlc = KrakenOHLC {
+            time: 100,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: 10.0,
+            count: None,
+        };
+        let bar = Bar::from(ohlc);
+        assert_eq!(bar.n_trades, None);
+        assert_eq!(bar.open_ts_exchange, 100);
+    }
 }

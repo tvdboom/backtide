@@ -114,12 +114,12 @@ class TestExchangeExpConfig:
     def test_margin_defaults(self):
         """Margin / leverage / short-selling defaults are sensible."""
         c = ExchangeExpConfig()
-        assert c.allow_margin is True
+        assert c.allow_margin is False
         assert c.max_leverage == 1.0
         assert c.initial_margin == 50.0
         assert c.maintenance_margin == 25.0
         assert c.margin_interest == 0.0
-        assert c.allow_short_selling is True
+        assert c.allow_short_selling is False
         assert c.borrow_rate == 0.0
         assert c.max_position_size == 100
         assert c.raise_on_margin_limit is False

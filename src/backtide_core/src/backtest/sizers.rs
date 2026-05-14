@@ -726,4 +726,68 @@ mod tests {
         assert_value_error(sizer.calculate(0.0, 100.0, None, None), "equity and price");
         assert_value_error(sizer.calculate(10_000.0, 0.0, None, None), "equity and price");
     }
+
+    // ── Additional edge/coverage tests ────────────────────────────────
+
+    #[test]
+    fn fixed_fractional_fraction_one_allocates_full_equity() {
+        let sizer = FixedFractional::new(1.0);
+        let qty = sizer.calculate(1_000.0, 50.0, None, None).unwrap();
+        assert!((qty - 20.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn fixed_fractional_rejects_negative_fraction() {
+        assert_value_error(
+            FixedFractional::new(-0.5).calculate(1_000.0, 10.0, None, None),
+            "fraction",
+        );
+    }
+
+    #[test]
+    fn fixed_notional_amt_larger_than_price() {
+        let sizer = FixedNotional::new(1_000.0);
+        let qty = sizer.calculate(10_000.0, 100.0, None, None).unwrap();
+        assert!((qty - 10.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn risk_based_large_stop_distance_yields_small_qty() {
+        let sizer = RiskBased::new(0.01);
+        let large = sizer.calculate(10_000.0, 100.0, Some(100.0), None).unwrap();
+        let small = sizer.calculate(10_000.0, 100.0, Some(1.0), None).unwrap();
+        assert!(large < small);
+    }
+
+    #[test]
+    fn volatility_scaled_large_atr_yields_small_qty() {
+        let sizer = VolatilityScaled::new(0.02);
+        let large = sizer.calculate(10_000.0, 100.0, None, Some(100.0)).unwrap();
+        let small = sizer.calculate(10_000.0, 100.0, None, Some(1.0)).unwrap();
+        assert!(large < small);
+    }
+
+    #[test]
+    fn kelly_criterion_full_kelly() {
+        // Full kelly (fraction=1.0)
+        let sizer = KellyCriterion::new(0.6, 2.0, 1.0, 1.0);
+        let qty = sizer.calculate(10_000.0, 100.0, None, None).unwrap();
+        // kelly_pct = 0.6 - 0.4/2 = 0.4; allocation = 10000 * 0.4 = 4000; qty = 40
+        assert!((qty - 40.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn kelly_criterion_negative_win_rate_errors() {
+        assert_value_error(
+            KellyCriterion::new(-0.1, 1.0, 1.0, 0.25).calculate(1_000.0, 10.0, None, None),
+            "win_rate",
+        );
+    }
+
+    #[test]
+    fn equal_weight_one_position() {
+        let sizer = EqualWeight::new(1);
+        let qty = sizer.calculate(5_000.0, 50.0, None, None).unwrap();
+        assert!((qty - 100.0).abs() < 1e-12);
+    }
 }

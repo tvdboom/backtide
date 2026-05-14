@@ -41,30 +41,6 @@ computed once over the full dataset before the simulation starts and are then
 sliced per bar for the strategy. They are de-duplicated across strategies, so
 two strategies asking for the same `SMA(20)` only compute it once.
 
-You don't need to think about this for built-in strategies. For [custom strategies](#custom-strategies),
-you can declare auto-included indicators yourself by overriding the `required_indicators`
-method on your subclass (note the `__auto_` prefix to avoid naming conflicts with
-user-defined indicators). The engine will then compute and inject those indicators
-into your strategy's `evaluate` method just like it does for built-in ones.
-
-```python
-from backtide.indicators import SimpleMovingAverage
-from backtide.strategies import BaseStrategy
-
-
-class MyStrategy(BaseStrategy):
-    def __init__(self, period=20):
-        self.period = period
-
-    def required_indicators(self):
-        return [SimpleMovingAverage(self.period)]
-
-    def evaluate(self, data, portfolio, state, indicators):
-        # Read the auto-injected SMA via its deterministic key.
-        sma = indicators[f"__auto_SMA_{self.period}"][-1]
-        ...
-```
-
 <br>
 
 ## Custom strategies
@@ -73,47 +49,72 @@ You can create your own strategies by subclassing `BaseStrategy`. Custom
 strategies can be written directly in the [application's][application] code
 editor or uploaded as `.py` files.
 
-```python title="Simple SMA trend strategy"
+```python title="Inside-bar breakout strategy"
 from math import floor
 
 from backtide.backtest import Order
-from backtide.indicators import SimpleMovingAverage
 from backtide.strategies import BaseStrategy
 
 
-class SimpleSmaTrend(BaseStrategy):
-    def __init__(self, symbol="AAPL", period=20, cash_fraction=0.95):
-        self.symbol = symbol
-        self.period = period
+class InsideBarBreakout(BaseStrategy):
+    """Long-only inside-bar breakout strategy.
+
+    Entry:
+      - Previous bar is an inside bar relative to the bar before it.
+      - Current close breaks above the inside bar high.
+
+    Exit:
+      - Current close falls below the inside bar low.
+
+    """
+
+    def __init__(self, cash_fraction=0.95):
         self.cash_fraction = cash_fraction
 
-    def required_indicators(self):
-        return [SimpleMovingAverage(self.period)]
-
     def evaluate(self, data, portfolio, state, indicators):
-        if self.symbol not in data:
-            return []
+        orders = []
+        entry_candidates = []
 
-        close = data[self.symbol]["close"].iloc[-1]
-        sma = indicators[f"__auto_SMA_{self.period}"][self.symbol].iloc[-1]
-        current_qty = portfolio.positions.get(self.symbol, 0)
+        # First pass: determine exits and potential entries.
+        for symbol, df in data.items():
+            # Need at least 3 bars:
+            # bar[-3] = "mother bar", bar[-2] = "inside bar", bar[-1] = current
+            if len(df) < 3:
+                continue
 
-        # Enter long when price is above the SMA.
-        if close > sma and current_qty <= 0:
-            cash = sum(portfolio.cash.values()) * self.cash_fraction
-            quantity = floor(cash / close)  # stocks/ETFs/forex require whole units
-            if quantity <= 0:
-                return []
-            return [Order(symbol=self.symbol, order_type="market", quantity=quantity)]
+            mother = df.iloc[-3]
+            inside = df.iloc[-2]
+            current = df.iloc[-1]
 
-        # Exit when price drops below the SMA.
-        if close < sma and current_qty > 0:
-            return [Order(symbol=self.symbol, order_type="market", quantity=-current_qty)]
+            current_qty = portfolio.positions.get(symbol, 0)
 
-        return []
+            is_inside_bar = inside["high"] < mother["high"] and inside["low"] > mother["low"]
+            breakout_up = current["close"] > inside["high"]
+            breakdown_down = current["close"] < inside["low"]
+
+            # Exit existing long on downside break.
+            if current_qty > 0 and breakdown_down:
+                orders.append(Order(symbol=symbol, order_type="market", quantity=-current_qty))
+                continue
+
+            # Track new long entries.
+            if current_qty <= 0 and is_inside_bar and breakout_up:
+                entry_candidates.append((symbol, float(current["close"])))
+
+        # Second pass: size entries from currently available cash.
+        if entry_candidates:
+            available_cash = sum(portfolio.cash.values()) * self.cash_fraction
+            cash_per_trade = available_cash / len(entry_candidates)
+
+            for symbol, close in entry_candidates:
+                qty = floor(cash_per_trade / close)
+                if qty > 0:
+                    orders.append(Order(symbol=symbol, order_type="market", quantity=qty))
+
+        return orders
 
 
-SimpleSmaTrend(symbol="AAPL", period=20)
+InsideBarBreakout()
 ```
 
 Custom strategies can either compute a numeric quantity for every order or attach

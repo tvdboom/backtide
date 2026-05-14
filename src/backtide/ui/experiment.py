@@ -1116,8 +1116,7 @@ with tab6:
                 on_change=lambda k=key: _persist(k),
                 help=(
                     "Maximum leverage ratio. A value of 2.0 means the strategy can borrow "
-                    "up to 1x the portfolio value on top of its own capital. Exceeding this "
-                    "limit raises an error."
+                    "up to 1x the portfolio value on top of its own capital."
                 ),
             )
 

@@ -1822,4 +1822,346 @@ mod tests {
         let instruments = db.query_instruments(None, None, Some(&[Exchange::XNYS]), None).unwrap();
         assert!(instruments.is_empty());
     }
+
+    // ── query_experiments search + limit ────────────────────────────────
+
+    #[test]
+    fn test_query_experiments_by_search_matches_name() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        // Search by partial match in the name (case-insensitive).
+        let rows = db.query_experiments(None, Some("STORAGE"), None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_query_experiments_by_search_matches_tag() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let rows = db.query_experiments(None, Some("custom"), None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_query_experiments_search_no_match() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let rows = db.query_experiments(None, Some("nomatch_xyz"), None).unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_query_experiments_empty_search_string_is_skipped() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        // Empty string -> no filter applied.
+        let rows = db.query_experiments(None, Some(""), None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_query_experiments_with_limit() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        for i in 0..3 {
+            let mut result = sample_experiment_result();
+            result.experiment_id = format!("exp-{i}");
+            db.write_experiment(&cfg, &result).unwrap();
+        }
+        let rows = db.query_experiments(None, None, Some(2)).unwrap();
+        assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn test_query_experiments_empty_id_filter_is_skipped() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let empty: &[String] = &[];
+        let rows = db.query_experiments(Some(empty), None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    // ── delete_experiment ───────────────────────────────────────────────
+
+    #[test]
+    fn test_delete_experiment_returns_zero_when_missing() {
+        let (_dir, db) = make_db();
+        let removed = db.delete_experiment("does-not-exist").unwrap();
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn test_delete_experiment_removes_all_rows() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        // Verify the rows exist first.
+        assert_eq!(
+            db.query_experiments(Some(std::slice::from_ref(&result.experiment_id)), None, None)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(db.query_strategy_runs(&result.experiment_id).unwrap().len(), 1);
+
+        let removed = db.delete_experiment(&result.experiment_id).unwrap();
+        assert_eq!(removed, 1);
+
+        // All cascades cleaned up.
+        assert!(db
+            .query_experiments(Some(std::slice::from_ref(&result.experiment_id)), None, None)
+            .unwrap()
+            .is_empty());
+        assert!(db.query_strategy_runs(&result.experiment_id).unwrap().is_empty());
+    }
+
+    // ── query_strategy_runs scalar-cash backward compat ─────────────────
+
+    #[test]
+    fn test_query_strategy_runs_empty_for_missing_experiment() {
+        let (_dir, db) = make_db();
+        let runs = db.query_strategy_runs("none").unwrap();
+        assert!(runs.is_empty());
+    }
+
+    #[test]
+    fn test_query_strategy_runs_handles_error_field() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let mut result = sample_experiment_result();
+        // Set an error on the strategy run.
+        result.strategies[0].error = Some("strategy crashed".to_owned());
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let runs = db.query_strategy_runs(&result.experiment_id).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].error.as_deref(), Some("strategy crashed"));
+    }
+
+    #[test]
+    fn test_query_strategy_runs_handles_benchmark_flag() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let mut result = sample_experiment_result();
+        result.strategies[0].is_benchmark = true;
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let runs = db.query_strategy_runs(&result.experiment_id).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].is_benchmark);
+    }
+
+    // ── query_bars_summary covers join + sparkline ──────────────────────
+
+    #[test]
+    fn test_query_bars_summary_with_dividends_too() {
+        let (_dir, db) = make_db();
+        use crate::data::models::dividend::Dividend;
+        db.write_instruments(&[sample_instrument("AAPL")]).unwrap();
+        db.write_bars_bulk(&[BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: (0..5).map(|i| sample_bar(1_000_000 + i * 86400)).collect(),
+        }])
+        .unwrap();
+        db.write_dividends_bulk(&[DividendSeries {
+            symbol: "AAPL".to_owned(),
+            provider: Provider::Yahoo,
+            dividends: vec![Dividend {
+                ex_date: 1_000_000,
+                amount: 0.82,
+            }],
+        }])
+        .unwrap();
+
+        let summaries = db.query_bars_summary().unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].n_rows, 5);
+        assert_eq!(summaries[0].sparkline.len(), 5);
+    }
+
+    // ── query_bar_ranges with multiple groupings ────────────────────────
+
+    #[test]
+    fn test_query_bar_ranges_multiple_groups() {
+        let (_dir, db) = make_db();
+        db.write_bars_bulk(&[
+            BarSeries {
+                symbol: "AAPL".to_owned(),
+                interval: Interval::OneDay,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(1_000), sample_bar(2_000)],
+            },
+            BarSeries {
+                symbol: "AAPL".to_owned(),
+                interval: Interval::OneHour,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(500)],
+            },
+        ])
+        .unwrap();
+
+        let ranges = db.query_bar_ranges().unwrap();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(
+            ranges[&("AAPL".to_owned(), "1d".to_owned(), "yahoo".to_owned())],
+            (1_000, 2_000)
+        );
+        assert_eq!(
+            ranges[&("AAPL".to_owned(), "1h".to_owned(), "yahoo".to_owned())],
+            (500, 500)
+        );
+    }
+
+    // ── query_bars empty filter slices ──────────────────────────────────
+
+    #[test]
+    fn test_query_bars_empty_interval_filter() {
+        let (_dir, db) = make_db();
+        db.write_bars_bulk(&[BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }])
+        .unwrap();
+        let empty: &[Interval] = &[];
+        let rows = db.query_bars(None, Some(empty), None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_query_bars_empty_provider_filter() {
+        let (_dir, db) = make_db();
+        db.write_bars_bulk(&[BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }])
+        .unwrap();
+        let empty: &[Provider] = &[];
+        let rows = db.query_bars(None, None, Some(empty), None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    // ── query_dividends empty filter slices ─────────────────────────────
+
+    #[test]
+    fn test_query_dividends_empty_symbol_filter() {
+        let (_dir, db) = make_db();
+        use crate::data::models::dividend::Dividend;
+        db.write_dividends_bulk(&[DividendSeries {
+            symbol: "AAPL".to_owned(),
+            provider: Provider::Yahoo,
+            dividends: vec![Dividend {
+                ex_date: 1_000_000,
+                amount: 0.82,
+            }],
+        }])
+        .unwrap();
+        let empty: &[&str] = &[];
+        let rows = db.query_dividends(Some(empty), None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_query_dividends_empty_provider_filter() {
+        let (_dir, db) = make_db();
+        use crate::data::models::dividend::Dividend;
+        db.write_dividends_bulk(&[DividendSeries {
+            symbol: "AAPL".to_owned(),
+            provider: Provider::Yahoo,
+            dividends: vec![Dividend {
+                ex_date: 1_000_000,
+                amount: 0.82,
+            }],
+        }])
+        .unwrap();
+        let empty: &[Provider] = &[];
+        let rows = db.query_dividends(None, Some(empty), None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    // ── query_instruments empty filter slices ───────────────────────────
+
+    #[test]
+    fn test_query_instruments_empty_filter_slices() {
+        let (_dir, db) = make_db();
+        db.write_instruments(&[sample_instrument("AAPL")]).unwrap();
+        let empty_it: &[InstrumentType] = &[];
+        let empty_pr: &[Provider] = &[];
+        let empty_ex: &[Exchange] = &[];
+        let rows =
+            db.query_instruments(Some(empty_it), Some(empty_pr), Some(empty_ex), None).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    // ── delete_symbols with empty filter conditions ─────────────────────
+
+    #[test]
+    fn test_delete_symbols_multiple_targets() {
+        let (_dir, db) = make_db();
+        db.write_bars_bulk(&[
+            BarSeries {
+                symbol: "AAPL".to_owned(),
+                interval: Interval::OneDay,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(1_000_000)],
+            },
+            BarSeries {
+                symbol: "MSFT".to_owned(),
+                interval: Interval::OneDay,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(1_000_000)],
+            },
+        ])
+        .unwrap();
+
+        let removed = db
+            .delete_symbols(&[
+                ("AAPL".to_owned(), None, None),
+                ("MSFT".to_owned(), None, None),
+            ])
+            .unwrap();
+        assert_eq!(removed, 2);
+        assert!(db.query_bars(None, None, None, None).unwrap().is_empty());
+    }
+
+    // ── write_experiment with status Error + best_sharpe absent ─────────
+
+    #[test]
+    fn test_write_experiment_with_error_status() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let mut result = sample_experiment_result();
+        result.status = ExperimentStatus::Error;
+        result.strategies[0].metrics.clear();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let rows = db
+            .query_experiments(Some(std::slice::from_ref(&result.experiment_id)), None, None)
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        // best_sharpe is None because no sharpe key in metrics.
+        assert!(rows[0].best_sharpe.is_none());
+    }
 }

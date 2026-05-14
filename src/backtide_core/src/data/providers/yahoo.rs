@@ -1139,4 +1139,310 @@ mod tests {
         assert_eq!(inst.name, "Microsoft Corp");
         assert_eq!(inst.provider, Provider::Yahoo);
     }
+
+    // ── ChartMeta error paths ───────────────────────────────────────────
+
+    #[test]
+    fn instrument_from_chart_meta_no_currency() {
+        let m = ChartMeta {
+            symbol: "AAA".to_owned(),
+            short_name: None,
+            long_name: None,
+            currency: None,
+            instrument_type: Some("EQUITY".to_owned()),
+            exchange_name: Some("NMS".to_owned()),
+            first_trade_date: None,
+            regular_market_time: None,
+        };
+        assert!(Instrument::try_from(m).is_err());
+    }
+
+    #[test]
+    fn instrument_from_chart_meta_no_instrument_type() {
+        let m = ChartMeta {
+            symbol: "AAA".to_owned(),
+            short_name: None,
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            instrument_type: None,
+            exchange_name: Some("NMS".to_owned()),
+            first_trade_date: None,
+            regular_market_time: None,
+        };
+        assert!(Instrument::try_from(m).is_err());
+    }
+
+    #[test]
+    fn instrument_from_chart_meta_no_exchange_name() {
+        let m = ChartMeta {
+            symbol: "AAA".to_owned(),
+            short_name: None,
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            instrument_type: Some("EQUITY".to_owned()),
+            exchange_name: None,
+            first_trade_date: None,
+            regular_market_time: None,
+        };
+        assert!(Instrument::try_from(m).is_err());
+    }
+
+    #[test]
+    fn instrument_from_chart_meta_unknown_exchange_code_kept_as_is() {
+        let m = ChartMeta {
+            symbol: "ZZZ".to_owned(),
+            short_name: None,
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            instrument_type: Some("EQUITY".to_owned()),
+            exchange_name: Some("UNKNOWN_CODE".to_owned()),
+            first_trade_date: None,
+            regular_market_time: None,
+        };
+        let inst = Instrument::try_from(m).unwrap();
+        assert_eq!(inst.exchange, "UNKNOWN_CODE");
+    }
+
+    #[test]
+    fn instrument_from_chart_meta_uses_long_name_when_short_missing() {
+        let m = ChartMeta {
+            symbol: "AAA".to_owned(),
+            short_name: None,
+            long_name: Some("Long Inc.".to_owned()),
+            currency: Some("USD".to_owned()),
+            instrument_type: Some("EQUITY".to_owned()),
+            exchange_name: Some("NMS".to_owned()),
+            first_trade_date: None,
+            regular_market_time: None,
+        };
+        let inst = Instrument::try_from(m).unwrap();
+        assert_eq!(inst.name, "Long Inc.");
+    }
+
+    #[test]
+    fn instrument_from_chart_meta_fallbacks_to_quote_when_no_names() {
+        let m = ChartMeta {
+            symbol: "AAA".to_owned(),
+            short_name: None,
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            instrument_type: Some("EQUITY".to_owned()),
+            exchange_name: Some("NMS".to_owned()),
+            first_trade_date: None,
+            regular_market_time: None,
+        };
+        let inst = Instrument::try_from(m).unwrap();
+        assert_eq!(inst.name, "USD");
+    }
+
+    // ── YahooQuote error paths ──────────────────────────────────────────
+
+    #[test]
+    fn instrument_from_quote_no_exchange() {
+        let q = YahooQuote {
+            symbol: "AAPL".to_owned(),
+            short_name: None,
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            quote_type: Some("EQUITY".to_owned()),
+            exchange: None,
+        };
+        assert!(Instrument::try_from(q).is_err());
+    }
+
+    #[test]
+    fn instrument_from_quote_uses_long_name_when_short_missing() {
+        let q = YahooQuote {
+            symbol: "AAPL".to_owned(),
+            short_name: None,
+            long_name: Some("Apple Long Name".to_owned()),
+            currency: Some("USD".to_owned()),
+            quote_type: Some("EQUITY".to_owned()),
+            exchange: Some("NMS".to_owned()),
+        };
+        let inst = Instrument::try_from(q).unwrap();
+        assert_eq!(inst.name, "Apple Long Name");
+    }
+
+    #[test]
+    fn instrument_from_quote_unknown_exchange_kept_as_string() {
+        let q = YahooQuote {
+            symbol: "AAPL".to_owned(),
+            short_name: Some("Apple".to_owned()),
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            quote_type: Some("EQUITY".to_owned()),
+            exchange: Some("UNKNOWN_XYZ".to_owned()),
+        };
+        let inst = Instrument::try_from(q).unwrap();
+        assert_eq!(inst.exchange, "UNKNOWN_XYZ");
+    }
+
+    #[test]
+    fn instrument_from_quote_forex_pair() {
+        let q = YahooQuote {
+            symbol: "EURUSD=X".to_owned(),
+            short_name: Some("EUR/USD".to_owned()),
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            quote_type: Some("CURRENCY".to_owned()),
+            exchange: Some("CCY".to_owned()),
+        };
+        let inst = Instrument::try_from(q).unwrap();
+        assert_eq!(inst.base, Some("EUR".to_owned()));
+        assert_eq!(inst.quote, "USD");
+        assert_eq!(inst.instrument_type, InstrumentType::Forex);
+    }
+
+    #[test]
+    fn instrument_from_quote_etf() {
+        let q = YahooQuote {
+            symbol: "SPY".to_owned(),
+            short_name: Some("SPDR S&P 500".to_owned()),
+            long_name: None,
+            currency: Some("USD".to_owned()),
+            quote_type: Some("ETF".to_owned()),
+            exchange: Some("PCX".to_owned()),
+        };
+        let inst = Instrument::try_from(q).unwrap();
+        assert_eq!(inst.instrument_type, InstrumentType::Etf);
+    }
+
+    // ── parse_base_quote forex implicit base ────────────────────────────
+
+    #[test]
+    fn parse_base_quote_forex_3char_implies_usd_base() {
+        let (base, quote) =
+            YahooFinance::parse_base_quote("CHF=X", "CHF", InstrumentType::Forex).unwrap();
+        assert_eq!(base.as_deref(), Some("USD"));
+        assert_eq!(quote, "CHF");
+    }
+
+    #[test]
+    fn parse_base_quote_crypto_without_dash_treats_as_no_base() {
+        // Crypto symbol with no dash falls through to default branch.
+        let (base, quote) =
+            YahooFinance::parse_base_quote("BTCUSD", "USD", InstrumentType::Crypto).unwrap();
+        assert_eq!(base, None);
+        assert_eq!(quote, "USD");
+    }
+
+    // ── parse_canonical_symbol additional ───────────────────────────────
+
+    #[test]
+    fn parse_canonical_symbol_etf_unchanged() {
+        assert_eq!(
+            YahooFinance::parse_canonical_symbol("SPY", InstrumentType::Etf).unwrap(),
+            "SPY"
+        );
+    }
+
+    #[test]
+    fn parse_canonical_symbol_stocks_passthrough_with_dash() {
+        assert_eq!(
+            YahooFinance::parse_canonical_symbol("BRK-B", InstrumentType::Stocks).unwrap(),
+            "BRK-B"
+        );
+    }
+
+    // ── Misc: list_instruments Forex (no HTTP) ──────────────────────────
+
+    #[tokio::test]
+    async fn list_instruments_forex_returns_all_pairs() {
+        let yf = YahooFinance {
+            client: HttpClient::with_config(HttpClientConfig {
+                max_concurrent_requests: 1,
+                connect_timeout: std::time::Duration::from_secs(1),
+                request_timeout: std::time::Duration::from_secs(1),
+                min_request_interval: None,
+            })
+            .unwrap(),
+            crumb: "test".to_owned(),
+        };
+        let instruments = yf.list_instruments(InstrumentType::Forex, None, 1).await.unwrap();
+        assert!(!instruments.is_empty());
+        // Every Forex instrument should be tagged correctly.
+        for inst in &instruments {
+            assert_eq!(inst.instrument_type, InstrumentType::Forex);
+            assert_eq!(inst.provider, Provider::Yahoo);
+            assert_eq!(inst.exchange, "CCY");
+        }
+    }
+
+    // ── ChartResponse deserialization ───────────────────────────────────
+
+    #[test]
+    fn chart_response_with_error_deserializes() {
+        let body = serde_json::json!({
+            "chart": {
+                "result": [],
+                "error": { "code": "Not Found", "description": "bad symbol" }
+            }
+        });
+        let parsed: ChartResponse = serde_json::from_value(body).unwrap();
+        assert!(parsed.chart.result.is_empty());
+        let err = parsed.chart.error.unwrap();
+        assert_eq!(err.description.as_deref(), Some("bad symbol"));
+    }
+
+    #[test]
+    fn chart_response_without_error_deserializes() {
+        let body = serde_json::json!({
+            "chart": {
+                "result": [{
+                    "meta": {
+                        "symbol": "AAPL",
+                        "currency": "USD",
+                        "instrumentType": "EQUITY",
+                        "exchangeName": "NMS"
+                    }
+                }],
+                "error": null
+            }
+        });
+        let parsed: ChartResponse = serde_json::from_value(body).unwrap();
+        assert_eq!(parsed.chart.result.len(), 1);
+        assert!(parsed.chart.error.is_none());
+        assert_eq!(parsed.chart.result[0].meta.symbol, "AAPL");
+    }
+
+    #[test]
+    fn screener_response_deserializes() {
+        let body = serde_json::json!({
+            "finance": {
+                "result": [{
+                    "quotes": [{
+                        "symbol": "AAPL",
+                        "shortName": "Apple Inc.",
+                        "currency": "USD",
+                        "quoteType": "EQUITY",
+                        "exchange": "NMS"
+                    }]
+                }]
+            }
+        });
+        let parsed: ScreenerResponse = serde_json::from_value(body).unwrap();
+        assert_eq!(parsed.finance.result.len(), 1);
+        assert_eq!(parsed.finance.result[0].quotes.len(), 1);
+        assert_eq!(parsed.finance.result[0].quotes[0].symbol, "AAPL");
+    }
+
+    // ── ChartIndicators / ChartQuote / ChartAdjClose defaults ───────────
+
+    #[test]
+    fn chart_indicators_default_is_empty() {
+        let ci = ChartIndicators::default();
+        assert!(ci.quote.is_empty());
+        assert!(ci.adjclose.is_none());
+    }
+
+    #[test]
+    fn chart_quote_default_is_empty() {
+        let cq = ChartQuote::default();
+        assert!(cq.open.is_empty());
+        assert!(cq.high.is_empty());
+        assert!(cq.low.is_empty());
+        assert!(cq.close.is_empty());
+        assert!(cq.volume.is_empty());
+    }
 }

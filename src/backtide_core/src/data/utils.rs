@@ -26,4 +26,16 @@ mod tests {
         let result = canonical_symbol("AAPL", &None, &"USD".to_owned());
         assert_eq!(result, "AAPL");
     }
+
+    #[test]
+    fn test_canonical_symbol_empty_base() {
+        let result = canonical_symbol("MSFT", &Some("".to_owned()), &"USD".to_owned());
+        assert_eq!(result, "-USD");
+    }
+
+    #[test]
+    fn test_canonical_symbol_preserves_case() {
+        let result = canonical_symbol("eth_usd", &Some("ETH".to_owned()), &"usd".to_owned());
+        assert_eq!(result, "ETH-usd");
+    }
 }

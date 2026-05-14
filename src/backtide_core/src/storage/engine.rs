@@ -104,24 +104,71 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::config::interface::Config;
+    use crate::constants::Symbol;
+    use crate::data::errors::DataResult;
     use crate::data::models::bar::Bar;
+    use crate::data::models::bar_download::BarDownload;
     use crate::data::models::dividend::Dividend;
+    use crate::data::models::exchange::Exchange;
     use crate::data::providers::traits::DataProvider;
     use crate::engine::{Engine, EngineCache};
     use crate::storage::duckdb::DuckDb;
     use crate::storage::models::bar_series::BarSeries;
     use crate::storage::models::dividend_series::DividendSeries;
     use crate::storage::traits::Storage;
+    use async_trait::async_trait;
     use std::sync::Arc;
     use strum::IntoEnumIterator;
     use tempfile::TempDir;
     use tokio::runtime::Runtime;
 
+    /// A no-op provider that never makes network calls.
+    struct StubProvider;
+
+    #[async_trait]
+    impl DataProvider for StubProvider {
+        async fn fetch_instrument(
+            &self,
+            _symbol: &Symbol,
+            _instrument_type: InstrumentType,
+        ) -> DataResult<Instrument> {
+            Err(crate::data::errors::DataError::SymbolNotFound("stub".into()))
+        }
+
+        async fn fetch_range(
+            &self,
+            _instrument: Instrument,
+            _interval: Interval,
+        ) -> DataResult<(u64, u64)> {
+            Ok((0, 0))
+        }
+
+        async fn list_instruments(
+            &self,
+            _instrument_type: InstrumentType,
+            _exchanges: Option<Vec<Exchange>>,
+            _limit: usize,
+        ) -> DataResult<Vec<Instrument>> {
+            Ok(vec![])
+        }
+
+        async fn download_bars(
+            &self,
+            _symbol: &str,
+            _instrument_type: InstrumentType,
+            _interval: Interval,
+            _start: u64,
+            _end: u64,
+        ) -> DataResult<BarDownload> {
+            Ok(BarDownload { bars: vec![], dividends: vec![] })
+        }
+    }
+
     /// Build a minimal Engine backed by a fresh DuckDb in a temporary directory.
     ///
     /// Providers are unused by storage tests, but every InstrumentType must
-    /// be present in the providers map for the engine to be valid. We point
-    /// them at any registered provider — the tests below never call out.
+    /// be present in the providers map for the engine to be valid. We use
+    /// a stub provider that never makes network calls.
     fn test_engine() -> (Engine, TempDir) {
         let config = Box::leak(Box::new(Config::default()));
         let rt = Runtime::new().unwrap();
@@ -130,14 +177,9 @@ mod tests {
         let db = DuckDb::new(&tmp.path().join("test.db")).unwrap();
         db.init().unwrap();
 
-        // Minimal placeholder providers map. Storage tests don't invoke them.
+        let stub: Arc<dyn DataProvider> = Arc::new(StubProvider);
         let providers: HashMap<InstrumentType, Arc<dyn DataProvider>> = InstrumentType::iter()
-            .map(|it| {
-                let p: Arc<dyn DataProvider> = Arc::new(
-                    rt.block_on(crate::data::providers::yahoo::YahooFinance::new()).unwrap(),
-                );
-                (it, p)
-            })
+            .map(|it| (it, stub.clone()))
             .collect();
 
         (
@@ -385,5 +427,97 @@ mod tests {
 
         let bars = engine.query_bars(Some(&["AAPL"]), None, None, None).unwrap();
         assert!(bars.is_empty());
+    }
+
+    #[test]
+    fn query_bars_empty_db_returns_empty_vec() {
+        let (engine, _tmp) = test_engine();
+        let bars = engine.query_bars(None, None, None, None).unwrap();
+        assert!(bars.is_empty());
+    }
+
+    #[test]
+    fn query_bar_ranges_empty_db_returns_empty_map() {
+        let (engine, _tmp) = test_engine();
+        let ranges = engine.query_bar_ranges().unwrap();
+        assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn query_bars_summary_empty_db_returns_empty_vec() {
+        let (engine, _tmp) = test_engine();
+        let summary = engine.query_bars_summary().unwrap();
+        assert!(summary.is_empty());
+    }
+
+    #[test]
+    fn query_dividends_empty_db_returns_empty_vec() {
+        let (engine, _tmp) = test_engine();
+        let divs = engine.query_dividends(None, None, None).unwrap();
+        assert!(divs.is_empty());
+    }
+
+    #[test]
+    fn query_instruments_empty_db_returns_empty_vec() {
+        let (engine, _tmp) = test_engine();
+        let insts = engine.query_instruments(None, None, None, None).unwrap();
+        assert!(insts.is_empty());
+    }
+
+    #[test]
+    fn write_and_read_multiple_symbols() {
+        let (engine, _tmp) = test_engine();
+        let series_a = BarSeries {
+            symbol: "AAPL".into(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![Bar {
+                open_ts: 100, close_ts: 200, open_ts_exchange: 100,
+                open: 1.0, high: 2.0, low: 0.5, close: 1.5, adj_close: 1.5,
+                volume: 10.0, n_trades: None,
+            }],
+        };
+        let series_b = BarSeries {
+            symbol: "MSFT".into(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![Bar {
+                open_ts: 100, close_ts: 200, open_ts_exchange: 100,
+                open: 50.0, high: 55.0, low: 49.0, close: 52.0, adj_close: 52.0,
+                volume: 20.0, n_trades: None,
+            }],
+        };
+        engine.write_bars_bulk(&[series_a, series_b]).unwrap();
+        let all_bars = engine.query_bars(None, None, None, None).unwrap();
+        assert_eq!(all_bars.len(), 2);
+        let aapl = engine.query_bars(Some(&["AAPL"]), None, None, None).unwrap();
+        assert_eq!(aapl.len(), 1);
+        let msft = engine.query_bars(Some(&["MSFT"]), None, None, None).unwrap();
+        assert_eq!(msft.len(), 1);
+    }
+
+    #[test]
+    fn delete_symbols_nonexistent_returns_zero() {
+        let (engine, _tmp) = test_engine();
+        let deleted = engine.delete_symbols(&[("NONEXIST".into(), None, None)]).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn write_instruments_and_query_by_exchange() {
+        let (engine, _tmp) = test_engine();
+        let inst = Instrument {
+            symbol: "AAPL".into(),
+            name: "Apple Inc.".into(),
+            base: None,
+            quote: "USD".into(),
+            instrument_type: InstrumentType::Stocks,
+            exchange: "NASDAQ".into(),
+            provider: Provider::Yahoo,
+        };
+        engine.write_instruments(&[inst]).unwrap();
+        let found = engine.query_instruments(None, None, None, None).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].exchange, "NASDAQ");
     }
 }

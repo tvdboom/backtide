@@ -142,4 +142,37 @@ mod tests {
         assert_eq!(cfg.data.storage_path, PathBuf::from(".backtide"));
         assert_eq!(cfg.display.port, 8501);
     }
+
+    #[test]
+    fn test_parse_config_yaml_yml_extension() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("backtide.config.yml");
+        fs::write(&path, "general:\n  base_currency: EUR\n").unwrap();
+        let cfg = parse_config(&path).unwrap();
+        assert_eq!(cfg.general.base_currency.to_string(), "EUR");
+    }
+
+    #[test]
+    fn test_parse_config_invalid_toml_content() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("backtide.config.toml");
+        fs::write(&path, "this is not valid toml {{{{").unwrap();
+        assert!(parse_config(&path).is_err());
+    }
+
+    #[test]
+    fn test_parse_config_invalid_json_content() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("backtide.config.json");
+        fs::write(&path, "not json at all").unwrap();
+        assert!(parse_config(&path).is_err());
+    }
+
+    #[test]
+    fn test_parse_config_invalid_yaml_content() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("backtide.config.yaml");
+        fs::write(&path, ":\n  bad:\n    - [unclosed").unwrap();
+        assert!(parse_config(&path).is_err());
+    }
 }

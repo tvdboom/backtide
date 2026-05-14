@@ -1709,4 +1709,87 @@ mod tests {
         assert!(!<SimpleMovingAverage as Indicator>::NAME.is_empty());
         assert!(!<SimpleMovingAverage as Indicator>::DESCRIPTION.is_empty());
     }
+
+    #[test]
+    fn ewm_with_leading_nans_recovers() {
+        let out = ewm(&[f64::NAN, f64::NAN, 5.0, 6.0, 7.0], 2);
+        assert!(out[0].is_nan());
+        assert!(out[1].is_nan());
+        assert_eq!(out[2], 5.0);
+        assert!(out[3] > 5.0 && out[3] < 7.0);
+    }
+
+    #[test]
+    fn rolling_mean_period_one_equals_data() {
+        let out = rolling_mean(&[1.0, 2.0, 3.0], 1);
+        assert_eq!(out, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn rolling_std_all_same_values_is_zero() {
+        let out = rolling_std(&[5.0, 5.0, 5.0, 5.0], 3);
+        assert!(out[0].is_nan());
+        assert!(out[1].is_nan());
+        assert!((out[2] - 0.0).abs() < 1e-12);
+        assert!((out[3] - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn true_range_first_bar_is_high_minus_low() {
+        let tr = true_range(&[20.0], &[10.0], &[15.0]);
+        assert_eq!(tr[0], 10.0);
+    }
+
+    #[test]
+    fn rsi_bounded_zero_to_one_hundred() {
+        let bars: Vec<Bar> = (0..30)
+            .map(|i| bar(100.0 + (i as f64 * 0.5).sin() * 10.0))
+            .collect();
+        let out = RelativeStrengthIndex::new(14).compute_inner(&bars);
+        for v in &out[0] {
+            if v.is_finite() {
+                assert!(*v >= 0.0 && *v <= 100.0, "RSI out of bounds: {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn bollinger_bands_middle_equals_sma() {
+        let bars: Vec<Bar> = (0..20).map(|i| bar(50.0 + i as f64)).collect();
+        let bb = BollingerBands::new(5, 2.0).compute_inner(&bars);
+        let sma = SimpleMovingAverage::new(5).compute_inner(&bars);
+        for i in 0..bars.len() {
+            if bb[1][i].is_finite() {
+                assert!((bb[1][i] - sma[0][i]).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn ema_empty_input() {
+        let out = ExponentialMovingAverage::new(5).compute_inner(&[]);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_empty());
+    }
+
+    #[test]
+    fn obv_single_bar_is_zero() {
+        let bars = vec![ohlc_bar(0.0, 0.0, 0.0, 10.0, 100.0)];
+        let out = OnBalanceVolume::new().compute_inner(&bars);
+        assert_eq!(out[0], vec![0.0]);
+    }
+
+    #[test]
+    fn atr_empty_input() {
+        let out = AverageTrueRange::new(14).compute_inner(&[]);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_empty());
+    }
+
+    #[test]
+    fn macd_empty_input() {
+        let out = MovingAverageConvergenceDivergence::new(12, 26, 9).compute_inner(&[]);
+        assert_eq!(out.len(), 2);
+        assert!(out[0].is_empty());
+    }
 }

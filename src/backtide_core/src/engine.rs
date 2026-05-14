@@ -232,4 +232,48 @@ mod tests {
         // clear_cache must be callable without panicking.
         e1.clear_cache();
     }
+
+    #[test]
+    fn engine_cache_instrument_insertion_and_retrieval() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let inst = Arc::new(Instrument {
+                symbol: "MSFT".to_owned(),
+                name: "Microsoft".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "NASDAQ".to_owned(),
+                provider: Provider::Yahoo,
+            });
+            cache.instrument_cache.insert("MSFT".to_owned(), inst.clone()).await;
+            cache.instrument_cache.run_pending_tasks().await;
+            let got = cache.instrument_cache.get("MSFT").await.unwrap();
+            assert_eq!(got.symbol, "MSFT");
+            assert!(cache.instrument_cache.get("NONEXIST").await.is_none());
+        });
+    }
+
+    #[test]
+    fn engine_cache_range_insertion_and_retrieval() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let key = ("BTC".to_owned(), Interval::OneHour);
+            cache.range_cache.insert(key.clone(), (1000, 2000)).await;
+            cache.range_cache.run_pending_tasks().await;
+            let (start, end) = cache.range_cache.get(&key).await.unwrap();
+            assert_eq!(start, 1000);
+            assert_eq!(end, 2000);
+        });
+    }
+
+    #[test]
+    fn engine_cache_multiple_clears_dont_panic() {
+        let cache = EngineCache::new();
+        cache.clear();
+        cache.clear();
+        cache.clear();
+    }
 }

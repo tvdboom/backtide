@@ -608,4 +608,51 @@ mod tests {
         let result = client.get(&format!("{}/fail", server.uri()), None).await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_http_client_successful_get() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ok"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("all good"))
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let resp = client.get(&format!("{}/ok", server.uri()), None).await.unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_http_client_404_returns_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/notfound"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let result = client.get(&format!("{}/notfound", server.uri()), None).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn http_client_default_config_creates_client() {
+        let client = HttpClient::new();
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn http_error_display_formats_correctly() {
+        let err = HttpError::Status { status: StatusCode::from_u16(503).unwrap(), body: "unavailable".into() };
+        let s = format!("{err}");
+        assert!(s.contains("unavailable"));
+    }
 }

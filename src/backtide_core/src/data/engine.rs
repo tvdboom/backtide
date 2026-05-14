@@ -1052,4 +1052,321 @@ mod tests {
         });
         assert!(cached.is_some());
     }
+
+    // ── download_bars partial overlap / head / tail ─────────────────────
+
+    #[test]
+    fn download_bars_handles_provider_error_as_failure() {
+        // A provider that returns an empty BarDownload from download_bars
+        // produces no failure; instead use a unique InstrumentType to force
+        // the provider lookup to use the default mock.
+        let inst = usd_quote_instrument();
+        let mock = MockProvider::new(inst.clone()); // empty bars
+        let (engine, _tmp) = test_engine(mock);
+
+        let mut earliest = HashMap::new();
+        let mut latest = HashMap::new();
+        earliest.insert(Interval::OneDay, 1_700_000_000);
+        latest.insert(Interval::OneDay, 1_700_086_400);
+
+        let profiles = vec![InstrumentProfile {
+            instrument: inst,
+            earliest_ts: earliest,
+            latest_ts: latest,
+            legs: vec![],
+        }];
+
+        let result = engine.download_bars(&profiles, None, None, false).unwrap();
+        // Mock returns Ok(0 bars), so it counts as a success with 0 bars.
+        assert_eq!(result.n_succeeded, 1);
+        assert_eq!(result.n_failed, 0);
+    }
+
+    // ── EngineCache instrument_cache hit path ───────────────────────────
+
+    #[test]
+    fn fetch_instruments_second_call_reads_from_cache() {
+        let inst = test_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst.clone()));
+
+        let r1 =
+            engine.fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto).unwrap();
+        let r2 =
+            engine.fetch_instruments(vec!["TEST-USD".to_owned()], InstrumentType::Crypto).unwrap();
+        assert_eq!(r1[0].symbol, r2[0].symbol);
+    }
+
+    // ── list_instruments forwards limit ─────────────────────────────────
+
+    #[test]
+    fn list_instruments_with_exchanges_filter() {
+        let inst = test_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst));
+
+        let results =
+            engine.list_instruments(InstrumentType::Crypto, Some(vec![Exchange::XNAS]), 5, false).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    // ── resolve_profiles with non-base quote triggers leg resolution ────
+
+    /// Stronger mock: returns different instruments / ranges per symbol.
+    struct MultiProvider {
+        instruments: HashMap<Symbol, Instrument>,
+        ranges: HashMap<Symbol, (u64, u64)>,
+        list: Vec<Instrument>,
+        bars: HashMap<Symbol, Vec<crate::data::models::bar::Bar>>,
+    }
+
+    impl MultiProvider {
+        fn new() -> Self {
+            Self {
+                instruments: HashMap::new(),
+                ranges: HashMap::new(),
+                list: vec![],
+                bars: HashMap::new(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl DataProvider for MultiProvider {
+        async fn fetch_instrument(
+            &self,
+            symbol: &Symbol,
+            _instrument_type: InstrumentType,
+        ) -> DataResult<Instrument> {
+            self.instruments
+                .get(symbol)
+                .cloned()
+                .ok_or_else(|| DataError::SymbolNotFound(symbol.clone()))
+        }
+
+        async fn fetch_range(
+            &self,
+            instrument: Instrument,
+            _interval: Interval,
+        ) -> DataResult<(u64, u64)> {
+            Ok(self.ranges.get(&instrument.symbol).copied().unwrap_or((1000, 2000)))
+        }
+
+        async fn list_instruments(
+            &self,
+            _: InstrumentType,
+            _: Option<Vec<Exchange>>,
+            _: usize,
+        ) -> DataResult<Vec<Instrument>> {
+            Ok(self.list.clone())
+        }
+
+        async fn download_bars(
+            &self,
+            symbol: &str,
+            _: InstrumentType,
+            _: Interval,
+            _: u64,
+            _: u64,
+        ) -> DataResult<BarDownload> {
+            Ok(BarDownload {
+                bars: self.bars.get(symbol).cloned().unwrap_or_default(),
+                dividends: vec![],
+            })
+        }
+    }
+
+    fn make_instrument(symbol: &str, base: Option<&str>, quote: &str, it: InstrumentType) -> Instrument {
+        Instrument {
+            symbol: symbol.to_owned(),
+            name: symbol.to_owned(),
+            base: base.map(|s| s.to_owned()),
+            quote: quote.to_owned(),
+            instrument_type: it,
+            exchange: "TEST".to_owned(),
+            provider: Provider::Yahoo,
+        }
+    }
+
+    #[test]
+    fn resolve_profiles_with_quote_matching_base_no_legs() {
+        // A quote matching base currency requires no legs.
+        let mut mp = MultiProvider::new();
+        mp.instruments
+            .insert("AAPL".to_owned(), make_instrument("AAPL", None, "USD", InstrumentType::Stocks));
+        let (engine, _tmp) = test_engine_multi(mp);
+
+        let profiles = engine
+            .resolve_profiles(
+                vec!["AAPL".to_owned()],
+                InstrumentType::Stocks,
+                vec![Interval::OneDay],
+                false,
+            )
+            .unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert!(profiles[0].legs.is_empty());
+    }
+
+    #[test]
+    fn resolve_profiles_with_base_matching_base_no_legs() {
+        // An instrument whose `base` matches the portfolio base currency
+        // should also resolve with no legs.
+        let mut mp = MultiProvider::new();
+        mp.instruments.insert(
+            "USD-EUR".to_owned(),
+            make_instrument("USD-EUR", Some("USD"), "EUR", InstrumentType::Forex),
+        );
+        let (engine, _tmp) = test_engine_multi(mp);
+
+        let profiles = engine
+            .resolve_profiles(
+                vec!["USD-EUR".to_owned()],
+                InstrumentType::Forex,
+                vec![Interval::OneDay],
+                false,
+            )
+            .unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert!(profiles[0].legs.is_empty());
+    }
+
+    fn test_engine_multi(mock: MultiProvider) -> (Engine, TempDir) {
+        let config = Box::leak(Box::new(Config::default()));
+
+        let rt = Runtime::new().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let db = DuckDb::new(&db_path).unwrap();
+        db.init().unwrap();
+
+        let provider: Arc<dyn DataProvider> = Arc::new(mock);
+        let mut providers = HashMap::new();
+        for it in InstrumentType::iter() {
+            providers.insert(it, provider.clone());
+        }
+
+        (
+            Engine {
+                config,
+                rt,
+                providers,
+                db: Box::new(db),
+                cache: EngineCache::new(),
+            },
+            tmp,
+        )
+    }
+
+    // ── clear_cache also clears range cache ─────────────────────────────
+
+    #[test]
+    fn clear_cache_also_clears_range_cache() {
+        let inst = usd_quote_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(inst));
+        engine
+            .resolve_profiles(
+                vec!["AAPL".to_owned()],
+                InstrumentType::Stocks,
+                vec![Interval::OneDay],
+                false,
+            )
+            .unwrap();
+
+        engine.clear_cache();
+        engine.rt.block_on(async {
+            engine.cache.range_cache.run_pending_tasks().await;
+        });
+        let cached = engine.rt.block_on(async {
+            engine.cache.range_cache.get(&("AAPL".to_owned(), Interval::OneDay)).await
+        });
+        assert!(cached.is_none());
+    }
+
+    // ── download_bars circuit breaker / failed task ─────────────────────
+
+    /// Provider that always errors on download_bars.
+    struct FailingProvider(Instrument);
+
+    #[async_trait]
+    impl DataProvider for FailingProvider {
+        async fn fetch_instrument(
+            &self,
+            _: &Symbol,
+            _: InstrumentType,
+        ) -> DataResult<Instrument> {
+            Ok(self.0.clone())
+        }
+        async fn fetch_range(
+            &self,
+            _: Instrument,
+            _: Interval,
+        ) -> DataResult<(u64, u64)> {
+            Ok((1_000, 2_000))
+        }
+        async fn list_instruments(
+            &self,
+            _: InstrumentType,
+            _: Option<Vec<Exchange>>,
+            _: usize,
+        ) -> DataResult<Vec<Instrument>> {
+            Ok(vec![])
+        }
+        async fn download_bars(
+            &self,
+            symbol: &str,
+            _: InstrumentType,
+            _: Interval,
+            _: u64,
+            _: u64,
+        ) -> DataResult<BarDownload> {
+            Err(DataError::SymbolNotFound(symbol.to_owned()))
+        }
+    }
+
+    fn test_engine_failing(mock: FailingProvider) -> (Engine, TempDir) {
+        let config = Box::leak(Box::new(Config::default()));
+        let rt = Runtime::new().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let db = DuckDb::new(&db_path).unwrap();
+        db.init().unwrap();
+
+        let provider: Arc<dyn DataProvider> = Arc::new(mock);
+        let mut providers = HashMap::new();
+        for it in InstrumentType::iter() {
+            providers.insert(it, provider.clone());
+        }
+        (
+            Engine {
+                config,
+                rt,
+                providers,
+                db: Box::new(db),
+                cache: EngineCache::new(),
+            },
+            tmp,
+        )
+    }
+
+    #[test]
+    fn download_bars_failed_task_recorded_as_failure() {
+        let inst = usd_quote_instrument();
+        let (engine, _tmp) = test_engine_failing(FailingProvider(inst.clone()));
+
+        let mut earliest = HashMap::new();
+        let mut latest = HashMap::new();
+        earliest.insert(Interval::OneDay, 1_700_000_000);
+        latest.insert(Interval::OneDay, 1_700_086_400);
+
+        let profiles = vec![InstrumentProfile {
+            instrument: inst,
+            earliest_ts: earliest,
+            latest_ts: latest,
+            legs: vec![],
+        }];
+
+        let result = engine.download_bars(&profiles, None, None, false).unwrap();
+        assert_eq!(result.n_succeeded, 0);
+        assert_eq!(result.n_failed, 1);
+        assert!(!result.warnings.is_empty());
+    }
 }
