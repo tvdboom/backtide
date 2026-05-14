@@ -19,11 +19,11 @@ build:
 
 # Generate stub files from the compiled module
 stubs:
-    python scripts/generate_stubs.py
+    uv run python scripts/generate_stubs.py
 
 # Verify stubs are in sync with the compiled module
 check:
-    python scripts/generate_stubs.py --check
+    uv run python scripts/generate_stubs.py --check
 
 # Run the test suite (Python + Cargo)
 test *args:
@@ -57,4 +57,4 @@ docs:
     $env:PYTHONPATH="."; uv run mkdocs serve
 
 launch:
-    backtide launch
+    uv run backtide launch

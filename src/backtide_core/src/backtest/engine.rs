@@ -37,6 +37,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn, Span};
 use uuid::Uuid;
+use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
 // ────────────────────────────────────────────────────────────────────────────
 // Public interface
 // ────────────────────────────────────────────────────────────────────────────
@@ -922,10 +923,8 @@ fn normalize_builtin_order_quantity(
 fn align_bars(
     bars: &HashMap<String, Vec<Bar>>,
     timeline: &[i64],
-    policy: crate::backtest::models::empty_bar_policy::EmptyBarPolicy,
+    policy: EmptyBarPolicy,
 ) -> HashMap<String, Vec<Option<Bar>>> {
-    use crate::backtest::models::empty_bar_policy::EmptyBarPolicy::*;
-
     let mut out: HashMap<String, Vec<Option<Bar>>> = HashMap::new();
     for (sym, sym_bars) in bars {
         let by_ts: HashMap<i64, Bar> =
@@ -939,8 +938,8 @@ fn align_bars(
                     row.push(Some(b.clone()));
                 },
                 None => match policy {
-                    Skip => row.push(None),
-                    ForwardFill => {
+                    EmptyBarPolicy::Skip => row.push(None),
+                    EmptyBarPolicy::ForwardFill => {
                         if let Some(b) = &last {
                             let mut filled = b.clone();
                             filled.open_ts = *ts as u64;
@@ -951,7 +950,7 @@ fn align_bars(
                             row.push(None);
                         }
                     },
-                    FillWithNaN => {
+                    EmptyBarPolicy::FillWithNaN => {
                         let nan_bar = Bar {
                             open_ts: *ts as u64,
                             close_ts: *ts as u64,
@@ -2652,13 +2651,9 @@ fn build_indicator_view<'py>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::backtest::models::commission_type::CommissionType;
-    use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
     use crate::backtest::models::experiment_config::*;
     use crate::data::models::instrument::Instrument;
-    use crate::data::models::instrument_profile::InstrumentProfile;
-    use crate::data::models::instrument_type::InstrumentType;
+    use super::*;
 
     fn mk_bar(ts: u64, close: f64) -> Bar {
         Bar {

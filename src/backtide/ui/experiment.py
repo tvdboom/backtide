@@ -305,6 +305,8 @@ with tab1:
         "🔬",
         "🧬",
         "🔭",
+        "🧫",
+        "🔍",
         # Finance & charts
         "📊",
         "📈",
@@ -316,6 +318,9 @@ with tab1:
         "💵",
         "💳",
         "🪙",
+        "💲",
+        "🏧",
+        "📋",
         # Performance & goals
         "🚀",
         "⚡",
@@ -324,17 +329,26 @@ with tab1:
         "⭐",
         "🥇",
         "🏅",
+        "🎖️",
+        "💪",
+        "🔑",
         # Strategy & intelligence
         "🧠",
         "🎲",
         "♟️",
         "🧩",
+        "💡",
+        "🎱",
         # Signals & alerts
         "📡",
         "🔔",
         "📣",
+        "🚨",
+        "📢",
         # Risk & protection
         "🛡️",
+        "⚔️",
+        "🔒",
         # Nature & energy
         "🔥",
         "🌊",
@@ -342,11 +356,18 @@ with tab1:
         "☀️",
         "⛈️",
         "🌿",
+        "🌋",
+        "❄️",
+        "🌪️",
         # Animals (bull/bear market)
         "🐂",
         "🐻",
         "🦅",
         "🐋",
+        "🦈",
+        "🐺",
+        "🦁",
+        "🐉",
         # Misc
         "🎰",
         "⏱️",
@@ -354,6 +375,12 @@ with tab1:
         "🧭",
         "⚙️",
         "🔮",
+        "🧲",
+        "🎪",
+        "🏁",
+        "♻️",
+        "🌐",
+        "⚖️",
     ]
 
     col_icon, col1, col2 = st.columns([0.44, 2, 1.2], vertical_alignment="bottom")
@@ -1042,7 +1069,7 @@ with tab6:
                 "**Stop-Loss / Take-Profit** become market orders when the trigger price is hit. "
                 "**Trailing-Stop** adjusts the stop price as the market moves in your favour. "
                 "**Settle-Position** closes an open position at the current market price. "
-                "Orders of a type not listed here will raise a hard error."
+                "Placing orders of a type not listed here will raise an error."
             ),
         )
 
@@ -1071,7 +1098,7 @@ with tab6:
                 "Safety guardrail for margin usage. When enabled (default), the strategy "
                 "may use leverage if it chooses to — the actual decision is made in your "
                 "strategy code. When disabled, any attempt to exceed the available cash "
-                "balance will raise a hard error and abort the simulation."
+                "balance will raise an error and abort the simulation."
             ),
         )
 
@@ -1088,7 +1115,7 @@ with tab6:
                 help=(
                     "Maximum leverage ratio. A value of 2.0 means the strategy can borrow "
                     "up to 1x the portfolio value on top of its own capital. Exceeding this "
-                    "limit raises a hard error."
+                    "limit raises an error."
                 ),
             )
 
@@ -1154,7 +1181,7 @@ with tab6:
                 "Safety guardrail for short positions. When enabled (default), the strategy "
                 "may open short positions if it chooses to - the actual decision is made in "
                 "your strategy code. When disabled, any attempt to sell positions not currently "
-                "held will raise a hard error and abort the simulation."
+                "held will raise an error and abort the simulation."
             ),
         )
 
@@ -1188,7 +1215,7 @@ with tab6:
             help=(
                 "Maximum allocation to a single position as a percentage of total "
                 "portfolio value. Applies to both long and short positions. Set to "
-                "100% for no concentration limit. Exceeding this limit raises a hard error."
+                "100% for no concentration limit. Exceeding this limit raises an error."
             ),
         )
 

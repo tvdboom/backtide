@@ -25,6 +25,7 @@ from inspect import (
 import json
 from types import MethodType
 
+from click import Command
 from mkdocs.config.defaults import MkDocsConfig
 import regex as re
 import yaml
@@ -127,14 +128,16 @@ class AutoDocs:
             self._parent_cls = None
             self._parent_anchor = ""
 
-        print(self.obj, type(self.obj))
-        print(self.obj.__name__)
         self.method = method
         self.module = obj.__module__
-        if not (doc := getdoc(self.obj)):
-            raise ValueError(f"Object {self.obj} has no docstring.")
+        if isinstance(self.obj, Command):  # Cli commands have no __name__
+            self.name = str(self.obj.name)
         else:
+            self.name = self.obj.__name__
+        if doc := getdoc(self.obj):
             self.doc = doc
+        else:
+            raise ValueError(f"Object {self.obj} has no docstring.")
 
     @staticmethod
     def get_obj(command: str) -> AutoDocs:
@@ -266,10 +269,10 @@ class AutoDocs:
         else:
             url = ""
 
-        anchor = f"[](){{#{self._parent_anchor}{self.obj.__name__}}}\n"
+        anchor = f"[](){{#{self._parent_anchor}{self.name}}}\n"
         module = self.module + "." if obj != "method" else ""
         obj = f"<em>{obj}</em>"
-        name = f"<strong style='color:#008AB8'>{self.obj.__name__}</strong>"
+        name = f"<strong style='color:#008AB8'>{self.name}</strong>"
         if url:
             try:
                 line = getsourcelines(self.obj)[1]
@@ -423,7 +426,7 @@ class AutoDocs:
                     header = f"{obj.__name__}: {types_conversion(output)}"
                     text = f"<div markdown class='param'>{getdoc(obj)}\n</div>"
 
-                    anchor = f"[](){{#{self.obj.__name__.lower()}-{obj.__name__}}}\n"
+                    anchor = f"[](){{#{self.name.lower()}-{obj.__name__}}}\n"
                     content += f"{anchor}<strong>{header}</strong><br>{text}"
 
             elif match := self.get_block(name):
@@ -461,7 +464,7 @@ class AutoDocs:
                     # Only parameters and attributes have names (returns and yields don't)
                     if name in ("Parameters", "Attributes"):
                         obj_name = header.split(":")[0]
-                        anchor = f"[](){{#{self.obj.__name__.lower()}-{obj_name}}}\n"
+                        anchor = f"[](){{#{self.name.lower()}-{obj_name}}}\n"
                     else:
                         anchor = ""
 
