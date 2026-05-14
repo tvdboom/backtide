@@ -44,7 +44,11 @@ def main():
     help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
 )
 def launch(address: str, port: str, log_level: str):
-    """Launch the Streamlit application.
+    """Launch the Backtide UI in a local web browser.
+
+    Starts the Streamlit-based graphical interface, which lets you browse stored
+    experiments, inspect equity curves, trade logs, and performance metrics without
+    writing any code.
 
     Parameters
     ----------
@@ -60,6 +64,23 @@ def launch(address: str, port: str, log_level: str):
     log_level : str, default="warn"
         Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.
 
+    See Also
+    --------
+    - backtide.config:BacktideConfig
+    - backtide.cli:download
+    - backtide.cli:run_experiment
+
+    Examples
+    --------
+    Launch with default settings:
+    ```bash
+        backtide launch
+    ```
+
+    Launch on a custom port and address:
+    ```bash
+        backtide launch --port 9000 --address 0.0.0.0
+    ```
     """
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
@@ -118,35 +139,67 @@ def launch(address: str, port: str, log_level: str):
     help="Show a progress bar while downloading.",
 )
 def download(symbols, instrument_type, interval, start, end, log_level, verbose):
-    """Download OHLCV data for one or more symbols.
+    """Download OHLCV bar data for one or more symbols and persist it locally.
 
-    Downloads the bars for the requested symbols. Required currency legs are
-    automatically downloaded as well.
+    Fetches open/high/low/close/volume bars from the configured data provider and
+    stores them in the local database. Any currency conversion legs required by
+    the requested symbols are resolved and downloaded automatically.  Already
+    cached bars are skipped, so it is safe to re-run the command to top up an
+    existing dataset.
 
     Parameters
     ----------
     symbols : tuple[str, ...]
-        One or more ticker symbols to download.
+        One or more ticker symbols to download (e.g., `AAPL`, `BTC-USD`). Multiple
+        symbols can be listed space-separated.
 
     instrument_type : str, default="stocks"
-        Instrument type. Choose from: `stocks`, `etf`, `forex` or `crypto`.
+        Asset class of the requested symbols.  Choose from `stocks`, `etf`, `forex`
+        or `crypto`.  All symbols in a single invocation must belong to the same
+        instrument type.
 
-    interval : tuple[str, ...], default=("1d",)
-        Bar intervals. Can be repeated, e.g., `-i 1d -i 1h`.
+    interval : tuple[str, ...], default="1d"
+        One or more bar intervals to download. The flag can be repeated to fetch
+        several resolutions in one call (e.g., `-i 1d -i 1h`). Supported values are:
+        `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`, `1wk`.
 
     start : str | None, default=None
-        Start date in Unix seconds. If `None`, the full available history is
-        downloaded.
+        Earliest bar to include, expressed as a Unix timestamp in seconds. When
+        omitted the provider's maximum available history is downloaded.
 
     end : str | None, default=None
-        End date in Unix seconds. Defaults to now.
+        Latest bar to include, expressed as a Unix timestamp in seconds. Defaults
+        to the current time when omitted.
 
     log_level : str, default="warn"
         Minimum log level to emit. Choose from: `error`, `warn`, `info` or
         `debug`.
 
     verbose : bool, default=True
-        Show a progress bar while downloading.
+        Whether to display a progress bar while bars are being downloaded.
+
+    See Also
+    --------
+    - backtide.data:download_bars
+    - backtide.data:resolve_profiles
+    - backtide.cli:run_experiment
+
+    Examples
+    --------
+    Download the full available daily history for a single stock:
+    ```bash
+        backtide download AAPL
+    ```
+
+    Download both daily and hourly bars for several crypto symbols:
+    ```bash
+        backtide download BTC-USD ETH-USD -t crypto -i 1d -i 1h
+    ```
+
+    Download forex bars starting from a specific date:
+    ```bash
+        backtide download EUR-USD -t forex --start 1672531200
+    ```
 
     """
     cfg = get_config()
@@ -186,18 +239,37 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
     help="Show a progress bar while the experiment is running.",
 )
 def run_experiment(config_file: Path, log_level: str, *, verbose: bool):
-    """Run a backtest experiment from a configuration file.
+    """Run a backtest experiment defined in a configuration file.
+
+    Reads an experiment configuration from a `.toml`, `.yaml`/`.yml` or `.json`
+    file, executes the full backtest pipeline — data resolution, indicator
+    computation, parallel strategy runs — and persists the results to the local
+    database.  The outcome can then be explored interactively via `backtide launch`.
 
     Parameters
     ----------
     config_file : Path
-        Path to the experiment configuration (`.toml`, `.yaml`/`.yml` or `.json`).
+        Path to the [experiment configuration][experimentconfig] (`.toml`,
+        `.yaml`/`.yml` or `.json`).
 
     log_level : str, default="warn"
         Minimum log level to emit. Choose from: `error``, `warn`, `info` or `debug`.
 
     verbose : bool, default=True
-        Show a progress bar while the experiment is running.
+        Whether to display a progress bar while the experiment is running.
+
+    See Also
+    --------
+    - backtide.backtest:ExperimentResult
+    - backtide.cli:launch
+    - backtide.backtest:run_experiment
+
+    Examples
+    --------
+    Run an experiment from a TOML config file:
+    ```bash
+        backtide run-experiment experiment.toml
+    ```
 
     """
     cfg = get_config()

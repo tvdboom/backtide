@@ -127,6 +127,8 @@ class AutoDocs:
             self._parent_cls = None
             self._parent_anchor = ""
 
+        print(self.obj, type(self.obj))
+        print(self.obj.__name__)
         self.method = method
         self.module = obj.__module__
         if not (doc := getdoc(self.obj)):
