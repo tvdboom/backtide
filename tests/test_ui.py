@@ -46,6 +46,7 @@ from backtide.strategies.utils import (
     _get_strategy_label,
     _is_builtin_strategy,
     _load_stored_strategies,
+    _resolve_auto_indicators,
     _save_strategy,
 )
 from backtide.ui.experiment import (
@@ -58,7 +59,10 @@ from backtide.ui.utils import (
     _clear_state,
     _default,
     _draw_cards,
+    _fmt_duration,
+    _fmt_metric,
     _fmt_number,
+    _fmt_period,
     _get_instrument_type_description,
     _get_logokit_url,
     _get_provider_logo,
@@ -88,6 +92,69 @@ class TestFmtNumber:
     def test_format(self, n, expected_substr):
         """Formatted number matches expected string."""
         assert _fmt_number(n) == expected_substr
+
+
+class TestFmtMetric:
+    """Tests for `_fmt_metric`."""
+
+    def test_none_returns_dashes(self):
+        """None or NaN renders as a double-dash."""
+        assert _fmt_metric(None) == "--"
+        assert _fmt_metric(float("nan")) == "--"
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (5.123, "5.12"),  # |value| < 10 → 2 decimals
+            (12.345, "12.3"),  # |value| < 100 → 1 decimal
+            (150.0, "150"),  # |value| >= 100 → 0 decimals
+        ],
+    )
+    def test_magnitude_adaptive_decimals(self, value, expected):
+        """Decimal precision tracks the magnitude bracket."""
+        assert _fmt_metric(value) == expected
+
+    def test_signed_positive_has_plus(self):
+        """`signed=True` prefixes positive numbers with '+'."""
+        assert _fmt_metric(5.0, signed=True).startswith("+")
+
+    def test_suffix_appended(self):
+        """The suffix is appended verbatim."""
+        assert _fmt_metric(12.0, suffix="%") == "12.0%"
+
+
+class TestFmtDuration:
+    """Tests for `_fmt_duration`."""
+
+    def test_hours(self):
+        """Durations of an hour or more use the `Xh Ym` format."""
+        assert _fmt_duration(3 * 3_600 + 15 * 60) == "3h 15m"
+
+    def test_minutes(self):
+        """Durations less than an hour use `Xm Ys`."""
+        assert _fmt_duration(5 * 60 + 30) == "5m 30s"
+
+    def test_seconds(self):
+        """Durations under a minute show just the seconds."""
+        assert _fmt_duration(45) == "45s"
+
+    def test_sub_second(self):
+        """Sub-second durations render as `<1s`."""
+        assert _fmt_duration(0) == "<1s"
+
+
+class TestFmtPeriod:
+    """Tests for `_fmt_period`."""
+
+    def test_days_only(self):
+        """Spans under a year report just the day count."""
+        assert _fmt_period(date(2024, 1, 1), date(2024, 1, 10)) == "10d"
+
+    def test_full_year(self):
+        """A multi-year span includes the years."""
+        result = _fmt_period(date(2020, 1, 1), date(2022, 6, 30))
+        assert result.startswith("2y")
+        assert result.endswith("d")
 
 
 class TestGetTimezone:
@@ -819,6 +886,41 @@ class TestIsBuiltinStrategy:
         assert _is_builtin_strategy(strat) is False
 
 
+class TestResolveAutoIndicators:
+    """Tests for `_resolve_auto_indicators`."""
+
+    def test_empty_returns_empty(self):
+        """No strategies → no auto indicators."""
+        assert _resolve_auto_indicators([]) == []
+
+    def test_strategy_without_required_indicators_is_skipped(self):
+        """Strategies lacking `required_indicators` produce nothing."""
+        strat = MagicMock(spec=["evaluate"])  # no `required_indicators`
+        assert _resolve_auto_indicators([strat]) == []
+
+    def test_collects_required_indicators(self):
+        """A built-in strategy that declares indicators returns them."""
+        from backtide.strategies import SmaCrossover
+
+        strat = SmaCrossover()
+        out = _resolve_auto_indicators([strat])
+        assert out, "SmaCrossover declares at least one required indicator"
+        names = {name for name, _, _ in out}
+        # The deterministic naming format starts with __auto_ and contains
+        # the indicator acronym.
+        assert all(n.startswith("__auto_") for n in names)
+
+    def test_deduplicates_same_indicator_across_strategies(self):
+        """If two strategies need the same indicator, it appears once."""
+        from backtide.strategies import SmaCrossover
+
+        a = SmaCrossover()
+        b = SmaCrossover()
+        out = _resolve_auto_indicators([a, b])
+        names = [n for n, _, _ in out]
+        assert len(names) == len(set(names))
+
+
 class TestSaveLoadStrategy:
     """Tests for _save_strategy and _load_stored_strategies."""
 
@@ -1226,6 +1328,27 @@ class TestDownloadPage:
         at = AppTest.from_file("src/backtide/ui/download.py", default_timeout=30)
         at.run()
         assert not at.exception
+
+
+class TestHomePage:
+    """Tests for the Home page."""
+
+    @pytest.mark.usefixtures("_app")
+    def test_home_renders(self):
+        """Smoke test: home page renders without error."""
+        at = AppTest.from_file("src/backtide/ui/home.py", default_timeout=60)
+        at.run()
+        assert not at.exception
+
+    @pytest.mark.usefixtures("_app")
+    def test_home_nav_via_session_state(self):
+        """A pending `_home_nav` session value triggers st.switch_page on rerun."""
+        at = AppTest.from_file("src/backtide/ui/home.py", default_timeout=60)
+        at.run()
+        at.session_state["_home_nav"] = "pages/strategies.py"
+        at.run()
+        # switch_page raises in AppTest since the page isn't registered.
+        assert at.exception
 
 
 class TestExperimentPage:

@@ -25,80 +25,6 @@ def main():
 
 
 @main.command()
-@click.option(
-    "--address",
-    "-A",
-    help=(
-        "The address where the server will listen for client and browser connections. "
-        "Use this if you want to bind the server to a specific address. If set, the server "
-        "will only be available from this address, and not from any aliases (like localhost)."
-    ),
-)
-@click.option(
-    "--port",
-    "-P",
-    help="The port where the server will listen for browser connections.",
-)
-@click.option(
-    "--log_level",
-    help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
-)
-def launch(address: str, port: str, log_level: str):
-    """Launch the Backtide UI in a local web browser.
-
-    Starts the Streamlit-based graphical interface, which lets you browse stored
-    experiments, inspect equity curves, trade logs, and performance metrics without
-    writing any code.
-
-    Parameters
-    ----------
-    address : str
-        The address where the server will listen for client and browser
-        connections. Use this if you want to bind the server to a specific
-        address. If set, the server will only be available from this address,
-        and not from any aliases (like localhost).
-
-    port : str, default=8501
-        TCP port the server listens on.
-
-    log_level : str, default="warn"
-        Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.
-
-    See Also
-    --------
-    - backtide.config:BacktideConfig
-    - backtide.cli:download
-    - backtide.cli:run_experiment
-
-    Examples
-    --------
-    Launch with default settings:
-    ```bash
-        backtide launch
-    ```
-
-    Launch on a custom port and address:
-    ```bash
-        backtide launch --port 9000 --address 0.0.0.0
-    ```
-    """
-    cfg = get_config()
-    init_logging(log_level or cfg.general.log_level)
-
-    click.echo("🚀  Launching app...")
-
-    run(
-        main_script_path=str(Path(__file__).resolve().parent / "ui" / "app.py"),
-        is_hello=False,
-        args=[],
-        flag_options={
-            "server.port": port or cfg.display.port,
-            "server.address": address or cfg.display.address,
-        },
-    )
-
-
-@main.command()
 @click.argument("symbols", nargs=-1, required=True)
 @click.option(
     "--instrument-type",
@@ -129,6 +55,7 @@ def launch(address: str, port: str, log_level: str):
 )
 @click.option(
     "--log_level",
+    "-l",
     help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
 )
 @click.option(
@@ -153,29 +80,29 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
         One or more ticker symbols to download (e.g., `AAPL`, `BTC-USD`). Multiple
         symbols can be listed space-separated.
 
-    instrument_type : str, default="stocks"
+    --instrument_type, -t : str, default="stocks"
         Asset class of the requested symbols.  Choose from `stocks`, `etf`, `forex`
         or `crypto`.  All symbols in a single invocation must belong to the same
         instrument type.
 
-    interval : tuple[str, ...], default="1d"
+    --interval, -i : tuple[str, ...], default="1d"
         One or more bar intervals to download. The flag can be repeated to fetch
         several resolutions in one call (e.g., `-i 1d -i 1h`). Supported values are:
         `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`, `1wk`.
 
-    start : str | None, default=None
+    --start, -s : str | None, default=None
         Earliest bar to include, expressed as a Unix timestamp in seconds. When
         omitted the provider's maximum available history is downloaded.
 
-    end : str | None, default=None
+    --end, -e : str | None, default=None
         Latest bar to include, expressed as a Unix timestamp in seconds. Defaults
         to the current time when omitted.
 
-    log_level : str, default="warn"
+    --log_level, -l : str, default="warn"
         Minimum log level to emit. Choose from: `error`, `warn`, `info` or
         `debug`.
 
-    verbose : bool, default=True
+    --verbose/--no-verbose, -v : bool, default=True
         Whether to display a progress bar while bars are being downloaded.
 
     See Also
@@ -187,18 +114,18 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
     Examples
     --------
     Download the full available daily history for a single stock:
-    ```bash
-        backtide download AAPL
+    ```
+    backtide download AAPL
     ```
 
     Download both daily and hourly bars for several crypto symbols:
-    ```bash
-        backtide download BTC-USD ETH-USD -t crypto -i 1d -i 1h
+    ```
+    backtide download BTC-USD ETH-USD -t crypto -i 1d -i 1h
     ```
 
     Download forex bars starting from a specific date:
-    ```bash
-        backtide download EUR-USD -t forex --start 1672531200
+    ```
+    backtide download EUR-USD -t forex --start 1672531200
     ```
 
     """
@@ -222,13 +149,89 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
         click.echo("✅  Done.")
 
 
+@main.command()
+@click.option(
+    "--address",
+    "-a",
+    help=(
+        "The address where the server will listen for client and browser connections. "
+        "Use this if you want to bind the server to a specific address. If set, the server "
+        "will only be available from this address, and not from any aliases (like localhost)."
+    ),
+)
+@click.option(
+    "--port",
+    "-p",
+    help="The port where the server will listen for browser connections.",
+)
+@click.option(
+    "--log_level",
+    "-l",
+    help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
+)
+def launch(address: str, port: str, log_level: str):
+    """Launch the Backtide UI in a local web browser.
+
+    Starts the Streamlit-based graphical interface, which lets you browse stored
+    experiments, inspect equity curves, trade logs, and performance metrics without
+    writing any code.
+
+    Parameters
+    ----------
+    --address, -a : str
+        The address where the server will listen for client and browser
+        connections. Use this if you want to bind the server to a specific
+        address. If set, the server will only be available from this address,
+        and not from any aliases (like localhost).
+
+    --port, -p : str, default=8501
+        TCP port the server listens on.
+
+    --log_level, -l : str, default="warn"
+        Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.
+
+    See Also
+    --------
+    - backtide.config:Config
+    - backtide.cli:download
+    - backtide.cli:run_experiment
+
+    Examples
+    --------
+    Launch with default settings:
+    ```
+    backtide launch
+    ```
+
+    Launch on a custom port and address:
+    ```
+    backtide launch --port 9000 --address 0.0.0.0
+    ```
+    """
+    cfg = get_config()
+    init_logging(log_level or cfg.general.log_level)
+
+    click.echo("🚀  Launching app...")
+
+    run(
+        main_script_path=str(Path(__file__).resolve().parent / "ui" / "app.py"),
+        is_hello=False,
+        args=[],
+        flag_options={
+            "server.port": port or cfg.display.port,
+            "server.address": address or cfg.display.address,
+        },
+    )
+
+
 @main.command(name="run-experiment")
 @click.argument(
-    "config_file",
+    "config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option(
     "--log_level",
+    "-l",
     help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
 )
 @click.option(
@@ -238,7 +241,7 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
     show_default=True,
     help="Show a progress bar while the experiment is running.",
 )
-def run_experiment(config_file: Path, log_level: str, *, verbose: bool):
+def run_experiment(config: Path, log_level: str, *, verbose: bool):
     """Run a backtest experiment defined in a configuration file.
 
     Reads an experiment configuration from a `.toml`, `.yaml`/`.yml` or `.json`
@@ -248,14 +251,14 @@ def run_experiment(config_file: Path, log_level: str, *, verbose: bool):
 
     Parameters
     ----------
-    config_file : Path
+    config : Path
         Path to the [experiment configuration][experimentconfig] (`.toml`,
         `.yaml`/`.yml` or `.json`).
 
-    log_level : str, default="warn"
+    --log_level, -l : str, default="warn"
         Minimum log level to emit. Choose from: `error``, `warn`, `info` or `debug`.
 
-    verbose : bool, default=True
+    --verbose/--no-verbose, -v : bool, default=True
         Whether to display a progress bar while the experiment is running.
 
     See Also
@@ -267,16 +270,16 @@ def run_experiment(config_file: Path, log_level: str, *, verbose: bool):
     Examples
     --------
     Run an experiment from a TOML config file:
-    ```bash
-        backtide run-experiment experiment.toml
+    ```
+    backtide run-experiment experiment.toml
     ```
 
     """
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
 
-    text = config_file.read_text(encoding="utf-8")
-    suffix = config_file.suffix.lower()
+    text = config.read_text(encoding="utf-8")
+    suffix = config.suffix.lower()
     if suffix == ".toml":
         exp_cfg = ExperimentConfig.from_toml(text)
     elif suffix == ".json":
@@ -288,7 +291,7 @@ def run_experiment(config_file: Path, log_level: str, *, verbose: bool):
             f"Unsupported config extension {suffix!r}. Use .toml, .yaml/.yml or .json."
         )
 
-    click.echo(f"🚀  Running experiment from {config_file.name}...")
+    click.echo(f"🚀  Running experiment from {config.name}...")
     result = run_backtest(exp_cfg, verbose=verbose)
 
     n = len(result.strategies)

@@ -238,10 +238,12 @@ class AutoDocs:
             obj = "classmethod"
         elif "self" in params or self._parent_cls:
             obj = "method"
+        elif isinstance(self.obj, Command):
+            obj = "command"
         else:
             obj = "function"
 
-        if obj not in ("enum", "dataclass"):
+        if obj not in ("enum", "dataclass", "command"):
             # Get signature without self, cls and type hints
             sign = []
             for k, v in params.items():
@@ -270,7 +272,12 @@ class AutoDocs:
             url = ""
 
         anchor = f"[](){{#{self._parent_anchor}{self.name}}}\n"
-        module = self.module + "." if obj != "method" else ""
+        if obj == "command":
+            module = ""
+        elif obj != "method":
+            module = self.module + "."
+        else:
+            module = self.module
         obj = f"<em>{obj}</em>"
         name = f"<strong style='color:#008AB8'>{self.name}</strong>"
         if url:
@@ -346,11 +353,11 @@ class AutoDocs:
 
                 # If it's a class, refer to the page, else to the anchor
                 if cls._parent_anchor:
-                    link = f"[{cls._parent_anchor}{cls.obj.__name__}]"
+                    link = f"[{cls._parent_anchor}{cls.name}]"
                 else:
                     link = ""
 
-                block += f"\n    [{cls.obj.__name__}]{link}<br>    {summary}\n"
+                block += f"\n    [{cls.name}]{link}<br>    {summary}\n"
 
         return block
 
@@ -430,8 +437,9 @@ class AutoDocs:
                     content += f"{anchor}<strong>{header}</strong><br>{text}"
 
             elif match := self.get_block(name):
-                # Headers start with a letter, * or [ after new line
-                for header in re.findall(r"^[\[a-zA-Z*].*?$", match, re.M):
+                # Headers start with a letter, *, -, or [ after new line
+                header_start = r"^[\[a-zA-Z*-].*?$"
+                for header in re.findall(header_start, match, re.M):
                     # Check that the default value in docstring matches the real one
                     if default := re.search("(?<=default=).+?$", header):
                         try:
@@ -455,7 +463,7 @@ class AutoDocs:
                             pass
 
                     # Get the body corresponding to the header
-                    pattern = f"(?<={re.escape(header)}\n).*?(?=\n\\w|\n\\*|\n\\[|\\Z)"
+                    pattern = rf"(?<={re.escape(header)}\n).*?(?=\n{header_start}|\Z)"
                     body = re.search(pattern, match, re.S | re.M).group()
 
                     header = header.replace("*", r"\*")  # Use literal * for args/kwargs

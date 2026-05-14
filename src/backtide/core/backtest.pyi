@@ -1255,9 +1255,6 @@ class EngineExpConfig:
     exclusive_orders : bool, default=False
         Cancel pending orders when a new order is submitted.
 
-    random_seed : int | None, default=None
-        Fixed RNG seed for reproducibility.
-
     empty_bar_policy : str | [EmptyBarPolicy], default="forward_fill"
         How to handle bars with no data.
 
@@ -1271,7 +1268,6 @@ class EngineExpConfig:
 
     empty_bar_policy: str | EmptyBarPolicy
     exclusive_orders: bool
-    random_seed: int | None
     risk_free_rate: float
     trade_on_close: bool
     warmup_period: int
@@ -1464,7 +1460,7 @@ class ExchangeExpConfig:
     partial_fills : bool, default=False
         Whether to simulate partial order fills.
 
-    allow_margin : bool, default=True
+    allow_margin : bool, default=False
         Whether margin trading is enabled.
 
     max_leverage : float, default=1.0
@@ -1479,14 +1475,20 @@ class ExchangeExpConfig:
     margin_interest : float, default=0.0
         Annual interest rate on borrowed funds.
 
-    allow_short_selling : bool, default=True
+    allow_short_selling : bool, default=False
         Whether short selling is permitted.
 
     borrow_rate : float, default=0.0
         Annual borrow cost for short positions.
 
     max_position_size : int, default=100
-        Max allocation to one position (% of portfolio).
+        Max allocation to one position (% of portfolio equity).
+
+    raise_on_margin_limit : bool, default=False
+        If `True`, the engine raises an error when an order would breach
+        `max_leverage` or `max_position_size`, or when equity falls below
+        `maintenance_margin`. If `False`, orders are auto-shrunk or
+        rejected and a warning is recorded instead.
 
     conversion_mode : str | [CurrencyConversionMode], default="immediate"
         How foreign-currency proceeds are converted.
@@ -1525,6 +1527,7 @@ class ExchangeExpConfig:
     max_leverage: float
     max_position_size: int
     partial_fills: bool
+    raise_on_margin_limit: bool
     slippage: float
 
     def __eq__(self, value, /):

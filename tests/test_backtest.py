@@ -111,6 +111,48 @@ class TestExchangeExpConfig:
         c = ExchangeExpConfig()
         assert isinstance(c.to_dict(), dict)
 
+    def test_margin_defaults(self):
+        """Margin / leverage / short-selling defaults are sensible."""
+        c = ExchangeExpConfig()
+        assert c.allow_margin is True
+        assert c.max_leverage == 1.0
+        assert c.initial_margin == 50.0
+        assert c.maintenance_margin == 25.0
+        assert c.margin_interest == 0.0
+        assert c.allow_short_selling is True
+        assert c.borrow_rate == 0.0
+        assert c.max_position_size == 100
+        assert c.raise_on_margin_limit is False
+
+    def test_raise_on_margin_limit_setter(self):
+        """The new `raise_on_margin_limit` field is configurable."""
+        c = ExchangeExpConfig(raise_on_margin_limit=True)
+        assert c.raise_on_margin_limit is True
+        c.raise_on_margin_limit = False
+        assert c.raise_on_margin_limit is False
+
+    def test_currency_conversion_settings(self):
+        """Conversion mode / threshold / period / interval are configurable."""
+        c = ExchangeExpConfig(
+            conversion_mode=CurrencyConversionMode.HoldUntilThreshold,
+            conversion_threshold=100.0,
+            conversion_period=ConversionPeriod.Week,
+            conversion_interval=5,
+        )
+        assert c.conversion_mode == CurrencyConversionMode.HoldUntilThreshold
+        assert c.conversion_threshold == 100.0
+        assert c.conversion_period == ConversionPeriod.Week
+        assert c.conversion_interval == 5
+
+    def test_roundtrip_includes_raise_on_margin_limit(self):
+        """`raise_on_margin_limit` survives a TOML round-trip."""
+        ec = ExperimentConfig(
+            exchange=ExchangeExpConfig(raise_on_margin_limit=True, max_leverage=2.0),
+        )
+        ec2 = ExperimentConfig.from_toml(ec.to_toml())
+        assert ec2.exchange.raise_on_margin_limit is True
+        assert ec2.exchange.max_leverage == 2.0
+
 
 class TestEngineExpConfig:
     """Tests for the EngineExpConfig model."""
@@ -124,6 +166,10 @@ class TestEngineExpConfig:
     def test_repr(self):
         """Test repr output."""
         assert "EngineExpConfig" in repr(EngineExpConfig())
+
+    def test_random_seed_removed(self):
+        """`random_seed` was removed from the engine config."""
+        assert not hasattr(EngineExpConfig(), "random_seed")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -448,7 +494,6 @@ class TestRunExperimentKwargs:
                 trade_on_close=True,
                 risk_free_rate=0.02,
                 empty_bar_policy="Skip",
-                random_seed=42,
                 verbose=False,
             )
 

@@ -687,4 +687,43 @@ mod tests {
         assert_value_error(sizer.calculate(10_000.0, 100.0, None, None), "atr");
         assert_value_error(sizer.calculate(10_000.0, 100.0, None, Some(-1.0)), "atr");
     }
+
+    // ── __repr__ outputs ─────────────────────────────────────────────────
+
+    #[test]
+    fn repr_matches_python_constructor_form() {
+        assert_eq!(EqualWeight::new(4).__repr__(), "EqualWeight(4)");
+        assert_eq!(FixedFractional::new(0.25).__repr__(), "FixedFractional(0.25)");
+        assert_eq!(FixedNotional::new(500.0).__repr__(), "FixedNotional(500)");
+        assert_eq!(FixedQuantity::new(3.0).__repr__(), "FixedQuantity(3)");
+        assert_eq!(RiskBased::new(0.01).__repr__(), "RiskBased(0.01)");
+        assert_eq!(VolatilityScaled::new(0.02).__repr__(), "VolatilityScaled(0.02)");
+        assert_eq!(
+            KellyCriterion::new(0.6, 2.0, 1.0, 0.5).__repr__(),
+            "KellyCriterion(0.6, 2, 1, 0.5)"
+        );
+    }
+
+    // ── Additional validation branches ───────────────────────────────────
+
+    #[test]
+    fn risk_based_rejects_non_positive_equity() {
+        let sizer = RiskBased::new(0.01);
+        assert_value_error(sizer.calculate(0.0, 100.0, Some(2.0), None), "equity");
+        assert_value_error(sizer.calculate(-1.0, 100.0, Some(2.0), None), "equity");
+    }
+
+    #[test]
+    fn volatility_scaled_rejects_non_positive_equity() {
+        let sizer = VolatilityScaled::new(0.02);
+        assert_value_error(sizer.calculate(0.0, 100.0, None, Some(4.0)), "equity");
+        assert_value_error(sizer.calculate(-1.0, 100.0, None, Some(4.0)), "equity");
+    }
+
+    #[test]
+    fn kelly_criterion_rejects_non_positive_equity_or_price() {
+        let sizer = KellyCriterion::new(0.6, 2.0, 1.0, 0.5);
+        assert_value_error(sizer.calculate(0.0, 100.0, None, None), "equity and price");
+        assert_value_error(sizer.calculate(10_000.0, 0.0, None, None), "equity and price");
+    }
 }

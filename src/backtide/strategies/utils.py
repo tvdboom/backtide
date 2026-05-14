@@ -6,6 +6,7 @@ Description: Utility functions to work with strategies.
 """
 
 import ast
+from collections.abc import Sequence
 import inspect
 from pathlib import Path
 from typing import Any
@@ -122,8 +123,16 @@ def _load_stored_strategies(cfg: Config) -> dict[str, BaseStrategy]:
     return strategies
 
 
-def _resolve_auto_indicators(strats: list[BaseStrategy]) -> list[tuple[str, BaseIndicator, str]]:
-    """Return indicators required by the given strategies."""
+def _resolve_auto_indicators(strats: Sequence[Any]) -> list[tuple[str, BaseIndicator, str]]:
+    """Return indicators required by the given strategies.
+
+    Accepts any iterable of objects (built-in Rust strategies don't inherit from
+    [`BaseStrategy`][backtide.strategies.BaseStrategy] in the Python class
+    hierarchy, so a strict `BaseStrategy` bound would needlessly exclude them at
+    type-check time). The function itself duck-types on `required_indicators` and
+    silently skips objects that lack it.
+
+    """
     out = []
     seen = set()
     for strat in strats:

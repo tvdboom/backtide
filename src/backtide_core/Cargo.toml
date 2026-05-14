@@ -63,3 +63,4 @@ harness = false
 
 [lints.clippy]
 type_complexity = "allow"
+too_many_arguments = "allow"

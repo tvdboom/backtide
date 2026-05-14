@@ -427,7 +427,7 @@ impl IndicatorExpConfig {
 /// partial_fills : bool, default=False
 ///     Whether to simulate partial order fills.
 ///
-/// allow_margin : bool, default=True
+/// allow_margin : bool, default=False
 ///     Whether margin trading is enabled.
 ///
 /// max_leverage : float, default=1.0
@@ -442,14 +442,20 @@ impl IndicatorExpConfig {
 /// margin_interest : float, default=0.0
 ///     Annual interest rate on borrowed funds.
 ///
-/// allow_short_selling : bool, default=True
+/// allow_short_selling : bool, default=False
 ///     Whether short selling is permitted.
 ///
 /// borrow_rate : float, default=0.0
 ///     Annual borrow cost for short positions.
 ///
 /// max_position_size : int, default=100
-///     Max allocation to one position (% of portfolio).
+///     Max allocation to one position (% of portfolio equity).
+///
+/// raise_on_margin_limit : bool, default=False
+///     If `True`, the engine raises an error when an order would breach
+///     `max_leverage` or `max_position_size`, or when equity falls below
+///     `maintenance_margin`. If `False`, orders are auto-shrunk or
+///     rejected and a warning is recorded instead.
 ///
 /// conversion_mode : str | [CurrencyConversionMode], default="immediate"
 ///     How foreign-currency proceeds are converted.
@@ -485,6 +491,7 @@ pub struct ExchangeExpConfig {
     pub allow_short_selling: bool,
     pub borrow_rate: f64,
     pub max_position_size: u32,
+    pub raise_on_margin_limit: bool,
     pub conversion_mode: CurrencyConversionMode,
     pub conversion_threshold: Option<f64>,
     pub conversion_period: Option<ConversionPeriod>,
@@ -500,14 +507,15 @@ impl Default for ExchangeExpConfig {
             slippage: 0.05,
             allowed_order_types: vec![OrderType::Market],
             partial_fills: false,
-            allow_margin: true,
+            allow_margin: false,
             max_leverage: 1.0,
             initial_margin: 50.0,
             maintenance_margin: 25.0,
             margin_interest: 0.0,
-            allow_short_selling: true,
+            allow_short_selling: false,
             borrow_rate: 0.0,
             max_position_size: 100,
+            raise_on_margin_limit: false,
             conversion_mode: CurrencyConversionMode::default(),
             conversion_threshold: None,
             conversion_period: None,
@@ -529,20 +537,20 @@ impl ExchangeExpConfig {
         slippage: "float" = 0.05,
         allowed_order_types: "list[str | OrderType]" = vec![OrderType::Market],
         partial_fills: "bool" = false,
-        allow_margin: "bool" = true,
+        allow_margin: "bool" = false,
         max_leverage: "float" = 1.0,
         initial_margin: "float" = 50.0,
         maintenance_margin: "float" = 25.0,
         margin_interest: "float" = 0.0,
-        allow_short_selling: "bool" = true,
+        allow_short_selling: "bool" = false,
         borrow_rate: "float" = 0.0,
         max_position_size: "int" = 100,
+        raise_on_margin_limit: "bool" = false,
         conversion_mode: "str | CurrencyConversionMode" = CurrencyConversionMode::default(),
         conversion_threshold: "float | None" = None,
         conversion_period: "str | ConversionPeriod | None" = None,
         conversion_interval: "int | None" = None,
     ))]
-    #[allow(clippy::too_many_arguments)]
     fn new(
         commission_type: CommissionType,
         commission_pct: f64,
@@ -558,6 +566,7 @@ impl ExchangeExpConfig {
         allow_short_selling: bool,
         borrow_rate: f64,
         max_position_size: u32,
+        raise_on_margin_limit: bool,
         conversion_mode: CurrencyConversionMode,
         conversion_threshold: Option<f64>,
         conversion_period: Option<ConversionPeriod>,
@@ -578,6 +587,7 @@ impl ExchangeExpConfig {
             allow_short_selling,
             borrow_rate,
             max_position_size,
+            raise_on_margin_limit,
             conversion_mode,
             conversion_threshold,
             conversion_period,
@@ -623,9 +633,6 @@ impl ExchangeExpConfig {
 /// exclusive_orders : bool, default=False
 ///     Cancel pending orders when a new order is submitted.
 ///
-/// random_seed : int | None, default=None
-///     Fixed RNG seed for reproducibility.
-///
 /// empty_bar_policy : str | [EmptyBarPolicy], default="forward_fill"
 ///     How to handle bars with no data.
 ///
@@ -641,7 +648,6 @@ pub struct EngineExpConfig {
     pub trade_on_close: bool,
     pub risk_free_rate: f64,
     pub exclusive_orders: bool,
-    pub random_seed: Option<u64>,
     pub empty_bar_policy: EmptyBarPolicy,
 }
 
@@ -652,7 +658,6 @@ impl Default for EngineExpConfig {
             trade_on_close: false,
             risk_free_rate: 0.0,
             exclusive_orders: false,
-            random_seed: None,
             empty_bar_policy: EmptyBarPolicy::default(),
         }
     }
@@ -669,7 +674,6 @@ impl EngineExpConfig {
         trade_on_close: "bool" = false,
         risk_free_rate: "float" = 0.0,
         exclusive_orders: "bool" = false,
-        random_seed: "int | None" = None,
         empty_bar_policy: "str | EmptyBarPolicy" = EmptyBarPolicy::default(),
     ))]
     fn new(
@@ -677,7 +681,6 @@ impl EngineExpConfig {
         trade_on_close: bool,
         risk_free_rate: f64,
         exclusive_orders: bool,
-        random_seed: Option<u64>,
         empty_bar_policy: EmptyBarPolicy,
     ) -> Self {
         Self {
@@ -685,7 +688,6 @@ impl EngineExpConfig {
             trade_on_close,
             risk_free_rate,
             exclusive_orders,
-            random_seed,
             empty_bar_policy,
         }
     }
@@ -817,7 +819,6 @@ impl ExperimentConfig {
         exchange: "ExchangeExpConfig" = ExchangeExpConfig::default(),
         engine: "EngineExpConfig" = EngineExpConfig::default(),
     ))]
-    #[allow(clippy::too_many_arguments)]
     fn new(
         general: GeneralExpConfig,
         data: DataExpConfig,

@@ -1034,3 +1034,289 @@ class TestPlotPriceWithStrategyRun:
         # Baseline behaviour: only the price line trace.
         fig = plot_price(daily_bars, display=None)
         assert len(fig.data) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Coverage - early-return / edge-case branches
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestEmptyRunsRaises:
+    """Every plot_* accepting a runs list raises ValueError when given an empty list."""
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            "rolling_returns",
+            "rolling_sharpe",
+            "trade_duration",
+            "trade_pnl",
+            "cash_holdings",
+        ],
+    )
+    def test_empty_runs_raises(self, module):
+        """An empty `runs` list raises a ValueError mentioning emptiness."""
+        plot_fn = getattr(
+            __import__(f"backtide.analysis.{module}", fromlist=["x"]),
+            f"plot_{module}",
+        )
+        with pytest.raises(ValueError, match="cannot be empty"):
+            plot_fn([], display=None)
+
+
+class TestBenchmarkAndEmptySkips:
+    """Plots silently skip benchmark or empty-trade/equity runs."""
+
+    def test_cash_holdings_skips_benchmark(self):
+        """Benchmark runs are skipped (no trace)."""
+        run = _run_result("Bench", [10_000.0, 10_100.0], is_benchmark=True)
+        fig = plot_cash_holdings([run], display=None)
+        assert len(fig.data) == 0
+
+    def test_cash_holdings_skips_empty_equity_curve(self):
+        """Runs with an empty equity_curve are silently skipped."""
+        run = _run_result("Empty", [])
+        fig = plot_cash_holdings([run], display=None)
+        assert len(fig.data) == 0
+
+    def test_cash_holdings_invalid_currency_falls_back_to_code(self):
+        """Unknown currency codes degrade gracefully (fall back to the raw code)."""
+        run = _run_result("S1", [10_000.0, 10_100.0], base_currency="USD")
+        # Override the cash bucket to use an unparseable code.
+        for sample in run.equity_curve:
+            sample.cash = {"XXX": 100.0}
+        fig = plot_cash_holdings([run], display=None)
+        # Y-axis label uses the raw code, not a Currency symbol.
+        assert "XXX" in fig.layout.yaxis.title.text
+
+    def test_pnl_histogram_skips_benchmark(self):
+        """`plot_pnl_histogram` skips benchmark runs (no trace)."""
+        from backtide.analysis import plot_pnl_histogram
+
+        bench = _run_result("B", [10_000.0, 10_100.0], is_benchmark=True)
+        # Use a non-benchmark run for the legend axis to render.
+        active = _make_run_with_trades("S1")
+        fig = plot_pnl_histogram([bench, active], display=None)
+        assert {t.name for t in fig.data} == {"S1"}
+
+    def test_trade_pnl_skips_benchmark(self):
+        """`plot_trade_pnl` skips benchmark runs."""
+        from backtide.analysis import plot_trade_pnl
+
+        bench = _run_result("B", [10_000.0, 10_100.0], is_benchmark=True)
+        active = _make_run_with_trades("S1")
+        fig = plot_trade_pnl([bench, active], display=None)
+        assert {t.name for t in fig.data} == {"S1"}
+
+    def test_trade_duration_skips_benchmark(self):
+        """`plot_trade_duration` skips benchmark runs."""
+        from backtide.analysis import plot_trade_duration
+
+        bench = _run_result("B", [10_000.0, 10_100.0], is_benchmark=True)
+        active = _make_run_with_trades("S1")
+        fig = plot_trade_duration([bench, active], display=None)
+        # Only the active strategy is rendered.
+        assert len(fig.data) == 1
+
+    def test_pnl_skips_all_zero_equity(self):
+        """`plot_pnl` skips runs whose equity curve is all zero."""
+        run = _run_result("Zero", [0.0, 0.0, 0.0])
+        fig = plot_pnl([run], drawdown=False, display=None)
+        assert len(fig.data) == 0
+
+    def test_pnl_benchmark_uses_dashed_line(self):
+        """Benchmark runs render with the dashed reference style."""
+        bench = _run_result("Bench", [10_000.0, 10_100.0], is_benchmark=True)
+        fig = plot_pnl([bench], drawdown=False, display=None)
+        # Benchmark line is dashed.
+        assert fig.data[0].line.dash == "dash"
+
+
+class TestRollingPlotsEdgeCases:
+    """Edge-case coverage for rolling_returns / rolling_sharpe."""
+
+    def test_rolling_sharpe_skips_short_runs(self):
+        """Runs shorter than `window` produce no trace."""
+        from backtide.analysis import plot_rolling_sharpe
+
+        short = _run_result("S1", [100.0, 101.0, 102.0])
+        fig = plot_rolling_sharpe([short], window=30, display=None)
+        assert len(fig.data) == 0
+
+    def test_rolling_sharpe_renders_benchmark(self):
+        """Benchmark runs render with the BENCHMARK_LINE style."""
+        from backtide.analysis import plot_rolling_sharpe
+
+        rng = np.random.default_rng(1)
+        equity = list(np.cumprod(1 + rng.normal(0.001, 0.01, 60)) * 1_000)
+        bench = _run_result("Bench", equity, is_benchmark=True)
+        fig = plot_rolling_sharpe([bench], window=20, display=None)
+        assert len(fig.data) == 1
+        # Benchmark line uses the dashed reference style.
+        assert fig.data[0].line.dash == "dash"
+
+    def test_rolling_returns_renders_benchmark(self):
+        """Benchmark runs render with the BENCHMARK_LINE style on rolling_returns."""
+        from backtide.analysis import plot_rolling_returns
+
+        bench = _run_result("Bench", [100.0 + i for i in range(50)], is_benchmark=True)
+        fig = plot_rolling_returns([bench], window=10, display=None)
+        assert len(fig.data) == 1
+        assert fig.data[0].line.dash == "dash"
+
+
+class TestTradeDurationUnits:
+    """Auto-unit selection in plot_trade_duration."""
+
+    def test_auto_picks_days_for_long_trades(self):
+        """Trades lasting weeks default to the `days` unit."""
+        from backtide.analysis import plot_trade_duration
+
+        # All trades last 10 days → auto-pick "days".
+        base = 1_700_000_000
+        pnls = (1.0, -1.0, 1.0)
+        trades = [
+            _StubTrade(
+                symbol="AAPL",
+                entry_ts=base + i * 86_400 * 30,
+                exit_ts=base + i * 86_400 * 30 + 10 * 86_400,
+                entry_price=100.0,
+                exit_price=101.0,
+                quantity=1,
+                pnl=p,
+            )
+            for i, p in enumerate(pnls)
+        ]
+        run = _run_result("S1", [10_000.0, 10_001.0, 10_000.0], trades=trades)
+        fig = plot_trade_duration([run], unit="auto", display=None)
+        assert "days" in fig.layout.xaxis.title.text.lower()
+
+    def test_auto_picks_hours_for_intraday(self):
+        """Trades a few hours long pick the `hours` unit."""
+        from backtide.analysis import plot_trade_duration
+
+        base = 1_700_000_000
+        trades = [
+            _StubTrade(
+                symbol="AAPL",
+                entry_ts=base + i * 3_600 * 8,
+                exit_ts=base + i * 3_600 * 8 + 4 * 3_600,
+                entry_price=100.0,
+                exit_price=101.0,
+                quantity=1,
+                pnl=1.0,
+            )
+            for i in range(3)
+        ]
+        run = _run_result("S1", [10_000.0] * 3, trades=trades)
+        fig = plot_trade_duration([run], unit="auto", display=None)
+        assert "hours" in fig.layout.xaxis.title.text.lower()
+
+
+class TestReturnsEmptyData:
+    """Coverage for empty-data branches in plot_returns."""
+
+    def test_empty_symbol_fallback(self):
+        """When no symbols produce returns, a blank figure is returned."""
+        # Use the default price_col ("adj_close") so the column check passes.
+        empty = pd.DataFrame({"symbol": [], "dt": [], "close": []})
+        fig = plot_returns(empty, display=None)
+        assert isinstance(fig, go.Figure)
+        # Empty data → no histogram traces.
+        assert len(fig.data) == 0
+
+
+class TestPositionSizeFiltering:
+    """`plot_position_size` respects the `symbols` filter."""
+
+    def test_symbols_filter(self):
+        """When `symbols=['AAPL']`, MSFT trades are excluded."""
+        from backtide.analysis import plot_position_size
+
+        run = _make_run_with_trades("S1")
+        fig = plot_position_size(run, symbols=["AAPL"], display=None)
+        names = {t.name for t in fig.data}
+        assert "AAPL" in names
+        assert "MSFT" not in names
+
+
+class TestMaeMfeEdgeCases:
+    """Coverage for the symbols filter and empty-bar window branch."""
+
+    def test_symbols_filter_excludes_other_trades(self, monkeypatch):
+        """The `symbols` argument filters which trades are analysed."""
+        from backtide.analysis import plot_mae_mfe
+
+        run = _make_run_with_trades("S1", pnls=(50.0, -30.0))
+        # Synthetic bars for the trade window.
+        bars = pd.DataFrame(
+            {
+                "open_ts": [t.entry_ts for t in run.trades] + [t.exit_ts for t in run.trades],
+                "interval": ["1d", "1d", "1d", "1d"],
+                "high": [110.0, 105.0, 110.0, 105.0],
+                "low": [95.0, 90.0, 95.0, 90.0],
+            }
+        )
+        monkeypatch.setattr("backtide.analysis.mae_mfe.query_bars", lambda **_: bars)
+        # All trades are on AAPL — filtering to MSFT yields no marks.
+        fig = plot_mae_mfe(run, symbols=["MSFT"], display=None)
+        # Both winner & loser traces have empty x.
+        for trace in fig.data:
+            if trace.name in {"Winners", "Losers"}:
+                assert len(trace.x) == 0
+
+    def test_empty_bar_window_skips_trade(self, monkeypatch):
+        """Trades whose bar window is empty are silently skipped."""
+        from backtide.analysis import plot_mae_mfe
+
+        run = _make_run_with_trades("S1", pnls=(50.0,))
+        # Bars exist but outside the trade time window.
+        far_ts = run.trades[0].entry_ts + 10 * 86_400
+        bars = pd.DataFrame(
+            {
+                "open_ts": [far_ts, far_ts + 1],
+                "interval": ["1d", "1d"],
+                "high": [110.0, 105.0],
+                "low": [95.0, 90.0],
+            }
+        )
+        monkeypatch.setattr("backtide.analysis.mae_mfe.query_bars", lambda **_: bars)
+        fig = plot_mae_mfe(run, display=None)
+        # No win/loss markers — trade skipped because window was empty.
+        for trace in fig.data:
+            if trace.name in {"Winners", "Losers"}:
+                assert len(trace.x) == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Analysis utils — _resolve_runs_currency / _get_currency_symbol fallbacks
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestResolveRunsCurrency:
+    """Tests for the `_resolve_runs_currency` helper."""
+
+    def test_single_currency_returns_it(self):
+        """Same base currency across runs → returns it."""
+        from backtide.analysis.utils import _resolve_runs_currency
+
+        a = _run_result("A", [100.0], base_currency="USD")
+        b = _run_result("B", [200.0], base_currency="USD")
+        assert _resolve_runs_currency([a, b]) == Currency.USD
+
+    def test_mixed_currencies_returns_none(self):
+        """Mixed base currencies → returns None."""
+        from backtide.analysis.utils import _resolve_runs_currency
+
+        a = _run_result("A", [100.0], base_currency="USD")
+        b = _run_result("B", [200.0], base_currency="EUR")
+        assert _resolve_runs_currency([a, b]) is None
+
+
+class TestGetCurrencySymbolFallback:
+    """`_get_currency_symbol` returns None for unknown codes."""
+
+    def test_unknown_code_returns_none(self):
+        """Unknown codes fall through to None (ValueError caught)."""
+        df = pd.DataFrame({"currency": ["XYZ", "XYZ"]})
+        assert _get_currency_symbol(df) is None

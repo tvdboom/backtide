@@ -70,9 +70,51 @@ fn rolling_mean(data: &[f64], period: usize) -> Vec<f64> {
     out
 }
 
+/// Compute Wilder's smoothing (a.k.a. Wilder's MA / RMA) over `data`.
+///
+/// Wilder's smoothing is an EMA with `α = 1 / period`, seeded with the
+/// SMA of the first `period` values. It is the smoothing used by the
+/// textbook definitions of [`RelativeStrengthIndex`], [`AverageTrueRange`]
+/// and [`AverageDirectionalIndex`] — distinct from the standard EMA
+/// (α = 2 / (n + 1)) used by [`ExponentialMovingAverage`] / [`MovingAverageConvergenceDivergence`].
+///
+/// Handles leading non-finite values by seeding at the first index whose
+/// look-back window of size `period` is fully finite. Subsequent
+/// non-finite samples are skipped (the previous value carries through).
+fn wilder_smooth(data: &[f64], period: usize) -> Vec<f64> {
+    let n = data.len();
+    let mut out = vec![f64::NAN; n];
+    if period == 0 || n < period {
+        return out;
+    }
+    let alpha = 1.0 / period as f64;
+    // Seed at the first index i >= period-1 whose look-back window
+    // [i+1-period..=i] is fully finite.
+    let mut seeded_at: Option<usize> = None;
+    for i in (period - 1)..n {
+        let window = &data[i + 1 - period..=i];
+        if window.iter().all(|x| x.is_finite()) {
+            out[i] = window.iter().sum::<f64>() / period as f64;
+            seeded_at = Some(i);
+            break;
+        }
+    }
+    if let Some(start) = seeded_at {
+        for i in (start + 1)..n {
+            let prev = out[i - 1];
+            if !prev.is_finite() || !data[i].is_finite() {
+                continue;
+            }
+            out[i] = prev + alpha * (data[i] - prev);
+        }
+    }
+    out
+}
+
 /// Compute an exponential weighted moving average with the given `span`.
 ///
-/// Uses the standard smoothing factor `α = 2 / (span + 1)`.
+/// Uses the standard smoothing factor `α = 2 / (span + 1)`. For Wilder's
+/// smoothing (α = 1 / period), use [`wilder_smooth`] instead.
 fn ewm(data: &[f64], span: usize) -> Vec<f64> {
     let n = data.len();
     let mut out = vec![f64::NAN; n];
@@ -366,8 +408,8 @@ impl Indicator for AverageDirectionalIndex {
             return vec![vec![f64::NAN; n]];
         }
 
-        let mut plus_dm = vec![0.0; n];
-        let mut minus_dm = vec![0.0; n];
+        let mut plus_dm = vec![f64::NAN; n];
+        let mut minus_dm = vec![f64::NAN; n];
         for i in 1..n {
             let up = h[i] - h[i - 1];
             let down = l[i - 1] - l[i];
@@ -384,9 +426,9 @@ impl Indicator for AverageDirectionalIndex {
         }
 
         let tr = true_range(&h, &l, &c);
-        let atr = ewm(&tr, p);
-        let smooth_plus = ewm(&plus_dm, p);
-        let smooth_minus = ewm(&minus_dm, p);
+        let atr = wilder_smooth(&tr, p);
+        let smooth_plus = wilder_smooth(&plus_dm, p);
+        let smooth_minus = wilder_smooth(&minus_dm, p);
 
         let mut dx = vec![f64::NAN; n];
         for i in 0..n {
@@ -402,7 +444,7 @@ impl Indicator for AverageDirectionalIndex {
             }
         }
 
-        let adx = ewm(&dx, p);
+        let adx = wilder_smooth(&dx, p);
         vec![adx]
     }
 }
@@ -475,7 +517,7 @@ impl Indicator for AverageTrueRange {
         let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let tr = true_range(&h, &l, &c);
-        vec![rolling_mean(&tr, self.period)]
+        vec![wilder_smooth(&tr, self.period)]
     }
 }
 
@@ -551,6 +593,7 @@ impl Indicator for BollingerBands {
     const NAME: &'static str = "Bollinger Bands";
     const DESCRIPTION: &'static str = "Volatility bands placed above and below a moving average, widening during high volatility and narrowing during low volatility.";
 
+    /// Returns `[upper, middle, lower]` where `middle = SMA(close, period)`.
     fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let mid = rolling_mean(&c, self.period);
@@ -564,7 +607,7 @@ impl Indicator for BollingerBands {
                 lower[i] = mid[i] - self.std_dev * std[i];
             }
         }
-        vec![upper, lower]
+        vec![upper, mid, lower]
     }
 }
 
@@ -952,26 +995,38 @@ impl Indicator for RelativeStrengthIndex {
         let p = self.period;
         let mut out = vec![f64::NAN; n];
         if n >= 2 && p > 0 {
-            let mut gains = vec![0.0; n];
-            let mut losses = vec![0.0; n];
+            // Per-bar gains and losses. Index 0 has no previous close, so
+            // mark it NaN — that way `wilder_smooth` seeds at the first
+            // window of `period` *actual* deltas (index `period`), matching
+            // Wilder's standard initialization.
+            let mut gains = vec![f64::NAN; n];
+            let mut losses = vec![f64::NAN; n];
             for i in 1..n {
+                if !c[i].is_finite() || !c[i - 1].is_finite() {
+                    continue;
+                }
                 let delta = c[i] - c[i - 1];
                 if delta > 0.0 {
                     gains[i] = delta;
+                    losses[i] = 0.0;
                 } else {
+                    gains[i] = 0.0;
                     losses[i] = -delta;
                 }
             }
-            let avg_gain = rolling_mean(&gains, p);
-            let avg_loss = rolling_mean(&losses, p);
+            // Wilder's smoothing (α = 1 / period) — the textbook RSI
+            // definition. Distinct from a plain SMA / EMA of gains.
+            let avg_gain = wilder_smooth(&gains, p);
+            let avg_loss = wilder_smooth(&losses, p);
             for i in 0..n {
-                if !avg_gain[i].is_nan() && !avg_loss[i].is_nan() {
-                    if avg_loss[i] == 0.0 {
-                        out[i] = 100.0;
-                    } else {
-                        let rs = avg_gain[i] / avg_loss[i];
-                        out[i] = 100.0 - (100.0 / (1.0 + rs));
-                    }
+                if !avg_gain[i].is_finite() || !avg_loss[i].is_finite() {
+                    continue;
+                }
+                if avg_loss[i] == 0.0 {
+                    out[i] = 100.0;
+                } else {
+                    let rs = avg_gain[i] / avg_loss[i];
+                    out[i] = 100.0 - (100.0 / (1.0 + rs));
                 }
             }
         }
@@ -1363,5 +1418,295 @@ mod tests {
 
         assert!(tr[0].is_nan());
         assert_eq!(tr[1], 2.0);
+    }
+
+    fn ohlc_bar(open: f64, high: f64, low: f64, close: f64, volume: f64) -> Bar {
+        Bar {
+            open_ts: 0,
+            close_ts: 0,
+            open_ts_exchange: 0,
+            open,
+            high,
+            low,
+            close,
+            adj_close: close,
+            volume,
+            n_trades: None,
+        }
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn rolling_mean_returns_nan_vec_for_zero_period_or_short_data() {
+        assert!(rolling_mean(&[1.0, 2.0, 3.0], 0).iter().all(|v| v.is_nan()));
+        assert!(rolling_mean(&[1.0, 2.0], 5).iter().all(|v| v.is_nan()));
+        assert!(rolling_mean(&[], 3).is_empty());
+    }
+
+    #[test]
+    fn rolling_mean_computes_basic_average() {
+        let out = rolling_mean(&[1.0, 2.0, 3.0, 4.0, 5.0], 3);
+        assert!(out[0].is_nan());
+        assert!(out[1].is_nan());
+        assert_eq!(out[2], 2.0);
+        assert_eq!(out[3], 3.0);
+        assert_eq!(out[4], 4.0);
+    }
+
+    #[test]
+    fn ewm_handles_empty_and_zero_span() {
+        assert!(ewm(&[], 5).is_empty());
+        let out = ewm(&[1.0, 2.0], 0);
+        assert!(out.iter().all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn ewm_seeds_from_first_value_and_smooths() {
+        let out = ewm(&[1.0, 2.0, 3.0], 1);
+        // alpha = 1.0, so EMA tracks data exactly
+        assert_eq!(out[0], 1.0);
+        assert_eq!(out[1], 2.0);
+        assert_eq!(out[2], 3.0);
+    }
+
+    #[test]
+    fn wilder_smooth_seeds_with_sma_then_smooths() {
+        // First valid value at index period-1 = SMA of [1,2,3,4] = 2.5.
+        // Then v[4] = 2.5 + 0.25 * (5.0 - 2.5) = 3.125.
+        let out = wilder_smooth(&[1.0, 2.0, 3.0, 4.0, 5.0], 4);
+        assert!(out[2].is_nan());
+        assert!((out[3] - 2.5).abs() < 1e-12);
+        assert!((out[4] - 3.125).abs() < 1e-12);
+    }
+
+    #[test]
+    fn wilder_smooth_handles_zero_period_and_short_input() {
+        assert!(wilder_smooth(&[1.0, 2.0], 0).iter().all(|v| v.is_nan()));
+        assert!(wilder_smooth(&[1.0], 5).iter().all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn wilder_smooth_seeds_after_leading_nans() {
+        // First fully-finite window of size 3 is [2,3,4] at index 4.
+        let out = wilder_smooth(&[f64::NAN, f64::NAN, 2.0, 3.0, 4.0, 5.0], 3);
+        assert!(out[3].is_nan());
+        assert!((out[4] - 3.0).abs() < 1e-12);
+        // 3.0 + (1/3) * (5 - 3) = 3.6666...
+        assert!((out[5] - (3.0 + (5.0 - 3.0) / 3.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rolling_std_short_input_returns_nans() {
+        assert!(rolling_std(&[1.0, 2.0], 5).iter().all(|v| v.is_nan()));
+        assert!(rolling_std(&[1.0, 2.0, 3.0], 1).iter().all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn rolling_std_computes_sample_std() {
+        let out = rolling_std(&[2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0], 4);
+        // Sample std of [2,4,4,4]: mean=3.5, var=3/3=1 → std=1.0
+        assert!((out[3] - 1.0).abs() < 1e-9);
+        // Sample std of [4,4,4,5]: mean=4.25, var=0.75/3=0.25 → std=0.5
+        assert!((out[4] - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn true_range_handles_empty_and_single_bar() {
+        assert!(true_range(&[], &[], &[]).is_empty());
+        let tr = true_range(&[10.0], &[5.0], &[7.0]);
+        assert_eq!(tr[0], 5.0);
+    }
+
+    #[test]
+    fn true_range_picks_max_of_three_components() {
+        // Gap up: |high - prev_close| dominates.
+        let tr = true_range(&[10.0, 30.0], &[5.0, 25.0], &[7.0, 28.0]);
+        assert_eq!(tr[0], 5.0);
+        // hl = 5, hc = |30 - 7| = 23, lc = |25 - 7| = 18 → 23
+        assert_eq!(tr[1], 23.0);
+    }
+
+    // ── Indicators ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn adx_returns_nan_for_short_input() {
+        let bars = vec![bar(1.0)];
+        let out = AverageDirectionalIndex::new(14).compute_inner(&bars);
+        assert_eq!(out.len(), 1);
+        assert!(out[0][0].is_nan());
+    }
+
+    #[test]
+    fn adx_produces_finite_values_for_trending_data() {
+        let closes: Vec<f64> = (0..40).map(|i| 100.0 + i as f64).collect();
+        let bars: Vec<Bar> = closes.into_iter().map(bar).collect();
+        let out = AverageDirectionalIndex::new(5).compute_inner(&bars);
+        assert!(out[0].iter().any(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn atr_matches_rolling_mean_of_true_range() {
+        let bars: Vec<Bar> = (0..10).map(|i| bar(10.0 + i as f64)).collect();
+        let out = AverageTrueRange::new(3).compute_inner(&bars);
+        // Last bar's high-low=2, hc/lc differences are bounded — value should be finite.
+        assert!(out[0][5].is_finite());
+    }
+
+    #[test]
+    fn bollinger_bands_returns_three_series() {
+        let bars: Vec<Bar> = (0..30).map(|i| bar(10.0 + i as f64)).collect();
+        let out = BollingerBands::new(5, 2.0).compute_inner(&bars);
+        // [upper, middle, lower]
+        assert_eq!(out.len(), 3);
+        let (upper, middle, lower) = (&out[0], &out[1], &out[2]);
+        let idx = 10;
+        assert!(upper[idx] > middle[idx]);
+        assert!(middle[idx] > lower[idx]);
+        // Middle band must equal the SMA of closes for that window.
+        let win_mean: f64 = bars[idx + 1 - 5..=idx].iter().map(|b| b.close).sum::<f64>() / 5.0;
+        assert!((middle[idx] - win_mean).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cci_handles_zero_md_window_with_nan() {
+        // Constant typical price → mean deviation is zero → CCI must be NaN.
+        let bars: Vec<Bar> = (0..10).map(|_| ohlc_bar(1.0, 1.0, 1.0, 1.0, 1.0)).collect();
+        let out = CommodityChannelIndex::new(3).compute_inner(&bars);
+        assert!(out[0].iter().skip(2).all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn cci_produces_finite_for_varying_prices() {
+        let bars: Vec<Bar> = (0..20)
+            .map(|i| ohlc_bar(0.0, (i + 2) as f64, (i) as f64, (i + 1) as f64, 1.0))
+            .collect();
+        let out = CommodityChannelIndex::new(5).compute_inner(&bars);
+        assert!(out[0].iter().any(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn ema_first_value_equals_input() {
+        let bars: Vec<Bar> = [5.0, 6.0, 7.0].into_iter().map(bar).collect();
+        let out = ExponentialMovingAverage::new(2).compute_inner(&bars);
+        assert_eq!(out[0][0], 5.0);
+        // Subsequent values bounded by the data range.
+        assert!(out[0][2] > 5.0 && out[0][2] < 8.0);
+    }
+
+    #[test]
+    fn macd_returns_two_series_and_macd_line_eq_fast_minus_slow() {
+        let bars: Vec<Bar> = (0..50).map(|i| bar(100.0 + (i as f64).sin())).collect();
+        let out = MovingAverageConvergenceDivergence::new(3, 6, 2).compute_inner(&bars);
+        assert_eq!(out.len(), 2);
+        assert!(out[0].iter().any(|v| v.is_finite()));
+        assert!(out[1].iter().any(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn obv_accumulates_volume_by_direction() {
+        let bars = vec![
+            ohlc_bar(0.0, 0.0, 0.0, 10.0, 100.0),
+            ohlc_bar(0.0, 0.0, 0.0, 11.0, 50.0), // up → +50
+            ohlc_bar(0.0, 0.0, 0.0, 11.0, 30.0), // flat → 0
+            ohlc_bar(0.0, 0.0, 0.0, 9.0, 40.0),  // down → -40
+        ];
+        let out = OnBalanceVolume::new().compute_inner(&bars);
+        assert_eq!(out[0], vec![0.0, 50.0, 50.0, 10.0]);
+    }
+
+    #[test]
+    fn rsi_is_100_when_no_losses_in_window() {
+        let bars: Vec<Bar> = (0..20).map(|i| bar(100.0 + i as f64)).collect();
+        let out = RelativeStrengthIndex::new(5).compute_inner(&bars);
+        // All differences positive → avg loss is zero → RSI = 100.
+        assert_eq!(out[0][10], 100.0);
+    }
+
+    #[test]
+    fn rsi_handles_short_input() {
+        let bars = vec![bar(1.0)];
+        let out = RelativeStrengthIndex::new(14).compute_inner(&bars);
+        assert!(out[0][0].is_nan());
+    }
+
+    #[test]
+    fn sma_handles_empty_input() {
+        let out = SimpleMovingAverage::new(3).compute_inner(&[]);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_empty());
+    }
+
+    #[test]
+    fn stoch_returns_two_series_and_finite_values() {
+        let bars: Vec<Bar> = (0..30)
+            .map(|i| ohlc_bar(0.0, (i + 5) as f64, (i) as f64, (i + 2) as f64, 1.0))
+            .collect();
+        let out = StochasticOscillator::new(5, 3).compute_inner(&bars);
+        assert_eq!(out.len(), 2);
+        assert!(out[0].iter().any(|v| v.is_finite()));
+        assert!(out[1].iter().any(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn stoch_returns_nan_when_range_is_zero() {
+        // Flat high/low → zero range → NaN %K.
+        let bars: Vec<Bar> = (0..10).map(|_| ohlc_bar(1.0, 1.0, 1.0, 1.0, 1.0)).collect();
+        let out = StochasticOscillator::new(3, 2).compute_inner(&bars);
+        assert!(out[0].iter().all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn vwap_returns_nan_when_volume_is_zero() {
+        let bars: Vec<Bar> =
+            (0..3).map(|i| ohlc_bar(0.0, (i + 2) as f64, i as f64, (i + 1) as f64, 0.0)).collect();
+        let out = VolumeWeightedAveragePrice::new().compute_inner(&bars);
+        assert!(out[0].iter().all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn vwap_matches_volume_weighted_typical_price() {
+        let bars = vec![
+            ohlc_bar(0.0, 3.0, 1.0, 2.0, 10.0), // tp=2.0
+            ohlc_bar(0.0, 6.0, 2.0, 4.0, 20.0), // tp=4.0
+        ];
+        let out = VolumeWeightedAveragePrice::new().compute_inner(&bars);
+        assert!((out[0][0] - 2.0).abs() < 1e-9);
+        // Weighted: (2*10 + 4*20) / 30 = 100/30
+        assert!((out[0][1] - (100.0 / 30.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn wma_returns_nan_when_period_exceeds_length() {
+        let bars: Vec<Bar> = [1.0, 2.0].into_iter().map(bar).collect();
+        let out = WeightedMovingAverage::new(5).compute_inner(&bars);
+        assert!(out[0].iter().all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn wma_zero_period_yields_all_nan() {
+        let bars: Vec<Bar> = [1.0, 2.0, 3.0].into_iter().map(bar).collect();
+        let out = WeightedMovingAverage::new(0).compute_inner(&bars);
+        assert!(out[0].iter().all(|v| v.is_nan()));
+    }
+
+    // ── Trait constants ─────────────────────────────────────────────────────
+
+    #[test]
+    fn indicator_constants_are_set() {
+        assert_eq!(<SimpleMovingAverage as Indicator>::ACRONYM, "SMA");
+        assert_eq!(<AverageDirectionalIndex as Indicator>::ACRONYM, "ADX");
+        assert_eq!(<AverageTrueRange as Indicator>::ACRONYM, "ATR");
+        assert_eq!(<BollingerBands as Indicator>::ACRONYM, "BB");
+        assert_eq!(<CommodityChannelIndex as Indicator>::ACRONYM, "CCI");
+        assert_eq!(<ExponentialMovingAverage as Indicator>::ACRONYM, "EMA");
+        assert_eq!(<MovingAverageConvergenceDivergence as Indicator>::ACRONYM, "MACD");
+        assert_eq!(<OnBalanceVolume as Indicator>::ACRONYM, "OBV");
+        assert_eq!(<RelativeStrengthIndex as Indicator>::ACRONYM, "RSI");
+        assert_eq!(<StochasticOscillator as Indicator>::ACRONYM, "STOCH");
+        assert_eq!(<VolumeWeightedAveragePrice as Indicator>::ACRONYM, "VWAP");
+        assert_eq!(<WeightedMovingAverage as Indicator>::ACRONYM, "WMA");
+        assert!(!<SimpleMovingAverage as Indicator>::NAME.is_empty());
+        assert!(!<SimpleMovingAverage as Indicator>::DESCRIPTION.is_empty());
     }
 }

@@ -127,7 +127,7 @@ nav:
     - CLI:
           - download: cli/download.md
           - launch: cli/launch.md
-          - run_experiment: cli/run_experiment.md
+          - run-experiment: cli/run_experiment.md
     - API:
         - config:
             - get_config: api/config/get_config.md

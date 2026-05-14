@@ -248,6 +248,25 @@ fn stddev(series: &[f64]) -> Option<f64> {
     Some(var.sqrt())
 }
 
+/// Sample standard deviation of the bar-to-bar returns implied by
+/// `prices`. Returns `None` when fewer than two valid returns can be
+/// derived (e.g. shorter than 3 bars, all-NaN, or every base price ≤ 0).
+/// Used as a lightweight realised-volatility estimate by strategies
+/// that adapt their behaviour to the current regime.
+fn window_return_std(prices: &[f64]) -> Option<f64> {
+    let returns: Vec<f64> = prices
+        .windows(2)
+        .filter_map(|w| {
+            if w[0].is_finite() && w[1].is_finite() && w[0] > 0.0 {
+                Some(w[1] / w[0] - 1.0)
+            } else {
+                None
+            }
+        })
+        .collect();
+    stddev(&returns)
+}
+
 /// Top-K rotation across symbols. Closes positions not in the top, then
 /// buys equal-weight into the top `k`.
 fn rotation_orders(
@@ -439,6 +458,16 @@ impl Strategy for AdaptiveRsi {
         "RSI with dynamic period that adapts to market volatility and cycles.";
     const IS_MULTI_ASSET: bool = false;
 
+    /// Decide which orders to place on the current bar.
+    ///
+    /// Compares short-horizon volatility (over `min_period` returns)
+    /// against long-horizon volatility (over `max_period` returns) and
+    /// picks the **short-period RSI when the recent regime is more
+    /// volatile** than the longer-term baseline, the **long-period RSI
+    /// otherwise**. The result is a single 0–100 RSI value that
+    /// implicitly adapts the look-back to the current regime, matching
+    /// the docstring: shorter window in choppy/volatile markets, longer
+    /// window when conditions are calm.
     fn decide(
         &self,
         closes: &[(String, &[f64])],
@@ -446,15 +475,37 @@ impl Strategy for AdaptiveRsi {
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        // Auto-included RSI uses ``min_period`` (see STRATEGY_INDICATORS).
-        let rsi_name = auto_indicator_name("RSI", &[fmt_arg(self.min_period)]);
+        let rsi_short = auto_indicator_name("RSI", &[fmt_arg(self.min_period)]);
+        let rsi_long = auto_indicator_name("RSI", &[fmt_arg(self.max_period)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
-            let r = match indicators.value(&rsi_name, sym) {
+            let r_short = match indicators.value(&rsi_short, sym) {
                 Some(v) => v,
                 None => continue,
             };
+            let r_long = match indicators.value(&rsi_long, sym) {
+                Some(v) => v,
+                None => continue,
+            };
+            // Need enough history to compute both volatility windows.
+            if c.len() <= self.max_period.max(self.min_period) {
+                continue;
+            }
+
+            // Realised return volatility over short and long windows.
+            let short_vol = window_return_std(&c[c.len() - self.min_period..]);
+            let long_vol = window_return_std(&c[c.len() - self.max_period..]);
+
+            // Pick the look-back that fits the current regime: short
+            // period (more reactive) when recent vol > long-term vol,
+            // long period (smoother) otherwise. Falls back to the long
+            // RSI when either vol is undefined.
+            let r = match (short_vol, long_vol) {
+                (Some(sv), Some(lv)) if sv > lv => r_short,
+                _ => r_long,
+            };
+
             let last = *c.last().unwrap_or(&0.0);
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if r < 30.0 && cur <= 0.0 {
@@ -472,7 +523,10 @@ impl Strategy for AdaptiveRsi {
     }
 
     fn required_indicators_inner(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
-        Ok(vec![Py::new(py, RelativeStrengthIndex::new(self.min_period))?.into_any()])
+        Ok(vec![
+            Py::new(py, RelativeStrengthIndex::new(self.min_period))?.into_any(),
+            Py::new(py, RelativeStrengthIndex::new(self.max_period))?.into_any(),
+        ])
     }
 }
 
@@ -664,11 +718,12 @@ impl Strategy for BollingerMeanReversion {
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
+            // BB returns `[upper, middle, lower]`.
             let parts = match indicators.last(&bb_name, sym) {
-                Some(v) if v.len() >= 2 => v,
+                Some(v) if v.len() >= 3 => v,
                 _ => continue,
             };
-            let (upper, lower) = (parts[0], parts[1]);
+            let (upper, lower) = (parts[0], parts[2]);
             if !upper.is_finite() || !lower.is_finite() {
                 continue;
             }
@@ -1377,11 +1432,12 @@ impl Strategy for MultiBollingerRotation {
             .iter()
             .map(|(s, c)| {
                 let last = *c.last().unwrap_or(&0.0);
+                // BB returns `[upper, middle, lower]`. Rank by distance of
+                // the latest close above the upper band — the further price
+                // has broken out above the volatility envelope, the higher
+                // the score.
                 let score = match indicators.last(&bb_name, s) {
-                    Some(v) if v.len() >= 2 && v[0].is_finite() && v[1].is_finite() => {
-                        // Score by deviation above the band midpoint.
-                        last - 0.5 * (v[0] + v[1])
-                    },
+                    Some(v) if v.len() >= 3 && v[0].is_finite() && v[2].is_finite() => last - v[0],
                     _ => f64::NAN,
                 };
                 (s.clone(), score)
@@ -1783,10 +1839,11 @@ impl Strategy for Rsi {
                 None => continue,
             };
             let bb = match indicators.last(&bb_name, sym) {
-                Some(v) if v.len() >= 2 && v[0].is_finite() && v[1].is_finite() => v,
+                Some(v) if v.len() >= 3 && v[0].is_finite() && v[2].is_finite() => v,
                 _ => continue,
             };
-            let (upper, lower) = (bb[0], bb[1]);
+            // BB returns `[upper, middle, lower]`.
+            let (upper, lower) = (bb[0], bb[2]);
             let last = *c.last().unwrap_or(&0.0);
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             // Dual confirmation: oversold RSI + price at/below lower band.
@@ -2399,32 +2456,64 @@ impl Strategy for TurtleTrading {
     const DESCRIPTION: &'static str = "A classic trend-following strategy that buys on breakouts and sells on breakdowns, using ATR for position sizing.";
     const IS_MULTI_ASSET: bool = false;
 
+    /// Decide which orders to place on the current bar.
+    ///
+    /// Entry: 20-day (configurable) Donchian breakout — long when the
+    /// latest close equals the highest high of the look-back window.
+    /// Exit: opposite Donchian breakdown over `exit_period`.
+    ///
+    /// Position sizing follows the classic Turtle "N-based" rule: a
+    /// single unit risks 1 % of total portfolio equity per **N**
+    /// (where N = ATR(`atr_period`)). The order quantity is therefore
+    /// `qty = (0.01 × equity) / ATR`, capped by available cash to
+    /// avoid over-allocating.
     fn decide(
         &self,
         closes: &[(String, &[f64])],
-        _indicators: &IndicatorView<'_>,
+        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
         // Donchian channel breakouts are pure price extremes – no indicator
-        // computation required.
-        let n_syms = closes.len().max(1) as f64;
+        // computation required for the signal itself.
+        let atr_name = auto_indicator_name("ATR", &[fmt_arg(self.atr_period)]);
+        let equity = portfolio_equity(portfolio, closes);
+        let cash = portfolio_cash(portfolio);
+        let risk_pct = 0.01_f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
             if c.len() < self.entry_period.max(self.exit_period) {
                 continue;
             }
             let last = *c.last().unwrap_or(&0.0);
+            if last <= 0.0 {
+                continue;
+            }
             let entry_high =
                 c[c.len() - self.entry_period..].iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             let exit_low =
                 c[c.len() - self.exit_period..].iter().cloned().fold(f64::INFINITY, f64::min);
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if last >= entry_high && cur <= 0.0 {
-                if let Some(o) =
-                    buy_equal_weight(sym, n_syms as usize, portfolio_cash(portfolio), last)
-                {
-                    orders.push(o);
+                // ATR-based "N" sizing — 1 % of equity per unit of N.
+                let atr = match indicators.value(&atr_name, sym) {
+                    Some(v) if v > 0.0 => v,
+                    _ => continue,
+                };
+                let target_qty = (equity * risk_pct) / atr;
+                // Never spend more than the cash on hand.
+                let max_affordable = cash / last;
+                let qty = target_qty.min(max_affordable);
+                if qty > 0.0 {
+                    orders.push(Order {
+                        id: new_order_id(),
+                        symbol: sym.to_owned(),
+                        order_type: OrderType::Market,
+                        quantity: qty,
+                        price: None,
+                        limit_price: None,
+                        sizer: None,
+                    });
                 }
             } else if last <= exit_low && cur > 0.0 {
                 if let Some(o) = sell_order(sym, cur) {

@@ -116,6 +116,7 @@ def _apply_config_to_state(exp: ExperimentConfig, state: dict[str, Any] | Sessio
         "allow_short_selling",
         "borrow_rate",
         "max_position_size",
+        "raise_on_margin_limit",
         "conversion_mode",
     ):
         _set(key, getattr(exp.exchange, key))
@@ -128,7 +129,6 @@ def _apply_config_to_state(exp: ExperimentConfig, state: dict[str, Any] | Sessio
         "trade_on_close",
         "risk_free_rate",
         "exclusive_orders",
-        "random_seed",
         "empty_bar_policy",
     ):
         _set(key, getattr(exp.engine, key))
@@ -195,6 +195,9 @@ def _build_config_toml(
             allow_short_selling=_get("allow_short_selling", default.exchange.allow_short_selling),
             borrow_rate=_get("borrow_rate", default.exchange.borrow_rate),
             max_position_size=_get("max_position_size", default.exchange.max_position_size),
+            raise_on_margin_limit=_get(
+                "raise_on_margin_limit", default.exchange.raise_on_margin_limit
+            ),
             conversion_mode=_get("conversion_mode", default.exchange.conversion_mode),
             conversion_threshold=_opt("conversion_threshold"),
             conversion_period=_opt("conversion_period"),
@@ -205,7 +208,6 @@ def _build_config_toml(
             trade_on_close=_get("trade_on_close", default.engine.trade_on_close),
             risk_free_rate=_get("risk_free_rate", default.engine.risk_free_rate),
             exclusive_orders=_get("exclusive_orders", default.engine.exclusive_orders),
-            random_seed=_opt("random_seed"),
             empty_bar_policy=_get("empty_bar_policy", default.engine.empty_bar_policy),
         ),
     )
@@ -1215,7 +1217,20 @@ with tab6:
             help=(
                 "Maximum allocation to a single position as a percentage of total "
                 "portfolio value. Applies to both long and short positions. Set to "
-                "100% for no concentration limit. Exceeding this limit raises an error."
+                "100% for no concentration limit."
+            ),
+        )
+
+        raise_on_margin_limit = st.toggle(
+            label="Raise on margin / position limit",
+            key=(key := "raise_on_margin_limit"),
+            value=_default(key, fallback=exp.exchange.raise_on_margin_limit),
+            on_change=lambda k=key: _persist(k),
+            help=(
+                "If enabled, the engine aborts the run with an error whenever "
+                "an order would exceed `max_leverage` or `max_position_size`, or when "
+                "equity falls below `maintenance_margin`. When disabled, orders are "
+                "auto-shrunk or rejected and a warning is recorded instead."
             ),
         )
 
@@ -1342,20 +1357,6 @@ with tab7:
             help=(
                 "When enabled, submitting a new order automatically cancels all pending "
                 "orders. Useful for strategies that should only have one active order at a time."
-            ),
-        )
-
-        random_seed = st.number_input(
-            label="Random seed",
-            key=(key := "random_seed"),
-            value=_default(key),
-            min_value=0,
-            step=1,
-            placeholder="Leave empty for non-deterministic",
-            on_change=lambda k=key: _persist(k),
-            help=(
-                "Fixed seed for the random number generator to ensure reproducible results. "
-                "Leave empty for non-deterministic execution."
             ),
         )
 

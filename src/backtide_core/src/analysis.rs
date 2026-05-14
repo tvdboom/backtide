@@ -579,4 +579,37 @@ mod tests {
         let stats = compute_single("X".into(), &prices, &timestamps, 0.0, Some(1)).unwrap();
         assert!(stats.cagr.is_finite());
     }
+
+    // ── compute_series_stats direct: edge cases ─────────────────────────
+
+    #[test]
+    fn compute_series_stats_returns_none_for_short_input() {
+        assert!(compute_series_stats(&[1.0, 2.0], &[0.0, 1.0], 0.0, None).is_none());
+        assert!(compute_series_stats(&[], &[], 0.0, None).is_none());
+    }
+
+    #[test]
+    fn compute_series_stats_skips_non_positive_base_windows() {
+        // values containing zero base produce fewer than 2 returns → None.
+        let values = vec![0.0, 0.0, 0.0, 0.0];
+        let ts = daily_timestamps(values.len());
+        assert!(compute_series_stats(&values, &ts, 0.0, None).is_none());
+    }
+
+    #[test]
+    fn compute_series_stats_total_return_zero_yields_minus_one_cagr() {
+        // total_return = last/first = 0 → n_years > 0 branch → ann_return = -1.
+        let values = vec![100.0, 50.0, 25.0, 0.0];
+        let ts = daily_timestamps(values.len());
+        let s = compute_series_stats(&values, &ts, 0.0, Some(252)).unwrap();
+        assert_eq!(s.ann_return, -1.0);
+    }
+
+    #[test]
+    fn compute_series_stats_max_dd_is_non_positive() {
+        let values = linear_prices(20, 100.0, 1.0);
+        let ts = daily_timestamps(20);
+        let s = compute_series_stats(&values, &ts, 0.0, None).unwrap();
+        assert!(s.max_dd <= 0.0);
+    }
 }

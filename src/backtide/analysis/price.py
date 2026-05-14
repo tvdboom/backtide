@@ -76,7 +76,7 @@ def plot_price(
 
 def plot_price(
     data: DataFrameLike,
-    price_col: str = "adj_close",
+    price_col: str = "close",
     *,
     indicators: BaseIndicator | Sequence[BaseIndicator] | dict[str, BaseIndicator] | None = None,
     run: RunResult | None = None,
@@ -231,11 +231,16 @@ def plot_price(
                         )
                     )
                 else:
+                    # Multi-output indicators: first and last columns are treated as an
+                    # upper / lower band. Exactly 3 columns are an upper / middle / lower
+                    # band (e.g., Bollinger Bands)
+                    upper_idx = 0
+                    lower_idx = values.shape[1] - 1
                     fig.add_traces(
                         [
                             go.Scatter(
                                 x=subset["dt"],
-                                y=(y := values.iloc[:, 0]),
+                                y=(y := values.iloc[:, upper_idx]),
                                 mode="lines",
                                 line={"width": cfg.plots.line_width / 2, "color": color},
                                 customdata=[_format_price(v, currency=ccy) for v in y],
@@ -249,7 +254,7 @@ def plot_price(
                             ),
                             go.Scatter(
                                 x=subset["dt"],
-                                y=(y := values.iloc[:, 1]),
+                                y=(y := values.iloc[:, lower_idx]),
                                 mode="lines",
                                 line={"width": cfg.plots.line_width / 2, "color": color},
                                 fill="tonexty",
@@ -265,6 +270,28 @@ def plot_price(
                             ),
                         ]
                     )
+
+                    if values.shape[1] == 3:
+                        fig.add_trace(
+                            go.Scatter(
+                                x=subset["dt"],
+                                y=(y := values.iloc[:, 1]),
+                                mode="lines",
+                                line={
+                                    "width": cfg.plots.line_width / 2,
+                                    "color": color,
+                                    "dash": "dot",
+                                },
+                                customdata=[_format_price(v, currency=ccy) for v in y],
+                                hovertemplate=(
+                                    f"%{{x}}<br>{name} (middle): %{{customdata}}"
+                                    f"<extra>{symbol}</extra>"
+                                ),
+                                name=name,
+                                legendgroup=symbol,
+                                showlegend=False,
+                            )
+                        )
 
     if run:
 

@@ -68,6 +68,12 @@ jobs:
         run: |
           uv sync --group tox
           uv run tox -e cargo-test
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: tvdboom/backtide
+          files: ./rust-coverage.info
 
   benchmarks:
     runs-on: ubuntu-latest

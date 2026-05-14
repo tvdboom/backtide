@@ -194,4 +194,42 @@ mod tests {
             assert!(cache.range_cache.get(&key).await.is_none());
         });
     }
+
+    #[test]
+    fn engine_cache_clear_invalidates_instrument_entries() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let inst = Arc::new(Instrument {
+                symbol: "AAPL".to_owned(),
+                name: "Apple".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "NASDAQ".to_owned(),
+                provider: Provider::Yahoo,
+            });
+            cache.instrument_cache.insert("AAPL".to_owned(), inst.clone()).await;
+            cache.instrument_cache.run_pending_tasks().await;
+            assert!(cache.instrument_cache.get("AAPL").await.is_some());
+
+            cache.clear();
+            cache.instrument_cache.run_pending_tasks().await;
+            assert!(cache.instrument_cache.get("AAPL").await.is_none());
+        });
+    }
+
+    #[test]
+    fn engine_get_returns_singleton() {
+        // First call initializes, second returns the same instance.
+        let e1 = Engine::get().expect("engine init");
+        let e2 = Engine::get().expect("engine init");
+        assert!(std::ptr::eq(e1, e2));
+        // Providers should be populated for all known instrument types.
+        for t in InstrumentType::iter() {
+            assert!(e1.providers.contains_key(&t));
+        }
+        // clear_cache must be callable without panicking.
+        e1.clear_cache();
+    }
 }

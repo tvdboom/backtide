@@ -49,7 +49,7 @@ def plot_drawdown(
 
 def plot_drawdown(
     data: DataFrameLike,
-    price_col: str = "adj_close",
+    price_col: str = "close",
     *,
     title: str | dict[str, Any] | None = None,
     legend: str | dict[str, Any] | None = "lower left",

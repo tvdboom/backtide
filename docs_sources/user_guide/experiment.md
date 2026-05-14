@@ -331,14 +331,3 @@ $$
 
 with $n_\text{years} = (\text{strat\_end} - \text{window\_start}) / (365.25 \cdot 86400)$
 and $r_f$ the configured `risk_free_rate / 100`.
-
-<br>
-
-## Reproducibility
-
-Set [`EngineExpConfig.random_seed`][EngineExpConfig] to a fixed integer to
-make stochastic strategies and any RNG-dependent fills deterministic. With a
-seed set, two runs of the same `ExperimentConfig` against the same stored bars
-produce identical equity curves, orders and trades. Saving the
-`config.toml` is enough to reproduce the run later — the bars themselves are
-already on disk via [storage].

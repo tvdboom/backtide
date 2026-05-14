@@ -5,6 +5,7 @@ Description: Unit tests for the CLI commands.
 
 """
 
+import json
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
@@ -13,6 +14,7 @@ from click.testing import CliRunner
 import pytest
 
 from backtide.cli import download, launch, main
+from backtide.cli import run_experiment as run_experiment_cmd
 
 
 @pytest.fixture
@@ -121,7 +123,7 @@ class TestLaunch:
             general=MagicMock(log_level="warn"),
             display=MagicMock(port=8501, address=None),
         )
-        result = runner.invoke(launch, ["-P", "9000"])
+        result = runner.invoke(launch, ["-p", "9000"])
         assert result.exit_code == 0
         call_kwargs = mock_run.call_args
         assert call_kwargs[1]["flag_options"]["server.port"] == "9000"
@@ -135,7 +137,7 @@ class TestLaunch:
             general=MagicMock(log_level="warn"),
             display=MagicMock(port=8501, address=None),
         )
-        result = runner.invoke(launch, ["-A", "0.0.0.0"])
+        result = runner.invoke(launch, ["-a", "0.0.0.0"])
         assert result.exit_code == 0
         assert mock_run.call_args[1]["flag_options"]["server.address"] == "0.0.0.0"
 
@@ -167,3 +169,133 @@ class TestMainBlock:
 
         assert result.returncode == 0
         assert "CLI application" in result.stdout
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# run-experiment command
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRunExperimentCommand:
+    """Tests for the `run-experiment` CLI subcommand."""
+
+    @staticmethod
+    def _stub_result(status, warnings=None):
+        """Build a stub ExperimentResult-like object."""
+        from backtide.backtest import ExperimentStatus
+
+        return MagicMock(
+            status=ExperimentStatus.Success if status == "success" else ExperimentStatus.Error,
+            warnings=warnings or [],
+            strategies=[MagicMock()],
+            experiment_id="abc123",
+        )
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.run_backtest")
+    def test_toml_success(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
+        """A TOML config runs end-to-end and reports success."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_run.return_value = self._stub_result("success")
+
+        cfg_path = tmp_path / "exp.toml"
+        cfg_path.write_text('[general]\nname = "t"\n', encoding="utf-8")
+
+        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        assert result.exit_code == 0, result.output
+        assert "Done" in result.output
+        assert "completed" in result.output
+        mock_run.assert_called_once()
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.run_backtest")
+    def test_json_config(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
+        """A `.json` config is parsed through `from_dict`."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_run.return_value = self._stub_result("success")
+
+        cfg_path = tmp_path / "exp.json"
+        cfg_path.write_text(json.dumps({"general": {"name": "t"}}), encoding="utf-8")
+
+        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        assert result.exit_code == 0
+        mock_run.assert_called_once()
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.run_backtest")
+    def test_yaml_config(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
+        """A `.yaml` config is parsed through `from_dict`."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_run.return_value = self._stub_result("success")
+
+        cfg_path = tmp_path / "exp.yaml"
+        cfg_path.write_text("general:\n  name: t\n", encoding="utf-8")
+
+        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        assert result.exit_code == 0
+        mock_run.assert_called_once()
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    def test_unsupported_extension(self, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
+        """Unsupported file extensions raise a UsageError."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+
+        cfg_path = tmp_path / "exp.ini"
+        cfg_path.write_text("[general]\nname=t\n", encoding="utf-8")
+
+        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        assert result.exit_code != 0
+        assert "Unsupported config extension" in result.output
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.run_backtest")
+    def test_success_with_warnings(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
+        """A successful run with warnings echoes each warning."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_run.return_value = self._stub_result("success", warnings=["w1", "w2"])
+
+        cfg_path = tmp_path / "exp.toml"
+        cfg_path.write_text("", encoding="utf-8")
+
+        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        assert result.exit_code == 0
+        assert "warning" in result.output.lower()
+        assert "w1" in result.output
+        assert "w2" in result.output
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.run_backtest")
+    def test_failed_status_exits_nonzero(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
+        """A failed run exits with status 1 and writes warnings to stderr."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_run.return_value = self._stub_result("failed", warnings=["boom"])
+
+        cfg_path = tmp_path / "exp.toml"
+        cfg_path.write_text("", encoding="utf-8")
+
+        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        assert result.exit_code == 1
+        # stderr (mixed_stderr default = True) ends up in `output`.
+        assert "failed" in result.output.lower()
+        assert "boom" in result.output
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.run_backtest")
+    def test_custom_log_level(self, mock_run, mock_logging, mock_cfg, runner, tmp_path):
+        """`--log_level` overrides the config value."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_run.return_value = self._stub_result("success")
+
+        cfg_path = tmp_path / "exp.toml"
+        cfg_path.write_text("", encoding="utf-8")
+
+        result = runner.invoke(run_experiment_cmd, [str(cfg_path), "--log_level", "debug"])
+        assert result.exit_code == 0
+        mock_logging.assert_called_once_with("debug")

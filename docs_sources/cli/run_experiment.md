@@ -1,4 +1,4 @@
-# run_experiment
+# run-experiment
 ----------------
 
 :: backtide.cli:run_experiment
