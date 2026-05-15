@@ -114,6 +114,7 @@ nav:
     - About: about.md
     - Getting started: getting_started.md
     - User guide:
+        - Introduction: user_guide/introduction.md
         - Nomenclature: user_guide/nomenclature.md
         - Application: user_guide/application.md
         - Data: user_guide/data.md

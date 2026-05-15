@@ -613,6 +613,7 @@ def _render_full_analysis(row: pd.Series):
             ),
         ):
             st.html("<span class='wide-marker' style='display:none'></span>")
+
             try:
                 log_text = log_path.read_text(encoding="utf-8", errors="replace")
             except OSError as ex:
@@ -630,8 +631,16 @@ def _render_full_analysis(row: pd.Series):
                     key=f"logs_{exp_id}",
                     width="stretch",
                 )
+
                 if log_text.strip():
-                    st.code(log_text, language="log", line_numbers=True)
+                    lines = log_text.splitlines()
+                    max_lines = 500
+                    if len(lines) > max_lines:
+                        st.caption(
+                            f"Showing last {max_lines} of {len(lines)} lines. "
+                            f"Download the full log for the complete output."
+                        )
+                    st.code("\n".join(lines[-max_lines:]), language="log", line_numbers=True)
                 else:
                     st.info("Log file is empty.")
 
@@ -725,21 +734,6 @@ def _render_full_analysis(row: pd.Series):
 
     runs = query_strategy_runs(row["id"])
 
-    if failed_runs := [r for r in runs if r.error]:
-        names = ", ".join(f"**{r.strategy_name}**" for r in failed_runs)
-        if len(failed_runs) == len(runs):
-            st.error(
-                f"All {len(runs)} strategies failed during execution: {names}. "
-                "See the per-strategy tabs below (or the logs popover) for the raised errors.",
-                icon=":material/error:",
-            )
-        else:
-            st.warning(
-                f"{len(failed_runs)} of {len(runs)} strategies failed during execution: "
-                f"{names}. The remaining strategies completed successfully.",
-                icon=":material/warning:",
-            )
-
     start_ts = None
     end_ts = None
     for r in runs:
@@ -795,6 +789,19 @@ def _render_full_analysis(row: pd.Series):
     st.markdown("")
 
     st.markdown("### Strategies", text_alignment="center")
+
+    if failed_runs := [r for r in runs if r.error]:
+        names = ", ".join(f"**{r.strategy_name}**" for r in failed_runs)
+        if len(failed_runs) == len(runs):
+            st.error(
+                f"All {len(runs)} strategies failed during execution: {names}.",
+                icon=":material/error:",
+            )
+        else:
+            st.warning(
+                f"{len(failed_runs)} of {len(runs)} strategies failed during execution: {names}.",
+                icon=":material/warning:",
+            )
 
     with st.container(key="strategy_picker"):
         bench_names = {run.strategy_name for run in runs if run.is_benchmark}

@@ -62,3 +62,11 @@ The sidebar gives access to the following pages:
 * **Configuration driven** — Every experiment setting exposed in the UI maps
   to a field in [ExperimentConfig], so you can also pre-fill the app by importing
   a config file from disk.
+
+
+![Home](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/home.png)
+![Experiment](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/experiment.png)
+![Results](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/results.png)
+![Trades](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/trades.png)
+![Stats](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/stats.png)
+![Analysis](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/analysis.png)

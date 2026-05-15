@@ -66,15 +66,43 @@ code. Every setting can still be fine-tuned when needed, but you never have to.
 
 Based on comprehensive [benchmarks](https://tvdboom.github.io/backtide/latest/contributing#benchmarks):
 
-| Operation                         | Performance | Use Case         |
-|-----------------------------------|-------------|------------------|
-| OHLC download (1 symbol - 1m)     | ~22ms       | Data ingestion   |
-| OHLC download (10 symbols - 1d)   | ~40ms       | Data ingestion   |
-| Batch bar insert (100)            | ~22ms       | Bulk processing  |
-| Batch bar insert (10000)          | ~48ms       | Bulk processing  |
-| Historical read (1 symbol)        | ~2.8ms      | Backtesting      |
-| Historical read (10 symbols)      | ~14ms       | Backtesting      |
+**Data download & storage**
 
+| Operation                      | Performance    | Use Case        |
+|--------------------------------|----------------|-----------------|
+| OHLC download (1 symbol - 1m)* | ~33ms          | Data ingestion  |
+| OHLC download (1 symbol - 1d)* | ~31ms          | Data ingestion  |
+| Batch insert (100 bars)        | ~20ms          | Bulk processing |
+| Batch insert (10k bars)        | ~45ms          | Bulk processing |
+| Historical read (1000 bars)    | ~1.5ms         | Backtesting     |
+| Historical read (1M bars)      | ~711ms         | Backtesting     |
+
+**Backtest (11k bars)**
+
+| Strategy            | Performance    | Use Case    |
+|---------------------|----------------|-------------|
+| Buy & Hold          | ~1.1ms         | Backtesting |
+| ROC Rotation        | ~1.1ms         | Backtesting |
+| RSRS Rotation       | ~1.1ms         | Backtesting |
+| Multi-BB Rotation   | ~1.2ms         | Backtesting |
+| ROC                 | ~1.3ms         | Backtesting |
+| Triple RSI Rotation | ~1.5ms         | Backtesting |
+| VCP                 | ~1.5ms         | Backtesting |
+| RSRS                | ~1.7ms         | Backtesting |
+| Double Top          | ~2.2ms         | Backtesting |
+| Momentum            | ~4.1ms         | Backtesting |
+| SMA Naive           | ~4.2ms         | Backtesting |
+| Alpha RSI Pro       | ~4.5ms         | Backtesting |
+| Turtle Trading      | ~4.6ms         | Backtesting |
+| Risk Averse         | ~4.9ms         | Backtesting |
+| BB Mean Reversion   | ~5.5ms         | Backtesting |
+| MACD                | ~6.3ms         | Backtesting |
+| Adaptive RSI        | ~7.4ms         | Backtesting |
+| SMA Crossover       | ~7.7ms         | Backtesting |
+| Hybrid Alpha RSI    | ~7.9ms         | Backtesting |
+| RSI                 | ~8.8ms         | Backtesting |
+
+*\*Downloads hit real network endpoints. Yahoo Finance applies rate limits, so these numbers are meant as a reference, not a strict benchmark.*
 
 <br>
 

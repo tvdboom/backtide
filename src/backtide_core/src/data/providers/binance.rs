@@ -638,8 +638,7 @@ mod tests {
     #[test]
     fn kline_negative_open_time_clamped_to_zero() {
         // Negative timestamps are clamped to 0.
-        let row =
-            json!([-1000i64, "1.0", "2.0", "0.5", "1.5", "10.0", 1_000_000i64, "100", 5]);
+        let row = json!([-1000i64, "1.0", "2.0", "0.5", "1.5", "10.0", 1_000_000i64, "100", 5]);
         let k = BinanceKline::try_from(row).unwrap();
         assert_eq!(k.open_time, 0);
     }

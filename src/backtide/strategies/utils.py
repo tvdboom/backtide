@@ -155,7 +155,7 @@ def _resolve_auto_indicators(strats: Sequence[Any]) -> list[tuple[str, BaseIndic
 
                     # Sanitize for filesystems
                     arg_str = arg_str.replace(".", "p").replace("-", "n").replace(" ", "")
-                    name = f"__auto_{acronym}_{arg_str}"
+                    name = f"{acronym}_{arg_str}"
 
                     if name not in seen:
                         seen.add(name)

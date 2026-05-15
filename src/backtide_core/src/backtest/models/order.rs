@@ -72,12 +72,16 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SizerSlot {
 
 /// A trading order submitted during the simulation.
 ///
+/// Read more in the [user guide][orders].
+///
 /// Attributes
 /// ----------
 /// id : str
 ///     Unique identifier of the order. Auto-generated if not provided.
-///     For [`OrderType.CancelOrder`][OrderType] orders, the `id` field
-///     identifies the target order that should be canceled.
+///     For [`OrderType.Cancel`][OrderType] orders, the `id` field
+///     identifies the target order that should be canceled. If an order
+///     with the same ``id`` already exists in the order book, the
+///     duplicate is rejected.
 ///
 /// symbol : str
 ///     The ticker symbol this order targets.
@@ -90,13 +94,15 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SizerSlot {
 ///     price.
 ///
 /// order_type : [OrderType]
-///     The execution semantics (market, limit, stop-loss, etc...).
+///     The execution semantics (market, limit, stop-loss, etc...). Also accepts
+///     a string of the form PascalCase (`StopLoss`) or snake_case (`stop_loss"),
+///     case-insensitively.
 ///
 /// price : float | None
 ///     Primary price for the order. The exact meaning depends on
 ///     `order_type`:
 ///
-/// - `Market` / `CancelOrder` / `SettlePosition`: ignored.
+/// - `Market` / `Cancel` / `SettlePosition`: ignored.
 /// - `Limit` / `TakeProfit`: the limit / target price.
 /// - `StopLoss`: the stop (trigger) price.
 /// - `StopLossLimit` / `TakeProfitLimit`: the stop (trigger)
@@ -150,12 +156,12 @@ impl Order {
 
     #[new]
     #[pyo3(signature = (
-        symbol = "",
-        quantity = None,
-        order_type = OrderType::Market,
-        price = None,
-        limit_price = None,
-        id = None,
+        symbol: "str" = "",
+        quantity: "float | Sizer | None" = None,
+        order_type: "str | OrderType" = OrderType::Market,
+        price: "float | None" = None,
+        limit_price: "float | None" = None,
+        id: "str | None" = None,
     ))]
     fn new(
         _py: Python<'_>,

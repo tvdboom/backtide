@@ -12,7 +12,7 @@ import click
 from streamlit.web.bootstrap import run
 import yaml
 
-from backtide.backtest import ExperimentConfig, ExperimentStatus
+from backtide.backtest import ExperimentAborted, ExperimentConfig, ExperimentStatus
 from backtide.backtest import run_experiment as run_backtest
 from backtide.core.config import get_config
 from backtide.core.utils import init_logging
@@ -73,6 +73,8 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
     the requested symbols are resolved and downloaded automatically.  Already
     cached bars are skipped, so it is safe to re-run the command to top up an
     existing dataset.
+
+    Read more in the [user guide][data].
 
     Parameters
     ----------
@@ -176,6 +178,8 @@ def launch(address: str, port: str, log_level: str):
     experiments, inspect equity curves, trade logs, and performance metrics without
     writing any code.
 
+    Read more in the [user guide][application].
+
     Parameters
     ----------
     --address, -a : str
@@ -247,7 +251,9 @@ def run_experiment(config: Path, log_level: str, *, verbose: bool):
     Reads an experiment configuration from a `.toml`, `.yaml`/`.yml` or `.json`
     file, executes the full backtest pipeline — data resolution, indicator
     computation, parallel strategy runs — and persists the results to the local
-    database.  The outcome can then be explored interactively via `backtide launch`.
+    database. The outcome can then be explored interactively via `backtide launch`.
+
+    Read more in the [user guide][experiment].
 
     Parameters
     ----------
@@ -292,7 +298,12 @@ def run_experiment(config: Path, log_level: str, *, verbose: bool):
         )
 
     click.echo(f"🚀  Running experiment from {config.name}...")
-    result = run_backtest(exp_cfg, verbose=verbose)
+
+    try:
+        result = run_backtest(exp_cfg, verbose=verbose)
+    except (KeyboardInterrupt, ExperimentAborted):
+        click.echo("\n⛔  Experiment aborted. Nothing was stored.", err=True)
+        raise SystemExit(130) from None
 
     n = len(result.strategies)
     if result.status == ExperimentStatus.Success and not result.warnings:

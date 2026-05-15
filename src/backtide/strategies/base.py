@@ -36,6 +36,34 @@ class BaseStrategy(ABC):
 
     """
 
+    @staticmethod
+    def log(message: str, level: str = "info"):
+        """Write a message to the experiment log.
+
+        Messages appear in the live log viewer while the experiment
+        runs and are persisted to the experiment's ``logs.txt`` file.
+
+        Parameters
+        ----------
+        message : str
+            The message to log.
+
+        level : str | [LogLevel], default="info"
+            Tracing log level. Choose from: "error", "warn", "info", "debug".
+
+        Examples
+        --------
+        ```python
+        def evaluate(self, data, portfolio, state, indicators):
+            self.log(f"Bar {state.bar_index}: evaluating...")
+            ...
+        ```
+
+        """
+        from backtide.backtest import experiment_log
+
+        experiment_log(message, level)
+
     @abstractmethod
     def evaluate(
         self,

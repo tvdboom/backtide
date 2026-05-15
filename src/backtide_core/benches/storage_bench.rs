@@ -10,7 +10,7 @@
 //! | Group                   | What it measures                                                 |
 //! |-------------------------|------------------------------------------------------------------|
 //! | `batch_bar_insert`      | Insert throughput at 100 / 10 000 rows.                          |
-//! | `historical_read`       | Read latency via `get_summary` for 1 and 10 symbols.             |
+//! | `historical_read`       | Read latency via `query_bars` for 1 and 1 000 symbols.           |
 //!
 //! Run with:
 //!
@@ -79,6 +79,11 @@ fn make_series(symbol: &str, bars: Vec<Bar>) -> BarSeries {
     }
 }
 
+/// Generate a unique symbol name from an index.
+fn sym_name(i: usize) -> String {
+    format!("SYM{i:04}")
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Benchmarks
 // ────────────────────────────────────────────────────────────────────────────
@@ -115,8 +120,7 @@ fn bench_batch_bar_insert(c: &mut Criterion) {
 /// Benchmark [`Storage::query_bars`] read latency for a single symbol.
 ///
 /// Pre-populates a DuckDB instance with 1 000 daily bars for one symbol,
-/// then repeatedly calls `query_bars`. Measures the full table scan
-/// for a single-series database.
+/// then repeatedly calls `query_bars`.
 fn bench_historical_read_1sym(c: &mut Criterion) {
     let (db, _dir) = fresh_db();
     let bars = generate_bars(1_000);
@@ -129,21 +133,19 @@ fn bench_historical_read_1sym(c: &mut Criterion) {
     });
 }
 
-/// Benchmark [`Storage::query_bars`] read latency across 10 symbols.
+/// Benchmark [`Storage::query_bars`] read latency across 1 000 symbols.
 ///
-/// Seeds the database with 10 symbols x 1 000 bars each (10 000 bars
+/// Seeds the database with 1 000 symbols × 1 000 bars each (1 000 000 bars
 /// total), then measures how long the full table scan takes.
-fn bench_historical_read_10sym(c: &mut Criterion) {
+fn bench_historical_read_1000sym(c: &mut Criterion) {
     let (db, _dir) = fresh_db();
 
-    let symbols = ["AAPL", "MSFT", "GOOG", "AMZN", "TSLA", "META", "NVDA", "JPM", "V", "JNJ"];
-
     let series: Vec<BarSeries> =
-        symbols.iter().map(|&sym| make_series(sym, generate_bars(1_000))).collect();
+        (0..1_000).map(|i| make_series(&sym_name(i), generate_bars(1_000))).collect();
 
     db.write_bars_bulk(&series).expect("seed write failed");
 
-    c.bench_function("historical_read/10sym", |b| {
+    c.bench_function("historical_read/1000sym", |b| {
         b.iter(|| {
             db.query_bars(None, None, None, None).expect("read query failed");
         });
@@ -158,7 +160,7 @@ criterion_group!(
     storage_benches,
     bench_batch_bar_insert,
     bench_historical_read_1sym,
-    bench_historical_read_10sym,
+    bench_historical_read_1000sym,
 );
 
 criterion_main!(storage_benches);

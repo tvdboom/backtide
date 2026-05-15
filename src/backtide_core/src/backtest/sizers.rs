@@ -49,7 +49,7 @@ macro_rules! sizer_pymethods {
             /// ------
             /// ValueError
             ///     If a required input is missing or invalid.
-            #[pyo3(signature = (equity, price, stop_distance = None, atr = None))]
+            #[pyo3(signature = (equity: "float", price: "float", stop_distance: "float | None" = None, atr: "float | None" = None))]
             fn calculate(
                 &self,
                 equity: f64,
@@ -322,7 +322,7 @@ pub struct KellyCriterion {
 #[pymethods]
 impl KellyCriterion {
     #[new]
-    #[pyo3(signature = (win_rate, avg_win, avg_loss, fraction = 0.25))]
+    #[pyo3(signature = (win_rate: "float", avg_win: "float", avg_loss: "float", fraction: "float" = 0.25))]
     pub fn new(win_rate: f64, avg_win: f64, avg_loss: f64, fraction: f64) -> Self {
         KellyCriterion {
             win_rate,

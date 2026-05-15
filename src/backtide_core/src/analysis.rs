@@ -314,7 +314,7 @@ fn compute_single(
 /// print(stats.head())
 /// ```
 #[pyfunction]
-#[pyo3(signature = (data, *, price_col="adj_close", risk_free_rate=0.0, periods_per_year=None))]
+#[pyo3(signature = (data: "DataFrame", *, price_col: "str"="adj_close", risk_free_rate: "float"=0.0, periods_per_year: "int | None"=None))]
 pub fn compute_statistics<'py>(
     py: Python<'py>,
     data: &Bound<'py, PyAny>,

@@ -1,4 +1,4 @@
-use crate::backtest::interface::run_experiment;
+use crate::backtest::interface::{experiment_log, request_abort, run_experiment};
 use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::conversion_period::ConversionPeriod;
 use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
@@ -101,6 +101,8 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Functions
     m.add_function(wrap_pyfunction!(run_experiment, &m)?)?;
+    m.add_function(wrap_pyfunction!(request_abort, &m)?)?;
+    m.add_function(wrap_pyfunction!(experiment_log, &m)?)?;
 
     parent.add_submodule(&m)?;
 

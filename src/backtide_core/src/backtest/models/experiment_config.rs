@@ -430,7 +430,7 @@ impl IndicatorExpConfig {
 /// allow_margin : bool, default=False
 ///     Whether margin trading is enabled.
 ///
-/// max_leverage : float, default=1.0
+/// max_leverage : float, default=2.0
 ///     Maximum leverage ratio.
 ///
 /// initial_margin : float, default=50.0
@@ -442,20 +442,27 @@ impl IndicatorExpConfig {
 /// margin_interest : float, default=0.0
 ///     Annual interest rate on borrowed funds.
 ///
+/// raise_on_margin_limit : bool, default=False
+///     If `True`, the engine raises an error when an order would breach
+///     `max_leverage` or when equity falls below `maintenance_margin`.
+///     If `False`, orders are auto-shrunk or rejected and a warning is
+///     recorded instead. Does not affect `max_position_size`, which
+///     always rejects (never aborts) independently.
+///
 /// allow_short_selling : bool, default=False
 ///     Whether short selling is permitted.
 ///
 /// borrow_rate : float, default=0.0
 ///     Annual borrow cost for short positions.
 ///
+/// raise_on_short_violation : bool, default=False
+///     If `True`, the engine raises an error when a sell order would
+///     create or increase a short position while `allow_short_selling`
+///     is `False`. If `False`, such orders are silently rejected with a
+///     warning instead of aborting the run.
+///
 /// max_position_size : int, default=100
 ///     Max allocation to one position (% of portfolio equity).
-///
-/// raise_on_margin_limit : bool, default=False
-///     If `True`, the engine raises an error when an order would breach
-///     `max_leverage` or `max_position_size`, or when equity falls below
-///     `maintenance_margin`. If `False`, orders are auto-shrunk or
-///     rejected and a warning is recorded instead.
 ///
 /// conversion_mode : str | [CurrencyConversionMode], default="immediate"
 ///     How foreign-currency proceeds are converted.
@@ -488,10 +495,11 @@ pub struct ExchangeExpConfig {
     pub initial_margin: f64,
     pub maintenance_margin: f64,
     pub margin_interest: f64,
+    pub raise_on_margin_limit: bool,
     pub allow_short_selling: bool,
     pub borrow_rate: f64,
+    pub raise_on_short_violation: bool,
     pub max_position_size: u32,
-    pub raise_on_margin_limit: bool,
     pub conversion_mode: CurrencyConversionMode,
     pub conversion_threshold: Option<f64>,
     pub conversion_period: Option<ConversionPeriod>,
@@ -508,14 +516,15 @@ impl Default for ExchangeExpConfig {
             allowed_order_types: vec![OrderType::Market],
             partial_fills: false,
             allow_margin: false,
-            max_leverage: 1.0,
+            max_leverage: 2.0,
             initial_margin: 50.0,
             maintenance_margin: 25.0,
             margin_interest: 0.0,
+            raise_on_margin_limit: false,
             allow_short_selling: false,
             borrow_rate: 0.0,
+            raise_on_short_violation: false,
             max_position_size: 100,
-            raise_on_margin_limit: false,
             conversion_mode: CurrencyConversionMode::default(),
             conversion_threshold: None,
             conversion_period: None,
@@ -538,14 +547,15 @@ impl ExchangeExpConfig {
         allowed_order_types: "list[str | OrderType]" = vec![OrderType::Market],
         partial_fills: "bool" = false,
         allow_margin: "bool" = false,
-        max_leverage: "float" = 1.0,
+        max_leverage: "float" = 2.0,
         initial_margin: "float" = 50.0,
         maintenance_margin: "float" = 25.0,
         margin_interest: "float" = 0.0,
+        raise_on_margin_limit: "bool" = false,
         allow_short_selling: "bool" = false,
         borrow_rate: "float" = 0.0,
+        raise_on_short_violation: "bool" = false,
         max_position_size: "int" = 100,
-        raise_on_margin_limit: "bool" = false,
         conversion_mode: "str | CurrencyConversionMode" = CurrencyConversionMode::default(),
         conversion_threshold: "float | None" = None,
         conversion_period: "str | ConversionPeriod | None" = None,
@@ -563,10 +573,11 @@ impl ExchangeExpConfig {
         initial_margin: f64,
         maintenance_margin: f64,
         margin_interest: f64,
+        raise_on_margin_limit: bool,
         allow_short_selling: bool,
         borrow_rate: f64,
+        raise_on_short_violation: bool,
         max_position_size: u32,
-        raise_on_margin_limit: bool,
         conversion_mode: CurrencyConversionMode,
         conversion_threshold: Option<f64>,
         conversion_period: Option<ConversionPeriod>,
@@ -584,10 +595,11 @@ impl ExchangeExpConfig {
             initial_margin,
             maintenance_margin,
             margin_interest,
+            raise_on_margin_limit,
             allow_short_selling,
             borrow_rate,
+            raise_on_short_violation,
             max_position_size,
-            raise_on_margin_limit,
             conversion_mode,
             conversion_threshold,
             conversion_period,

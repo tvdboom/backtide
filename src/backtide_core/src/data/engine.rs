@@ -1103,8 +1103,9 @@ mod tests {
         let inst = test_instrument();
         let (engine, _tmp) = test_engine(MockProvider::new(inst));
 
-        let results =
-            engine.list_instruments(InstrumentType::Crypto, Some(vec![Exchange::XNAS]), 5, false).unwrap();
+        let results = engine
+            .list_instruments(InstrumentType::Crypto, Some(vec![Exchange::XNAS]), 5, false)
+            .unwrap();
         assert_eq!(results.len(), 1);
     }
 
@@ -1174,7 +1175,12 @@ mod tests {
         }
     }
 
-    fn make_instrument(symbol: &str, base: Option<&str>, quote: &str, it: InstrumentType) -> Instrument {
+    fn make_instrument(
+        symbol: &str,
+        base: Option<&str>,
+        quote: &str,
+        it: InstrumentType,
+    ) -> Instrument {
         Instrument {
             symbol: symbol.to_owned(),
             name: symbol.to_owned(),
@@ -1190,8 +1196,10 @@ mod tests {
     fn resolve_profiles_with_quote_matching_base_no_legs() {
         // A quote matching base currency requires no legs.
         let mut mp = MultiProvider::new();
-        mp.instruments
-            .insert("AAPL".to_owned(), make_instrument("AAPL", None, "USD", InstrumentType::Stocks));
+        mp.instruments.insert(
+            "AAPL".to_owned(),
+            make_instrument("AAPL", None, "USD", InstrumentType::Stocks),
+        );
         let (engine, _tmp) = test_engine_multi(mp);
 
         let profiles = engine
@@ -1288,18 +1296,10 @@ mod tests {
 
     #[async_trait]
     impl DataProvider for FailingProvider {
-        async fn fetch_instrument(
-            &self,
-            _: &Symbol,
-            _: InstrumentType,
-        ) -> DataResult<Instrument> {
+        async fn fetch_instrument(&self, _: &Symbol, _: InstrumentType) -> DataResult<Instrument> {
             Ok(self.0.clone())
         }
-        async fn fetch_range(
-            &self,
-            _: Instrument,
-            _: Interval,
-        ) -> DataResult<(u64, u64)> {
+        async fn fetch_range(&self, _: Instrument, _: Interval) -> DataResult<(u64, u64)> {
             Ok((1_000, 2_000))
         }
         async fn list_instruments(

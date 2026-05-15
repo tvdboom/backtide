@@ -41,6 +41,7 @@ CUSTOM_URLS = {
     "logokit": "https://logokit.com/",
     "momentjs": "https://momentjscom.readthedocs.io/en/latest/moment/04-displaying/01-format/",
     "numba": "https://numba.pydata.org/",
+    "streamlit": "https://streamlit.io",
     "wiki-adx": "https://en.wikipedia.org/wiki/Average_directional_movement_index",
     "wiki-atr": "https://en.wikipedia.org/wiki/Average_true_range",
     "wiki-bb": "https://en.wikipedia.org/wiki/Bollinger_Bands",

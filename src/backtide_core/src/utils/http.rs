@@ -651,7 +651,10 @@ mod tests {
 
     #[test]
     fn http_error_display_formats_correctly() {
-        let err = HttpError::Status { status: StatusCode::from_u16(503).unwrap(), body: "unavailable".into() };
+        let err = HttpError::Status {
+            status: StatusCode::from_u16(503).unwrap(),
+            body: "unavailable".into(),
+        };
         let s = format!("{err}");
         assert!(s.contains("unavailable"));
     }

@@ -6,6 +6,7 @@
 
 use crate::backtest::fx::FxTable;
 use crate::backtest::indicators::Indicator as BuiltinIndicator;
+use crate::backtest::interface::check_abort;
 use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
 use crate::backtest::models::experiment_config::ExperimentConfig;
@@ -470,6 +471,7 @@ impl Engine {
             .collect();
 
         for (name, obj, _) in custom {
+            // Check for abort before each sequential strategy.
             info!("▶ Running custom strategy {:?}...", name);
             let r = run_one_strategy(
                 &name,
@@ -637,9 +639,20 @@ impl Engine {
         }
 
         let finished_at = started_at + started_instant.elapsed().as_secs() as i64;
+
+        // If an abort was requested during the simulation, bail out before
+        // running diagnostics or persisting any partial results.
+        if check_abort() {
+            info!("Experiment aborted — skipping diagnostics and persistence.");
+            return Err(EngineError::Aborted);
+        }
+
         // Surface per-strategy failures: log each one and roll the
         // experiment status up to "failed" if any strategy errored out.
-        let n_failed = results.iter().filter(|r| r.error.is_some()).count();
+        // The benchmark is excluded from the status calculation.
+        let non_bench: Vec<&_> = results.iter().filter(|r| r.strategy_name != BENCHMARK).collect();
+        let n_failed = non_bench.iter().filter(|r| r.error.is_some()).count();
+        let n_non_bench = non_bench.len();
         for r in &results {
             if let Some(err) = &r.error {
                 warn!(strategy = %r.strategy_name, "Strategy failed: {err}");
@@ -655,7 +668,7 @@ impl Engine {
             //    etc.). `initial_cash` is irrelevant here.
             //
             // 2. The strategy produced orders but *every* one was rejected
-            //    or cancelled — typically because the initial cash was
+            //    or canceled — typically because the initial cash was
             //    too small to afford a single whole unit of a non-crypto
             //    instrument, or because the broker ran out of cash. In
             //    that case we surface the (first) rejection reason and
@@ -674,15 +687,15 @@ impl Engine {
                 warn!(strategy = %r.strategy_name, "{msg}");
                 warnings.push(msg);
             } else {
-                // All orders rejected/cancelled. Use the first non-empty
-                // reason as the headline cause; fall back to a generic
-                // message when no reason was recorded.
+                // All orders rejected/canceled. Use the first non-empty reason as the
+                // headline cause; fall back to a generic message when no reason was recorded.
                 let first_reason = r
                     .orders
                     .iter()
                     .find(|o| !o.reason.is_empty())
                     .map(|o| o.reason.as_str())
                     .unwrap_or("see per-order rejection reasons");
+
                 let msg = format!(
                     "Strategy {:?} produced {} order(s) but none filled ({}). \
                      If the rejection is about quantity or insufficient funds, the \
@@ -693,13 +706,14 @@ impl Engine {
                     r.orders.len(),
                     first_reason,
                 );
+
                 warn!(strategy = %r.strategy_name, "{msg}");
                 warnings.push(msg);
             }
         }
         let status = if n_failed == 0 {
             ExperimentStatus::Success
-        } else if n_failed == results.len() {
+        } else if n_failed >= n_non_bench {
             ExperimentStatus::Error
         } else {
             ExperimentStatus::Partial
@@ -742,6 +756,7 @@ impl Engine {
         };
 
         // ── Phase 5: persist ────────────────────────────────────────────
+
         info!("Phase 5: persisting experiment to DuckDB...");
         let pb = verbose.then(|| progress_spinner("Persisting experiment results..."));
         // Refresh finished_at right before the upsert so it reflects every
@@ -900,7 +915,7 @@ fn normalize_builtin_order_quantity(
     order: &mut Order,
     instrument_type: InstrumentType,
 ) -> Option<String> {
-    if matches!(order.order_type, OrderType::CancelOrder | OrderType::SettlePosition) {
+    if matches!(order.order_type, OrderType::Cancel | OrderType::SettlePosition) {
         return None;
     }
     if !order.quantity.is_finite() {
@@ -920,19 +935,28 @@ fn normalize_builtin_order_quantity(
 }
 
 /// Align bars to a master timeline using the configured empty-bar policy.
+///
+/// Uses binary search on the (already-sorted) per-symbol bar vectors
+/// instead of building a temporary `HashMap<i64, Bar>` for each symbol.
+/// This avoids O(n) hash-map construction and per-key hashing overhead,
+/// replacing it with O(log n) lookups — a significant win on large
+/// datasets (10 k+ bars per symbol).
 fn align_bars(
     bars: &HashMap<String, Vec<Bar>>,
     timeline: &[i64],
     policy: EmptyBarPolicy,
 ) -> HashMap<String, Vec<Option<Bar>>> {
-    let mut out: HashMap<String, Vec<Option<Bar>>> = HashMap::new();
+    let mut out: HashMap<String, Vec<Option<Bar>>> = HashMap::with_capacity(bars.len());
     for (sym, sym_bars) in bars {
-        let by_ts: HashMap<i64, Bar> =
-            sym_bars.iter().map(|b| (b.open_ts as i64, b.clone())).collect();
         let mut row: Vec<Option<Bar>> = Vec::with_capacity(timeline.len());
         let mut last: Option<Bar> = None;
         for ts in timeline {
-            match by_ts.get(ts) {
+            // Binary search on the sorted bar slice (sorted by open_ts in load_bars).
+            let found = sym_bars
+                .binary_search_by_key(&(*ts as u64), |b| b.open_ts)
+                .ok()
+                .map(|i| &sym_bars[i]);
+            match found {
                 Some(b) => {
                     last = Some(b.clone());
                     row.push(Some(b.clone()));
@@ -988,28 +1012,34 @@ fn compute_indicators(
     aligned: &HashMap<String, Vec<Option<Bar>>>,
     pb: Option<&ProgressBar>,
 ) -> EngineResult<HashMap<String, HashMap<String, Vec<Vec<f64>>>>> {
-    let mut out: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+    let mut out: HashMap<String, HashMap<String, Vec<Vec<f64>>>> =
+        HashMap::with_capacity(indicator_objs.len());
+
+    // Pre-build a NaN bar template once, reused for every missing bar
+    // across all indicator × symbol combinations.
+    let nan_bar = Bar {
+        open_ts: 0,
+        close_ts: 0,
+        open_ts_exchange: 0,
+        open: f64::NAN,
+        high: f64::NAN,
+        low: f64::NAN,
+        close: f64::NAN,
+        adj_close: f64::NAN,
+        volume: f64::NAN,
+        n_trades: None,
+    };
 
     for (name, obj) in indicator_objs {
-        let mut per_symbol: HashMap<String, Vec<Vec<f64>>> = HashMap::new();
+        let mut per_symbol: HashMap<String, Vec<Vec<f64>>> = HashMap::with_capacity(aligned.len());
 
         for (sym, row) in aligned {
+            // Build the dense bar slice. Clone existing bars, substitute
+            // the pre-built NaN bar for gaps — avoids constructing a new
+            // Bar struct per missing slot.
             let bars: Vec<Bar> = row
                 .iter()
-                .map(|b| {
-                    b.clone().unwrap_or(Bar {
-                        open_ts: 0,
-                        close_ts: 0,
-                        open_ts_exchange: 0,
-                        open: f64::NAN,
-                        high: f64::NAN,
-                        low: f64::NAN,
-                        close: f64::NAN,
-                        adj_close: f64::NAN,
-                        volume: f64::NAN,
-                        n_trades: None,
-                    })
-                })
+                .map(|b| b.as_ref().cloned().unwrap_or_else(|| nan_bar.clone()))
                 .collect();
 
             let computed = Python::attach(|py| -> PyResult<Vec<Vec<f64>>> {
@@ -1130,13 +1160,13 @@ fn load_pickled(py: Python<'_>, sub: &str, name: &str) -> PyResult<Py<PyAny>> {
     Ok(obj.unbind())
 }
 
-/// Build the deterministic ``__auto_*`` name for a Python indicator
+/// Build the deterministic name for a Python indicator
 /// instance. Mirrors `_auto_indicator_name` in the Python strategy utils
 /// and the Rust `auto_indicator_name` used by built-in strategies'
 /// ``decide_inner`` so the engine and the strategies look up indicators
 /// under the *same* key.
 ///
-/// Format: ``__auto_<ACRONYM>_<arg1>_<arg2>_...`` (or ``__auto_<ACRONYM>_default``
+/// Format: ``<ACRONYM>_<arg1>_<arg2>_...`` (or ``<ACRONYM>_default``
 /// when the indicator takes no constructor arguments). ``.``, ``-`` and
 /// spaces are sanitised for filesystem-friendliness.
 fn auto_indicator_name_for(py: Python<'_>, ind: &Py<PyAny>) -> PyResult<String> {
@@ -1159,7 +1189,7 @@ fn auto_indicator_name_for(py: Python<'_>, ind: &Py<PyAny>) -> PyResult<String> 
         arg_strs.join("_")
     };
     let sanitized = arg_str.replace('.', "p").replace('-', "n").replace(' ', "");
-    Ok(format!("__auto_{acronym}_{sanitized}"))
+    Ok(format!("{acronym}_{sanitized}"))
 }
 
 /// Load every requested strategy. Returns `(name, obj, is_custom)` triples.
@@ -1238,7 +1268,13 @@ fn run_one_strategy(
     let base_ccy = cfg.portfolio.base_currency;
     let mut cash: HashMap<Currency, f64> = HashMap::new();
     cash.insert(base_ccy, cfg.portfolio.initial_cash as f64);
-    let mut positions: HashMap<String, f64> = cfg.portfolio.starting_positions.clone();
+    // The benchmark strategy always starts with a clean slate (no pre-existing
+    // holdings) so its return reflects a pure buy-and-hold from cash.
+    let mut positions: HashMap<String, f64> = if is_benchmark_run {
+        HashMap::new()
+    } else {
+        cfg.portfolio.starting_positions.clone()
+    };
     let mut open_orders: Vec<Order> = Vec::new();
     // Per-order extremes for trailing stops: (running_high, running_low)
     // observed since the order was first seen. Cleared on fill / cancel.
@@ -1298,6 +1334,11 @@ fn run_one_strategy(
         .collect();
     // Stable order (matches HashMap iteration would otherwise be random).
     closes_full.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Pre-borrow symbol names so the per-bar `closes_view` construction
+    // reuses `&str` references instead of cloning `String` on every bar.
+    // This eliminates ~n_symbols × n_bars heap allocations on the hot path.
+    let symbol_refs: Vec<&str> = closes_full.iter().map(|(s, _)| s.as_str()).collect();
 
     // Pre-build per-symbol full DataFrames and per-indicator full series
     // for the *Python* path only. Built-in strategies don't need these and we
@@ -1415,6 +1456,13 @@ fn run_one_strategy(
     };
 
     for bar_index in 0..total_bars {
+        // Check for abort periodically. An atomic Relaxed load is essentially
+        // free, so checking every 16 bars gives sub-second abort latency
+        // even for very fast bars.
+        if bar_index & 15 == 0 && check_abort() {
+            break;
+        }
+
         let ts = timeline[bar_index];
         let is_warmup = bar_index < warmup;
 
@@ -1447,7 +1495,7 @@ fn run_one_strategy(
         let drained: Vec<Order> = std::mem::take(&mut open_orders);
         for mut order in drained {
             // Cancel orders take effect immediately and do not need a price.
-            if order.order_type == OrderType::CancelOrder {
+            if order.order_type == OrderType::Cancel {
                 still_open.retain(|o| o.id != order.id);
                 trail_state.remove(&order.id);
                 order_records.push(OrderRecord {
@@ -1550,7 +1598,7 @@ fn run_one_strategy(
                 } else {
                     0.0
                 };
-                if let Err(reason) = check_order_against_limits(
+                if let Err((violation, reason)) = check_order_against_limits(
                     cfg,
                     &symbol,
                     qty,
@@ -1586,8 +1634,11 @@ fn run_one_strategy(
                         abs_after = abs_after.floor();
                     }
                     if !abs_after.is_finite() || abs_after <= 1e-12 {
-                        return Err(format!(
-                            "no headroom under leverage / position-size limits for {symbol}"
+                        return Err((
+                            LimitViolation::Margin,
+                            format!(
+                                "no headroom under leverage / position-size limits for {symbol}"
+                            ),
                         ));
                     }
                     // Update the order quantity, sign-preserving, and
@@ -1621,9 +1672,13 @@ fn run_one_strategy(
                     if margin_limit_warnings.insert(warning_key) {
                         warn!(strategy=%name, order_id=%order.id, "{reason}");
                     } else {
-                        debug!(strategy=%name, order_id=%order.id, "suppressed repeated margin-limit rejection: {reason}");
+                        debug!(strategy=%name, order_id=%order.id, "suppressed repeated limit rejection: {reason}");
                     }
-                    if cfg.exchange.raise_on_margin_limit {
+                    // Position-size rejections are always just warnings —
+                    // they are a concentration guardrail, not margin-related.
+                    // Only margin/leverage violations are gated by
+                    // `raise_on_margin_limit`.
+                    if violation == LimitViolation::Margin && cfg.exchange.raise_on_margin_limit {
                         run_error.get_or_insert_with(|| reason.clone());
                     }
                     order_records.push(OrderRecord {
@@ -1751,6 +1806,9 @@ fn run_one_strategy(
                 let cur = *positions.get(&symbol).unwrap_or(&0.0);
                 if !cfg.exchange.allow_short_selling && cur < abs_qty {
                     warn!(strategy=%name, order_id=%order.id, "Short selling disabled and not enough position, skipping.");
+                    if cfg.exchange.raise_on_short_violation {
+                        run_error.get_or_insert_with(|| "short selling disabled".to_owned());
+                    }
                     order_records.push(OrderRecord {
                         order: order.clone(),
                         timestamp: ts,
@@ -1869,10 +1927,29 @@ fn run_one_strategy(
         if !is_warmup {
             let new_orders: Result<Vec<Order>, PyErr> = if let Some(b) = &builtin {
                 // Fast path: pure-Rust dispatch, no GIL, no DataFrame slicing.
-                let closes_view: Vec<(String, &[f64])> =
-                    closes_full.iter().map(|(s, v)| (s.clone(), &v[..=bar_index])).collect();
+                // Reuses pre-borrowed `symbol_refs` to avoid cloning Strings
+                // on every bar — a significant allocation saving on long runs.
+                let closes_view: Vec<(String, &[f64])> = symbol_refs
+                    .iter()
+                    .zip(closes_full.iter())
+                    .map(|(&s, (_, v))| (s.to_owned(), &v[..=bar_index]))
+                    .collect();
                 let inds = IndicatorView::new(indicators, bar_index);
-                Ok(b.decide(&closes_view, &inds, &portfolio, &state))
+                let orders = b.decide(&closes_view, &inds, &portfolio, &state);
+                for o in &orders {
+                    let side = if o.quantity > 0.0 {
+                        "BUY"
+                    } else {
+                        "SELL"
+                    };
+                    let abs_qty = o.quantity.abs();
+                    info!(
+                        strategy=%name,
+                        "Order placed: {side} {abs_qty:.4} {} @ bar {bar_index}",
+                        o.symbol,
+                    );
+                }
+                Ok(orders)
             } else {
                 // Custom (Python) strategy: original evaluate path.
                 Python::attach(|py| -> PyResult<Vec<Order>> {
@@ -1972,7 +2049,7 @@ fn run_one_strategy(
                             o.id = new_order_id();
                         }
                         if !allowed.contains(&o.order_type)
-                            && o.order_type != OrderType::CancelOrder
+                            && o.order_type != OrderType::Cancel
                         {
                             warn!(strategy=%name, "Order type {} not allowed, dropping.", o.order_type);
                             order_records.push(OrderRecord {
@@ -1986,7 +2063,7 @@ fn run_one_strategy(
                             });
                             return false;
                         }
-                        if !matches!(o.order_type, OrderType::CancelOrder | OrderType::SettlePosition) {
+                        if !matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition) {
                             let instrument_type = instrument_type_for_symbol(
                                 &o.symbol,
                                 &instrument_types,
@@ -2024,6 +2101,32 @@ fn run_one_strategy(
                         }
                         true
                     });
+
+                    // Reject orders whose id already exists in the open book
+                    // or appears more than once in the current batch.
+                    let mut seen_ids: Vec<String> =
+                        open_orders.iter().map(|o| o.id.clone()).collect();
+                    ords.retain(|o| {
+                        if matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition) {
+                            return true;
+                        }
+                        if seen_ids.contains(&o.id) {
+                            warn!(strategy=%name, order_id=%o.id, "Duplicate order id, rejecting.");
+                            order_records.push(OrderRecord {
+                                order: o.clone(),
+                                timestamp: ts,
+                                status: "rejected".into(),
+                                fill_price: None,
+                                reason: format!("duplicate order id {:?}", o.id),
+                                commission: 0.0,
+                                pnl: None,
+                            });
+                            return false;
+                        }
+                        seen_ids.push(o.id.clone());
+                        true
+                    });
+
                     open_orders.extend(ords);
                 },
                 Err(e) => {
@@ -2066,10 +2169,21 @@ fn run_one_strategy(
         } else {
             0.0
         };
+
+        // Build the cash snapshot for this equity sample. Avoid allocating
+        // a new HashMap when the portfolio holds only the base currency
+        // (the overwhelmingly common case for single-currency experiments).
+        let cash_snapshot = if cash.len() <= 1 {
+            // Single bucket (or empty): cheap clone, no filtering needed.
+            cash.clone()
+        } else {
+            cash.iter().filter(|(_, v)| v.abs() > 1e-12).map(|(k, v)| (*k, *v)).collect()
+        };
+
         equity_curve.push(EquitySample {
             timestamp: ts,
             equity,
-            cash: cash.iter().filter(|(_, v)| v.abs() > 1e-12).map(|(k, v)| (*k, *v)).collect(),
+            cash: cash_snapshot,
             drawdown,
         });
 
@@ -2265,8 +2379,8 @@ fn resolve_trigger(
     use OrderType::*;
 
     match order.order_type {
-        // CancelOrder is handled before resolve_trigger is called.
-        CancelOrder => TriggerOutcome::Cancel {
+        // Cancel is handled before resolve_trigger is called.
+        Cancel => TriggerOutcome::Cancel {
             reason: "cancel".into(),
         },
 
@@ -2909,6 +3023,16 @@ fn gross_notional_in_currency(
 ///
 /// `equity_base` and `gross_base` must already be expressed in the
 /// portfolio base currency.
+/// Classification of a limit-check rejection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitViolation {
+    /// Per-symbol concentration limit (`max_position_size`). Not related
+    /// to margin — always enforced regardless of `raise_on_margin_limit`.
+    PositionSize,
+    /// Leverage / margin / equity constraint. Gated by `raise_on_margin_limit`.
+    Margin,
+}
+
 fn check_order_against_limits(
     cfg: &ExperimentConfig,
     symbol: &str,
@@ -2922,7 +3046,7 @@ fn check_order_against_limits(
     current_pos_base: f64,
     fx: &FxTable,
     ts: i64,
-) -> Result<f64, String> {
+) -> Result<f64, (LimitViolation, String)> {
     let abs_qty = qty.abs();
     if abs_qty <= 0.0 || !abs_qty.is_finite() {
         return Ok(qty);
@@ -2973,9 +3097,12 @@ fn check_order_against_limits(
         let max_per_pos = equity_base * pos_cap_pct / 100.0;
         let allowed_abs_qty = max_qty_for_final_exposure(max_per_pos);
         if allowed_abs_qty <= 1e-12 {
-            return Err(format!(
+            return Err((
+                LimitViolation::PositionSize,
+                format!(
                 "order would exceed max_position_size ({pos_cap_pct}% of equity) for {symbol}: \
                  position already at limit (current {current_pos_base:.2}, cap {max_per_pos:.2})"
+            ),
             ));
         }
         max_abs_qty = max_abs_qty.min(allowed_abs_qty);
@@ -2993,19 +3120,28 @@ fn check_order_against_limits(
         let symbol_cap_base = max_gross - other_gross_base;
         let allowed_abs_qty = max_qty_for_final_exposure(symbol_cap_base);
         if allowed_abs_qty <= 1e-12 {
-            return Err(format!(
-                "order would exceed max_leverage ({cap:.2}x): gross notional already at limit \
+            return Err((
+                LimitViolation::Margin,
+                format!(
+                    "order would exceed max_leverage ({cap:.2}x): gross notional already at limit \
                  (current {gross_base:.2}, cap {max_gross:.2})"
+                ),
             ));
         }
         max_abs_qty = max_abs_qty.min(allowed_abs_qty);
     } else if equity_base <= 0.0 {
         // Account already wiped out — nothing more can be opened.
-        return Err("equity is non-positive; cannot open new exposure".to_owned());
+        return Err((
+            LimitViolation::Margin,
+            "equity is non-positive; cannot open new exposure".to_owned(),
+        ));
     }
 
     if !max_abs_qty.is_finite() || max_abs_qty <= 1e-12 {
-        return Err(format!("no headroom under leverage / position-size limits for {symbol}"));
+        return Err((
+            LimitViolation::Margin,
+            format!("no headroom under leverage / position-size limits for {symbol}"),
+        ));
     }
     Ok(qty.signum() * max_abs_qty.min(abs_qty))
 }
@@ -3157,7 +3293,7 @@ mod tests {
         cfg.exchange.commission_pct = 0.0;
         cfg.exchange.slippage = 0.0;
         cfg.portfolio.initial_cash = 10_000;
-        cfg.exchange.allowed_order_types = vec![OrderType::Market, OrderType::CancelOrder];
+        cfg.exchange.allowed_order_types = vec![OrderType::Market, OrderType::Cancel];
         cfg
     }
 
@@ -3260,6 +3396,7 @@ mod tests {
         let mut closed_trades: Vec<Trade> = Vec::new();
         let mut open_trades: HashMap<String, (i64, f64, f64)> = HashMap::new();
         let mut peak = cfg.portfolio.initial_cash as f64;
+        let mut run_error: Option<String> = None;
 
         let quote_ccy: HashMap<String, Currency> = profiles
             .iter()
@@ -3289,7 +3426,7 @@ mod tests {
             // `run_one_strategy`).
             for (i, o) in &injected {
                 if *i == bar_index {
-                    if !allowed.contains(&o.order_type) && o.order_type != OrderType::CancelOrder {
+                    if !allowed.contains(&o.order_type) && o.order_type != OrderType::Cancel {
                         order_records.push(OrderRecord {
                             order: o.clone(),
                             timestamp: ts,
@@ -3301,7 +3438,7 @@ mod tests {
                         });
                         continue;
                     }
-                    if !matches!(o.order_type, OrderType::CancelOrder | OrderType::SettlePosition) {
+                    if !matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition) {
                         let instrument_type = instrument_type_for_symbol(
                             &o.symbol,
                             &instrument_types,
@@ -3322,6 +3459,21 @@ mod tests {
                             continue;
                         }
                     }
+                    // Reject duplicate ids in test helper.
+                    if !matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition)
+                        && open_orders.iter().any(|existing| existing.id == o.id)
+                    {
+                        order_records.push(OrderRecord {
+                            order: o.clone(),
+                            timestamp: ts,
+                            status: "rejected".into(),
+                            fill_price: None,
+                            reason: format!("duplicate order id {:?}", o.id),
+                            commission: 0.0,
+                            pnl: None,
+                        });
+                        continue;
+                    }
                     open_orders.push(o.clone());
                 }
             }
@@ -3329,7 +3481,7 @@ mod tests {
             // Resolve open orders: faithful copy of run_one_strategy's logic.
             let drained: Vec<Order> = std::mem::take(&mut open_orders);
             for mut order in drained {
-                if order.order_type == OrderType::CancelOrder {
+                if order.order_type == OrderType::Cancel {
                     open_orders.retain(|o| o.id != order.id);
                     order_records.push(OrderRecord {
                         order: order.clone(),
@@ -3484,6 +3636,9 @@ mod tests {
                     let cur = *positions.get(&symbol).unwrap_or(&0.0);
                     if !cfg.exchange.allow_short_selling && cur < abs_qty {
                         warn!(strategy="test", order_id=%order.id, "Short selling disabled and not enough position, skipping.");
+                        if cfg.exchange.raise_on_short_violation {
+                            run_error.get_or_insert_with(|| "short selling disabled".to_owned());
+                        }
                         order_records.push(OrderRecord {
                             order: order.clone(),
                             timestamp: ts,
@@ -3576,7 +3731,7 @@ mod tests {
             orders: order_records,
             metrics,
             base_currency: cfg.portfolio.base_currency,
-            error: None,
+            error: run_error,
             is_benchmark: false,
         }
     }
@@ -3686,7 +3841,7 @@ mod tests {
         let cancel = Order {
             id: "buy1".into(),
             symbol: "".into(),
-            order_type: OrderType::CancelOrder,
+            order_type: OrderType::Cancel,
             quantity: 0.0,
             price: None,
             limit_price: None,
@@ -3702,6 +3857,45 @@ mod tests {
         );
         let cancelled = r.orders.iter().filter(|o| o.status == "cancelled").count();
         assert!(cancelled >= 1);
+    }
+
+    #[test]
+    fn duplicate_order_id_is_rejected() {
+        let cfg = mk_cfg("AAPL");
+        let aligned = mk_aligned("AAPL", &[100.0, 101.0, 102.0]);
+        let limit1 = Order {
+            id: "dup".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Limit,
+            quantity: 5.0,
+            price: Some(99.0),
+            limit_price: None,
+            sizer: None,
+        };
+        let limit2 = Order {
+            id: "dup".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Limit,
+            quantity: 10.0,
+            price: Some(98.0),
+            limit_price: None,
+            sizer: None,
+        };
+        let mut cfg2 = cfg.clone();
+        cfg2.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::Limit, OrderType::Cancel];
+        let r = run_with_orders(
+            &cfg2,
+            &aligned,
+            &[mk_profile("AAPL", "USD")],
+            vec![(0, limit1), (0, limit2)],
+        );
+        let rejected = r
+            .orders
+            .iter()
+            .filter(|o| o.status == "rejected" && o.reason.contains("duplicate"))
+            .count();
+        assert_eq!(rejected, 1, "second order with same id should be rejected");
     }
 
     #[test]
@@ -3910,7 +4104,7 @@ mod tests {
 
     // ─────────────────────────────────────────────────────────────────
     // Order types — see `OrderType` enum. The engine only implements
-    // Market + CancelOrder execution semantics today; everything else
+    // Market + Cancel execution semantics today; everything else
     // either falls through to the Market path (when present in
     // `allowed_order_types`) or is rejected by the allowed-types filter.
     // The tests below pin down both the working paths and the gaps so
@@ -3924,7 +4118,7 @@ mod tests {
         // submission time. With only Market allowed, a Limit order is
         // rejected before it ever reaches the resolution loop.
         let mut cfg = mk_cfg("AAPL");
-        cfg.exchange.allowed_order_types = vec![OrderType::Market, OrderType::CancelOrder];
+        cfg.exchange.allowed_order_types = vec![OrderType::Market, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
         let limit = Order {
             id: "lim1".into(),
@@ -3950,7 +4144,7 @@ mod tests {
         // Buy limit at 50, price stays around 100 → never hits the limit.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::Limit, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 101.0]); // mk_bar makes high=*1.01, low=*0.99
         let limit = Order {
             id: "lim1".into(),
@@ -3971,7 +4165,7 @@ mod tests {
         // Buy limit at 110, bar opens at 100 → fill at the open (better than limit).
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::Limit, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 100.0]);
         let limit = Order {
             id: "lim".into(),
@@ -3993,7 +4187,7 @@ mod tests {
         // (100 > 99.5), but bar.low (99) <= 99.5 → fill at limit price.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::Limit, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0]);
         let limit = Order {
             id: "lim".into(),
@@ -4014,7 +4208,7 @@ mod tests {
         // mk_bar(100) → open=100, high=101. Sell limit at 100.5 → fill at 100.5.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::Limit, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0]);
         // Need a long to sell from.
         let buy = Order {
@@ -4055,7 +4249,7 @@ mod tests {
         // Engine should clamp the slipped price at 99.5.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::Limit, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::Limit, OrderType::Cancel];
         cfg.exchange.slippage = 1.0;
         let aligned = mk_aligned("AAPL", &[100.0]);
         let limit = Order {
@@ -4072,6 +4266,45 @@ mod tests {
         assert_eq!(r.orders[0].fill_price, Some(99.5));
     }
 
+    #[test]
+    fn limit_sell_slippage_never_crosses_limit() {
+        // Sell limit at 100.5, bar.high=101 → raw fill at 100.5,
+        // 1 % slippage would push it down to ~99.495, crossing the limit.
+        // Engine should clamp the slipped price at 100.5.
+        let mut cfg = mk_cfg("AAPL");
+        cfg.exchange.allowed_order_types =
+            vec![OrderType::Market, OrderType::Limit, OrderType::Cancel];
+        cfg.exchange.slippage = 1.0;
+        let aligned = mk_aligned("AAPL", &[100.0]);
+        let buy = Order {
+            id: "b".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5.0,
+            price: None,
+            limit_price: None,
+            sizer: None,
+        };
+        let sell_limit = Order {
+            id: "s".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Limit,
+            quantity: -5.0,
+            price: Some(100.5),
+            limit_price: None,
+            sizer: None,
+        };
+        let r = run_with_orders(
+            &cfg,
+            &aligned,
+            &[mk_profile("AAPL", "USD")],
+            vec![(0, buy), (0, sell_limit)],
+        );
+        let sell_rec = r.orders.iter().find(|o| o.order.id == "s").expect("sell missing");
+        assert_eq!(sell_rec.status, "filled");
+        assert_eq!(sell_rec.fill_price, Some(100.5));
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Stop-loss / take-profit
     // ─────────────────────────────────────────────────────────────────
@@ -4081,7 +4314,7 @@ mod tests {
         // Sell stop at 90, prices stay at/above 100 → never triggers.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::StopLoss, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::StopLoss, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
         let buy = Order {
             id: "b".into(),
@@ -4113,7 +4346,7 @@ mod tests {
         // Sell stop at 95, bar 1 has open=100, low=99, bar 2 open=90 → triggers via gap-down.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::StopLoss, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::StopLoss, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 90.0]); // bar2 open=90 < 95
         let buy = Order {
             id: "b".into(),
@@ -4147,7 +4380,7 @@ mod tests {
         // mk_bar(100) → open=100, low=99. Stop at 99.5 → no gap, fills at 99.5.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::StopLoss, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::StopLoss, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0]);
         let buy = Order {
             id: "b".into(),
@@ -4181,7 +4414,7 @@ mod tests {
         // at 111 → gap-up triggers fill at open 111.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::StopLoss, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::StopLoss, OrderType::Cancel];
         // 0 → buy stop placed; bar 1: 100 (low 99, high 101) — no trigger;
         // bar 2: 111 (gap-up open above 110).
         let aligned = mk_aligned("AAPL", &[100.0, 111.0]);
@@ -4205,7 +4438,7 @@ mod tests {
         // with bar.high=101 → fills at 100.5.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::TakeProfit, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::TakeProfit, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0]);
         let buy = Order {
             id: "b".into(),
@@ -4243,7 +4476,7 @@ mod tests {
         // pending. Bar 3 opens at 96 → sell-limit fills at the open.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::StopLossLimit, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::StopLossLimit, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 90.0, 96.0]);
         let buy = Order {
             id: "b".into(),
@@ -4277,7 +4510,7 @@ mod tests {
     fn stop_loss_limit_does_nothing_until_stop_fires() {
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::StopLossLimit, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::StopLossLimit, OrderType::Cancel];
         // Prices stay above stop forever.
         let aligned = mk_aligned("AAPL", &[100.0, 102.0, 104.0]);
         let buy = Order {
@@ -4313,7 +4546,7 @@ mod tests {
         // and never gets hit.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::TrailingStop, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::TrailingStop, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 105.0, 110.0]);
         let buy = Order {
             id: "b".into(),
@@ -4349,7 +4582,7 @@ mod tests {
         // is below stop → fills at gap-down open (100).
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::TrailingStop, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::TrailingStop, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 110.0, 100.0]);
         let buy = Order {
             id: "b".into(),
@@ -4389,7 +4622,7 @@ mod tests {
         // Subsequent bar opens at 106 → sell-limit fills at the open.
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::TrailingStopLimit, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::TrailingStopLimit, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 110.0, 100.0, 106.0]);
         let buy = Order {
             id: "b".into(),
@@ -4429,7 +4662,7 @@ mod tests {
     fn settle_position_flattens_long() {
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::SettlePosition, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::SettlePosition, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
         let buy = Order {
             id: "b".into(),
@@ -4467,7 +4700,7 @@ mod tests {
     fn settle_position_with_no_position_is_cancelled() {
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::SettlePosition, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::SettlePosition, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
         let settle = Order {
             id: "s".into(),
@@ -4488,7 +4721,7 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allow_short_selling = true;
         cfg.exchange.allowed_order_types =
-            vec![OrderType::Market, OrderType::SettlePosition, OrderType::CancelOrder];
+            vec![OrderType::Market, OrderType::SettlePosition, OrderType::Cancel];
         let aligned = mk_aligned("AAPL", &[100.0, 101.0]);
         let short = Order {
             id: "sh".into(),
@@ -4919,7 +5152,8 @@ mod tests {
             0,
         )
         .expect_err("zero headroom must reject");
-        assert!(err.contains("max_position_size"));
+        assert_eq!(err.0, LimitViolation::PositionSize);
+        assert!(err.1.contains("max_position_size"));
     }
 
     #[test]
@@ -4969,7 +5203,8 @@ mod tests {
             0,
         )
         .expect_err("should reject borrow when margin disabled");
-        assert!(err.contains("max_leverage"));
+        assert_eq!(err.0, LimitViolation::Margin);
+        assert!(err.1.contains("max_leverage"));
     }
 
     #[test]
@@ -5017,7 +5252,8 @@ mod tests {
             0,
         )
         .expect_err("non-positive equity");
-        assert!(err.contains("non-positive"));
+        assert_eq!(err.0, LimitViolation::Margin);
+        assert!(err.1.contains("non-positive"));
     }
 
     #[test]
@@ -5382,7 +5618,10 @@ mod tests {
     fn fill_limit_sell_fills_at_open_when_above_limit() {
         let bar = mk_bar(0, 100.0);
         match fill_limit(-1.0, &bar, 95.0) {
-            TriggerOutcome::Fill { raw_px, .. } => assert!((raw_px - 100.0).abs() < 1e-9),
+            TriggerOutcome::Fill {
+                raw_px,
+                ..
+            } => assert!((raw_px - 100.0).abs() < 1e-9),
             _ => panic!("expected fill"),
         }
     }
@@ -5402,7 +5641,9 @@ mod tests {
     fn fill_limit_zero_qty_cancels() {
         let bar = mk_bar(0, 100.0);
         match fill_limit(0.0, &bar, 100.0) {
-            TriggerOutcome::Cancel { .. } => {},
+            TriggerOutcome::Cancel {
+                ..
+            } => {},
             _ => panic!("expected cancel"),
         }
     }
@@ -5412,7 +5653,11 @@ mod tests {
         let mut bar = mk_bar(0, 90.0);
         bar.open = 88.0;
         match fill_stop(-1.0, &bar, 90.0) {
-            TriggerOutcome::Fill { raw_px, reason, .. } => {
+            TriggerOutcome::Fill {
+                raw_px,
+                reason,
+                ..
+            } => {
                 assert!((raw_px - 88.0).abs() < 1e-9);
                 assert!(reason.contains("gap-down"));
             },
@@ -5424,7 +5669,9 @@ mod tests {
     fn fill_stop_zero_qty_cancels() {
         let bar = mk_bar(0, 100.0);
         match fill_stop(0.0, &bar, 100.0) {
-            TriggerOutcome::Cancel { .. } => {},
+            TriggerOutcome::Cancel {
+                ..
+            } => {},
             _ => panic!("expected cancel"),
         }
     }
@@ -5486,8 +5733,14 @@ mod tests {
     fn instrument_type_uses_map_then_fallback() {
         let mut m = HashMap::new();
         m.insert("AAPL".to_owned(), InstrumentType::Stocks);
-        assert_eq!(instrument_type_for_symbol("AAPL", &m, InstrumentType::Crypto), InstrumentType::Stocks);
-        assert_eq!(instrument_type_for_symbol("X", &m, InstrumentType::Forex), InstrumentType::Forex);
+        assert_eq!(
+            instrument_type_for_symbol("AAPL", &m, InstrumentType::Crypto),
+            InstrumentType::Stocks
+        );
+        assert_eq!(
+            instrument_type_for_symbol("X", &m, InstrumentType::Forex),
+            InstrumentType::Forex
+        );
     }
 
     // ── align_bars additional ─────────────────────────────────────────
@@ -5584,12 +5837,18 @@ mod tests {
     fn resolve_trigger_cancel_order() {
         let bar = mk_bar(0, 100.0);
         let mut order = Order {
-            id: new_order_id(), symbol: "X".into(), quantity: 1.0,
-            price: None, limit_price: None, order_type: OrderType::CancelOrder,
+            id: new_order_id(),
+            symbol: "X".into(),
+            quantity: 1.0,
+            price: None,
+            limit_price: None,
+            order_type: OrderType::Cancel,
             sizer: None,
         };
         match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
-            TriggerOutcome::Cancel { .. } => {},
+            TriggerOutcome::Cancel {
+                ..
+            } => {},
             _ => panic!("expected cancel"),
         }
     }
@@ -5598,12 +5857,19 @@ mod tests {
     fn resolve_trigger_market_trade_on_close() {
         let bar = mk_bar(0, 100.0);
         let mut order = Order {
-            id: new_order_id(), symbol: "X".into(), quantity: 1.0,
-            price: None, limit_price: None, order_type: OrderType::Market,
+            id: new_order_id(),
+            symbol: "X".into(),
+            quantity: 1.0,
+            price: None,
+            limit_price: None,
+            order_type: OrderType::Market,
             sizer: None,
         };
         match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), true) {
-            TriggerOutcome::Fill { raw_px, .. } => assert!((raw_px - bar.close).abs() < 1e-9),
+            TriggerOutcome::Fill {
+                raw_px,
+                ..
+            } => assert!((raw_px - bar.close).abs() < 1e-9),
             _ => panic!("expected fill"),
         }
     }
@@ -5612,12 +5878,18 @@ mod tests {
     fn resolve_trigger_settle_no_position_cancels() {
         let bar = mk_bar(0, 100.0);
         let mut order = Order {
-            id: new_order_id(), symbol: "X".into(), quantity: 0.0,
-            price: None, limit_price: None, order_type: OrderType::SettlePosition,
+            id: new_order_id(),
+            symbol: "X".into(),
+            quantity: 0.0,
+            price: None,
+            limit_price: None,
+            order_type: OrderType::SettlePosition,
             sizer: None,
         };
         match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
-            TriggerOutcome::Cancel { reason } => assert!(reason.contains("no position")),
+            TriggerOutcome::Cancel {
+                reason,
+            } => assert!(reason.contains("no position")),
             _ => panic!("expected cancel"),
         }
     }
@@ -5626,12 +5898,18 @@ mod tests {
     fn resolve_trigger_limit_missing_price_cancels() {
         let bar = mk_bar(0, 100.0);
         let mut order = Order {
-            id: new_order_id(), symbol: "X".into(), quantity: 1.0,
-            price: None, limit_price: None, order_type: OrderType::Limit,
+            id: new_order_id(),
+            symbol: "X".into(),
+            quantity: 1.0,
+            price: None,
+            limit_price: None,
+            order_type: OrderType::Limit,
             sizer: None,
         };
         match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
-            TriggerOutcome::Cancel { .. } => {},
+            TriggerOutcome::Cancel {
+                ..
+            } => {},
             _ => panic!("expected cancel"),
         }
     }
@@ -5640,12 +5918,18 @@ mod tests {
     fn resolve_trigger_stop_loss_missing_price_cancels() {
         let bar = mk_bar(0, 100.0);
         let mut order = Order {
-            id: new_order_id(), symbol: "X".into(), quantity: -1.0,
-            price: None, limit_price: None, order_type: OrderType::StopLoss,
+            id: new_order_id(),
+            symbol: "X".into(),
+            quantity: -1.0,
+            price: None,
+            limit_price: None,
+            order_type: OrderType::StopLoss,
             sizer: None,
         };
         match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
-            TriggerOutcome::Cancel { .. } => {},
+            TriggerOutcome::Cancel {
+                ..
+            } => {},
             _ => panic!("expected cancel"),
         }
     }
@@ -5654,12 +5938,18 @@ mod tests {
     fn resolve_trigger_trailing_stop_missing_price_cancels() {
         let bar = mk_bar(0, 100.0);
         let mut order = Order {
-            id: new_order_id(), symbol: "X".into(), quantity: -1.0,
-            price: None, limit_price: None, order_type: OrderType::TrailingStop,
+            id: new_order_id(),
+            symbol: "X".into(),
+            quantity: -1.0,
+            price: None,
+            limit_price: None,
+            order_type: OrderType::TrailingStop,
             sizer: None,
         };
         match resolve_trigger(&mut order, &bar, &HashMap::new(), &mut HashMap::new(), false) {
-            TriggerOutcome::Cancel { .. } => {},
+            TriggerOutcome::Cancel {
+                ..
+            } => {},
             _ => panic!("expected cancel"),
         }
     }
@@ -5669,7 +5959,10 @@ mod tests {
         use crate::backtest::models::conversion_period::ConversionPeriod;
         let ts1 = 1_700_000_000_i64;
         let ts2 = ts1 + 3600;
-        assert_eq!(period_bucket(ts1, ConversionPeriod::Day), period_bucket(ts2, ConversionPeriod::Day));
+        assert_eq!(
+            period_bucket(ts1, ConversionPeriod::Day),
+            period_bucket(ts2, ConversionPeriod::Day)
+        );
     }
 
     #[test]
@@ -5677,7 +5970,13 @@ mod tests {
         use crate::backtest::models::conversion_period::ConversionPeriod;
         let ts1 = 1_672_531_200_i64; // 2023-01-01
         let ts2 = ts1 + 14 * 86_400; // 2023-01-15
-        assert_eq!(period_bucket(ts1, ConversionPeriod::Month), period_bucket(ts2, ConversionPeriod::Month));
-        assert_ne!(period_bucket(ts1, ConversionPeriod::Week), period_bucket(ts2, ConversionPeriod::Week));
+        assert_eq!(
+            period_bucket(ts1, ConversionPeriod::Month),
+            period_bucket(ts2, ConversionPeriod::Month)
+        );
+        assert_ne!(
+            period_bucket(ts1, ConversionPeriod::Week),
+            period_bucket(ts2, ConversionPeriod::Week)
+        );
     }
 }

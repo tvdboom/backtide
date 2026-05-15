@@ -115,12 +115,13 @@ class TestExchangeExpConfig:
         """Margin / leverage / short-selling defaults are sensible."""
         c = ExchangeExpConfig()
         assert c.allow_margin is False
-        assert c.max_leverage == 1.0
+        assert c.max_leverage == 2.0
         assert c.initial_margin == 50.0
         assert c.maintenance_margin == 25.0
         assert c.margin_interest == 0.0
         assert c.allow_short_selling is False
         assert c.borrow_rate == 0.0
+        assert c.raise_on_short_violation is False
         assert c.max_position_size == 100
         assert c.raise_on_margin_limit is False
 
@@ -130,6 +131,13 @@ class TestExchangeExpConfig:
         assert c.raise_on_margin_limit is True
         c.raise_on_margin_limit = False
         assert c.raise_on_margin_limit is False
+
+    def test_raise_on_short_violation_setter(self):
+        """The `raise_on_short_violation` field is configurable."""
+        c = ExchangeExpConfig(raise_on_short_violation=True)
+        assert c.raise_on_short_violation is True
+        c.raise_on_short_violation = False
+        assert c.raise_on_short_violation is False
 
     def test_currency_conversion_settings(self):
         """Conversion mode / threshold / period / interval are configurable."""
@@ -308,19 +316,19 @@ class TestOrder:
         assert o1.id != o2.id  # uuid uniqueness
 
     def test_explicit_id_is_kept(self):
-        """An explicit id is preserved (used by CancelOrder)."""
+        """An explicit id is preserved (used by Cancel)."""
         o = Order(symbol="AAPL", order_type="market", quantity=1, id="abc123")
         assert o.id == "abc123"
 
     def test_cancel_order_can_have_empty_symbol(self):
-        """CancelOrder only needs the target id, not a symbol."""
+        """Cancel only needs the target id, not a symbol."""
         cancel = Order(
             symbol="",
-            order_type="cancelorder",
+            order_type="cancel",
             quantity=0,
             id="target_id",
         )
-        assert cancel.order_type == OrderType.CancelOrder
+        assert cancel.order_type == OrderType.Cancel
         assert cancel.id == "target_id"
 
     def test_repr_contains_id(self):
@@ -333,17 +341,17 @@ class TestOrderType:
     """Tests for the OrderType enum."""
 
     def test_cancel_order_variant_exists(self):
-        """The new CancelOrder variant is available."""
-        assert OrderType.CancelOrder is not None
-        assert "Cancel" in OrderType.CancelOrder.name
+        """The new Cancel variant is available."""
+        assert OrderType.Cancel is not None
+        assert "Cancel" in OrderType.Cancel.name
 
     def test_cancel_order_in_variants(self):
-        """CancelOrder appears in the variants list."""
-        assert any(v == OrderType.CancelOrder for v in OrderType.variants())
+        """Cancel appears in the variants list."""
+        assert any(v == OrderType.Cancel for v in OrderType.variants())
 
     def test_cancel_order_description(self):
-        """CancelOrder has a non-empty description."""
-        assert "cancel" in OrderType.CancelOrder.description().lower()
+        """Cancel has a non-empty description."""
+        assert "cancel" in OrderType.Cancel.description().lower()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

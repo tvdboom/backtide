@@ -6,6 +6,17 @@ related to this package. The most frequent terms are described hereunder.
 
 <br>
 
+[](){#nom-application}
+<strong id="application">application</strong>
+<div markdown style="margin: -1em 0 0 1.2em">
+The interactive web application built on [Streamlit] that ships with Backtide. It
+provides a graphical interface for downloading data, configuring experiments,
+running strategies and analyzing results, without writing any Python code. Launch
+it with [`backtide launch`][launch]. Read more in the [user guide][application].
+</div>
+
+<br>
+
 [](){#nom-bar}
 <strong id="bar">bar</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
@@ -32,6 +43,16 @@ to throughout Backtide. Configured globally via [`Config`].
 The marketplace on which an [instrument][nom-instrument] is listed and traded, such as NASDAQ,
 NYSE, or Binance. The exchange determines the trading calendar and session hours used
 when aligning bars across multiple instruments.
+</div>
+
+<br>
+
+[](){#nom-indicator}
+<strong id="indicator">indicator</strong>
+<div markdown style="margin: -1em 0 0 1.2em">
+A numeric transformation applied to a symbol's [bar][nom-bar] history to produce
+derived time-series (e.g., simple moving average, RSI, Bollinger Bands). Read more
+in the [user guide][indicators].
 </div>
 
 <br>
@@ -95,6 +116,24 @@ A specific strategy execution within an experiment. An experiment that evaluates
 N strategies produces N runs — each with its own equity curve, executed orders,
 closed trades and summary metrics. Runs are persisted independently and can be
 queried via [`query_strategy_runs`]. See [`RunResult`].
+</div>
+
+<br>
+
+[](){#nom-sizer}
+<strong id="sizer">sizer</strong>
+<div markdown style="margin: -1em 0 0 1.2em">
+A position-sizing rule that converts a trading signal into a concrete order quantity.
+Read more in the [user guide][sizers].
+</div>
+
+<br>
+
+[](){#nom-strategy}
+<strong id="strategy">strategy</strong>
+<div markdown style="margin: -1em 0 0 1.2em">
+The decision-making logic that determines when to buy, sell or hold positions during
+a backtest. Read more in the [user guide][strategies].
 </div>
 
 <br>

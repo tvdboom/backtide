@@ -8,6 +8,9 @@ Description: Run a new backtest page.
 from datetime import datetime as dt
 import json
 import logging
+from pathlib import Path
+import re
+import threading
 import tomllib
 from typing import Any
 import uuid
@@ -16,6 +19,7 @@ import streamlit as st
 from streamlit.runtime.state import SessionStateProxy
 import yaml
 
+import backtide.backtest as _bt_mod
 from backtide.backtest import (
     CommissionType,
     ConversionPeriod,
@@ -24,6 +28,7 @@ from backtide.backtest import (
     EmptyBarPolicy,
     EngineExpConfig,
     ExchangeExpConfig,
+    ExperimentAborted,
     ExperimentConfig,
     ExperimentStatus,
     GeneralExpConfig,
@@ -31,6 +36,7 @@ from backtide.backtest import (
     OrderType,
     PortfolioExpConfig,
     StrategyExpConfig,
+    request_abort,
     run_experiment,
 )
 from backtide.config import get_config
@@ -113,10 +119,11 @@ def _apply_config_to_state(exp: ExperimentConfig, state: dict[str, Any] | Sessio
         "initial_margin",
         "maintenance_margin",
         "margin_interest",
+        "raise_on_margin_limit",
         "allow_short_selling",
         "borrow_rate",
+        "raise_on_short_violation",
         "max_position_size",
-        "raise_on_margin_limit",
         "conversion_mode",
     ):
         _set(key, getattr(exp.exchange, key))
@@ -192,12 +199,15 @@ def _build_config_toml(
             initial_margin=_get("initial_margin", default.exchange.initial_margin),
             maintenance_margin=_get("maintenance_margin", default.exchange.maintenance_margin),
             margin_interest=_get("margin_interest", default.exchange.margin_interest),
-            allow_short_selling=_get("allow_short_selling", default.exchange.allow_short_selling),
-            borrow_rate=_get("borrow_rate", default.exchange.borrow_rate),
-            max_position_size=_get("max_position_size", default.exchange.max_position_size),
             raise_on_margin_limit=_get(
                 "raise_on_margin_limit", default.exchange.raise_on_margin_limit
             ),
+            allow_short_selling=_get("allow_short_selling", default.exchange.allow_short_selling),
+            borrow_rate=_get("borrow_rate", default.exchange.borrow_rate),
+            raise_on_short_violation=_get(
+                "raise_on_short_violation", default.exchange.raise_on_short_violation
+            ),
+            max_position_size=_get("max_position_size", default.exchange.max_position_size),
             conversion_mode=_get("conversion_mode", default.exchange.conversion_mode),
             conversion_threshold=_opt("conversion_threshold"),
             conversion_period=_opt("conversion_period"),
@@ -244,6 +254,78 @@ def _on_config_upload():
             st.session_state["_success"] = f"Loaded configuration from `{upload.name}`."
         except Exception as ex:  # noqa: BLE001
             st.session_state["_error"] = f"Failed to parse file: {ex}"
+
+
+def _on_abort():
+    """Abort button callback — fires at the start of the fragment rerun."""
+    request_abort()
+    if evt := st.session_state.get("_exp_abort_event"):
+        evt.set()
+
+
+def _launch_experiment():
+    """Build config, spawn the worker thread and stash handles in session state."""
+    st.session_state.pop("_exp_completed", None)
+
+    cfg_str = _build_experiment_config()
+    exp_cfg = ExperimentConfig.from_toml(cfg_str)
+
+    abort_event = threading.Event()
+    _bt_mod._abort_event = abort_event
+
+    thread_result: dict[str, Any] = {}
+    st.session_state["_exp_result"] = thread_result
+    st.session_state["_exp_abort_event"] = abort_event
+    st.session_state["_exp_name"] = experiment_name
+
+    def _run_in_thread():
+        """Run the experiment in a separate thread."""
+        try:
+            thread_result["result"] = run_experiment(exp_cfg, verbose=False)
+        except (KeyboardInterrupt, ExperimentAborted):
+            thread_result["aborted"] = True
+        except Exception as ex:  # noqa: BLE001
+            thread_result["error"] = ex
+
+    thread = threading.Thread(target=_run_in_thread, daemon=True)
+    st.session_state["_exp_thread"] = thread
+    thread.start()
+
+
+def _strip_log_prefix(line: str) -> str:
+    """Strip timestamp, thread-id and module path from a tracing log line."""
+    match = re.match(
+        r"^\d{4}-\d{2}-\d{2}T[\d:.+\-]+\s+"  # timestamp
+        r"(INFO|WARN|ERROR|DEBUG|TRACE)\s+"  # level
+        r"(?:ThreadId\(\d+\)\s+)?"  # optional thread id
+        r"[\w:]+:\s*"  # module path + colon
+        r"(.*)",  # message
+        line,
+    )
+
+    if match:
+        return f"{match.group(1)}: {match.group(2)}"
+
+    return line
+
+
+def _read_experiment_log(max_lines: int = 10) -> list[str]:
+    """Return the last `max_lines` lines from the most recent experiment log."""
+    experiments_dir = Path(cfg.data.storage_path) / "experiments"
+
+    try:
+        log_files = sorted(
+            experiments_dir.glob("*/logs.txt"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if log_files:
+            lines = log_files[0].read_text(encoding="utf-8", errors="replace").splitlines()
+            return [_strip_log_prefix(line) for line in lines[-max_lines:]]
+    except Exception:  # noqa: BLE001
+        pass
+
+    return []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -966,7 +1048,7 @@ with tab5:
     if selected_strats:
         if auto_i := _resolve_auto_indicators([stored_strat[n] for n in selected_strats]):
             for name, ind, src in auto_i:
-                label = _get_indicator_label(name.removeprefix("__auto_"), ind)
+                label = _get_indicator_label(name, ind)
                 st.caption(f"{label} · :material/auto_awesome: _Injected by strategy **{src}**_")
 
     if st.button("Create a new indicator", icon=":material/add:", type="secondary"):
@@ -1105,7 +1187,9 @@ with tab6:
         )
 
         if enable_margin:
-            max_leverage = col_input.number_input(
+            col1, col2 = st.columns(2)
+
+            max_leverage = col1.number_input(
                 label="Max leverage",
                 key=(key := "max_leverage"),
                 value=_default(key, exp.exchange.max_leverage),
@@ -1120,9 +1204,7 @@ with tab6:
                 ),
             )
 
-            col1, col2 = st.columns(2)
-
-            initial_margin = col1.number_input(
+            initial_margin = col2.number_input(
                 label="Initial margin (%)",
                 key=(key := "initial_margin"),
                 value=_default(key, exp.exchange.initial_margin),
@@ -1138,7 +1220,7 @@ with tab6:
                 ),
             )
 
-            maintenance_margin = col2.number_input(
+            maintenance_margin = col1.number_input(
                 label="Maintenance margin (%)",
                 key=(key := "maintenance_margin"),
                 value=_default(key, exp.exchange.maintenance_margin),
@@ -1153,7 +1235,7 @@ with tab6:
                 ),
             )
 
-            margin_interest = st.number_input(
+            margin_interest = col2.number_input(
                 label="Margin interest rate (% annual)",
                 key=(key := "margin_interest"),
                 value=_default(key, exp.exchange.margin_interest),
@@ -1165,6 +1247,18 @@ with tab6:
                 help=(
                     "Annualized interest rate charged on borrowed funds. Accrued daily and "
                     "deducted from the portfolio cash balance."
+                ),
+            )
+
+            raise_on_margin_limit = st.toggle(
+                label="Raise on margin limit",
+                key=(key := "raise_on_margin_limit"),
+                value=_default(key, fallback=exp.exchange.raise_on_margin_limit),
+                on_change=lambda k=key: _persist(k),
+                help=(
+                    "If enabled, the engine raises an error and aborts the run when equity "
+                    "falls below the maintenance margin. If disabled, such orders are "
+                    "auto-shrunk or rejected with a warning instead."
                 ),
             )
         else:
@@ -1202,6 +1296,18 @@ with tab6:
                 ),
             )
 
+        raise_on_short_violation = st.toggle(
+            label="Raise on short violation",
+            key=(key := "raise_on_short_violation"),
+            value=_default(key, fallback=exp.exchange.raise_on_short_violation),
+            on_change=lambda k=key: _persist(k),
+            help=(
+                "If enabled, the engine aborts the run with an error when a sell order "
+                "would create or increase a short position while short selling is disabled. "
+                "When disabled, such orders are silently rejected and a warning is recorded."
+            ),
+        )
+
     with st.container(border=True):
         st.markdown("**Position limits**")
 
@@ -1216,20 +1322,8 @@ with tab6:
             help=(
                 "Maximum allocation to a single position as a percentage of total "
                 "portfolio value. Applies to both long and short positions. Set to "
-                "100% for no concentration limit."
-            ),
-        )
-
-        raise_on_margin_limit = st.toggle(
-            label="Raise on margin / position limit",
-            key=(key := "raise_on_margin_limit"),
-            value=_default(key, fallback=exp.exchange.raise_on_margin_limit),
-            on_change=lambda k=key: _persist(k),
-            help=(
-                "If enabled, the engine aborts the run with an error whenever "
-                "an order would exceed `max_leverage` or `max_position_size`, or when "
-                "equity falls below `maintenance_margin`. When disabled, orders are "
-                "auto-shrunk or rejected and a warning is recorded instead."
+                "100% for no concentration limit. Orders that would exceed this "
+                "limit are automatically shrunk or rejected."
             ),
         )
 
@@ -1390,15 +1484,13 @@ st.divider()
 # Experiment logic
 # ─────────────────────────────────────────────────────────────────────────────
 
-running_experiment = st.session_state.get("running_experiment", False)
-
 # At least one non-benchmark strategy must be selected
 bench_val = st.session_state.get("benchmark") or _default("benchmark", None)
 non_bench = [s for s in selected_strats if s != bench_val or bench_val not in selected_strats]
 
 can_run = profiles and start_ts and latest_ts and not err_benchmark and non_bench
 
-if not running_experiment and not can_run:
+if not can_run and st.session_state.get("_exp_thread") is None:
     missing = []
     if not symbols:
         missing.append("select at least one **symbol**")
@@ -1414,68 +1506,159 @@ if not running_experiment and not can_run:
             icon=":material/info:",
         )
 
-button_slot = st.empty()
-if button_slot.button(
-    label="Run experiment",
-    key="running_experiment",
-    icon=":material/play_circle:",
-    type="primary",
-    disabled=not can_run or running_experiment,
-    shortcut="Enter",
-    width="stretch",
-):
-    # Hide the run button while the experiment is executing.
-    button_slot.empty()
+# Determine whether the fragment should auto-poll (only while a thread is alive).
+poll_thread = st.session_state.get("_exp_thread")
+poll_interval = 0.4 if (poll_thread is not None and poll_thread.is_alive()) else None
 
-    cfg_str = _build_experiment_config()
-    exp_cfg = ExperimentConfig.from_toml(cfg_str)
 
-    with st.spinner(f"Running experiment **{experiment_name}**..."):
-        try:
-            # ``run_experiment`` auto-injects the indicators required by the
-            # selected strategies and runs a Buy & Hold benchmark side-car
-            # whenever ``strategy.benchmark`` is set. Both happen for any
-            # caller — UI, CLI, or Python script.
-            result = run_experiment(exp_cfg, verbose=False)
-        except Exception as ex:  # noqa: BLE001
-            st.error(f"Experiment failed: {ex}", icon=":material/error:")
+@st.fragment(run_every=poll_interval)
+def _experiment_fragment():
+    """Self-contained fragment that manages the experiment lifecycle.
+
+    While the worker thread is alive this fragment auto-reruns every
+    `_poll_interval` seconds — without re-rendering the rest of the page,
+     so the spinner stays visible and the abort button is always responsive.
+
+    """
+    _exp_thread = st.session_state.get("_exp_thread")
+    _exp_is_running = _exp_thread is not None and _exp_thread.is_alive()
+
+    if _exp_is_running:
+        _exp_name = st.session_state.get("_exp_name", "experiment")
+        st.button(
+            label="Abort experiment",
+            key="abort_experiment",
+            icon=":material/stop_circle:",
+            type="secondary",
+            width="stretch",
+            on_click=_on_abort,
+        )
+
+        status = st.status(
+            label=f"Running experiment **{_exp_name}**...",
+            state="running",
+            expanded=True,
+        )
+
+        # Tail the live experiment log file produced by the engine.
+        if log_lines := _read_experiment_log():
+            status.code("\n".join(log_lines), language="log")
+
+    elif _exp_thread is not None:
+        # Thread finished — harvest the result and clean up state.
+        _exp_thread.join(timeout=2.0)
+
+        thread_result = st.session_state.pop("_exp_result", {})
+        abort_event = st.session_state.pop("_exp_abort_event", None)
+        _exp_name = st.session_state.pop("_exp_name", "experiment")
+        st.session_state.pop("_exp_thread", None)
+        _bt_mod._abort_event = None
+
+        # Store completion info in session state so it survives the full-page
+        # rerun we trigger below (which recalculates _poll_interval to None,
+        # stopping the fragment's auto-rerun timer).
+        if thread_result.get("aborted") or (abort_event and abort_event.is_set()):
+            st.session_state["_exp_completed"] = {"status": "aborted", "name": _exp_name}
+        elif "error" in thread_result:
+            st.session_state["_exp_completed"] = {
+                "status": "error",
+                "name": _exp_name,
+                "error": str(thread_result["error"]),
+            }
         else:
+            st.session_state["_exp_completed"] = {
+                "status": "success",
+                "name": _exp_name,
+                "result": thread_result.get("result"),
+            }
             if not use_storage:
-                # Invalidate the storage cache so new bars become visible.
                 st.cache_data.clear()
 
-            n_strats = len(result.strategies)
+        # Full-page rerun so _poll_interval is recalculated to None
+        st.rerun(scope="app")
 
-            if result.status == ExperimentStatus.Success and not result.warnings:
-                st.success(
-                    f"Experiment **{experiment_name}** finished successfully. "
-                    f"Evaluated {n_strats} strateg{'y' if n_strats == 1 else 'ies'}.",
-                    icon=":material/check_circle:",
-                )
-            elif result.status == ExperimentStatus.Success:
-                st.warning(
-                    f"Experiment **{experiment_name}** finished with {len(result.warnings)} "
-                    f"warning{'s' if len(result.warnings) > 1 else ''}. Evaluated {n_strats} "
-                    f"{'strategy' if n_strats == 1 else 'strategies'}.\n\n"
-                    + "\n".join(f"- {w}" for w in result.warnings),
-                    icon=":material/warning:",
-                )
-            else:
-                st.error(
-                    f"Experiment **{experiment_name}** failed.\n\n"
-                    + "\n".join(f"- {w}" for w in result.warnings),
-                    icon=":material/error:",
-                )
+    elif completed := st.session_state.get("_exp_completed"):
+        # Display the result from the just-finished experiment.
+        _exp_name = completed["name"]
 
-            st.button(
-                label="View results",
-                icon=":material/fact_check:",
-                type="primary",
-                shortcut="Enter",
-                width="stretch",
-                on_click=lambda: st.session_state.update(to_results=result.experiment_id),
+        if completed["status"] == "aborted":
+            st.warning(
+                f"Experiment **{_exp_name}** was aborted. Nothing was stored.",
+                icon=":material/cancel:",
             )
+        elif completed["status"] == "error":
+            st.error(
+                f"Experiment failed: {completed['error']}",
+                icon=":material/error:",
+            )
+        else:
+            result = completed.get("result")
 
-if st.session_state.get("to_results"):
-    st.session_state["selected_experiment_id"] = st.session_state.pop("to_results")
-    st.switch_page("results.py")
+            if result is None:
+                st.error("Experiment produced no result.", icon=":material/error:")
+            else:
+                n_strats = len(result.strategies)
+
+                if result.status == ExperimentStatus.Success and not result.warnings:
+                    st.success(
+                        f"Experiment **{_exp_name}** finished successfully. "
+                        f"Evaluated {n_strats} strateg{'y' if n_strats == 1 else 'ies'}.",
+                        icon=":material/check_circle:",
+                    )
+                elif result.status == ExperimentStatus.Success:
+                    st.warning(
+                        f"Experiment **{_exp_name}** finished with {len(result.warnings)} "
+                        f"warning{'s' if len(result.warnings) > 1 else ''}. Evaluated "
+                        f"{n_strats} "
+                        f"{'strategy' if n_strats == 1 else 'strategies'}.\n\n"
+                        + "\n".join(f"- {w}" for w in result.warnings),
+                        icon=":material/warning:",
+                    )
+                else:
+                    st.error(
+                        f"Experiment **{_exp_name}** failed.\n\n"
+                        + "\n".join(f"- {w}" for w in result.warnings),
+                        icon=":material/error:",
+                    )
+
+                if st.button(
+                    label="View results",
+                    icon=":material/fact_check:",
+                    type="primary",
+                    width="stretch",
+                ):
+                    st.session_state.pop("_exp_completed", None)
+                    st.session_state["selected_experiment_id"] = result.experiment_id
+                    st.switch_page("results.py")
+
+                # Don't show "Run experiment" below "View results"
+                return
+
+        # Show "Run experiment" after aborted / error / no-result messages.
+        if st.button(
+            label="Run experiment",
+            icon=":material/play_circle:",
+            type="primary",
+            disabled=not can_run,
+            shortcut="Enter",
+            width="stretch",
+        ):
+            st.session_state.pop("_exp_completed", None)
+            _launch_experiment()
+            st.rerun(scope="app")
+
+    else:
+        # No experiment running or finished — show the run button.
+        if st.button(
+            label="Run experiment",
+            icon=":material/play_circle:",
+            type="primary",
+            disabled=not can_run,
+            shortcut="Enter",
+            width="stretch",
+        ):
+            _launch_experiment()
+            st.rerun(scope="app")
+
+
+_experiment_fragment()

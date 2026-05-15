@@ -7,7 +7,7 @@ use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
-use crate::backtest::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
+use crate::backtest::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer, VolatilityScaled};
 
 /// Cheap, pure-Rust indicator-snapshot view passed to strategies on each
 /// bar. The engine pre-computes every auto-injected indicator into a
@@ -438,8 +438,8 @@ pub struct AdaptiveRsi {
 #[pymethods]
 impl AdaptiveRsi {
     #[new]
-    #[pyo3(signature = (min_period=8, max_period=28))]
-    fn new(min_period: usize, max_period: usize) -> Self {
+    #[pyo3(signature = (min_period: "int"=8, max_period: "int"=28))]
+    pub fn new(min_period: usize, max_period: usize) -> Self {
         Self {
             min_period,
             max_period,
@@ -573,8 +573,8 @@ pub struct AlphaRsiPro {
 #[pymethods]
 impl AlphaRsiPro {
     #[new]
-    #[pyo3(signature = (period=14, vol_window=20))]
-    fn new(period: usize, vol_window: usize) -> Self {
+    #[pyo3(signature = (period: "int"=14, vol_window: "int"=20))]
+    pub fn new(period: usize, vol_window: usize) -> Self {
         Self {
             period,
             vol_window,
@@ -687,8 +687,8 @@ pub struct BollingerMeanReversion {
 #[pymethods]
 impl BollingerMeanReversion {
     #[new]
-    #[pyo3(signature = (period=20, std_dev=2.0))]
-    fn new(period: usize, std_dev: f64) -> Self {
+    #[pyo3(signature = (period: "int"=20, std_dev: "float"=2.0))]
+    pub fn new(period: usize, std_dev: f64) -> Self {
         Self {
             period,
             std_dev,
@@ -784,8 +784,8 @@ pub struct BuyAndHold {
 #[pymethods]
 impl BuyAndHold {
     #[new]
-    #[pyo3(signature = (symbol=None))]
-    fn new(symbol: Option<String>) -> Self {
+    #[pyo3(signature = (symbol: "str | None"=None))]
+    pub fn new(symbol: Option<String>) -> Self {
         Self {
             symbol,
         }
@@ -814,15 +814,13 @@ impl Strategy for BuyAndHold {
             return Vec::new();
         }
 
-        // If a single symbol is configured, only buy that one (and only
-        // once its history has actually started — until then the engine's
-        // empty-bar policy reports NaN for the close, which would make us
-        // place a bogus first-bar order at e.g. 1970-01-01 against a
-        // symbol that doesn't have any data yet).
+        // If a single symbol is configured, only buy that one once its history
+        // has actually started.
         if let Some(target) = &self.symbol {
-            // Skip once anything is held *or* still pending fill.
-            let has_position = portfolio.positions.values().any(|q| *q > 0.0);
-            let has_pending_buy = portfolio.orders.iter().any(|o| o.quantity > 0.0);
+            // Skip once the target symbol is held *or* still pending fill.
+            let has_position = portfolio.positions.get(target).is_some_and(|q| *q > 0.0);
+            let has_pending_buy =
+                portfolio.orders.iter().any(|o| o.symbol == *target && o.quantity > 0.0);
             if has_position || has_pending_buy {
                 return Vec::new();
             }
@@ -846,7 +844,7 @@ impl Strategy for BuyAndHold {
         // data starts years apart, the first leg gets ~50 % on day one
         // and the second leg gets the remaining ~50 % on its first
         // available bar — without forcing the strategy to wait until
-        // *every* symbol becomes tradable (the previous behaviour,
+        // *every* symbol becomes tradable (the previous behavior,
         // which made the first trade arrive years late).
         let mut needs_entry: Vec<(&str, f64)> = Vec::new();
         let mut already_entered = 0usize;
@@ -913,8 +911,8 @@ pub struct DoubleTop {
 #[pymethods]
 impl DoubleTop {
     #[new]
-    #[pyo3(signature = (lookback=60))]
-    fn new(lookback: usize) -> Self {
+    #[pyo3(signature = (lookback: "int"=60))]
+    pub fn new(lookback: usize) -> Self {
         Self {
             lookback,
         }
@@ -1033,8 +1031,8 @@ pub struct HybridAlphaRsi {
 #[pymethods]
 impl HybridAlphaRsi {
     #[new]
-    #[pyo3(signature = (min_period=8, max_period=28, vol_window=20))]
-    fn new(min_period: usize, max_period: usize, vol_window: usize) -> Self {
+    #[pyo3(signature = (min_period: "int"=8, max_period: "int"=28, vol_window: "int"=20))]
+    pub fn new(min_period: usize, max_period: usize, vol_window: usize) -> Self {
         Self {
             min_period,
             max_period,
@@ -1172,8 +1170,8 @@ pub struct Macd {
 #[pymethods]
 impl Macd {
     #[new]
-    #[pyo3(signature = (fast_period=12, slow_period=26, signal_period=9))]
-    fn new(fast_period: usize, slow_period: usize, signal_period: usize) -> Self {
+    #[pyo3(signature = (fast_period: "int"=12, slow_period: "int"=26, signal_period: "int"=9))]
+    pub fn new(fast_period: usize, slow_period: usize, signal_period: usize) -> Self {
         Self {
             fast_period,
             slow_period,
@@ -1278,8 +1276,8 @@ pub struct Momentum {
 #[pymethods]
 impl Momentum {
     #[new]
-    #[pyo3(signature = (period=14, ma_period=50))]
-    fn new(period: usize, ma_period: usize) -> Self {
+    #[pyo3(signature = (period: "int"=14, ma_period: "int"=50))]
+    pub fn new(period: usize, ma_period: usize) -> Self {
         Self {
             period,
             ma_period,
@@ -1392,8 +1390,8 @@ pub struct MultiBollingerRotation {
 #[pymethods]
 impl MultiBollingerRotation {
     #[new]
-    #[pyo3(signature = (period=20, std_dev=2.0, top_k=5, rebalance_interval=20))]
-    fn new(period: usize, std_dev: f64, top_k: usize, rebalance_interval: usize) -> Self {
+    #[pyo3(signature = (period: "int"=20, std_dev: "float"=2.0, top_k: "int"=5, rebalance_interval: "int"=20))]
+    pub fn new(period: usize, std_dev: f64, top_k: usize, rebalance_interval: usize) -> Self {
         Self {
             period,
             std_dev,
@@ -1495,8 +1493,8 @@ pub struct RiskAverse {
 #[pymethods]
 impl RiskAverse {
     #[new]
-    #[pyo3(signature = (vol_period=14, breakout_period=20))]
-    fn new(vol_period: usize, breakout_period: usize) -> Self {
+    #[pyo3(signature = (vol_period: "int"=14, breakout_period: "int"=20))]
+    pub fn new(vol_period: usize, breakout_period: usize) -> Self {
         Self {
             vol_period,
             breakout_period,
@@ -1600,8 +1598,8 @@ pub struct Roc {
 #[pymethods]
 impl Roc {
     #[new]
-    #[pyo3(signature = (period=12))]
-    fn new(period: usize) -> Self {
+    #[pyo3(signature = (period: "int"=12))]
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }
@@ -1693,8 +1691,8 @@ pub struct RocRotation {
 #[pymethods]
 impl RocRotation {
     #[new]
-    #[pyo3(signature = (period=12, top_k=5, rebalance_interval=20))]
-    fn new(period: usize, top_k: usize, rebalance_interval: usize) -> Self {
+    #[pyo3(signature = (period: "int"=12, top_k: "int"=5, rebalance_interval: "int"=20))]
+    pub fn new(period: usize, top_k: usize, rebalance_interval: usize) -> Self {
         Self {
             period,
             top_k,
@@ -1799,8 +1797,8 @@ pub struct Rsi {
 #[pymethods]
 impl Rsi {
     #[new]
-    #[pyo3(signature = (rsi_period=14, bb_period=20, bb_std=2.0))]
-    fn new(rsi_period: usize, bb_period: usize, bb_std: f64) -> Self {
+    #[pyo3(signature = (rsi_period: "int"=14, bb_period: "int"=20, bb_std: "float"=2.0))]
+    pub fn new(rsi_period: usize, bb_period: usize, bb_std: f64) -> Self {
         Self {
             rsi_period,
             bb_period,
@@ -1905,8 +1903,8 @@ pub struct Rsrs {
 #[pymethods]
 impl Rsrs {
     #[new]
-    #[pyo3(signature = (period=18))]
-    fn new(period: usize) -> Self {
+    #[pyo3(signature = (period: "int"=18))]
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }
@@ -2005,8 +2003,8 @@ pub struct RsrsRotation {
 #[pymethods]
 impl RsrsRotation {
     #[new]
-    #[pyo3(signature = (period=18, top_k=5, rebalance_interval=20))]
-    fn new(period: usize, top_k: usize, rebalance_interval: usize) -> Self {
+    #[pyo3(signature = (period: "int"=18, top_k: "int"=5, rebalance_interval: "int"=20))]
+    pub fn new(period: usize, top_k: usize, rebalance_interval: usize) -> Self {
         Self {
             period,
             top_k,
@@ -2104,8 +2102,8 @@ pub struct SmaCrossover {
 #[pymethods]
 impl SmaCrossover {
     #[new]
-    #[pyo3(signature = (fast_period=20, slow_period=50))]
-    fn new(fast_period: usize, slow_period: usize) -> Self {
+    #[pyo3(signature = (fast_period: "int"=20, slow_period: "int"=50))]
+    pub fn new(fast_period: usize, slow_period: usize) -> Self {
         Self {
             fast_period,
             slow_period,
@@ -2195,8 +2193,8 @@ pub struct SmaNaive {
 #[pymethods]
 impl SmaNaive {
     #[new]
-    #[pyo3(signature = (period=20))]
-    fn new(period: usize) -> Self {
+    #[pyo3(signature = (period: "int"=20))]
+    pub fn new(period: usize) -> Self {
         Self {
             period,
         }
@@ -2304,8 +2302,8 @@ pub struct TripleRsiRotation {
 #[pymethods]
 impl TripleRsiRotation {
     #[new]
-    #[pyo3(signature = (short_period=5, medium_period=14, long_period=28, top_k=5, rebalance_interval=20))]
-    fn new(
+    #[pyo3(signature = (short_period: "int"=5, medium_period: "int"=14, long_period: "int"=28, top_k: "int"=5, rebalance_interval: "int"=20))]
+    pub fn new(
         short_period: usize,
         medium_period: usize,
         long_period: usize,
@@ -2433,8 +2431,8 @@ pub struct TurtleTrading {
 #[pymethods]
 impl TurtleTrading {
     #[new]
-    #[pyo3(signature = (entry_period=20, exit_period=10, atr_period=20))]
-    fn new(entry_period: usize, exit_period: usize, atr_period: usize) -> Self {
+    #[pyo3(signature = (entry_period: "int"=20, exit_period: "int"=10, atr_period: "int"=20))]
+    pub fn new(entry_period: usize, exit_period: usize, atr_period: usize) -> Self {
         Self {
             entry_period,
             exit_period,
@@ -2495,12 +2493,17 @@ impl Strategy for TurtleTrading {
                 c[c.len() - self.exit_period..].iter().cloned().fold(f64::INFINITY, f64::min);
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if last >= entry_high && cur <= 0.0 {
-                // ATR-based "N" sizing — 1 % of equity per unit of N.
+                // ATR-based "N" sizing via the VolatilityScaled sizer —
+                // 1 % of equity per unit of ATR, capped by available cash.
                 let atr = match indicators.value(&atr_name, sym) {
                     Some(v) if v > 0.0 => v,
                     _ => continue,
                 };
-                let target_qty = (equity * risk_pct) / atr;
+                let sizer = VolatilityScaled::new(risk_pct);
+                let target_qty = match sizer.calculate(equity, last, None, Some(atr)) {
+                    Ok(q) if q > 0.0 => q,
+                    _ => continue,
+                };
                 // Never spend more than the cash on hand.
                 let max_affordable = cash / last;
                 let qty = target_qty.min(max_affordable);
@@ -2571,8 +2574,8 @@ pub struct Vcp {
 #[pymethods]
 impl Vcp {
     #[new]
-    #[pyo3(signature = (lookback=60, contractions=3))]
-    fn new(lookback: usize, contractions: usize) -> Self {
+    #[pyo3(signature = (lookback: "int"=60, contractions: "int"=3))]
+    pub fn new(lookback: usize, contractions: usize) -> Self {
         Self {
             lookback,
             contractions,

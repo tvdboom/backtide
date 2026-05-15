@@ -160,7 +160,10 @@ mod tests {
             _start: u64,
             _end: u64,
         ) -> DataResult<BarDownload> {
-            Ok(BarDownload { bars: vec![], dividends: vec![] })
+            Ok(BarDownload {
+                bars: vec![],
+                dividends: vec![],
+            })
         }
     }
 
@@ -178,9 +181,8 @@ mod tests {
         db.init().unwrap();
 
         let stub: Arc<dyn DataProvider> = Arc::new(StubProvider);
-        let providers: HashMap<InstrumentType, Arc<dyn DataProvider>> = InstrumentType::iter()
-            .map(|it| (it, stub.clone()))
-            .collect();
+        let providers: HashMap<InstrumentType, Arc<dyn DataProvider>> =
+            InstrumentType::iter().map(|it| (it, stub.clone())).collect();
 
         (
             Engine {
@@ -472,9 +474,16 @@ mod tests {
             interval: Interval::OneDay,
             provider: Provider::Yahoo,
             bars: vec![Bar {
-                open_ts: 100, close_ts: 200, open_ts_exchange: 100,
-                open: 1.0, high: 2.0, low: 0.5, close: 1.5, adj_close: 1.5,
-                volume: 10.0, n_trades: None,
+                open_ts: 100,
+                close_ts: 200,
+                open_ts_exchange: 100,
+                open: 1.0,
+                high: 2.0,
+                low: 0.5,
+                close: 1.5,
+                adj_close: 1.5,
+                volume: 10.0,
+                n_trades: None,
             }],
         };
         let series_b = BarSeries {
@@ -482,9 +491,16 @@ mod tests {
             interval: Interval::OneDay,
             provider: Provider::Yahoo,
             bars: vec![Bar {
-                open_ts: 100, close_ts: 200, open_ts_exchange: 100,
-                open: 50.0, high: 55.0, low: 49.0, close: 52.0, adj_close: 52.0,
-                volume: 20.0, n_trades: None,
+                open_ts: 100,
+                close_ts: 200,
+                open_ts_exchange: 100,
+                open: 50.0,
+                high: 55.0,
+                low: 49.0,
+                close: 52.0,
+                adj_close: 52.0,
+                volume: 20.0,
+                n_trades: None,
             }],
         };
         engine.write_bars_bulk(&[series_a, series_b]).unwrap();

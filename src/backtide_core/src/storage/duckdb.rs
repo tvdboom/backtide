@@ -2025,10 +2025,7 @@ mod tests {
             ranges[&("AAPL".to_owned(), "1d".to_owned(), "yahoo".to_owned())],
             (1_000, 2_000)
         );
-        assert_eq!(
-            ranges[&("AAPL".to_owned(), "1h".to_owned(), "yahoo".to_owned())],
-            (500, 500)
-        );
+        assert_eq!(ranges[&("AAPL".to_owned(), "1h".to_owned(), "yahoo".to_owned())], (500, 500));
     }
 
     // ── query_bars empty filter slices ──────────────────────────────────
@@ -2137,10 +2134,7 @@ mod tests {
         .unwrap();
 
         let removed = db
-            .delete_symbols(&[
-                ("AAPL".to_owned(), None, None),
-                ("MSFT".to_owned(), None, None),
-            ])
+            .delete_symbols(&[("AAPL".to_owned(), None, None), ("MSFT".to_owned(), None, None)])
             .unwrap();
         assert_eq!(removed, 2);
         assert!(db.query_bars(None, None, None, None).unwrap().is_empty());

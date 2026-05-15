@@ -6,6 +6,7 @@ Description: Public Python interface for the backtest module.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from backtide.core.backtest import (
@@ -31,11 +32,40 @@ from backtide.core.backtest import (
     State,
     StrategyExpConfig,
     Trade,
+    experiment_log,
+    request_abort,
 )
-from backtide.core.backtest import (
-    run_experiment as _run_experiment,
-)
-from backtide.utils.utils import _to_list
+from backtide.core.backtest import run_experiment as _run_experiment
+from backtide.core.storage import delete_experiment as _delete_experiment
+from backtide.core.storage import query_experiments as _query_experiments
+from backtide.utils.utils import _to_list, _to_pandas
+
+# Threading event used to signal an abort from external code (e.g., Streamlit UI).
+_abort_event: threading.Event | None = None
+
+
+class ExperimentAborted(KeyboardInterrupt):
+    """Raised when an experiment is aborted by the user."""
+
+
+def _cleanup_experiment(experiment_id: str | None, name: str):
+    """Best-effort removal of a (partially) persisted experiment."""
+    if experiment_id:
+        try:
+            _delete_experiment(experiment_id)
+        except Exception:  # noqa: BLE001
+            pass
+        return
+
+    # The Rust core may have persisted the experiment before the interrupt
+    # reached Python. Try to find and remove the most recent experiment
+    # matching the config name.
+    try:
+        df = _to_pandas(_query_experiments(search=name, limit=1))
+        if not df.empty:
+            _delete_experiment(df.iloc[0]["id"])
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def run_experiment(
@@ -54,6 +84,8 @@ def run_experiment(
     3. Runs every strategy in parallel. Each strategy has its own independent
        portfolio, order book and equity curve.
     4. Persists the results into the database.
+
+    Read more in the [user guide][experiment].
 
     Parameters
     ----------
@@ -189,10 +221,11 @@ def run_experiment(
                 initial_margin=get("initial_margin", "exchange"),
                 maintenance_margin=get("maintenance_margin", "exchange"),
                 margin_interest=get("margin_interest", "exchange"),
+                raise_on_margin_limit=get("raise_on_margin_limit", "exchange"),
                 allow_short_selling=get("allow_short_selling", "exchange"),
                 borrow_rate=get("borrow_rate", "exchange"),
+                raise_on_short_violation=get("raise_on_short_violation", "exchange"),
                 max_position_size=get("max_position_size", "exchange"),
-                raise_on_margin_limit=get("raise_on_margin_limit", "exchange"),
                 conversion_mode=get("conversion_mode", "exchange"),
                 conversion_threshold=get("conversion_threshold", "exchange"),
                 conversion_period=get("conversion_period", "exchange"),
@@ -220,4 +253,16 @@ def run_experiment(
     if not cfg.strategy.strategies and not strategy_overrides:
         raise ValueError("Experiment configuration has no strategies.")
 
-    return _run_experiment(cfg, verbose, strategy_overrides, indicator_overrides)
+    try:
+        result = _run_experiment(cfg, verbose, strategy_overrides, indicator_overrides)
+    except KeyboardInterrupt:
+        _cleanup_experiment(None, cfg.general.name)
+        raise ExperimentAborted("Experiment aborted by user.") from None
+
+    # If an abort was signaled while the core was running (e.g., from the UI),
+    # remove whatever was persisted and raise.
+    if _abort_event is not None and _abort_event.is_set():
+        _cleanup_experiment(result.experiment_id, cfg.general.name)
+        raise ExperimentAborted("Experiment aborted by user.")
+
+    return result

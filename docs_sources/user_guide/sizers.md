@@ -125,7 +125,7 @@ class AtrSizedBreakout(BaseStrategy):
             return []
 
         close = data[symbol]["close"].iloc[-1]
-        atr = indicators["__auto_ATR_14"][symbol].iloc[-1]
+        atr = indicators["ATR_14"][symbol].iloc[-1]
         if atr <= 0:
             return []
 

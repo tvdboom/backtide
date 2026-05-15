@@ -138,20 +138,56 @@ fn ewm(data: &[f64], span: usize) -> Vec<f64> {
 ///
 /// Uses Bessel's correction (denominator `period - 1`). The first
 /// `period - 1` elements are [`f64::NAN`].
+///
+/// Implements an incremental sum / sum-of-squares algorithm for O(n)
+/// performance instead of the naïve O(n × period) double loop. Windows
+/// containing any non-finite value produce NAN; the window recovers
+/// as soon as all values in the window are finite.
 fn rolling_std(data: &[f64], period: usize) -> Vec<f64> {
     let n = data.len();
     let mut out = vec![f64::NAN; n];
     if period < 2 || n < period {
         return out;
     }
-    for i in (period - 1)..n {
-        let window = &data[i + 1 - period..=i];
-        if !window.iter().all(|x| x.is_finite()) {
-            continue;
+    let p = period as f64;
+
+    // Seed: compute sum and sum-of-squares for the first full window.
+    let mut sum = 0.0_f64;
+    let mut sum_sq = 0.0_f64;
+    let mut finite_count = 0_usize;
+    for item in data.iter().take(period) {
+        if item.is_finite() {
+            sum += item;
+            sum_sq += item * item;
+            finite_count += 1;
         }
-        let mean: f64 = window.iter().sum::<f64>() / period as f64;
-        let var: f64 = window.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (period - 1) as f64;
-        out[i] = var.sqrt();
+    }
+    if finite_count == period {
+        let mean = sum / p;
+        let var = (sum_sq - p * mean * mean) / (p - 1.0);
+        out[period - 1] = var.max(0.0).sqrt();
+    }
+
+    // Slide the window one step at a time.
+    for i in period..n {
+        let new = data[i];
+        let old = data[i - period];
+        // Update finite count.
+        if old.is_finite() {
+            sum -= old;
+            sum_sq -= old * old;
+            finite_count -= 1;
+        }
+        if new.is_finite() {
+            sum += new;
+            sum_sq += new * new;
+            finite_count += 1;
+        }
+        if finite_count == period {
+            let mean = sum / p;
+            let var = (sum_sq - p * mean * mean) / (p - 1.0);
+            out[i] = var.max(0.0).sqrt();
+        }
     }
     out
 }
@@ -381,7 +417,7 @@ pub struct AverageDirectionalIndex {
 #[pymethods]
 impl AverageDirectionalIndex {
     #[new]
-    #[pyo3(signature = (period=14))]
+    #[pyo3(signature = (period: "int"=14))]
     pub fn new(period: usize) -> Self {
         Self {
             period,
@@ -495,7 +531,7 @@ pub struct AverageTrueRange {
 #[pymethods]
 impl AverageTrueRange {
     #[new]
-    #[pyo3(signature = (period=14))]
+    #[pyo3(signature = (period: "int"=14))]
     pub fn new(period: usize) -> Self {
         Self {
             period,
@@ -574,7 +610,7 @@ pub struct BollingerBands {
 #[pymethods]
 impl BollingerBands {
     #[new]
-    #[pyo3(signature = (period=20, std_dev=2.0))]
+    #[pyo3(signature = (period: "int"=20, std_dev: "float"=2.0))]
     pub fn new(period: usize, std_dev: f64) -> Self {
         Self {
             period,
@@ -659,7 +695,7 @@ pub struct CommodityChannelIndex {
 #[pymethods]
 impl CommodityChannelIndex {
     #[new]
-    #[pyo3(signature = (period=20))]
+    #[pyo3(signature = (period: "int"=20))]
     pub fn new(period: usize) -> Self {
         Self {
             period,
@@ -742,7 +778,7 @@ pub struct ExponentialMovingAverage {
 #[pymethods]
 impl ExponentialMovingAverage {
     #[new]
-    #[pyo3(signature = (period=14))]
+    #[pyo3(signature = (period: "int"=14))]
     pub fn new(period: usize) -> Self {
         Self {
             period,
@@ -825,7 +861,7 @@ pub struct MovingAverageConvergenceDivergence {
 #[pymethods]
 impl MovingAverageConvergenceDivergence {
     #[new]
-    #[pyo3(signature = (fast_period=12, slow_period=26, signal_period=9))]
+    #[pyo3(signature = (fast_period: "int"=12, slow_period: "int"=26, signal_period: "int"=9))]
     pub fn new(fast_period: usize, slow_period: usize, signal_period: usize) -> Self {
         Self {
             fast_period,
@@ -971,7 +1007,7 @@ pub struct RelativeStrengthIndex {
 #[pymethods]
 impl RelativeStrengthIndex {
     #[new]
-    #[pyo3(signature = (period=14))]
+    #[pyo3(signature = (period: "int"=14))]
     pub fn new(period: usize) -> Self {
         Self {
             period,
@@ -1076,7 +1112,7 @@ pub struct SimpleMovingAverage {
 #[pymethods]
 impl SimpleMovingAverage {
     #[new]
-    #[pyo3(signature = (period=14))]
+    #[pyo3(signature = (period: "int"=14))]
     pub fn new(period: usize) -> Self {
         Self {
             period,
@@ -1153,7 +1189,7 @@ pub struct StochasticOscillator {
 #[pymethods]
 impl StochasticOscillator {
     #[new]
-    #[pyo3(signature = (k_period=14, d_period=3))]
+    #[pyo3(signature = (k_period: "int"=14, d_period: "int"=3))]
     pub fn new(k_period: usize, d_period: usize) -> Self {
         Self {
             k_period,
@@ -1306,7 +1342,7 @@ pub struct WeightedMovingAverage {
 #[pymethods]
 impl WeightedMovingAverage {
     #[new]
-    #[pyo3(signature = (period=14))]
+    #[pyo3(signature = (period: "int"=14))]
     pub fn new(period: usize) -> Self {
         Self {
             period,
@@ -1578,9 +1614,8 @@ mod tests {
 
     #[test]
     fn cci_produces_finite_for_varying_prices() {
-        let bars: Vec<Bar> = (0..20)
-            .map(|i| ohlc_bar(0.0, (i + 2) as f64, (i) as f64, (i + 1) as f64, 1.0))
-            .collect();
+        let bars: Vec<Bar> =
+            (0..20).map(|i| ohlc_bar(0.0, (i + 2) as f64, i as f64, (i + 1) as f64, 1.0)).collect();
         let out = CommodityChannelIndex::new(5).compute_inner(&bars);
         assert!(out[0].iter().any(|v| v.is_finite()));
     }
@@ -1639,9 +1674,8 @@ mod tests {
 
     #[test]
     fn stoch_returns_two_series_and_finite_values() {
-        let bars: Vec<Bar> = (0..30)
-            .map(|i| ohlc_bar(0.0, (i + 5) as f64, (i) as f64, (i + 2) as f64, 1.0))
-            .collect();
+        let bars: Vec<Bar> =
+            (0..30).map(|i| ohlc_bar(0.0, (i + 5) as f64, i as f64, (i + 2) as f64, 1.0)).collect();
         let out = StochasticOscillator::new(5, 3).compute_inner(&bars);
         assert_eq!(out.len(), 2);
         assert!(out[0].iter().any(|v| v.is_finite()));
@@ -1742,9 +1776,7 @@ mod tests {
 
     #[test]
     fn rsi_bounded_zero_to_one_hundred() {
-        let bars: Vec<Bar> = (0..30)
-            .map(|i| bar(100.0 + (i as f64 * 0.5).sin() * 10.0))
-            .collect();
+        let bars: Vec<Bar> = (0..30).map(|i| bar(100.0 + (i as f64 * 0.5).sin() * 10.0)).collect();
         let out = RelativeStrengthIndex::new(14).compute_inner(&bars);
         for v in &out[0] {
             if v.is_finite() {

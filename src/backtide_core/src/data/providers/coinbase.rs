@@ -659,7 +659,8 @@ mod tests {
     #[test]
     fn interval_granularity_all_supported() {
         use Interval::*;
-        for iv in [OneMinute, FiveMinutes, FifteenMinutes, ThirtyMinutes, OneHour, FourHours, OneDay]
+        for iv in
+            [OneMinute, FiveMinutes, FifteenMinutes, ThirtyMinutes, OneHour, FourHours, OneDay]
         {
             assert!(Coinbase::interval_granularity(iv).is_ok());
         }

@@ -3,13 +3,17 @@
 use crate::config::errors::ConfigError;
 use crate::data::errors::DataError;
 use crate::storage::errors::StorageError;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError};
 use pyo3::PyErr;
 use thiserror::Error;
 
 /// Errors that the [`Engine`] implementation might return.
 #[derive(Debug, Error)]
 pub enum EngineError {
+    /// The experiment was aborted by the user.
+    #[error("Experiment aborted by user.")]
+    Aborted,
+
     /// An error when trying to retrieve the config file.
     #[error("Configuration error: {0}")]
     Config(#[from] ConfigError),
@@ -35,6 +39,9 @@ pub type EngineResult<T> = Result<T, EngineError>;
 
 impl From<EngineError> for PyErr {
     fn from(e: EngineError) -> PyErr {
-        PyRuntimeError::new_err(e.to_string())
+        match e {
+            EngineError::Aborted => PyKeyboardInterrupt::new_err(e.to_string()),
+            _ => PyRuntimeError::new_err(e.to_string()),
+        }
     }
 }

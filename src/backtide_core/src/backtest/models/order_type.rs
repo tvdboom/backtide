@@ -1,13 +1,17 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::{pyclass, pymethods, Borrowed, Bound, FromPyObject, Py, PyAny, PyErr, PyResult, Python};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
+use strum::{Display, EnumIter, IntoEnumIterator};
+
+use std::str::FromStr;
 
 /// The type of order that can be submitted to the exchange.
 ///
 /// Defines which execution semantics apply to a trade request.
 /// The engine validates that only allowed order types (configured
 /// in the exchange settings) are submitted during the simulation.
+///
+/// Read more in the [user guide][orders].
 ///
 /// Attributes
 /// ----------
@@ -30,11 +34,9 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
     PartialEq,
     Display,
     EnumIter,
-    EnumString,
     SerializeDisplay,
     DeserializeFromStr,
 )]
-#[strum(ascii_case_insensitive)]
 pub enum OrderType {
     #[default]
     Market,
@@ -46,7 +48,36 @@ pub enum OrderType {
     TrailingStop,
     TrailingStopLimit,
     SettlePosition,
-    CancelOrder,
+    Cancel,
+}
+
+impl OrderType {
+    /// Parse an order type from a flexible string representation.
+    ///
+    /// Accepted formats (all case-insensitive):
+    ///
+    /// - PascalCase variant name: `"StopLoss"`, `"Cancel"`
+    /// - snake_case: `"stop_loss"`, `"cancel_order"`
+    /// - Without trailing "order": `"cancel"`, `"Cancel"`
+    /// - Any mix: `"trailing_stop_limit"`, `"TrailingStopLimit"`, `"STOPLOSS"`
+    pub fn parse_flexible(s: &str) -> Result<Self, String> {
+        // Normalize: lowercase and strip underscores
+        let normalized: String = s.trim().to_ascii_lowercase().replace('_', "");
+
+        match normalized.as_str() {
+            "market" => Ok(Self::Market),
+            "limit" => Ok(Self::Limit),
+            "stoploss" | "stop" => Ok(Self::StopLoss),
+            "takeprofit" => Ok(Self::TakeProfit),
+            "stoplosslimit" => Ok(Self::StopLossLimit),
+            "takeprofitlimit" => Ok(Self::TakeProfitLimit),
+            "trailingstop" => Ok(Self::TrailingStop),
+            "trailingstoplimit" => Ok(Self::TrailingStopLimit),
+            "settleposition" | "settle" => Ok(Self::SettlePosition),
+            "cancel" => Ok(Self::Cancel),
+            _ => Err(format!("Unknown order type: {s:?}")),
+        }
+    }
 }
 
 #[pymethods]
@@ -56,7 +87,7 @@ impl OrderType {
 
     #[new]
     pub fn new(s: &str) -> PyResult<Self> {
-        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown order type: {s}")))
+        Self::parse_flexible(s).map_err(PyValueError::new_err)
     }
 
     pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
@@ -80,7 +111,7 @@ impl OrderType {
             Self::TrailingStop => "Trailing-Stop",
             Self::TrailingStopLimit => "Trailing-Stop-Limit",
             Self::SettlePosition => "Settle-Position",
-            Self::CancelOrder => "Cancel-Order",
+            Self::Cancel => "Cancel-Order",
         }
     }
 
@@ -101,7 +132,7 @@ impl OrderType {
             Self::TrailingStop => "A stop order whose trigger price trails the market price by a fixed offset, locking in gains as the price moves favourably.",
             Self::TrailingStopLimit => "A trailing stop that converts to a limit order instead of a market order when triggered.",
             Self::SettlePosition => "Closes an existing open position entirely at the current market price.",
-            Self::CancelOrder => "Cancels a previously submitted order, identified by its id.",
+            Self::Cancel => "Cancels a previously submitted order, identified by its id.",
         }
     }
 
@@ -128,6 +159,14 @@ impl OrderType {
     }
 }
 
+impl FromStr for OrderType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse_flexible(s)
+    }
+}
+
 impl<'a, 'py> FromPyObject<'a, 'py> for OrderType {
     type Error = PyErr;
 
@@ -137,8 +176,8 @@ impl<'a, 'py> FromPyObject<'a, 'py> for OrderType {
             return Ok(*bound.borrow());
         }
 
-        // Else parse from string
+        // Else parse from string (flexible: snake_case, PascalCase)
         let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown order type {s:?}.")))
+        Self::parse_flexible(&s).map_err(PyValueError::new_err)
     }
 }

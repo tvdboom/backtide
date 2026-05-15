@@ -906,9 +906,8 @@ class TestResolveAutoIndicators:
         out = _resolve_auto_indicators([strat])
         assert out, "SmaCrossover declares at least one required indicator"
         names = {name for name, _, _ in out}
-        # The deterministic naming format starts with __auto_ and contains
-        # the indicator acronym.
-        assert all(n.startswith("__auto_") for n in names)
+        # The deterministic naming format contains the indicator acronym
+        assert all(n[0].isalpha() and "_" in n for n in names)
 
     def test_deduplicates_same_indicator_across_strategies(self):
         """If two strategies need the same indicator, it appears once."""

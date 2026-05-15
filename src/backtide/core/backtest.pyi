@@ -62,6 +62,8 @@ __all__ = [
     "VolatilityScaled",
     "VolumeWeightedAveragePrice",
     "WeightedMovingAverage",
+    "experiment_log",
+    "request_abort",
     "run_experiment",
 ]
 
@@ -1463,7 +1465,7 @@ class ExchangeExpConfig:
     allow_margin : bool, default=False
         Whether margin trading is enabled.
 
-    max_leverage : float, default=1.0
+    max_leverage : float, default=2.0
         Maximum leverage ratio.
 
     initial_margin : float, default=50.0
@@ -1475,20 +1477,27 @@ class ExchangeExpConfig:
     margin_interest : float, default=0.0
         Annual interest rate on borrowed funds.
 
+    raise_on_margin_limit : bool, default=False
+        If `True`, the engine raises an error when an order would breach
+        `max_leverage` or when equity falls below `maintenance_margin`.
+        If `False`, orders are auto-shrunk or rejected and a warning is
+        recorded instead. Does not affect `max_position_size`, which
+        always rejects (never aborts) independently.
+
     allow_short_selling : bool, default=False
         Whether short selling is permitted.
 
     borrow_rate : float, default=0.0
         Annual borrow cost for short positions.
 
+    raise_on_short_violation : bool, default=False
+        If `True`, the engine raises an error when a sell order would
+        create or increase a short position while `allow_short_selling`
+        is `False`. If `False`, such orders are silently rejected with a
+        warning instead of aborting the run.
+
     max_position_size : int, default=100
         Max allocation to one position (% of portfolio equity).
-
-    raise_on_margin_limit : bool, default=False
-        If `True`, the engine raises an error when an order would breach
-        `max_leverage` or `max_position_size`, or when equity falls below
-        `maintenance_margin`. If `False`, orders are auto-shrunk or
-        rejected and a warning is recorded instead.
 
     conversion_mode : str | [CurrencyConversionMode], default="immediate"
         How foreign-currency proceeds are converted.
@@ -1528,6 +1537,7 @@ class ExchangeExpConfig:
     max_position_size: int
     partial_fills: bool
     raise_on_margin_limit: bool
+    raise_on_short_violation: bool
     slippage: float
 
     def __eq__(self, value, /):
@@ -2901,12 +2911,16 @@ class OnBalanceVolume:
 class Order:
     """A trading order submitted during the simulation.
 
+    Read more in the [user guide][orders].
+
     Attributes
     ----------
     id : str
         Unique identifier of the order. Auto-generated if not provided.
-        For [`OrderType.CancelOrder`][OrderType] orders, the `id` field
-        identifies the target order that should be canceled.
+        For [`OrderType.Cancel`][OrderType] orders, the `id` field
+        identifies the target order that should be canceled. If an order
+        with the same ``id`` already exists in the order book, the
+        duplicate is rejected.
 
     symbol : str
         The ticker symbol this order targets.
@@ -2919,13 +2933,15 @@ class Order:
         price.
 
     order_type : [OrderType]
-        The execution semantics (market, limit, stop-loss, etc...).
+        The execution semantics (market, limit, stop-loss, etc...). Also accepts
+        a string of the form PascalCase (`StopLoss`) or snake_case (`stop_loss"),
+        case-insensitively.
 
     price : float | None
         Primary price for the order. The exact meaning depends on
         `order_type`:
 
-    - `Market` / `CancelOrder` / `SettlePosition`: ignored.
+    - `Market` / `Cancel` / `SettlePosition`: ignored.
     - `Limit` / `TakeProfit`: the limit / target price.
     - `StopLoss`: the stop (trigger) price.
     - `StopLossLimit` / `TakeProfitLimit`: the stop (trigger)
@@ -3059,6 +3075,8 @@ class OrderType:
     The engine validates that only allowed order types (configured
     in the exchange settings) are submitted during the simulation.
 
+    Read more in the [user guide][orders].
+
     Attributes
     ----------
     name : str
@@ -3074,7 +3092,7 @@ class OrderType:
 
     name: str
 
-    CancelOrder: ClassVar[OrderType]
+    Cancel: ClassVar[OrderType]
     Limit: ClassVar[OrderType]
     Market: ClassVar[OrderType]
     SettlePosition: ClassVar[OrderType]
@@ -5125,6 +5143,18 @@ class WeightedMovingAverage:
             The description.
 
         """
+
+def experiment_log(message, level=...):
+    """Write a message to the active experiment's log file.
+
+    This is intended to be called from a custom strategy's `evaluate()`
+    method. The message is routed through the `tracing` layer so it
+    ends up in the per-experiment `logs.txt` alongside engine events.
+
+    """
+
+def request_abort():
+    """Signal the Rust engine to abort the current experiment."""
 
 def run_experiment(config, verbose=True, strategy_overrides=None, indicator_overrides=None):
     """Low-level entry point that runs an already-built experiment
