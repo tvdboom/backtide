@@ -74,10 +74,9 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     [configuration]. See the [currency conversion][data] section for details.
 
 ??? faq "How do I run the benchmarks?"
-    Backtide uses [Criterion.rs](https://github.com/bheisler/criterion.rs)
-    for performance benchmarking. Run all benchmarks with
-    `cargo bench --manifest-path backtide_core/Cargo.toml`, or use
-    `tox -e bench`. See the [contributing] page for more details.
+    Backtide uses [Criterion.rs](https://github.com/bheisler/criterion.rs) for performance benchmarking. Run all
+    benchmarks with `cargo bench --manifest-path src/backtide_core/Cargo.toml`,
+    or use `tox -e bench`. See the [contributing] page for more details.
 
 ??? faq "How do I report a bug or request a feature?"
     Open an [issue](https://github.com/tvdboom/backtide/issues) on GitHub. For bugs, include a minimal reproduction scenario.

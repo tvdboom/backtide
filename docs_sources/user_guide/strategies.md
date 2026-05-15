@@ -320,7 +320,8 @@ are:
     The strategy below computes a custom z-score momentum signal that would be
     slow in a plain Python loop. The heavy lifting is offloaded to a `@njit`
     compiled helper that is defined and compiled once at import time, outside
-    `evaluate()`.
+    `evaluate()`. Make sure to have [numba] installed in your environment to use
+    this example.
 
     ```python title="Z-score momentum strategy with Numba"
     from math import floor

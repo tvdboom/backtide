@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from datetime import date
 from datetime import datetime as dt
 from pathlib import Path
+import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -41,6 +42,16 @@ from backtide.utils.utils import _moment_to_strftime, _to_list, _to_pandas
 # ─────────────────────────────────────────────────────────────────────────────
 
 _CODE_OPTIONS = [":material/code: Code editor", ":material/upload_file: Upload file"]
+
+_CLASS_NAME_RE = re.compile(r"^\s*class\s+(\w+)\s*[(:]", re.MULTILINE)
+
+
+def _extract_class_name(code: str) -> str | None:
+    """Return the first class name found in *code*, or ``None``."""
+    if m := _CLASS_NAME_RE.search(code):
+        return m.group(1)
+    return None
+
 
 # Default benchmark per base currency for stocks/ETF experiments.
 # Each ticker is the most liquid broad-market ETF in its home market and

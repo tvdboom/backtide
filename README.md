@@ -77,6 +77,10 @@ Based on comprehensive [benchmarks](https://tvdboom.github.io/backtide/latest/co
 | Historical read (1000 bars)    | ~1.5ms         | Backtesting     |
 | Historical read (1M bars)      | ~711ms         | Backtesting     |
 
+*\*Downloads hit real network endpoints. Yahoo Finance applies rate limits, so these numbers are meant as a reference, not a strict benchmark.*
+
+<br>
+
 **Backtest (11k bars)**
 
 | Strategy            | Performance    | Use Case    |
@@ -101,8 +105,6 @@ Based on comprehensive [benchmarks](https://tvdboom.github.io/backtide/latest/co
 | SMA Crossover       | ~7.7ms         | Backtesting |
 | Hybrid Alpha RSI    | ~7.9ms         | Backtesting |
 | RSI                 | ~8.8ms         | Backtesting |
-
-*\*Downloads hit real network endpoints. Yahoo Finance applies rate limits, so these numbers are meant as a reference, not a strict benchmark.*
 
 <br>
 

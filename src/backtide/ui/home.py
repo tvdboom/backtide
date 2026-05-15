@@ -296,7 +296,8 @@ st.markdown('<div class="home-hero"><h2>Welcome to Backtide</h2></div>', unsafe_
 if not experiments.empty:
     st.markdown('<div class="section-label">Recent experiments</div>', unsafe_allow_html=True)
 
-    for col, (_, row) in zip(st.columns(3), experiments.iloc[:3].iterrows(), strict=True):
+    experiment_rows = list(experiments.iloc[:3].iterrows())
+    for col, (_, row) in zip(st.columns(len(experiment_rows)), experiment_rows, strict=True):
         with col:
             status = row["status"]
             n_strats = row["n_strategies"]
@@ -401,7 +402,8 @@ if not summary.empty:
             )
 
     if widgets:
-        for col, w in zip(st.columns(3), widgets[:3], strict=True):
+        visible_widgets = widgets[:3]
+        for col, w in zip(st.columns(len(visible_widgets)), visible_widgets, strict=True):
             with col:
                 change_cls = "positive" if w["change_pct"] >= 0 else "negative"
                 change_sign = "+" if w["change_pct"] >= 0 else ""
@@ -449,8 +451,8 @@ if not summary.empty:
                         key=f"analyze_{w['symbol']}",
                         width="stretch",
                         type="tertiary",
-                        on_click=lambda: st.session_state.update(
-                            _symbols=[sym],
+                        on_click=lambda s=w["symbol"]: st.session_state.update(
+                            _symbols=[s],
                             _interval=Interval.get_default(),
                             _home_nav="analysis.py",
                         ),

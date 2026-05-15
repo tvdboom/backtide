@@ -27,9 +27,9 @@ And operating systems:
 * **[cloudpickle](https://github.com/cloudpipe/cloudpickle)** (>=3.1.2)
 * **[numpy](https://numpy.org/)** (>=2.0.0)
 * **[pandas](https://pandas.pydata.org/)** (>=2.3.3)
-* **[plotly](https://plotly.com/python/)** (>=6.1.0)
+* **[plotly](https://plotly.com/python/)** (>=6.7.0)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
-* **[streamlit](https://streamlit.io/)** (>=1.55.0)
+* **[streamlit](https://streamlit.io/)** (>=1.56.0)
 * **[streamlit-code-editor](https://github.com/bouzidanas/streamlit-code-editor)** (>=0.1.22)
 * **[tzlocal](https://github.com/regebro/tzlocal)** (>=5.0)
 
@@ -49,7 +49,7 @@ required for any of its functionalities. These libraries are only necessary to
 
 **Dev**
 
-* **[tox](https://tox.wiki/)** (>=4.50.3)
+* **[tox](https://tox.wiki/)** (>=4.53.0)
 * **[tox-uv](https://github.com/tox-dev/tox-uv)** (>=1.33.4)
 
 **Linting**
@@ -57,7 +57,7 @@ required for any of its functionalities. These libraries are only necessary to
 * **[pre-commit](https://pre-commit.com/)** (>=4.5.1)
 * **[pre-commit-uv](https://github.com/tox-dev/pre-commit-uv)** (>=4.2.1)
 * **[ruff](https://docs.astral.sh/ruff/)** (>=0.15.7)
-* **[ty](https://github.com/astral-sh/ty)** (>=0.0.25)
+* **[ty](https://github.com/astral-sh/ty)** (>=0.0.30)
 
 **Testing**
 
@@ -75,6 +75,7 @@ required for any of its functionalities. These libraries are only necessary to
 * **[mkdocs-material](https://squidfunk.github.io/mkdocs-material/)** (>=9.7.6)
 * **[mkdocs-material-extensions](https://pypi.org/project/mkdocs-material-extensions/)** (>=1.3.1)
 * **[mkdocs-simple-hooks](https://github.com/aklajnert/mkdocs-simple-hooks)** (>=0.1.5)
+* **[pymdown-extensions](https://facelessuser.github.io/pymdown-extensions/)** (>=10.21)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
 * **[regex](https://github.com/mrabarnett/mrab-regex)** (>=2026.2.28)
 
@@ -87,25 +88,32 @@ required for any of its functionalities. These libraries are only necessary to
 
 * **[async-trait](https://crates.io/crates/async-trait)** (0.1.89)
 * **[chrono](https://crates.io/crates/chrono)** (0.4.44)
-* **[duckdb](https://crates.io/crates/duckdb)** (1.10501.0)
+* **[chrono-tz](https://crates.io/crates/chrono-tz)** (0.10.4)
+* **[duckdb](https://crates.io/crates/duckdb)** (1.10502.0)
 * **[futures](https://crates.io/crates/futures)** (0.3.32)
-* **[indexmap](https://crates.io/crates/indexmap)** (2.13.1)
+* **[indexmap](https://crates.io/crates/indexmap)** (2.14.0)
+* **[indicatif](https://crates.io/crates/indicatif)** (0.18.4)
+* **[itertools](https://crates.io/crates/itertools)** (0.14)
 * **[moka](https://crates.io/crates/moka)** (0.12.15)
 * **[pyo3](https://crates.io/crates/pyo3)** (0.28.3)
 * **[pythonize](https://crates.io/crates/pythonize)** (0.28.0)
-* **[reqwest](https://crates.io/crates/reqwest)** (0.13.2)
+* **[rayon](https://crates.io/crates/rayon)** (1.12.0)
+* **[reqwest](https://crates.io/crates/reqwest)** (0.13.3)
 * **[serde](https://crates.io/crates/serde)** (1.0.228)
 * **[serde_json](https://crates.io/crates/serde_json)** (1.0.149)
 * **[serde_yml](https://crates.io/crates/serde_yml)** (0.0.12)
 * **[serde_with](https://crates.io/crates/serde_with)** (3.18.0)
 * **[strum](https://crates.io/crates/strum)** (0.28.0)
 * **[thiserror](https://crates.io/crates/thiserror)** (2.0.18)
-* **[tokio](https://crates.io/crates/tokio)** (1.51.1)
-* **[toml](https://crates.io/crates/toml)** (1.1.0)
+* **[tokio](https://crates.io/crates/tokio)** (1.52.1)
+* **[toml](https://crates.io/crates/toml)** (1.1.2)
 * **[tracing](https://crates.io/crates/tracing)** (0.1.44)
 * **[tracing-subscriber](https://crates.io/crates/tracing-subscriber)** (0.3.23)
+* **[uuid](https://crates.io/crates/uuid)** (1.23.1)
 
 ### Dev
 
 * **[criterion](https://crates.io/crates/criterion)** (0.8.2)
+* **[rstest](https://crates.io/crates/rstest)** (0.26.1)
 * **[tempfile](https://crates.io/crates/tempfile)** (3.27.0)
+* **[wiremock](https://crates.io/crates/wiremock)** (0.6.5)

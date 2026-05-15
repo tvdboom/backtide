@@ -23,6 +23,7 @@ from backtide.indicators.utils import (
 from backtide.ui.utils import (
     _CODE_OPTIONS,
     _default,
+    _extract_class_name,
     _persist,
 )
 from backtide.utils.constants import INVALID_FILENAME_CHARS
@@ -141,14 +142,45 @@ st.write("")
 if stored_ind := _load_stored_indicators(cfg):
     for name, ind in stored_ind.items():
         with st.container(border=True):
-            col1, col2 = st.columns([5, 1], vertical_alignment="center")
+            col1, col2, col3 = st.columns([10, 1.2, 1], vertical_alignment="center")
             col1.markdown(_get_indicator_label(name, ind))
 
-            if col2.button(
-                label="Delete",
+            with col2.popover("", icon=":material/edit:"):
+                new_name = st.text_input(
+                    "New name",
+                    value=name,
+                    key=f"rename_ind_input_{name}",
+                    max_chars=40,
+                )
+
+                error = None
+                if not new_name:
+                    error = "Name cannot be empty."
+                elif INVALID_FILENAME_CHARS.findall(new_name):
+                    chars = INVALID_FILENAME_CHARS.findall(new_name)
+                    error = f"Invalid characters: {' '.join(repr(c) for c in sorted(set(chars)))}"
+                elif new_name != name and new_name in stored_ind:
+                    error = f"An indicator with name **{new_name}** already exists."
+
+                if error:
+                    st.error(error)
+
+                if st.button(
+                    "Rename",
+                    key=f"confirm_rename_ind_{name}",
+                    icon=":material/save:",
+                    type="primary",
+                    disabled=bool(error) or new_name == name,
+                    use_container_width=True,
+                ):
+                    Path(storage_path, f"{name}.pkl").rename(Path(storage_path, f"{new_name}.pkl"))
+                    st.rerun()
+
+            if col3.button(
+                label="",
                 key=f"delete_ind_{name}",
                 icon=":material/delete:",
-                type="tertiary",
+                type="primary",
             ):
                 Path(storage_path, f"{name}.pkl").unlink(missing_ok=True)
                 st.rerun()
@@ -310,9 +342,15 @@ if mode == "builtin":
 
 elif mode == "custom":
     with st.container(border=True):
+        # Pre-fill name from class name detected on the previous run.
+        name_key = "new_ind_custom_name"
+        auto_cls = st.session_state.get("_auto_cls_ind")
+        if auto_cls and st.session_state.get(name_key, "MyIndicator") == "MyIndicator":
+            st.session_state[name_key] = auto_cls
+
         ind_name = st.text_input(
             label="Name",
-            key=(key := "new_ind_custom_name"),
+            key=(key := name_key),
             value=_default(key, "MyIndicator"),
             max_chars=40,
             placeholder="Add a name...",
@@ -349,6 +387,8 @@ elif mode == "custom":
 
             if text := resp["text"]:
                 code = st.session_state[f"_{key}"] = text
+            else:
+                code = st.session_state.get(f"_{key}")
         else:
             st.caption(
                 "The uploaded file must contain a class that inherits from `BaseIndicator` "
@@ -373,6 +413,9 @@ elif mode == "custom":
         if code:
             if err := _check_indicator_code(code, cfg):
                 st.error(err)
+            if (cls := _extract_class_name(code)) and cls != st.session_state.get("_auto_cls_ind"):
+                st.session_state["_auto_cls_ind"] = cls
+                st.rerun()
 
         name_error = None
         if not ind_name:
@@ -399,6 +442,10 @@ elif mode == "custom":
                 instance = _build_custom_indicator(code)  # ty: ignore[invalid-argument-type]
                 _save_indicator(instance, ind_name, cfg)
                 st.session_state.pop("_add_indicator_mode", None)
+                st.session_state.pop("_ind_custom_code_editor", None)
+                st.session_state.pop("_new_ind_custom_name", None)
+                st.session_state.pop("_new_custom_source", None)
+                st.session_state.pop("_auto_cls_ind", None)
                 st.rerun()
             except Exception as ex:  # noqa: BLE001
                 st.error(f"Failed to build indicator. {ex}")

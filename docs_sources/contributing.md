@@ -80,6 +80,7 @@ backtide/                           # Repository root
 │   │   │   ├── analysis.py         # Analysis page
 │   │   │   ├── download.py         # Download page
 │   │   │   ├── experiment.py       # Experiment page
+│   │   │   ├── home.py             # Home dashboard page
 │   │   │   ├── indicators.py       # Indicators page
 │   │   │   ├── results.py          # Results page
 │   │   │   ├── storage.py          # Storage page
@@ -107,7 +108,8 @@ backtide/                           # Repository root
 │       │   └── utils/              # Utility functions & HTTP helpers
 │       └── benches/                # Criterion.rs benchmarks
 │           ├── storage_bench.rs    # DuckDB storage throughput / latency benchmarks
-│           └── data_bench.rs       # Live API download latency benchmarks
+│           ├── data_bench.rs       # Live API download latency benchmarks
+│           └── backtest_bench.rs   # Core strategy runtime benchmarks
 │
 ├── tests/                          # Python unit tests (pytest)
 │   ├── __init__.py
@@ -117,12 +119,14 @@ backtide/                           # Repository root
 │   ├── test_cli.py
 │   ├── test_config.py
 │   ├── test_data.py
+│   ├── test_sizing.py
 │   ├── test_storage.py
 │   ├── test_ui.py
 │   └── test_utils.py
 │
 ├── scripts/                        # Developer scripts
-│   └── generate_stubs.py           # Regenerate .pyi stubs from the compiled extension
+│   ├── generate_stubs.py           # Regenerate .pyi stubs from the compiled extension
+│   └── run_cargo.py                # Helper wrapper around cargo invocations
 │
 ├── docs_sources/                   # MkDocs documentation sources
 │   ├── index.md
@@ -248,24 +252,23 @@ in `tox.ini` and uses the [tox-uv](https://github.com/tox-dev/tox-uv) plugin so 
 
 ### Available environments
 
-| Environment       | What it does                                                             |
-|-------------------|--------------------------------------------------------------------------|
-| `py311` … `py314` | Build the wheel (including Rust compilation) and run pytest on that Python version. |
-| `py311-min`       | Test against the **oldest compatible** versions of runtime dependencies. |
-| `cargo-test`      | Run `cargo test` on the Rust crate.                                      |
-| `pre-commit`      | Run all pre-commit hooks (`ruff`, `ruff-format`, `cargo fmt`, `cargo clippy`, …). |
-| `bench`           | Run Criterion.rs benchmarks (see [Benchmarks](#benchmarks)).             |
-| `docs`            | Build the MkDocs documentation in strict mode.                           |
+| Environment         | What it does                                                                        |
+|---------------------|-------------------------------------------------------------------------------------|
+| `py311` ... `py314` | Build the wheel (including Rust compilation) and run pytest on that Python version. |
+| `py314-min`         | Test against the **oldest compatible** versions of runtime dependencies.            |
+| `cargo-test`        | Run `cargo test` on the Rust crate.                                                 |
+| `pre-commit`        | Run all pre-commit hooks (`ruff`, `ruff-format`, `cargo fmt`, `cargo clippy`, …).   |
+| `bench`             | Run Criterion.rs benchmarks (see [Benchmarks]).                                     |
+| `docs`              | Build the MkDocs documentation in strict mode.                                      |
 
 <br><br>
 
 
 ## Benchmarks
 
-Performance of the Rust core is tracked with
-[Criterion.rs](https://github.com/bheisler/criterion.rs) benchmarks defined in
-`src/backtide_core/benches/`. Criterion generates HTML reports in
-`src/backtide_core/target/criterion/report/index.html`. Two benchmark suites
+Performance of the Rust core is tracked with [Criterion.rs](https://github.com/bheisler/criterion.rs) benchmarks defined
+in `src/backtide_core/benches/`. Criterion generates HTML reports in
+`src/backtide_core/target/criterion/report/index.html`. Three benchmark suites
 exist:
 
 ### Storage benchmarks
@@ -280,6 +283,11 @@ Measures end-to-end download latency for the data providers. These benchmarks hi
 real network endpoints, so results are inherently noisier and depend on network
 conditions.
 
+### Backtest benchmarks
+
+Measures runtime for representative built-in strategies over a fixed historical
+dataset to track the performance of the Rust engine as strategy logic evolves.
+
 ### Running benchmarks
 
 ```bash
@@ -291,6 +299,9 @@ cargo bench --manifest-path src/backtide_core/Cargo.toml --bench storage_bench
 
 # Data/download only
 cargo bench --manifest-path src/backtide_core/Cargo.toml --bench data_bench
+
+# Backtest only
+cargo bench --manifest-path src/backtide_core/Cargo.toml --bench backtest_bench
 ```
 
 Or via tox:
@@ -397,7 +408,7 @@ If your contribution requires a new **Python** library dependency:
 
 If your contribution requires a new **Rust** crate dependency:
 
-* Add it to `backtide_core/Cargo.toml` with an explicit version.
+* Add it to `src/backtide_core/Cargo.toml` with an explicit version.
 * Make sure `cargo clippy` and `cargo test` still pass.
 
 After submitting your pull request, GitHub will automatically run the tests
