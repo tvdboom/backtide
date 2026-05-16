@@ -86,7 +86,7 @@ def _clean_type(raw: str) -> str:
       - `str | [Currency]` → `str | Currency`
       - `list[str | [Instrument]]` → `list[str | Instrument]`
       - `dict[str | [InstrumentType], str | [Provider]] | None` → ...
-      - `int or None` → `int | None`
+      - `int | None` → `int | None`
       - `str, default="USD"` → `str`
     """
     # Strip default values:  "str, default=..."  → "str"

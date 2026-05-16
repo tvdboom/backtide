@@ -52,7 +52,7 @@ class BaseIndicator(ABC):
         -------
         np.ndarray | pd.Series | pd.DataFrame | pl.Series | pl.DataFrame
             Single series for one-output indicators, or 2d for multi-output
-            indicators (e.g., Bollinger Bands upper/lower).
+            indicators (e.g., Bollinger Bands).
 
         """
         ...

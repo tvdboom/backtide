@@ -236,7 +236,7 @@ impl Engine {
             .collect();
         info!("Building FX table from {} conversion leg(s).", leg_profiles.len());
 
-        let mut fx = FxTable::new(config.portfolio.base_currency);
+        let mut fx = FxTable::new(config.portfolio.base_currency.to_string());
         for leg in &leg_profiles {
             let leg_provider = match self.config.data.providers.get(&leg.instrument.instrument_type)
             {
@@ -267,29 +267,42 @@ impl Engine {
                 },
             };
 
-            // Parse base/quote currencies. Crypto legs may have a non-fiat
-            // base (e.g. BTC) — we can still record the series if both
-            // sides parse to a `Currency`, otherwise skip the leg.
-            let from_ccy = leg.instrument.base.as_deref().and_then(|s| s.parse::<Currency>().ok());
-            let to_ccy = leg.instrument.quote.parse::<Currency>().ok();
-            let (Some(from_ccy), Some(to_ccy)) = (from_ccy, to_ccy) else {
-                debug!(
-                    symbol=%leg.instrument.symbol,
-                    base=?leg.instrument.base,
-                    quote=%leg.instrument.quote,
-                    "Leg base/quote not a recognised Currency; skipping FX series.",
-                );
-                continue;
+            // Extract the base/quote identifiers. These can be fiat ISO
+            // codes (EUR, USD) or crypto tickers (ETH, USDT) — the
+            // string-based FxTable accepts both.
+            let from_str = match leg.instrument.base.as_deref() {
+                Some(s) if !s.is_empty() => s,
+                _ => {
+                    debug!(
+                        symbol=%leg.instrument.symbol,
+                        "Leg has no base currency; skipping FX series.",
+                    );
+                    continue;
+                },
             };
+            let to_str = &leg.instrument.quote;
 
             let series: Vec<(i64, f64)> =
                 bars.iter().map(|b| (b.open_ts as i64, b.close)).collect();
             debug!(
                 symbol=%leg.instrument.symbol,
-                from=%from_ccy, to=%to_ccy,
+                from=%from_str, to=%to_str,
                 "Adding FX series ({} points).", series.len()
             );
-            fx.add_series(from_ccy, to_ccy, series);
+            fx.add_series(from_str, to_str, series);
+        }
+
+        // ── Synthetic crypto/fiat peg ────────────────────────────────
+        //
+        // When the triangulation crypto stablecoin (e.g. USDT) is
+        // configured as pegged to a fiat currency (e.g. USD), add a
+        // synthetic 1:1 rate so the FxTable can bridge the crypto and
+        // fiat sides of the conversion graph.
+        let tri_crypto = &self.config.general.triangulation_crypto;
+        let tri_pegged = self.config.general.triangulation_crypto_pegged.to_string();
+        if !tri_crypto.is_empty() && *tri_crypto != tri_pegged {
+            fx.add_series(tri_crypto, &tri_pegged, vec![(0, 1.0)]);
+            info!("Added synthetic peg: {} -> {} at 1:1.", tri_crypto, tri_pegged);
         }
 
         // ── Phase 3a: load strategies (so we can collect their auto indicators) ──
@@ -1266,6 +1279,7 @@ fn run_one_strategy(
 
     // Initial portfolio: all initial cash in base currency.
     let base_ccy = cfg.portfolio.base_currency;
+    let base_ccy_str = base_ccy.to_string();
     let mut cash: HashMap<Currency, f64> = HashMap::new();
     cash.insert(base_ccy, cfg.portfolio.initial_cash as f64);
     // The benchmark strategy always starts with a clean slate (no pre-existing
@@ -1302,11 +1316,9 @@ fn run_one_strategy(
     let mut bars_since_conv: usize = 0;
 
     // Pre-compute instrument quote currency lookup.
-    let quote_ccy: HashMap<String, Currency> = profiles
+    let quote_ccy: HashMap<String, String> = profiles
         .iter()
-        .filter_map(|p| {
-            p.instrument.quote.parse::<Currency>().ok().map(|c| (p.instrument.symbol.clone(), c))
-        })
+        .map(|p| (p.instrument.symbol.clone(), p.instrument.quote.clone()))
         .collect();
     let instrument_types = profile_instrument_types(profiles);
 
@@ -1501,7 +1513,7 @@ fn run_one_strategy(
                 order_records.push(OrderRecord {
                     order: order.clone(),
                     timestamp: ts,
-                    status: "cancelled".into(),
+                    status: "canceled".into(),
                     fill_price: None,
                     reason: "cancel".into(),
                     commission: 0.0,
@@ -1544,7 +1556,7 @@ fn run_one_strategy(
                     order_records.push(OrderRecord {
                         order: order.clone(),
                         timestamp: ts,
-                        status: "cancelled".into(),
+                        status: "canceled".into(),
                         fill_price: None,
                         reason,
                         commission: 0.0,
@@ -1560,7 +1572,22 @@ fn run_one_strategy(
 
             let mut qty = order.quantity;
             let mut filled_qty = qty;
-            let mut notional = fill_px * qty.abs();
+
+            // Determine accounting currency for cash operations.
+            // For non-fiat quote currencies (e.g. ETH), convert fill
+            // amounts to the portfolio base currency so cash accounting
+            // stays in fiat.
+            let order_ccy_str = quote_ccy.get(&symbol).map(String::as_str).unwrap_or(&base_ccy_str);
+            let (order_ccy, nonfiat_fx_rate) = match order_ccy_str.parse::<Currency>() {
+                Ok(fiat) => (fiat, 1.0_f64),
+                Err(_) => {
+                    let rate = fx.rate(order_ccy_str, &base_ccy_str, ts).unwrap_or(1.0);
+                    (base_ccy, rate)
+                },
+            };
+            let acct_fill_px = fill_px * nonfiat_fx_rate;
+
+            let mut notional = acct_fill_px * qty.abs();
             let mut commission = match cfg.exchange.commission_type {
                 CommissionType::Percentage => notional * cfg.exchange.commission_pct / 100.0,
                 CommissionType::Fixed => cfg.exchange.commission_fixed,
@@ -1568,8 +1595,6 @@ fn run_one_strategy(
                     notional * cfg.exchange.commission_pct / 100.0 + cfg.exchange.commission_fixed
                 },
             };
-
-            let order_ccy = quote_ccy.get(&symbol).copied().unwrap_or(base_ccy);
 
             // ── Leverage / position-size pre-check ───────────────────
             //
@@ -1580,10 +1605,24 @@ fn run_one_strategy(
             // all when `allow_margin` is disabled.
             {
                 let equity_base = portfolio_equity_in_currency(
-                    &cash, &positions, aligned, bar_index, &quote_ccy, base_ccy, base_ccy, fx, ts,
+                    &cash,
+                    &positions,
+                    aligned,
+                    bar_index,
+                    &quote_ccy,
+                    &base_ccy_str,
+                    &base_ccy_str,
+                    fx,
+                    ts,
                 );
                 let gross_base = gross_notional_in_currency(
-                    &positions, aligned, bar_index, &quote_ccy, base_ccy, fx, ts,
+                    &positions,
+                    aligned,
+                    bar_index,
+                    &quote_ccy,
+                    &base_ccy_str,
+                    fx,
+                    ts,
                 );
                 let current_qty = positions.get(&symbol).copied().unwrap_or(0.0);
                 let current_pos_base = if current_qty.abs() > 1e-12 {
@@ -1593,8 +1632,8 @@ fn run_one_strategy(
                         .map(|b| b.close)
                         .unwrap_or(fill_px);
                     let value = current_qty.abs() * bar_close;
-                    let ccy = quote_ccy.get(&symbol).copied().unwrap_or(base_ccy);
-                    fx.convert(value, ccy, base_ccy, ts).unwrap_or(value)
+                    let ccy = quote_ccy.get(&symbol).map(String::as_str).unwrap_or(&base_ccy_str);
+                    fx.convert(value, ccy, &base_ccy_str, ts).unwrap_or(value)
                 } else {
                     0.0
                 };
@@ -1602,9 +1641,9 @@ fn run_one_strategy(
                     cfg,
                     &symbol,
                     qty,
-                    fill_px,
-                    order_ccy,
-                    base_ccy,
+                    acct_fill_px,
+                    &order_ccy.to_string(),
+                    &base_ccy_str,
                     equity_base,
                     gross_base,
                     current_qty,
@@ -1648,7 +1687,7 @@ fn run_one_strategy(
                     qty = new_qty_signed;
                     order.quantity = new_qty_signed;
                     filled_qty = new_qty_signed;
-                    notional = fill_px * abs_after;
+                    notional = acct_fill_px * abs_after;
                     commission = match cfg.exchange.commission_type {
                         CommissionType::Percentage => {
                             notional * cfg.exchange.commission_pct / 100.0
@@ -1718,7 +1757,9 @@ fn run_one_strategy(
                     let avail: f64 = cash
                         .iter()
                         .filter(|(_, v)| v.is_finite() && **v > 0.0)
-                        .filter_map(|(ccy, v)| fx.convert(*v, *ccy, order_ccy, ts))
+                        .filter_map(|(ccy, v)| {
+                            fx.convert(*v, &ccy.to_string(), &order_ccy.to_string(), ts)
+                        })
                         .sum();
                     let pct_part = match cfg.exchange.commission_type {
                         CommissionType::Percentage | CommissionType::PercentagePlusFixed => {
@@ -1733,10 +1774,10 @@ fn run_one_strategy(
                         CommissionType::Percentage => 0.0,
                     };
                     // Solve for the largest quantity q such that
-                    //   fill_px * q * (1 + pct_part) + fixed_part <= avail.
+                    //   acct_fill_px * q * (1 + pct_part) + fixed_part <= avail.
                     // Non-crypto instruments must settle whole units, so
                     // floor the cash-fit quantity before retrying the debit.
-                    let denom = fill_px * (1.0 + pct_part);
+                    let denom = acct_fill_px * (1.0 + pct_part);
                     let mut max_qty: f64 = if denom > 0.0 && avail > fixed_part {
                         ((avail - fixed_part) / denom).max(0.0)
                     } else {
@@ -1767,7 +1808,7 @@ fn run_one_strategy(
                         continue;
                     }
                     filled_qty = max_qty.min(qty);
-                    notional = fill_px * filled_qty;
+                    notional = acct_fill_px * filled_qty;
                     commission = match cfg.exchange.commission_type {
                         CommissionType::Percentage => {
                             notional * cfg.exchange.commission_pct / 100.0
@@ -1800,7 +1841,7 @@ fn run_one_strategy(
                     };
                 }
                 *positions.entry(symbol.clone()).or_insert(0.0) += filled_qty;
-                update_open_trade_buy(&mut open_trades, &symbol, ts, filled_qty, fill_px);
+                update_open_trade_buy(&mut open_trades, &symbol, ts, filled_qty, acct_fill_px);
             } else if qty < 0.0 {
                 let abs_qty = qty.abs();
                 let cur = *positions.get(&symbol).unwrap_or(&0.0);
@@ -1843,7 +1884,7 @@ fn run_one_strategy(
                     &symbol,
                     ts,
                     abs_qty,
-                    fill_px,
+                    acct_fill_px,
                     commission,
                 )
                 .map(|t| {
@@ -1971,7 +2012,7 @@ fn run_one_strategy(
                             order_records.push(OrderRecord {
                                 order: o.clone(),
                                 timestamp: ts,
-                                status: "cancelled".into(),
+                                status: "canceled".into(),
                                 fill_price: None,
                                 reason: "exclusive_orders".into(),
                                 commission: 0.0,
@@ -1990,14 +2031,24 @@ fn run_one_strategy(
                     // quantity and the sizer field is cleared.
                     for o in &mut ords {
                         if let Some(sizer_slot) = o.sizer.take() {
-                            let order_ccy = quote_ccy.get(&o.symbol).copied().unwrap_or(base_ccy);
+                            let order_ccy_str_sizer = quote_ccy
+                                .get(&o.symbol)
+                                .map(String::as_str)
+                                .unwrap_or(&base_ccy_str);
                             // Compute mark-to-market equity in the same currency
                             // as the symbol's price. Sizers divide equity/risk by
                             // price-like inputs, so `equity`, `price`,
                             // `stop_distance`, and `atr` must share a currency.
                             let eq = portfolio_equity_in_currency(
-                                &cash, &positions, aligned, bar_index, &quote_ccy, base_ccy,
-                                order_ccy, fx, ts,
+                                &cash,
+                                &positions,
+                                aligned,
+                                bar_index,
+                                &quote_ccy,
+                                &base_ccy_str,
+                                order_ccy_str_sizer,
+                                fx,
+                                ts,
                             );
 
                             // Get the current close price for this symbol.
@@ -2149,7 +2200,7 @@ fn run_one_strategy(
         // FX coverage as a flat segment rather than a NaN.
         let mut equity = 0.0;
         for (ccy, amount) in &cash {
-            equity += fx.convert(*amount, *ccy, base_ccy, ts).unwrap_or(*amount);
+            equity += fx.convert(*amount, &ccy.to_string(), &base_ccy_str, ts).unwrap_or(*amount);
         }
         for (sym, qty) in &positions {
             if qty.abs() < 1e-12 {
@@ -2157,8 +2208,8 @@ fn run_one_strategy(
             }
             if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
                 let value = *qty * b.close;
-                let pos_ccy = quote_ccy.get(sym).copied().unwrap_or(base_ccy);
-                equity += fx.convert(value, pos_ccy, base_ccy, ts).unwrap_or(value);
+                let pos_ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(&base_ccy_str);
+                equity += fx.convert(value, pos_ccy, &base_ccy_str, ts).unwrap_or(value);
             }
         }
         if equity > peak_equity {
@@ -2195,7 +2246,13 @@ fn run_one_strategy(
         // each. When `raise_on_margin_limit` is set, also surface the
         // event as a run error.
         let gross_base = gross_notional_in_currency(
-            &positions, aligned, bar_index, &quote_ccy, base_ccy, fx, ts,
+            &positions,
+            aligned,
+            bar_index,
+            &quote_ccy,
+            &base_ccy_str,
+            fx,
+            ts,
         );
         if let Some(reason) = check_maintenance_margin(cfg, equity, gross_base) {
             warn!(strategy=%name, "{reason}");
@@ -2213,8 +2270,16 @@ fn run_one_strategy(
                     Some(b) => b.close,
                     None => continue,
                 };
-                let pos_ccy = quote_ccy.get(&sym).copied().unwrap_or(base_ccy);
+                let pos_ccy_str = quote_ccy.get(&sym).map(String::as_str).unwrap_or(&base_ccy_str);
+                let pos_ccy = pos_ccy_str.parse::<Currency>().unwrap_or(base_ccy);
                 let notional = qty.abs() * close;
+                // For non-fiat quotes, convert the notional to the fiat
+                // accounting currency so cash operations stay fiat-only.
+                let notional_fiat = if pos_ccy_str.parse::<Currency>().is_err() {
+                    fx.convert(notional, pos_ccy_str, &base_ccy_str, ts).unwrap_or(notional)
+                } else {
+                    notional
+                };
                 let synth = Order {
                     id: format!("margin-call-{}", &sym),
                     symbol: sym.clone(),
@@ -2226,7 +2291,7 @@ fn run_one_strategy(
                 };
                 if qty > 0.0 {
                     // Long: credit cash with proceeds.
-                    *cash.entry(pos_ccy).or_insert(0.0) += notional;
+                    *cash.entry(pos_ccy).or_insert(0.0) += notional_fiat;
                     if let Some(t) =
                         close_open_trade_sell(&mut open_trades, &sym, ts, qty, close, 0.0)
                     {
@@ -2235,7 +2300,7 @@ fn run_one_strategy(
                 } else {
                     // Short: debit cash (or any available bucket) to buy
                     // back the shares.
-                    let _ = try_debit(&mut cash, pos_ccy, notional, base_ccy, fx, ts);
+                    let _ = try_debit(&mut cash, pos_ccy, notional_fiat, base_ccy, fx, ts);
                     open_trades.remove(&sym);
                 }
                 positions.insert(sym.clone(), 0.0);
@@ -2303,15 +2368,15 @@ fn portfolio_equity_in_currency(
     positions: &HashMap<String, f64>,
     aligned: &HashMap<String, Vec<Option<Bar>>>,
     bar_index: usize,
-    quote_ccy: &HashMap<String, Currency>,
-    base_ccy: Currency,
-    target_ccy: Currency,
+    quote_ccy: &HashMap<String, String>,
+    base_ccy: &str,
+    target_ccy: &str,
     fx: &FxTable,
     ts: i64,
 ) -> f64 {
     let mut equity = 0.0_f64;
     for (ccy, amount) in cash {
-        equity += fx.convert(*amount, *ccy, target_ccy, ts).unwrap_or(*amount);
+        equity += fx.convert(*amount, &ccy.to_string(), target_ccy, ts).unwrap_or(*amount);
     }
     for (sym, qty) in positions {
         if qty.abs() < 1e-12 {
@@ -2319,7 +2384,7 @@ fn portfolio_equity_in_currency(
         }
         if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
             let value = *qty * b.close;
-            let pos_ccy = quote_ccy.get(sym).copied().unwrap_or(base_ccy);
+            let pos_ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(base_ccy);
             equity += fx.convert(value, pos_ccy, target_ccy, ts).unwrap_or(value);
         }
     }
@@ -2338,7 +2403,7 @@ fn portfolio_equity_in_currency(
 //     bookkeeping (cash, positions, commissions, …).
 //   * `Pending`             — the order does not fill this bar; keep it open.
 //   * `Cancel { .. }`       — the order cannot make sense (e.g.
-//     SettlePosition with no current position); record as cancelled.
+//     SettlePosition with no current position); record as canceled.
 //
 // Stop-into-limit variants mutate `order` in place: when the stop fires
 // we replace `order_type` with `OrderType::Limit` and copy
@@ -2360,7 +2425,7 @@ enum TriggerOutcome {
     },
     /// The order does not fill this bar.
     Pending,
-    /// The order is invalid against current state and should be cancelled.
+    /// The order is invalid against current state and should be canceled.
     Cancel {
         reason: String,
     },
@@ -2679,7 +2744,7 @@ fn try_debit(
     } else {
         *cash.get(&base).unwrap_or(&0.0)
     };
-    let needed_base = match fx.rate(ccy, base, ts) {
+    let needed_base = match fx.rate(&ccy.to_string(), &base.to_string(), ts) {
         Some(r) if r > 0.0 => remaining * r,
         _ => f64::INFINITY,
     };
@@ -2708,7 +2773,7 @@ fn try_debit(
     if needed_base.is_finite() {
         staged_base_drain = staged_base_drain.min(needed_base);
         let covered_in_ccy = if staged_base_drain > 0.0 {
-            match fx.rate(base, ccy, ts) {
+            match fx.rate(&base.to_string(), &ccy.to_string(), ts) {
                 Some(r) if r > 0.0 => staged_base_drain * r,
                 _ => 0.0,
             }
@@ -2724,7 +2789,7 @@ fn try_debit(
         if remaining <= 0.0 {
             break;
         }
-        let r = match fx.rate(other_ccy, ccy, ts) {
+        let r = match fx.rate(&other_ccy.to_string(), &ccy.to_string(), ts) {
             Some(r) if r > 0.0 => r,
             _ => continue,
         };
@@ -2777,7 +2842,7 @@ fn sweep_foreign_to_base(
             Some(v) if v.is_finite() && v.abs() > 0.0 => v,
             _ => continue,
         };
-        let in_base = match fx.convert(amount, ccy, base, ts) {
+        let in_base = match fx.convert(amount, &ccy.to_string(), &base.to_string(), ts) {
             Some(v) => v,
             None => continue,
         };
@@ -2997,8 +3062,8 @@ fn gross_notional_in_currency(
     positions: &HashMap<String, f64>,
     aligned: &HashMap<String, Vec<Option<Bar>>>,
     bar_index: usize,
-    quote_ccy: &HashMap<String, Currency>,
-    target_ccy: Currency,
+    quote_ccy: &HashMap<String, String>,
+    target_ccy: &str,
     fx: &FxTable,
     ts: i64,
 ) -> f64 {
@@ -3009,7 +3074,7 @@ fn gross_notional_in_currency(
         }
         if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
             let value = qty.abs() * b.close;
-            let ccy = quote_ccy.get(sym).copied().unwrap_or(target_ccy);
+            let ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(target_ccy);
             total += fx.convert(value, ccy, target_ccy, ts).unwrap_or(value);
         }
     }
@@ -3038,8 +3103,8 @@ fn check_order_against_limits(
     symbol: &str,
     qty: f64,
     fill_px: f64,
-    order_ccy: Currency,
-    base_ccy: Currency,
+    order_ccy: &str,
+    base_ccy: &str,
     equity_base: f64,
     gross_base: f64,
     current_qty: f64,
@@ -3193,7 +3258,7 @@ fn accrue_margin_costs(
     positions: &HashMap<String, f64>,
     aligned: &HashMap<String, Vec<Option<Bar>>>,
     bar_index: usize,
-    quote_ccy: &HashMap<String, Currency>,
+    quote_ccy: &HashMap<String, String>,
     base_ccy: Currency,
     fx: &FxTable,
     ts: i64,
@@ -3211,7 +3276,8 @@ fn accrue_margin_costs(
         for (ccy, amt) in cash.iter() {
             if *amt < 0.0 {
                 let v = -*amt;
-                borrowed_base += fx.convert(v, *ccy, base_ccy, ts).unwrap_or(v);
+                borrowed_base +=
+                    fx.convert(v, &ccy.to_string(), &base_ccy.to_string(), ts).unwrap_or(v);
             }
         }
         if borrowed_base > 0.0 {
@@ -3229,8 +3295,9 @@ fn accrue_margin_costs(
             }
             if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
                 let v = qty.abs() * b.close;
-                let ccy = quote_ccy.get(sym).copied().unwrap_or(base_ccy);
-                shorts_value_base += fx.convert(v, ccy, base_ccy, ts).unwrap_or(v);
+                let base_str = base_ccy.to_string();
+                let ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(&base_str);
+                shorts_value_base += fx.convert(v, ccy, &base_str, ts).unwrap_or(v);
             }
         }
         if shorts_value_base > 0.0 {
@@ -3329,9 +3396,9 @@ mod tests {
 
         let cash = HashMap::from([(Currency::EUR, 1_000.0)]);
         let positions = HashMap::from([("AAPL".to_owned(), 2.0)]);
-        let quote_ccy = HashMap::from([("AAPL".to_owned(), Currency::USD)]);
-        let mut fx = FxTable::new(Currency::EUR);
-        fx.add_series(Currency::EUR, Currency::USD, vec![(1_700_000_000, 1.20)]);
+        let quote_ccy = HashMap::from([("AAPL".to_owned(), "USD".to_owned())]);
+        let mut fx = FxTable::new("EUR");
+        fx.add_series("EUR", "USD", vec![(1_700_000_000, 1.20)]);
 
         let equity_usd = portfolio_equity_in_currency(
             &cash,
@@ -3339,8 +3406,8 @@ mod tests {
             &aligned,
             0,
             &quote_ccy,
-            Currency::EUR,
-            Currency::USD,
+            "EUR",
+            "USD",
             &fx,
             1_700_000_000,
         );
@@ -3352,8 +3419,8 @@ mod tests {
             &aligned,
             0,
             &quote_ccy,
-            Currency::EUR,
-            Currency::EUR,
+            "EUR",
+            "EUR",
             &fx,
             1_700_000_000,
         );
@@ -3386,6 +3453,7 @@ mod tests {
             .collect();
 
         let base_ccy = cfg.portfolio.base_currency;
+        let base_ccy_str = base_ccy.to_string();
         let mut cash: HashMap<Currency, f64> = HashMap::new();
         cash.insert(base_ccy, cfg.portfolio.initial_cash as f64);
         let mut positions: HashMap<String, f64> = cfg.portfolio.starting_positions.clone();
@@ -3398,15 +3466,9 @@ mod tests {
         let mut peak = cfg.portfolio.initial_cash as f64;
         let mut run_error: Option<String> = None;
 
-        let quote_ccy: HashMap<String, Currency> = profiles
+        let quote_ccy: HashMap<String, String> = profiles
             .iter()
-            .filter_map(|p| {
-                p.instrument
-                    .quote
-                    .parse::<Currency>()
-                    .ok()
-                    .map(|c| (p.instrument.symbol.clone(), c))
-            })
+            .map(|p| (p.instrument.symbol.clone(), p.instrument.quote.clone()))
             .collect();
         let instrument_types = profile_instrument_types(profiles);
 
@@ -3415,7 +3477,7 @@ mod tests {
         // Empty FX table — tests run single-currency, no leg bars. The
         // FX-aware `try_debit` falls back to base-only debits when the
         // table has no rates, exactly matching the legacy behaviour.
-        let fx = FxTable::new(base_ccy);
+        let fx = FxTable::new(base_ccy.to_string());
 
         for bar_index in 0..total_bars {
             let ts = timeline[bar_index];
@@ -3486,7 +3548,7 @@ mod tests {
                     order_records.push(OrderRecord {
                         order: order.clone(),
                         timestamp: ts,
-                        status: "cancelled".into(),
+                        status: "canceled".into(),
                         fill_price: None,
                         reason: "cancel".into(),
                         commission: 0.0,
@@ -3528,7 +3590,7 @@ mod tests {
                         order_records.push(OrderRecord {
                             order: order.clone(),
                             timestamp: ts,
-                            status: "cancelled".into(),
+                            status: "canceled".into(),
                             fill_price: None,
                             reason,
                             commission: 0.0,
@@ -3543,7 +3605,20 @@ mod tests {
 
                 let qty = order.quantity;
                 let mut filled_qty = qty;
-                let mut notional = fill_px * qty.abs();
+
+                // Accounting currency for cash operations (same as main loop).
+                let order_ccy_str =
+                    quote_ccy.get(&order.symbol).map(String::as_str).unwrap_or(&base_ccy_str);
+                let (order_ccy, nonfiat_fx_rate) = match order_ccy_str.parse::<Currency>() {
+                    Ok(fiat) => (fiat, 1.0_f64),
+                    Err(_) => {
+                        let rate = fx.rate(order_ccy_str, &base_ccy_str, ts).unwrap_or(1.0);
+                        (base_ccy, rate)
+                    },
+                };
+                let acct_fill_px = fill_px * nonfiat_fx_rate;
+
+                let mut notional = acct_fill_px * qty.abs();
                 let mut commission = match cfg.exchange.commission_type {
                     CommissionType::Percentage => notional * cfg.exchange.commission_pct / 100.0,
                     CommissionType::Fixed => cfg.exchange.commission_fixed,
@@ -3552,7 +3627,6 @@ mod tests {
                             + cfg.exchange.commission_fixed
                     },
                 };
-                let order_ccy = quote_ccy.get(&order.symbol).copied().unwrap_or(base_ccy);
                 let mut fill_pnl: Option<f64> = None;
 
                 if qty > 0.0 {
@@ -3572,7 +3646,7 @@ mod tests {
                             },
                             CommissionType::Percentage => 0.0,
                         };
-                        let denom = fill_px * (1.0 + pct_part);
+                        let denom = acct_fill_px * (1.0 + pct_part);
                         let mut max_qty: f64 = if denom > 0.0 && avail > fixed_part {
                             ((avail - fixed_part) / denom).max(0.0)
                         } else {
@@ -3599,7 +3673,7 @@ mod tests {
                             continue;
                         }
                         filled_qty = max_qty.min(qty);
-                        notional = fill_px * filled_qty;
+                        notional = acct_fill_px * filled_qty;
                         commission = match cfg.exchange.commission_type {
                             CommissionType::Percentage => {
                                 notional * cfg.exchange.commission_pct / 100.0
@@ -3630,7 +3704,7 @@ mod tests {
                         };
                     }
                     *positions.entry(symbol.clone()).or_insert(0.0) += filled_qty;
-                    update_open_trade_buy(&mut open_trades, &symbol, ts, filled_qty, fill_px);
+                    update_open_trade_buy(&mut open_trades, &symbol, ts, filled_qty, acct_fill_px);
                 } else if qty < 0.0 {
                     let abs_qty = qty.abs();
                     let cur = *positions.get(&symbol).unwrap_or(&0.0);
@@ -3670,7 +3744,7 @@ mod tests {
                         &symbol,
                         ts,
                         abs_qty,
-                        fill_px,
+                        acct_fill_px,
                         commission,
                     )
                     .map(|t| {
@@ -3700,8 +3774,8 @@ mod tests {
             for (sym, qty) in &positions {
                 if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
                     let value = *qty * b.close;
-                    let pos_ccy = quote_ccy.get(sym).copied().unwrap_or(base_ccy);
-                    equity += fx.convert(value, pos_ccy, base_ccy, ts).unwrap_or(value);
+                    let pos_ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(&base_ccy_str);
+                    equity += fx.convert(value, pos_ccy, &base_ccy_str, ts).unwrap_or(value);
                 }
             }
             if equity > peak {
@@ -3855,8 +3929,8 @@ mod tests {
             &[mk_profile("AAPL", "USD")],
             vec![(0, cancel), (0, buy)],
         );
-        let cancelled = r.orders.iter().filter(|o| o.status == "cancelled").count();
-        assert!(cancelled >= 1);
+        let canceled = r.orders.iter().filter(|o| o.status == "canceled").count();
+        assert!(canceled >= 1);
     }
 
     #[test]
@@ -4697,7 +4771,7 @@ mod tests {
     }
 
     #[test]
-    fn settle_position_with_no_position_is_cancelled() {
+    fn settle_position_with_no_position_is_canceled() {
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.allowed_order_types =
             vec![OrderType::Market, OrderType::SettlePosition, OrderType::Cancel];
@@ -4712,7 +4786,7 @@ mod tests {
             sizer: None,
         };
         let r = run_with_orders(&cfg, &aligned, &[mk_profile("AAPL", "USD")], vec![(0, settle)]);
-        assert_eq!(r.orders[0].status, "cancelled");
+        assert_eq!(r.orders[0].status, "canceled");
         assert_eq!(r.orders[0].reason, "no position to settle");
     }
 
@@ -5063,7 +5137,7 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────
 
     fn empty_fx(base: Currency) -> FxTable {
-        FxTable::new(base)
+        FxTable::new(base.to_string())
     }
 
     fn dummy_aligned(symbol: &str, close: f64) -> HashMap<String, Vec<Option<Bar>>> {
@@ -5108,23 +5182,8 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.max_position_size = 50; // 50 % of equity per symbol
         let fx = empty_fx(Currency::USD);
-        // Equity = 10_000, max per-pos notional = 5_000.
-        // Order = 100 shares @ $60 = $6_000 → exceeds the cap, but
-        // limit checks now shrink (instead of reject) so the order
-        // returns the largest qty that fits: $5_000 / $60 ≈ 83.33.
         let qty = check_order_against_limits(
-            &cfg,
-            "AAPL",
-            100.0,
-            60.0,
-            Currency::USD,
-            Currency::USD,
-            10_000.0,
-            0.0,
-            0.0,
-            0.0,
-            &fx,
-            0,
+            &cfg, "AAPL", 100.0, 60.0, "USD", "USD", 10_000.0, 0.0, 0.0, 0.0, &fx, 0,
         )
         .expect("limit check should shrink, not reject");
         assert!((qty - (5_000.0 / 60.0)).abs() < 1e-9, "got {qty}");
@@ -5135,21 +5194,8 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.max_position_size = 50;
         let fx = empty_fx(Currency::USD);
-        // Equity = 10_000, cap = 5_000. Current exposure already at 5_000
-        // → zero headroom, so any new buy is fully rejected.
         let err = check_order_against_limits(
-            &cfg,
-            "AAPL",
-            1.0,
-            60.0,
-            Currency::USD,
-            Currency::USD,
-            10_000.0,
-            5_000.0,
-            50.0,
-            5_000.0,
-            &fx,
-            0,
+            &cfg, "AAPL", 1.0, 60.0, "USD", "USD", 10_000.0, 5_000.0, 50.0, 5_000.0, &fx, 0,
         )
         .expect_err("zero headroom must reject");
         assert_eq!(err.0, LimitViolation::PositionSize);
@@ -5161,20 +5207,8 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.exchange.max_position_size = 50;
         let fx = empty_fx(Currency::USD);
-        // Order = 50 shares @ $60 = $3_000 ≤ $5_000 cap.
         let qty = check_order_against_limits(
-            &cfg,
-            "AAPL",
-            50.0,
-            60.0,
-            Currency::USD,
-            Currency::USD,
-            10_000.0,
-            0.0,
-            0.0,
-            0.0,
-            &fx,
-            0,
+            &cfg, "AAPL", 50.0, 60.0, "USD", "USD", 10_000.0, 0.0, 0.0, 0.0, &fx, 0,
         )
         .expect("within cap");
         assert_eq!(qty, 50.0);
@@ -5186,21 +5220,8 @@ mod tests {
         cfg.exchange.allow_margin = false;
         cfg.exchange.max_position_size = 0; // disable per-symbol cap
         let fx = empty_fx(Currency::USD);
-        // Equity = 1_000; gross already = 1_000 (fully invested).
-        // Another order @ $100 = $100 → would push gross past equity × 1.0.
         let err = check_order_against_limits(
-            &cfg,
-            "AAPL",
-            1.0,
-            100.0,
-            Currency::USD,
-            Currency::USD,
-            1_000.0,
-            1_000.0,
-            0.0,
-            0.0,
-            &fx,
-            0,
+            &cfg, "AAPL", 1.0, 100.0, "USD", "USD", 1_000.0, 1_000.0, 0.0, 0.0, &fx, 0,
         )
         .expect_err("should reject borrow when margin disabled");
         assert_eq!(err.0, LimitViolation::Margin);
@@ -5215,20 +5236,8 @@ mod tests {
         cfg.exchange.initial_margin = 10.0; // would be 10x but max_leverage wins
         cfg.exchange.max_position_size = 0;
         let fx = empty_fx(Currency::USD);
-        // 3x of $1_000 equity = $3_000 cap. Gross 1_000 + new 1_500 = 2_500.
         check_order_against_limits(
-            &cfg,
-            "AAPL",
-            15.0,
-            100.0,
-            Currency::USD,
-            Currency::USD,
-            1_000.0,
-            1_000.0,
-            0.0,
-            0.0,
-            &fx,
-            0,
+            &cfg, "AAPL", 15.0, 100.0, "USD", "USD", 1_000.0, 1_000.0, 0.0, 0.0, &fx, 0,
         )
         .expect("within 3x leverage");
     }
@@ -5238,18 +5247,7 @@ mod tests {
         let cfg = mk_cfg("AAPL");
         let fx = empty_fx(Currency::USD);
         let err = check_order_against_limits(
-            &cfg,
-            "AAPL",
-            1.0,
-            100.0,
-            Currency::USD,
-            Currency::USD,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            &fx,
-            0,
+            &cfg, "AAPL", 1.0, 100.0, "USD", "USD", 0.0, 0.0, 0.0, 0.0, &fx, 0,
         )
         .expect_err("non-positive equity");
         assert_eq!(err.0, LimitViolation::Margin);
@@ -5262,25 +5260,11 @@ mod tests {
         cfg.exchange.max_position_size = 100;
         cfg.exchange.allow_margin = true;
         cfg.exchange.max_leverage = 1.0;
-        let mut fx = FxTable::new(Currency::USD);
+        let mut fx = FxTable::new("USD");
         // 1 GBP = 1.30 USD
-        fx.add_series(Currency::GBP, Currency::USD, vec![(0, 1.30)]);
-        // Equity = 1_000 USD. Order = 100 shares @ £10 = £1_000 = $1_300 →
-        // above 1x leverage. The check now shrinks the qty to whatever
-        // fits inside $1_000 of headroom: ≈ £769.23 / £10 = 76.92 shares.
+        fx.add_series("GBP", "USD", vec![(0, 1.30)]);
         let qty = check_order_against_limits(
-            &cfg,
-            "VOD.L",
-            100.0,
-            10.0,
-            Currency::GBP,
-            Currency::USD,
-            1_000.0,
-            0.0,
-            0.0,
-            0.0,
-            &fx,
-            0,
+            &cfg, "VOD.L", 100.0, 10.0, "GBP", "USD", 1_000.0, 0.0, 0.0, 0.0, &fx, 0,
         )
         .expect("limit check should shrink, not reject");
         let expected = (1_000.0_f64 / 1.30_f64) / 10.0;
@@ -5295,18 +5279,7 @@ mod tests {
         let fx = empty_fx(Currency::USD);
 
         let qty = check_order_against_limits(
-            &cfg,
-            "AAPL",
-            -1.0,
-            100.0,
-            Currency::USD,
-            Currency::USD,
-            1_000.0,
-            1_000.0,
-            10.0,
-            1_000.0,
-            &fx,
-            0,
+            &cfg, "AAPL", -1.0, 100.0, "USD", "USD", 1_000.0, 1_000.0, 10.0, 1_000.0, &fx, 0,
         )
         .expect("reducing exposure should be allowed at the cap");
         assert_eq!(qty, -1.0);
@@ -5355,10 +5328,9 @@ mod tests {
         let aligned = dummy_aligned("AAPL", 50.0);
         let mut positions = HashMap::new();
         positions.insert("AAPL".to_owned(), -10.0);
-        let quote_ccy = HashMap::from([("AAPL".to_owned(), Currency::USD)]);
+        let quote_ccy = HashMap::from([("AAPL".to_owned(), "USD".to_owned())]);
         let fx = empty_fx(Currency::USD);
-        let gross =
-            gross_notional_in_currency(&positions, &aligned, 0, &quote_ccy, Currency::USD, &fx, 0);
+        let gross = gross_notional_in_currency(&positions, &aligned, 0, &quote_ccy, "USD", &fx, 0);
         assert!((gross - 500.0).abs() < 1e-12);
     }
 
@@ -5367,11 +5339,10 @@ mod tests {
         let aligned = dummy_aligned("VOD.L", 100.0);
         let mut positions = HashMap::new();
         positions.insert("VOD.L".to_owned(), 10.0);
-        let quote_ccy = HashMap::from([("VOD.L".to_owned(), Currency::GBP)]);
-        let mut fx = FxTable::new(Currency::USD);
-        fx.add_series(Currency::GBP, Currency::USD, vec![(0, 1.30)]);
-        let gross =
-            gross_notional_in_currency(&positions, &aligned, 0, &quote_ccy, Currency::USD, &fx, 0);
+        let quote_ccy = HashMap::from([("VOD.L".to_owned(), "GBP".to_owned())]);
+        let mut fx = FxTable::new("USD");
+        fx.add_series("GBP", "USD", vec![(0, 1.30)]);
+        let gross = gross_notional_in_currency(&positions, &aligned, 0, &quote_ccy, "USD", &fx, 0);
         // 10 × 100 GBP × 1.30 = 1_300 USD.
         assert!((gross - 1_300.0).abs() < 1e-9);
     }
@@ -5413,7 +5384,7 @@ mod tests {
         let mut positions = HashMap::new();
         positions.insert("AAPL".to_owned(), -10.0);
         let aligned = dummy_aligned("AAPL", 100.0);
-        let quote_ccy = HashMap::from([("AAPL".to_owned(), Currency::USD)]);
+        let quote_ccy = HashMap::from([("AAPL".to_owned(), "USD".to_owned())]);
         let fx = empty_fx(Currency::USD);
         // Short worth $1_000; 1 day at 0.1 % ≈ $1.00 charge.
         accrue_margin_costs(
@@ -5508,9 +5479,9 @@ mod tests {
     fn try_debit_falls_back_to_base_via_fx() {
         let mut cash = HashMap::new();
         cash.insert(Currency::USD, 1_300.0);
-        let mut fx = FxTable::new(Currency::USD);
+        let mut fx = FxTable::new("USD");
         // 1 GBP = 1.30 USD → debit £1_000 = $1_300 from base.
-        fx.add_series(Currency::GBP, Currency::USD, vec![(0, 1.30)]);
+        fx.add_series("GBP", "USD", vec![(0, 1.30)]);
         assert!(try_debit(&mut cash, Currency::GBP, 1_000.0, Currency::USD, &fx, 0));
         let bal = cash.get(&Currency::USD).copied().unwrap_or(0.0);
         assert!(bal.abs() < 1e-6, "expected USD drained to 0, got {bal}");
@@ -5529,8 +5500,8 @@ mod tests {
         let mut cash = HashMap::new();
         cash.insert(Currency::USD, 100.0);
         cash.insert(Currency::EUR, 50.0);
-        let mut fx = FxTable::new(Currency::USD);
-        fx.add_series(Currency::EUR, Currency::USD, vec![(0, 1.10)]);
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
         sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, None);
         assert!(!cash.contains_key(&Currency::EUR));
         // 100 + 50 × 1.10 = 155.
@@ -5542,8 +5513,8 @@ mod tests {
         let mut cash = HashMap::new();
         cash.insert(Currency::USD, 100.0);
         cash.insert(Currency::EUR, 5.0);
-        let mut fx = FxTable::new(Currency::USD);
-        fx.add_series(Currency::EUR, Currency::USD, vec![(0, 1.10)]);
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
         // Threshold 10 USD; EUR balance worth ~5.50 USD → stays.
         sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, Some(10.0));
         assert!(cash.contains_key(&Currency::EUR));
@@ -5554,7 +5525,7 @@ mod tests {
         let mut cash = HashMap::new();
         cash.insert(Currency::USD, 100.0);
         cash.insert(Currency::JPY, 1_000.0);
-        let fx = FxTable::new(Currency::USD); // no rates
+        let fx = FxTable::new("USD"); // no rates
         sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, None);
         // JPY bucket stays untouched.
         assert!(cash.contains_key(&Currency::JPY));
@@ -5978,5 +5949,417 @@ mod tests {
             period_bucket(ts1, ConversionPeriod::Week),
             period_bucket(ts2, ConversionPeriod::Week)
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Extra coverage — small helpers and conversion-flow edge cases
+    // ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_iso_date_to_ts_y2k_boundary() {
+        // 2000-01-01 UTC = 946_684_800
+        assert_eq!(parse_iso_date_to_ts("2000-01-01").unwrap(), 946_684_800);
+    }
+
+    #[test]
+    fn parse_iso_date_to_ts_with_time_is_invalid() {
+        // The function only accepts YYYY-MM-DD; richer ISO 8601 input should
+        // be rejected to keep callers from accidentally passing timestamps.
+        assert!(parse_iso_date_to_ts("2024-01-01T00:00:00Z").is_none());
+    }
+
+    #[test]
+    fn now_secs_monotonic_within_call() {
+        let a = now_secs();
+        let b = now_secs();
+        assert!(b >= a, "now_secs() should be monotonic non-decreasing");
+    }
+
+    #[test]
+    fn is_whole_quantity_negative_zero() {
+        // -0.0 has zero fractional component and should count as whole.
+        assert!(is_whole_quantity(-0.0));
+    }
+
+    #[test]
+    fn is_whole_quantity_very_small_fraction() {
+        assert!(!is_whole_quantity(1.0 + 1e-9));
+    }
+
+    // ── portfolio_equity_in_currency edge cases ───────────────────────
+
+    #[test]
+    fn portfolio_equity_in_currency_empty_inputs_returns_zero() {
+        let aligned: HashMap<String, Vec<Option<Bar>>> = HashMap::new();
+        let cash: HashMap<Currency, f64> = HashMap::new();
+        let positions: HashMap<String, f64> = HashMap::new();
+        let quote_ccy: HashMap<String, String> = HashMap::new();
+        let fx = empty_fx(Currency::USD);
+        let eq = portfolio_equity_in_currency(
+            &cash, &positions, &aligned, 0, &quote_ccy, "USD", "USD", &fx, 0,
+        );
+        assert_eq!(eq, 0.0);
+    }
+
+    #[test]
+    fn portfolio_equity_in_currency_missing_fx_falls_back_to_par() {
+        // No FX rate set up; values are summed at par (1.0) as a
+        // best-effort fallback so equity remains a finite number.
+        let aligned = dummy_aligned("X", 50.0);
+        let cash = HashMap::from([(Currency::EUR, 100.0)]);
+        let positions = HashMap::from([("X".to_owned(), 2.0)]);
+        let quote_ccy = HashMap::from([("X".to_owned(), "EUR".to_owned())]);
+        let fx = empty_fx(Currency::USD);
+        let eq = portfolio_equity_in_currency(
+            &cash, &positions, &aligned, 0, &quote_ccy, "USD", "USD", &fx, 0,
+        );
+        // 100 EUR + 2 × 50 EUR (both at par) = 200.
+        assert!((eq - 200.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn portfolio_equity_in_currency_ignores_tiny_positions() {
+        let aligned = dummy_aligned("X", 50.0);
+        let cash = HashMap::new();
+        let positions = HashMap::from([("X".to_owned(), 1e-15)]);
+        let quote_ccy = HashMap::from([("X".to_owned(), "USD".to_owned())]);
+        let fx = empty_fx(Currency::USD);
+        let eq = portfolio_equity_in_currency(
+            &cash, &positions, &aligned, 0, &quote_ccy, "USD", "USD", &fx, 0,
+        );
+        assert_eq!(eq, 0.0);
+    }
+
+    // ── gross_notional_in_currency edge cases ────────────────────────
+
+    #[test]
+    fn gross_notional_in_currency_empty_positions() {
+        let aligned: HashMap<String, Vec<Option<Bar>>> = HashMap::new();
+        let positions: HashMap<String, f64> = HashMap::new();
+        let quote_ccy: HashMap<String, String> = HashMap::new();
+        let fx = empty_fx(Currency::USD);
+        let g = gross_notional_in_currency(&positions, &aligned, 0, &quote_ccy, "USD", &fx, 0);
+        assert_eq!(g, 0.0);
+    }
+
+    #[test]
+    fn gross_notional_in_currency_uses_abs_for_shorts() {
+        // Short position of -5 × 100 USD = $500 gross.
+        let aligned = dummy_aligned("AAPL", 100.0);
+        let positions = HashMap::from([("AAPL".to_owned(), -5.0)]);
+        let quote_ccy = HashMap::from([("AAPL".to_owned(), "USD".to_owned())]);
+        let fx = empty_fx(Currency::USD);
+        let g = gross_notional_in_currency(&positions, &aligned, 0, &quote_ccy, "USD", &fx, 0);
+        assert!((g - 500.0).abs() < 1e-9);
+    }
+
+    // ── try_debit extra coverage ──────────────────────────────────────
+
+    #[test]
+    fn try_debit_partial_drain_uses_other_foreign_bucket() {
+        // 100 USD pool needs to fund a £200 debit. Insufficient in
+        // GBP, base, and FX-fallback: the engine drains the leftover
+        // from an unrelated EUR bucket via a direct EUR→GBP rate.
+        let mut cash = HashMap::new();
+        cash.insert(Currency::GBP, 50.0);
+        cash.insert(Currency::USD, 100.0); // base
+        cash.insert(Currency::EUR, 1_000.0);
+
+        let mut fx = FxTable::new("USD");
+        fx.add_series("GBP", "USD", vec![(0, 1.30)]);
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+        fx.add_series("EUR", "GBP", vec![(0, 0.85)]);
+
+        // Need £200; have £50 + base($100 ≈ £77) + 1000 EUR. Should succeed.
+        assert!(try_debit(&mut cash, Currency::GBP, 200.0, Currency::USD, &fx, 0));
+        // GBP bucket is fully drained.
+        assert!(cash.get(&Currency::GBP).copied().unwrap_or(0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn try_debit_negative_amount_is_noop_returns_true() {
+        let mut cash = HashMap::new();
+        cash.insert(Currency::USD, 100.0);
+        let fx = empty_fx(Currency::USD);
+        assert!(try_debit(&mut cash, Currency::USD, -50.0, Currency::USD, &fx, 0));
+        assert_eq!(cash[&Currency::USD], 100.0);
+    }
+
+    #[test]
+    fn try_debit_drains_ccy_bucket_when_falling_back() {
+        // GBP bucket has £30, debit £100, base has plenty of USD.
+        // The £30 bucket should be drained (removed) and the
+        // remaining £70 paid from base via FX.
+        let mut cash = HashMap::new();
+        cash.insert(Currency::GBP, 30.0);
+        cash.insert(Currency::USD, 1_000.0);
+        let mut fx = FxTable::new("USD");
+        fx.add_series("GBP", "USD", vec![(0, 1.30)]);
+        assert!(try_debit(&mut cash, Currency::GBP, 100.0, Currency::USD, &fx, 0));
+        // GBP bucket gone.
+        assert!(!cash.contains_key(&Currency::GBP));
+        // USD debited by (100 - 30) × 1.30 = 91.
+        assert!((cash[&Currency::USD] - 909.0).abs() < 1e-6);
+    }
+
+    // ── sweep_foreign_to_base extra coverage ─────────────────────────
+
+    #[test]
+    fn sweep_foreign_to_base_handles_negative_bucket() {
+        // A negative bucket (e.g. borrowed-currency loss) is still
+        // converted at the current FX rate so the engine never leaves
+        // dangling foreign debt on equity snapshots.
+        let mut cash = HashMap::new();
+        cash.insert(Currency::USD, 1_000.0);
+        cash.insert(Currency::EUR, -100.0);
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+        sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, None);
+        // EUR removed, USD debited by 110.
+        assert!(!cash.contains_key(&Currency::EUR));
+        assert!((cash[&Currency::USD] - 890.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sweep_foreign_to_base_no_op_for_only_base() {
+        let mut cash = HashMap::new();
+        cash.insert(Currency::USD, 1_000.0);
+        let fx = empty_fx(Currency::USD);
+        sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, None);
+        assert_eq!(cash[&Currency::USD], 1_000.0);
+        assert_eq!(cash.len(), 1);
+    }
+
+    // ── compute_metrics extra ─────────────────────────────────────────
+
+    #[test]
+    fn compute_metrics_total_return_with_curve() {
+        let curve = vec![
+            EquitySample {
+                timestamp: 0,
+                equity: 1_000.0,
+                cash: HashMap::new(),
+                drawdown: 0.0,
+            },
+            EquitySample {
+                timestamp: 86_400,
+                equity: 1_200.0,
+                cash: HashMap::new(),
+                drawdown: 0.0,
+            },
+        ];
+        let m = compute_metrics(1_000.0, 0.0, &curve, &[]);
+        assert!((m["total_return"] - 0.20).abs() < 1e-9);
+        assert!((m["pnl"] - 200.0).abs() < 1e-9);
+        assert_eq!(m["final_equity"], 1_200.0);
+        assert_eq!(m["n_trades"], 0.0);
+    }
+
+    #[test]
+    fn compute_metrics_win_rate_with_trades() {
+        let trades = vec![
+            Trade {
+                symbol: "X".into(),
+                entry_ts: 0,
+                exit_ts: 1,
+                quantity: 1.0,
+                entry_price: 100.0,
+                exit_price: 110.0,
+                pnl: 10.0,
+            },
+            Trade {
+                symbol: "X".into(),
+                entry_ts: 0,
+                exit_ts: 1,
+                quantity: 1.0,
+                entry_price: 100.0,
+                exit_price: 95.0,
+                pnl: -5.0,
+            },
+        ];
+        let m = compute_metrics(1_000.0, 0.0, &[], &trades);
+        assert_eq!(m["n_trades"], 2.0);
+        assert!((m["win_rate"] - 0.5).abs() < 1e-9);
+    }
+
+    // ── apply_slippage additional ─────────────────────────────────────
+
+    #[test]
+    fn apply_slippage_buy_no_cap() {
+        let p = apply_slippage(100.0, 1.0, 0.02, None);
+        assert!((p - 102.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_slippage_buy_capped_above() {
+        // Buy slippage above the limit cap is clamped down.
+        let p = apply_slippage(100.0, 1.0, 0.10, Some(105.0));
+        assert!((p - 105.0).abs() < 1e-9);
+    }
+
+    // ── fill_limit / fill_stop additional ─────────────────────────────
+
+    #[test]
+    fn fill_limit_buy_fills_when_low_reaches_limit() {
+        let mut bar = mk_bar(0, 100.0);
+        bar.low = 99.0;
+        bar.open = 100.5;
+        match fill_limit(1.0, &bar, 99.5) {
+            TriggerOutcome::Fill {
+                raw_px,
+                ..
+            } => {
+                assert!(raw_px <= 99.5 + 1e-9, "buy limit fills at-or-below limit");
+            },
+            _ => panic!("expected fill"),
+        }
+    }
+
+    #[test]
+    fn fill_stop_buy_gap_up() {
+        // Open already above stop → fill at open (gap-up).
+        let mut bar = mk_bar(0, 110.0);
+        bar.open = 108.0;
+        match fill_stop(1.0, &bar, 105.0) {
+            TriggerOutcome::Fill {
+                raw_px,
+                reason,
+                ..
+            } => {
+                assert!((raw_px - 108.0).abs() < 1e-9);
+                assert!(reason.contains("gap-up"));
+            },
+            _ => panic!("expected gap-up fill"),
+        }
+    }
+
+    #[test]
+    fn fill_stop_pending_when_not_crossed() {
+        let mut bar = mk_bar(0, 100.0);
+        bar.open = 100.0;
+        bar.high = 102.0;
+        bar.low = 99.0;
+        match fill_stop(1.0, &bar, 110.0) {
+            TriggerOutcome::Pending => {},
+            _ => panic!("expected pending"),
+        }
+    }
+
+    // ── stop_triggered additional ─────────────────────────────────────
+
+    #[test]
+    fn stop_triggered_sell_below_stop_triggers() {
+        let mut bar = mk_bar(0, 95.0);
+        bar.low = 90.0;
+        assert!(stop_triggered(-1.0, &bar, 92.0, false));
+    }
+
+    #[test]
+    fn stop_triggered_buy_above_stop_triggers() {
+        let mut bar = mk_bar(0, 105.0);
+        bar.high = 110.0;
+        assert!(stop_triggered(1.0, &bar, 108.0, false));
+    }
+
+    // ── update_open_trade_buy / close_open_trade_sell additional ─────
+
+    #[test]
+    fn close_open_trade_sell_full_position_clears_entry() {
+        let mut trades = HashMap::new();
+        trades.insert("X".to_owned(), (100_i64, 5.0, 50.0));
+        let t = close_open_trade_sell(&mut trades, "X", 200, 5.0, 60.0, 0.0).unwrap();
+        assert!((t.pnl - (60.0 - 50.0) * 5.0).abs() < 1e-9);
+        // Position fully closed → entry removed.
+        assert!(!trades.contains_key("X"));
+    }
+
+    #[test]
+    fn close_open_trade_sell_includes_commission_in_pnl() {
+        let mut trades = HashMap::new();
+        trades.insert("X".to_owned(), (100_i64, 5.0, 50.0));
+        let t = close_open_trade_sell(&mut trades, "X", 200, 5.0, 60.0, 2.0).unwrap();
+        // Commission reduces PnL: (10 × 5) - 2 = 48.
+        assert!((t.pnl - 48.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn update_open_trade_buy_creates_new_entry() {
+        let mut trades = HashMap::new();
+        update_open_trade_buy(&mut trades, "X", 500, 3.0, 75.0);
+        let (ts, qty, avg) = trades["X"];
+        assert_eq!(ts, 500);
+        assert!((qty - 3.0).abs() < 1e-12);
+        assert!((avg - 75.0).abs() < 1e-12);
+    }
+
+    // ── persist & parse additional ────────────────────────────────────
+
+    #[test]
+    fn persist_experiment_config_writes_toml() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cfg = mk_cfg("AAPL");
+        let path = persist_experiment_config(dir.path(), "name", &cfg).unwrap();
+        let contents = std::fs::read_to_string(path).unwrap();
+        assert!(contents.contains("symbols"));
+    }
+
+    // ── period_bucket additional ──────────────────────────────────────
+
+    #[test]
+    fn period_bucket_year_boundary() {
+        use crate::backtest::models::conversion_period::ConversionPeriod;
+        // 2023-12-31 vs 2024-01-01.
+        let dec31 = 1_704_067_199_i64;
+        let jan1 = 1_704_067_200_i64;
+        assert_ne!(
+            period_bucket(dec31, ConversionPeriod::Year),
+            period_bucket(jan1, ConversionPeriod::Year)
+        );
+    }
+
+    #[test]
+    fn period_bucket_iso_week_year_crossover() {
+        // 2024-12-30 (Mon, ISO week 1 of 2025) vs 2024-12-23 (Mon, ISO
+        // week 52 of 2024). Bucket id encodes (year, week) so they must
+        // differ.
+        use crate::backtest::models::conversion_period::ConversionPeriod;
+        let dec23 = 1_734_912_000_i64; // 2024-12-23 00:00:00 UTC
+        let dec30 = dec23 + 7 * 86_400;
+        assert_ne!(
+            period_bucket(dec23, ConversionPeriod::Week),
+            period_bucket(dec30, ConversionPeriod::Week)
+        );
+    }
+
+    // ── quantity rejection additional ─────────────────────────────────
+
+    #[test]
+    fn quantity_rejection_zero_qty_is_rejected() {
+        assert!(quantity_rejection_reason("X", 0.0, InstrumentType::Stocks).is_some());
+    }
+
+    #[test]
+    fn quantity_rejection_infinity_is_rejected() {
+        assert!(quantity_rejection_reason("X", f64::INFINITY, InstrumentType::Crypto).is_some());
+    }
+
+    // ── instrument_type_for_symbol ────────────────────────────────────
+
+    #[test]
+    fn instrument_type_empty_map_uses_fallback() {
+        let m: HashMap<String, InstrumentType> = HashMap::new();
+        assert_eq!(
+            instrument_type_for_symbol("BTC", &m, InstrumentType::Crypto),
+            InstrumentType::Crypto
+        );
+    }
+
+    // ── profile_instrument_types ──────────────────────────────────────
+
+    #[test]
+    fn profile_instrument_types_empty() {
+        let profiles: Vec<InstrumentProfile> = vec![];
+        let m = profile_instrument_types(&profiles);
+        assert!(m.is_empty());
     }
 }

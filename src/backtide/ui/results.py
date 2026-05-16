@@ -634,7 +634,7 @@ def _render_full_analysis(row: pd.Series):
 
                 if log_text.strip():
                     lines = log_text.splitlines()
-                    max_lines = 500
+                    max_lines = 1000
                     if len(lines) > max_lines:
                         st.caption(
                             f"Showing last {max_lines} of {len(lines)} lines. "

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+import backtide.backtest as backtest_module
 from backtide.backtest import (
     CommissionType,
     ConversionPeriod,
@@ -551,6 +552,68 @@ class TestRunExperimentKwargs:
         with pytest.raises(ValueError, match="no symbols"):
             run_experiment(cfg, name="overridden", verbose=False)
 
+    def test_blank_name_gets_auto_generated(self, monkeypatch):
+        """Blank names are replaced by an 8-char auto id before dispatch."""
+
+        class _CaptureConfig(RuntimeError):
+            def __init__(self, cfg):
+                super().__init__("captured")
+                self.cfg = cfg
+
+        class _FakeUuid:
+            def __str__(self) -> str:
+                return "01234567-89ab-cdef-0123-456789abcdef"
+
+        monkeypatch.setattr(backtest_module.uuid, "uuid4", lambda: _FakeUuid())
+
+        def _fake_run_experiment(cfg, _verbose, _strategy_overrides, _indicator_overrides):
+            raise _CaptureConfig(cfg)
+
+        monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
+
+        with pytest.raises(_CaptureConfig) as ex:
+            run_experiment(
+                name="",
+                symbols=["AAPL"],
+                instrument_type="stocks",
+                interval="1d",
+                full_history=False,
+                start_date="2024-01-01",
+                end_date="2024-03-01",
+                strategies=[BuyAndHold()],
+                verbose=False,
+            )
+
+        assert ex.value.cfg.general.name == "01234567"
+
+    def test_explicit_name_is_preserved(self, monkeypatch):
+        """A non-empty name passes through unchanged."""
+
+        class _CaptureConfig(RuntimeError):
+            def __init__(self, cfg):
+                super().__init__("captured")
+                self.cfg = cfg
+
+        def _fake_run_experiment(cfg, _verbose, _strategy_overrides, _indicator_overrides):
+            raise _CaptureConfig(cfg)
+
+        monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
+
+        with pytest.raises(_CaptureConfig) as ex:
+            run_experiment(
+                name="my-exp",
+                symbols=["AAPL"],
+                instrument_type="stocks",
+                interval="1d",
+                full_history=False,
+                start_date="2024-01-01",
+                end_date="2024-03-01",
+                strategies=[BuyAndHold()],
+                verbose=False,
+            )
+
+        assert ex.value.cfg.general.name == "my-exp"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # run_experiment polymorphic strategies / indicators
@@ -638,3 +701,75 @@ class TestRunExperimentPolymorphicForms:
             **run_kwargs,
         )
         assert result.status == ExperimentStatus.Success
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regression: auto-injected indicators reach built-in strategies
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAutoIndicatorLookup:
+    """Built-in strategies must find the indicators the engine auto-injects.
+
+    Previously the strategy-side helper produced ``__auto_BB_20_2p0`` while
+    the engine stored series under ``BB_20_2p0``, so every built-in strategy
+    that relied on an auto-included indicator (BB, RSI, SMA, MACD, ATR, …)
+    silently returned no orders. The two helpers are now aligned and all
+    indicator-driven strategies actually trade.
+    """
+
+    def test_multi_bollinger_rotation_produces_orders(self):
+        """MultiBollingerRotation trades with auto-injected Bollinger Bands."""
+        from backtide.strategies import MultiBollingerRotation
+
+        result = run_experiment(
+            strategies=MultiBollingerRotation(period=5, rebalance_interval=1),
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result.status == ExperimentStatus.Success
+        rr = result.strategies[0]
+        assert len(rr.orders) > 0, "rotation strategy produced no orders"
+
+    def test_triple_rsi_rotation_produces_orders(self):
+        """TripleRsiRotation trades with auto-injected RSI indicators."""
+        from backtide.strategies import TripleRsiRotation
+
+        result = run_experiment(
+            strategies=TripleRsiRotation(
+                short_period=2, medium_period=3, long_period=5, rebalance_interval=1
+            ),
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result.status == ExperimentStatus.Success
+        rr = result.strategies[0]
+        assert len(rr.orders) > 0, "rotation strategy produced no orders"
+
+    def test_bollinger_mean_reversion_produces_orders(self):
+        """BollingerMeanReversion triggers when price crosses bands.
+
+        Pick a very short window so the band is volatile enough for the
+        AAPL Jan-Mar 2024 fixture to produce at least one cross.
+        """
+        from backtide.strategies import BollingerMeanReversion
+
+        # The strategy is satisfied as long as it can *look up* its
+        # auto-injected BB indicator — even on a quiet stretch the order
+        # list may be empty, but the run must succeed without warnings.
+        result = run_experiment(
+            strategies=BollingerMeanReversion(period=3, std_dev=1.0),
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result.status == ExperimentStatus.Success
+        # Either we got orders, or — at minimum — the auto-indicator
+        # lookup didn't fail loudly. We assert the auto-indicator
+        # warning is absent because that's the failure mode the
+        # regression fix targets.
+        rr = result.strategies[0]
+        # The fix is verified if there are orders OR no
+        # "produced no orders" warning. Most short fixtures yield
+        # at least one band touch, so we assert orders are produced
+        # with a permissive parameter set.
+        assert len(rr.orders) > 0, "indicator-driven strategy produced no orders"

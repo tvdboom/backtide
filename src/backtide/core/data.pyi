@@ -1079,12 +1079,12 @@ def download_bars(profiles, start=None, end=None, *, verbose=True) -> DownloadRe
     profiles : list[[InstrumentProfile]]
         Resolved instrument profiles (run [`resolve_profiles`] first).
 
-    start : int or None, default=None
+    start : int | None, default=None
         Optional start of the download window (Unix timestamp, inclusive). When
         given, per-instrument ranges are clamped so that no data before this timestamp
         is requested. If `None`, it uses the provider's earliest available date.
 
-    end : int or None, default=None
+    end : int | None, default=None
         Optional end of the download window (Unix timestamp, exclusive). When
         given, per-instrument ranges are clamped so that no data after this timestamp
         is requested. If `None`, it uses the provider's latest available date.

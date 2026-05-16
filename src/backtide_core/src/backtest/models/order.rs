@@ -19,7 +19,7 @@ pub fn new_order_id() -> String {
 ///
 /// Implements the standard derives by delegating: `Clone` clones the
 /// reference-counted `Py<PyAny>`, `Debug` prints a placeholder, and
-/// `Serialize`/`Deserialize` skip the field (sizers are transient —
+/// `Serialize`/`Deserialize` skip the field (sizers are transient,
 /// once the engine resolves them the slot is cleared).
 pub struct SizerSlot(pub Py<PyAny>);
 
@@ -77,25 +77,24 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SizerSlot {
 /// Attributes
 /// ----------
 /// id : str
-///     Unique identifier of the order. Auto-generated if not provided.
-///     For [`OrderType.Cancel`][OrderType] orders, the `id` field
-///     identifies the target order that should be canceled. If an order
-///     with the same ``id`` already exists in the order book, the
-///     duplicate is rejected.
+///     Unique identifier of the order. Auto-generated if not provided. For
+///     [`OrderType.Cancel`][OrderType] orders, the `id` field identifies the
+///     target order that should be canceled. If an order with the same `id`
+///     already exists in the order book, the duplicate is rejected.
 ///
 /// symbol : str
 ///     The ticker symbol this order targets.
 ///
 /// quantity : int | float | [BaseSizer], default=1
 ///     Signed quantity (positive = buy, negative = sell). Fractional values
-///     are accepted only for crypto instruments. When a _sizer_ is passed, the
-///     engine resolves the quantity automatically at order-processing time using
-///     portfolio equity converted to the asset's quote currency and the asset's
-///     price.
+///     are accepted only for crypto instruments. When a [sizer][sizers] is
+///     passed, the engine resolves the quantity automatically at order-processing
+///     time using portfolio equity converted to the asset's quote currency and
+///     the asset's price.
 ///
 /// order_type : [OrderType]
 ///     The execution semantics (market, limit, stop-loss, etc...). Also accepts
-///     a string of the form PascalCase (`StopLoss`) or snake_case (`stop_loss"),
+///     a string of the form PascalCase (`StopLoss`) or snake_case (`stop_loss`),
 ///     case-insensitively.
 ///
 /// price : float | None
@@ -105,19 +104,16 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SizerSlot {
 /// - `Market` / `Cancel` / `SettlePosition`: ignored.
 /// - `Limit` / `TakeProfit`: the limit / target price.
 /// - `StopLoss`: the stop (trigger) price.
-/// - `StopLossLimit` / `TakeProfitLimit`: the stop (trigger)
-///   price; once hit the order converts to a limit at
-///   `limit_price`.
-/// - `TrailingStop` / `TrailingStopLimit`: the trail amount in
-///   price units (positive). The engine maintains the running
-///   extreme internally.
+/// - `StopLossLimit` / `TakeProfitLimit`: the stop (trigger) price. Once hit, the
+///   order converts to a limit at `limit_price`.
+/// - `TrailingStop` / `TrailingStopLimit`: the trail amount in price units (positive).
+///   The engine maintains the running extreme internally.
 ///
 /// limit_price : float | None
-///     Secondary limit price used by the ``StopLossLimit``,
-///     ``TakeProfitLimit`` and ``TrailingStopLimit`` order types.
-///     Once the stop component triggers, the order converts to a
-///     limit order resting at this price. Ignored for all other
-///     order types.
+///     Secondary limit price used by the `StopLossLimit`, `TakeProfitLimit` and
+///     `TrailingStopLimit` order types. Once the stop component triggers, the order
+///     converts to a limit order resting at this price. Ignored for all other order
+///     types.
 ///
 /// See Also
 /// --------

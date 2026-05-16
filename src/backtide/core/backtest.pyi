@@ -1365,10 +1365,10 @@ class EqualWeight:
         price : float
             Reference price of the instrument.
 
-        stop_distance : float or None, default=None
+        stop_distance : float | None, default=None
             Distance from entry to stop loss, in price units.
 
-        atr : float or None, default=None
+        atr : float | None, default=None
             Current ATR value. Required for volatility-based sizers.
 
         Returns
@@ -1399,7 +1399,7 @@ class EquitySample:
 
     drawdown : float
         Running drawdown (negative or zero) versus the all-time high
-        equity, expressed as a fraction (e.g., -0.12 = -12 %).
+        equity, expressed as a fraction (e.g., -0.12 = -12%).
 
     See Also
     --------
@@ -1697,12 +1697,12 @@ class ExperimentConfig:
         """
 
 class ExperimentResult:
-    """The complete result of a single experiment run.
+    """The complete result of a single experiment.
 
     Attributes
     ----------
     experiment_id : str
-        Unique identifier of the persisted experiment row.
+        Unique identifier of the experiment.
 
     name : str
         Human-readable name (mirrors the config).
@@ -1711,14 +1711,17 @@ class ExperimentResult:
         Tags assigned to the experiment.
 
     started_at : int
-        UTC timestamp (seconds) when the run started.
+        UTC timestamp when the run started (in Unix seconds).
 
     finished_at : int
-        UTC timestamp (seconds) when the run finished.
+        UTC timestamp when the run finished (in Unix seconds).
 
     status : [ExperimentStatus]
-        `Success` if every strategy succeeded, `Partial` if some failed,
-        `Error` if all failed or the experiment could not run.
+        The status with which the experiment ended. Possible values are:
+
+        - `Success`: Every strategy succeeded.
+        - `Partial`: At least one strategy failed, but not all.
+        - `Error`: All strategies failed or the experiment could not run.
 
     strategies : list[[RunResult]]
         One result entry per evaluated strategy.
@@ -1978,10 +1981,10 @@ class FixedFractional:
         price : float
             Reference price of the instrument.
 
-        stop_distance : float or None, default=None
+        stop_distance : float | None, default=None
             Distance from entry to stop loss, in price units.
 
-        atr : float or None, default=None
+        atr : float | None, default=None
             Current ATR value. Required for volatility-based sizers.
 
         Returns
@@ -2054,10 +2057,10 @@ class FixedNotional:
         price : float
             Reference price of the instrument.
 
-        stop_distance : float or None, default=None
+        stop_distance : float | None, default=None
             Distance from entry to stop loss, in price units.
 
-        atr : float or None, default=None
+        atr : float | None, default=None
             Current ATR value. Required for volatility-based sizers.
 
         Returns
@@ -2130,10 +2133,10 @@ class FixedQuantity:
         price : float
             Reference price of the instrument.
 
-        stop_distance : float or None, default=None
+        stop_distance : float | None, default=None
             Distance from entry to stop loss, in price units.
 
-        atr : float or None, default=None
+        atr : float | None, default=None
             Current ATR value. Required for volatility-based sizers.
 
         Returns
@@ -2429,10 +2432,10 @@ class KellyCriterion:
         price : float
             Reference price of the instrument.
 
-        stop_distance : float or None, default=None
+        stop_distance : float | None, default=None
             Distance from entry to stop loss, in price units.
 
-        atr : float or None, default=None
+        atr : float | None, default=None
             Current ATR value. Required for volatility-based sizers.
 
         Returns
@@ -2916,25 +2919,24 @@ class Order:
     Attributes
     ----------
     id : str
-        Unique identifier of the order. Auto-generated if not provided.
-        For [`OrderType.Cancel`][OrderType] orders, the `id` field
-        identifies the target order that should be canceled. If an order
-        with the same ``id`` already exists in the order book, the
-        duplicate is rejected.
+        Unique identifier of the order. Auto-generated if not provided. For
+        [`OrderType.Cancel`][OrderType] orders, the `id` field identifies the
+        target order that should be canceled. If an order with the same `id`
+        already exists in the order book, the duplicate is rejected.
 
     symbol : str
         The ticker symbol this order targets.
 
     quantity : int | float | [BaseSizer], default=1
         Signed quantity (positive = buy, negative = sell). Fractional values
-        are accepted only for crypto instruments. When a _sizer_ is passed, the
-        engine resolves the quantity automatically at order-processing time using
-        portfolio equity converted to the asset's quote currency and the asset's
-        price.
+        are accepted only for crypto instruments. When a [sizer][sizers] is
+        passed, the engine resolves the quantity automatically at order-processing
+        time using portfolio equity converted to the asset's quote currency and
+        the asset's price.
 
     order_type : [OrderType]
         The execution semantics (market, limit, stop-loss, etc...). Also accepts
-        a string of the form PascalCase (`StopLoss`) or snake_case (`stop_loss"),
+        a string of the form PascalCase (`StopLoss`) or snake_case (`stop_loss`),
         case-insensitively.
 
     price : float | None
@@ -2944,19 +2946,16 @@ class Order:
     - `Market` / `Cancel` / `SettlePosition`: ignored.
     - `Limit` / `TakeProfit`: the limit / target price.
     - `StopLoss`: the stop (trigger) price.
-    - `StopLossLimit` / `TakeProfitLimit`: the stop (trigger)
-      price; once hit the order converts to a limit at
-      `limit_price`.
-    - `TrailingStop` / `TrailingStopLimit`: the trail amount in
-      price units (positive). The engine maintains the running
-      extreme internally.
+    - `StopLossLimit` / `TakeProfitLimit`: the stop (trigger) price. Once hit, the
+      order converts to a limit at `limit_price`.
+    - `TrailingStop` / `TrailingStopLimit`: the trail amount in price units (positive).
+      The engine maintains the running extreme internally.
 
     limit_price : float | None
-        Secondary limit price used by the ``StopLossLimit``,
-        ``TakeProfitLimit`` and ``TrailingStopLimit`` order types.
-        Once the stop component triggers, the order converts to a
-        limit order resting at this price. Ignored for all other
-        order types.
+        Secondary limit price used by the `StopLossLimit`, `TakeProfitLimit` and
+        `TrailingStopLimit` order types. Once the stop component triggers, the order
+        converts to a limit order resting at this price. Ignored for all other order
+        types.
 
     See Also
     --------
@@ -3006,13 +3005,13 @@ class OrderRecord:
         The original order.
 
     timestamp : int
-        The bar timestamp at which the order was processed.
+        The bar timestamp at which the order was processed (in Unix seconds).
 
     status : str
-        `"filled"`, `"cancelled"`, `"rejected"` or `"pending"`.
+        One of: "filled", "canceled", "rejected" or "pending".
 
     fill_price : float | None
-        Average fill price (None if not filled).
+        Average fill price. `None` if not filled.
 
     reason : str
         Human-readable note (rejection / cancellation reason).
@@ -3022,10 +3021,10 @@ class OrderRecord:
         Zero for non-filled orders.
 
     pnl : float | None
-        Realised profit & loss attributable to this order, in the base
-        currency, after commission. Populated only on closing fills
-        (sell that flattens / reduces an existing long, or buy-to-cover);
-        `None` for opening fills, cancellations and rejections.
+        Realised profit & loss attributable to this order, in the base currency,
+        after commission. Populated only on closing fills (sell that flattens /
+        reduces an existing long, or buy-to-cover). `None` for opening fills,
+        cancellations and rejections.
 
     See Also
     --------
@@ -3513,10 +3512,10 @@ class RiskBased:
         price : float
             Reference price of the instrument.
 
-        stop_distance : float or None, default=None
+        stop_distance : float | None, default=None
             Distance from entry to stop loss, in price units.
 
-        atr : float or None, default=None
+        atr : float | None, default=None
             Current ATR value. Required for volatility-based sizers.
 
         Returns
@@ -3983,7 +3982,7 @@ class RunResult:
         Unique identifier for this strategy run.
 
     strategy_name : str
-        The user-facing name of the strategy.
+        The name of the strategy.
 
     equity_curve : list[[EquitySample]]
         Per-bar equity samples in chronological order.
@@ -3998,18 +3997,14 @@ class RunResult:
         Summary metrics (total_return, sharpe, max_drawdown, ...).
 
     base_currency : [Currency]
-        The portfolio's base (accounting) currency for this run. Equity,
-        PnL and drawdown values stored on the run are denominated in this
-        currency. Captured from the `ExperimentConfig` so analysis tools
-        don't need to look the experiment config up to label axes.
+        The portfolio's base currency for this run. Equity, PnL and drawdown
+        values stored on the run are denominated in this currency.
 
     error : str | None
-        `None` on success. Otherwise, the first error raised by the
-        strategy during the run (e.g., an exception thrown by
-        `evaluate(...)`). Strategies that fail still produce a result
-        row so the rest of the experiment isn't lost — the engine simply
-        records the error and reports the experiment status as
-        `"failed"`.
+        `None` on success. Otherwise, the first error raised by the strategy
+        during the run. Strategies that fail still produce a result row so the
+        rest of the experiment isn't lost — the engine simply records the error
+        and reports the experiment status as "failed".
 
     is_benchmark : bool
         Whether this run is the benchmark run for the experiment.
@@ -4559,10 +4554,10 @@ class Trade:
         Floating-point so fractional units are tracked exactly for crypto.
 
     entry_ts : int
-        Open timestamp (seconds since the Unix epoch).
+        Open timestamp (in Unix seconds).
 
     exit_ts : int
-        Close timestamp (seconds since the Unix epoch).
+        Close timestamp (in Unix seconds).
 
     entry_price : float
         Average fill price at entry, in the instrument's quote currency.
@@ -4954,10 +4949,10 @@ class VolatilityScaled:
         price : float
             Reference price of the instrument.
 
-        stop_distance : float or None, default=None
+        stop_distance : float | None, default=None
             Distance from entry to stop loss, in price units.
 
-        atr : float or None, default=None
+        atr : float | None, default=None
             Current ATR value. Required for volatility-based sizers.
 
         Returns

@@ -96,7 +96,7 @@ class AutoDocs:
     obj : object
         Class, method or function to parse.
 
-    method : str or None
+    method : str | None
         Method of `obj` to parse.
 
     References
@@ -742,7 +742,7 @@ def custom_autorefs(markdown: str, autodocs: AutoDocs | None = None) -> str:
     markdown: str
         Markdown source text of page.
 
-    autodocs: Autodocs or None
+    autodocs: Autodocs | None
         Class for which the page is created.
 
     Returns

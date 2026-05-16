@@ -285,11 +285,11 @@ $$
 
 `final_equity` is the last value of the equity curve, which itself is the sum
 of every cash bucket converted to the portfolio base currency at each bar via
-the FX table (forward-filled to the latest known rate ≤ the bar's
-timestamp), plus the mark-to-market value of every open position at every
-bar's close. Buckets or positions for which no FX rate is available at a
-given timestamp fall back to a 1:1 conversion so equity stays a finite,
-comparable number.
+the FX table (using the latest known rate ≤ the bar's timestamp, or the
+earliest available rate when the bar predates the first FX sample), plus the
+mark-to-market value of every open position at every bar's close. Buckets or
+positions for which no FX rate is available at a given timestamp fall back to
+a 1:1 conversion so equity stays a finite, comparable number.
 
 ### n_trades & win_rate
 

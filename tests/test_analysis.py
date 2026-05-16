@@ -876,6 +876,39 @@ class TestPlotCashHoldings:
         assert fig.data[0].legendgrouptitle.text == "Global"
         assert fig.layout.yaxis.title.text == "Cash"
 
+    def test_sparse_currency_buckets_keep_timestamps_aligned(self):
+        """Currencies that only appear in some snapshots stay aligned on the time axis.
+
+        Regression: the previous implementation built per-currency series via a
+        ``defaultdict(list)``-style ``y`` array, then reused the *full* equity
+        curve as the x-axis. If a bucket disappeared mid-run (e.g. ``USD`` is
+        removed when the bucket is fully debited), the per-currency line was
+        anchored to the first N timestamps instead of the timestamps where the
+        currency actually existed.
+        """
+        run = _run_result(
+            "Sparse",
+            [10_000.0, 10_000.0, 10_000.0, 10_000.0],
+            base_currency="EUR",
+        )
+        # USD only exists in snapshots 1 and 3 — the other bars don't include it.
+        run.equity_curve[0].cash = {"EUR": 10_000.0}
+        run.equity_curve[1].cash = {"EUR": 5_000.0, "USD": 100.0}
+        run.equity_curve[2].cash = {"EUR": 5_000.0}
+        run.equity_curve[3].cash = {"EUR": 4_000.0, "USD": 200.0}
+
+        fig = plot_cash_holdings([run], display=None)
+        traces = {t.name: t for t in fig.data}
+        # EUR appears in every snapshot, USD only in two.
+        assert len(traces["EUR"].x) == 4
+        assert len(traces["EUR"].y) == 4
+        assert len(traces["USD"].x) == 2
+        assert len(traces["USD"].y) == 2
+        # The two USD points line up with snapshots 1 and 3 (not 0 and 1).
+        assert traces["USD"].y == (100.0, 200.0)
+        assert traces["USD"].x[0] == traces["EUR"].x[1]
+        assert traces["USD"].x[1] == traces["EUR"].x[3]
+
 
 class TestPlotRollingSharpe:
     """Tests for plot_rolling_sharpe."""
@@ -975,7 +1008,7 @@ class TestPlotPositionSize:
         assert all(t.mode != "lines" or t.name == "" for t in fig.data) or len(fig.data) == 0
 
 
-class TestPlotMaeMfe:
+class TestMaeMfe:
     """Tests for plot_mae_mfe."""
 
     def test_uses_query_bars_and_classifies_winners(self, monkeypatch):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 from typing import Any
+import uuid
 
 from backtide.core.backtest import (
     CommissionType,
@@ -169,7 +170,7 @@ def run_experiment(
         general=kwargs.pop(
             "general",
             GeneralExpConfig(
-                name=get("name", "general"),
+                name=get("name", "general").strip() or str(uuid.uuid4())[:8],
                 icon=get("icon", "general"),
                 tags=get("tags", "general"),
                 description=get("description", "general"),

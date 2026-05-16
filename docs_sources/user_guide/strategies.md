@@ -65,7 +65,7 @@ are accepted; others are rejected immediately.
 | **`TrailingStop`**      | A stop that follows the market. The engine tracks the running high (for sells) or running low (for buys). The stop triggers when the price reverses by `price` units from the extreme. Fills like a market order. | `price` = trail amount                        |
 | **`TrailingStopLimit`** | Same as `TrailingStop`, but converts to a **limit** at `limit_price` instead of filling at market.                                                                                                                | `price` = trail amount, `limit_price` = limit |
 | **`SettlePosition`**    | Closes the entire open position in the symbol at a market price. Quantity is computed by the engine.                                                                                                              | —                                             |
-| **`Cancel`**            | Cancels a pending order. Set `id` to the ID of the order to cancel.                                                                                                                                               | —                                             |
+| **`Cancel`**            | Cancels a pending order. Set `id` to the ID of the order to cancel. Other fields (`symbol`, `quantity`, `price`, `limit_price`) are ignored.                                                                   | —                                             |
 
 !!! note
     Limit-style orders are protected against slippage: a buy limit will never fill
@@ -146,13 +146,12 @@ orders.append(Order(
 ))
 
 # On a later bar, cancel it
-orders.append(Order(
-    id="my-limit",
-    order_type="cancel",
-    symbol="AAPL",
-    quantity=0,
-))
+orders.append(Order(id="my-limit", order_type="cancel"))
 ```
+
+!!! info
+    For `Cancel` orders, only the `id` field matters. You can omit `symbol`,
+    `quantity`, `price` and `limit_price` since the engine ignores them.
 
 If you didn't assign a custom `id` when submitting the order, the engine
 auto-generates one. You can retrieve it from the portfolio:
@@ -163,12 +162,7 @@ from backtide.backtest import OrderType
 # Cancel all pending stop-loss orders for AAPL
 for pending in portfolio.orders:
     if pending.symbol == "AAPL" and pending.order_type == OrderType.StopLoss:
-        orders.append(Order(
-            id=pending.id,
-            order_type="cancel",
-            symbol="AAPL",
-            quantity=0,
-        ))
+        orders.append(Order(id=pending.id, order_type="cancel"))
 ```
 
 Alternatively, enable [`EngineExpConfig.exclusive_orders`][EngineExpConfig] to
@@ -219,9 +213,8 @@ editor or uploaded as `.py` files.
 
 ??? example
     ```python title="Inside-bar breakout strategy"
-    from math import floor
-
     from backtide.backtest import Order
+    from backtide.sizers import EqualWeight
     from backtide.strategies import BaseStrategy
 
 
@@ -268,17 +261,14 @@ editor or uploaded as `.py` files.
 
                 # Track new long entries.
                 if current_qty <= 0 and is_inside_bar and breakout_up:
-                    entry_candidates.append((symbol, float(current["close"])))
+                    entry_candidates.append(symbol)
 
-            # Second pass: size entries from currently available cash.
+            # Second pass: hand sizing off to the built-in EqualWeight sizer
+            # (scaled down by `cash_fraction` so the strategy keeps a cash buffer).
             if entry_candidates:
-                available_cash = sum(portfolio.cash.values()) * self.cash_fraction
-                cash_per_trade = available_cash / len(entry_candidates)
-
-                for symbol, close in entry_candidates:
-                    qty = floor(cash_per_trade / close)
-                    if qty > 0:
-                        orders.append(Order(symbol=symbol, order_type="market", quantity=qty))
+                sizer = EqualWeight(n_positions=int(len(entry_candidates) / self.cash_fraction))
+                for symbol in entry_candidates:
+                    orders.append(Order(symbol=symbol, order_type="market", quantity=sizer))
 
             return orders
 
@@ -324,12 +314,11 @@ are:
     this example.
 
     ```python title="Z-score momentum strategy with Numba"
-    from math import floor
-
     import numpy as np
     from numba import njit
 
     from backtide.backtest import Order
+    from backtide.sizers import FixedFractional
     from backtide.strategies import BaseStrategy
 
 
@@ -392,7 +381,7 @@ are:
 
         Uses a Numba-compiled kernel to compute a rolling z-score of close
         prices. When the z-score exceeds the upper threshold, the strategy
-        goes long with a fixed fraction of available cash. When it drops
+        goes long with a fixed fraction of available equity. When it drops
         below the lower threshold, existing positions are closed.
 
         """
@@ -400,7 +389,7 @@ are:
         def __init__(self, lookback=20, threshold=1.5, cash_fraction=0.95):
             self.lookback = lookback
             self.threshold = threshold
-            self.cash_fraction = cash_fraction
+            self.sizer = FixedFractional(fraction=cash_fraction)
 
         def evaluate(self, data, portfolio, state, indicators):
             orders = []
@@ -412,11 +401,7 @@ are:
                 current_qty = portfolio.positions.get(symbol, 0)
 
                 if signal == 1 and current_qty <= 0:
-                    available = sum(portfolio.cash.values()) * self.cash_fraction
-                    price = closes[-1]
-                    qty = floor(available / price)
-                    if qty > 0:
-                        orders.append(Order(symbol=symbol, order_type="market", quantity=qty))
+                    orders.append(Order(symbol=symbol, order_type="market", quantity=self.sizer))
 
                 elif signal == -1 and current_qty > 0:
                     orders.append(Order(symbol=symbol, order_type="market", quantity=-current_qty))
@@ -480,9 +465,9 @@ Backtide uses [sizers] to turn a trading signal into an order quantity:
 
 ### Portfolio-rotation strategies
 
-| Strategy                   | Description                                                    |
-|----------------------------|----------------------------------------------------------------|
-| [`MultiBollingerRotation`] | Rotates into stocks crossing above their upper Bollinger Band. |
-| [`RocRotation`]            | Rotates into the top K stocks by Rate of Change.               |
-| [`RsrsRotation`]           | Rotates into stocks with highest RSRS values.                  |
-| [`TripleRsiRotation`]      | Rotates based on composite long/medium/short RSI scores.       |
+| Strategy                   | Description                                                         |
+|----------------------------|---------------------------------------------------------------------|
+| [`MultiBollingerRotation`] | Rotates into instruments crossing above their upper Bollinger Band. |
+| [`RocRotation`]            | Rotates into the top K instruments by Rate of Change.               |
+| [`RsrsRotation`]           | Rotates into instruments with highest RSRS values.                  |
+| [`TripleRsiRotation`]      | Rotates based on composite long/medium/short RSI scores.            |

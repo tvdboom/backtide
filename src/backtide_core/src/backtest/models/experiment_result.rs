@@ -26,7 +26,7 @@ use std::collections::HashMap;
 ///
 /// drawdown : float
 ///     Running drawdown (negative or zero) versus the all-time high
-///     equity, expressed as a fraction (e.g., -0.12 = -12 %).
+///     equity, expressed as a fraction (e.g., -0.12 = -12%).
 ///
 /// See Also
 /// --------
@@ -90,10 +90,10 @@ impl EquitySample {
 ///     Floating-point so fractional units are tracked exactly for crypto.
 ///
 /// entry_ts : int
-///     Open timestamp (seconds since the Unix epoch).
+///     Open timestamp (in Unix seconds).
 ///
 /// exit_ts : int
-///     Close timestamp (seconds since the Unix epoch).
+///     Close timestamp (in Unix seconds).
 ///
 /// entry_price : float
 ///     Average fill price at entry, in the instrument's quote currency.
@@ -159,13 +159,13 @@ impl Trade {
 ///     The original order.
 ///
 /// timestamp : int
-///     The bar timestamp at which the order was processed.
+///     The bar timestamp at which the order was processed (in Unix seconds).
 ///
 /// status : str
-///     `"filled"`, `"cancelled"`, `"rejected"` or `"pending"`.
+///     One of: "filled", "canceled", "rejected" or "pending".
 ///
 /// fill_price : float | None
-///     Average fill price (None if not filled).
+///     Average fill price. `None` if not filled.
 ///
 /// reason : str
 ///     Human-readable note (rejection / cancellation reason).
@@ -175,10 +175,10 @@ impl Trade {
 ///     Zero for non-filled orders.
 ///
 /// pnl : float | None
-///     Realised profit & loss attributable to this order, in the base
-///     currency, after commission. Populated only on closing fills
-///     (sell that flattens / reduces an existing long, or buy-to-cover);
-///     `None` for opening fills, cancellations and rejections.
+///     Realised profit & loss attributable to this order, in the base currency,
+///     after commission. Populated only on closing fills (sell that flattens /
+///     reduces an existing long, or buy-to-cover). `None` for opening fills,
+///     cancellations and rejections.
 ///
 /// See Also
 /// --------
@@ -240,7 +240,7 @@ impl OrderRecord {
 ///     Unique identifier for this strategy run.
 ///
 /// strategy_name : str
-///     The user-facing name of the strategy.
+///     The name of the strategy.
 ///
 /// equity_curve : list[[EquitySample]]
 ///     Per-bar equity samples in chronological order.
@@ -255,18 +255,14 @@ impl OrderRecord {
 ///     Summary metrics (total_return, sharpe, max_drawdown, ...).
 ///
 /// base_currency : [Currency]
-///     The portfolio's base (accounting) currency for this run. Equity,
-///     PnL and drawdown values stored on the run are denominated in this
-///     currency. Captured from the `ExperimentConfig` so analysis tools
-///     don't need to look the experiment config up to label axes.
+///     The portfolio's base currency for this run. Equity, PnL and drawdown
+///     values stored on the run are denominated in this currency.
 ///
 /// error : str | None
-///     `None` on success. Otherwise, the first error raised by the
-///     strategy during the run (e.g., an exception thrown by
-///     `evaluate(...)`). Strategies that fail still produce a result
-///     row so the rest of the experiment isn't lost — the engine simply
-///     records the error and reports the experiment status as
-///     `"failed"`.
+///     `None` on success. Otherwise, the first error raised by the strategy
+///     during the run. Strategies that fail still produce a result row so the
+///     rest of the experiment isn't lost — the engine simply records the error
+///     and reports the experiment status as "failed".
 ///
 /// is_benchmark : bool
 ///     Whether this run is the benchmark run for the experiment.
@@ -332,12 +328,12 @@ impl RunResult {
     }
 }
 
-/// The complete result of a single experiment run.
+/// The complete result of a single experiment.
 ///
 /// Attributes
 /// ----------
 /// experiment_id : str
-///     Unique identifier of the persisted experiment row.
+///     Unique identifier of the experiment.
 ///
 /// name : str
 ///     Human-readable name (mirrors the config).
@@ -346,14 +342,17 @@ impl RunResult {
 ///     Tags assigned to the experiment.
 ///
 /// started_at : int
-///     UTC timestamp (seconds) when the run started.
+///     UTC timestamp when the run started (in Unix seconds).
 ///
 /// finished_at : int
-///     UTC timestamp (seconds) when the run finished.
+///     UTC timestamp when the run finished (in Unix seconds).
 ///
 /// status : [ExperimentStatus]
-///     `Success` if every strategy succeeded, `Partial` if some failed,
-///     `Error` if all failed or the experiment could not run.
+///     The status with which the experiment ended. Possible values are:
+///
+///     - `Success`: Every strategy succeeded.
+///     - `Partial`: At least one strategy failed, but not all.
+///     - `Error`: All strategies failed or the experiment could not run.
 ///
 /// strategies : list[[RunResult]]
 ///     One result entry per evaluated strategy.

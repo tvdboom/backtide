@@ -71,7 +71,14 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     `base_currency`, Backtide automatically downloads the required forex
     conversion pairs (legs) and converts prices to the base currency. The
     conversion path is controlled by `triangulation_strategy` in the
-    [configuration]. See the [currency conversion][data] section for details.
+    [configuration].
+
+    FX lookups do not require an exact rate sample at the same timestamp. Backtide
+    uses the latest known conversion rate at or before the requested timestamp.
+    If the portfolio needs a conversion for a timestamp earlier than the first
+    available FX sample, it falls back to that earliest known rate.
+
+    See the [currency conversion] section for details.
 
 ??? faq "How do I run the benchmarks?"
     Backtide uses [Criterion.rs](https://github.com/bheisler/criterion.rs) for performance benchmarking. Run all

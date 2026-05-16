@@ -8,9 +8,13 @@ Description: Abstract base class for strategies.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import numpy as np
+    import pandas as pd
+    import polars as pl
+
     from backtide.backtest import Order, Portfolio, State
 
 
@@ -67,17 +71,18 @@ class BaseStrategy(ABC):
     @abstractmethod
     def evaluate(
         self,
-        data: Any,
+        data: dict[str, np.ndarray | pd.DataFrame | pl.DataFrame],
         portfolio: Portfolio,
         state: State,
-        indicators: Any,
+        indicators: dict[str, dict[str, np.ndarray | pd.DataFrame | pl.DataFrame]] | None,
     ) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
-            Historical OHLCV data available up to the current bar.
+        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+            Keys are the experiment's symbols and values are the historical
+            OHLCV data available up to the current bar.
 
         portfolio : [Portfolio]
             Current portfolio holdings (cash, positions and open orders).
@@ -85,9 +90,10 @@ class BaseStrategy(ABC):
         state : [State]
             Current simulation state.
 
-        indicators : np.array | pd.DataFrame | pl.DataFrame | None
-            Pre-computed indicator values. `None` if no indicators were
-            selected.
+        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+            The first keys are the indicator names. The second keys are the
+            experiment's symbols. The values are the pre-computed indicator
+            values. `None` if no indicators were selected.
 
         Returns
         -------

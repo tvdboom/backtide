@@ -99,7 +99,7 @@ def plot_price(
     price_col : str, default="close"
         Column name in `data` to plot on the y-axis.
 
-    indicators : [BaseIndicator] | Sequence[[BaseIndicator]] | dict[str, [BaseIndicator]] or None, default=None
+    indicators : [BaseIndicator] | Sequence[[BaseIndicator]] | dict[str, [BaseIndicator]] | None, default=None
         Indicators to overlay on the price chart. If dict, it must map a name
         (used in the legend) to an indicator instance.
 

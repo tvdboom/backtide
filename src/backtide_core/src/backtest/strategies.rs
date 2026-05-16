@@ -313,16 +313,21 @@ fn rotation_orders(
 }
 
 /// Format a value the same way Python's ``str()`` does, for use in
-/// ``__auto_*`` indicator names. Floats render with their decimal point
+/// auto-indicator names. Floats render with their decimal point
 /// (e.g. ``2.0`` → ``"2.0"``); integers and other types fall back to
 /// their ``Debug`` representation.
 fn fmt_arg<T: std::fmt::Debug>(v: T) -> String {
     format!("{:?}", v)
 }
 
-/// Build the deterministic ``__auto_*`` name used by the engine for an
-/// auto-included indicator (mirrors `_auto_indicator_name` in the Python
-/// strategy utils).
+/// Build the deterministic name used by the engine for an auto-included
+/// indicator. Mirrors `_auto_indicator_name` in the Python strategy utils
+/// and [`auto_indicator_name_for`] in the engine so built-in strategies'
+/// lookups and the engine's writes agree on the same key.
+///
+/// Format: ``<ACRONYM>_<arg1>_<arg2>_...`` (or ``<ACRONYM>_default``
+/// when the indicator takes no constructor arguments). ``.``, ``-`` and
+/// spaces are sanitized for filesystem-friendliness.
 fn auto_indicator_name(acronym: &str, args: &[String]) -> String {
     let arg_str = if args.is_empty() {
         "default".to_owned()
@@ -330,7 +335,7 @@ fn auto_indicator_name(acronym: &str, args: &[String]) -> String {
         args.join("_")
     };
     let sanitized = arg_str.replace('.', "p").replace('-', "n").replace(' ', "");
-    format!("__auto_{acronym}_{sanitized}")
+    format!("{acronym}_{sanitized}")
 }
 
 /// Shared pymethods macro for all strategy structs.

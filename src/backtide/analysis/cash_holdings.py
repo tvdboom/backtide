@@ -130,16 +130,20 @@ def plot_cash_holdings(
         if run.is_benchmark or not run.equity_curve:
             continue
 
-        currencies = defaultdict(list)
+        # Build per-currency (timestamp, amount) pairs.
+        currencies: dict[str, tuple[list, list]] = defaultdict(lambda: ([], []))
         for eq in run.equity_curve:
+            ts = pd.to_datetime(eq.timestamp, unit="s")
             for ccy, amount in eq.cash.items():
-                currencies[str(ccy)].append(amount)
+                xs, ys = currencies[str(ccy)]
+                xs.append(ts)
+                ys.append(amount)
 
-        for idx2, (ccy, y) in enumerate(currencies.items()):
+        for idx2, (ccy, (xs, ys)) in enumerate(currencies.items()):
             fig.add_trace(
                 go.Scatter(
-                    x=[pd.to_datetime(s.timestamp, unit="s") for s in run.equity_curve],
-                    y=y,
+                    x=xs,
+                    y=ys,
                     mode="lines",
                     name=run.strategy_name if len(currencies) == 1 else ccy,
                     legendgroup=run.strategy_name,

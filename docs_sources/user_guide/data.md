@@ -190,9 +190,22 @@ print(result.n_succeeded, "succeeded,", result.n_failed, "failed")
 
 ## Currency conversion
 
-All values in Backtide are normalized to the project's base currency. If a symbol
-is quoted in another currency, Backtide resolves the conversion path automatically
-and downloads the required legs together with the requested bars.
+All final metrics in an [experiment] are normalized to the project's base currency.
+If a symbol is quoted in another currency, Backtide resolves the conversion path
+automatically and downloads the required legs together with the requested bars.
+
+When the engine needs an FX rate at a particular timestamp, it does not require
+an exact FX bar at that same time. Instead, it uses these lookup rules:
+
+1. Use a conversion sample if it exists exactly at that timestamp.
+2. Use the latest known sample at or before that timestamp.
+3. If the requested timestamp is earlier than the first available conversion sample,
+   use that earliest sample instead.
+
+In other words, FX conversion is normally forward-filled from history, with a
+single earliest-rate fallback for pre-history timestamps. This lets Backtide keep
+valuing portfolios and funding orders even when the traded instrument's bars begin
+slightly earlier than the downloaded conversion leg.
 
 Examples:
 

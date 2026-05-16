@@ -104,7 +104,7 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
 
         Returns
         -------
-        str or None
+        str | None
             Name of the file. Returns None if the dir is empty.
 
         """
@@ -226,7 +226,7 @@ def formatter(
     css_class: str
         Name of the css class to add to the block.
 
-    options: dict or None
+    options: dict | None
         Additional options for the formatter.
 
     md: markdown.Markdown

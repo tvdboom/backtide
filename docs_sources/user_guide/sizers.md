@@ -29,8 +29,31 @@ to the target instrument's quote currency, reads the symbol's latest close, and
 then calls `calculate(...)`.
 
 If the portfolio base currency differs from the instrument quote currency, the
-engine converts equity first. For example, in a EUR-based portfolio trading a
+engine converts equity first. For example, in an EUR-based portfolio trading a
 USD-quoted stock, the sizer receives equity in USD.
+
+### Equity vs cash
+
+The built-in sizers use equity as a mean of calculating the quantity to trade.
+This means they compute the total current portfolio equity, not just idle cash.
+For an attached sizer, the engine first computes all cash balances across currencies,
+plus the mark-to-market value of all open positions, and convert it into the order
+instrument's quote currency. That converted total is what gets passed as `equity`
+into `calculate(equity, price, stop_distance, atr)`.
+
+However, orders are still paid for with cash, not with unrealized position value.
+After the sizer returns a quantity, the engine checks whether the trade can actually
+be funded. For buys, it attempts to pay from:
+
+1. Cash already held in the instrument's quote currency,
+2. Base-currency cash converted at the current FX rate,
+3. Any other positive cash buckets that can be converted.
+
+If there still is not enough cash, the engine shrinks the order to the largest
+quantity that fits, or rejects it if nothing fits.
+
+If you want strictly cash-only sizing, compute the quantity yourself from
+`portfolio.cash` or implement a custom sizer with that policy.
 
 !!! note
     If you call `calculate()` manually inside a custom strategy, you are
@@ -130,9 +153,10 @@ class AtrSizedBreakout(BaseStrategy):
             return []
 
         # Manual examples should keep equity and price in the same currency.
-        # For same-currency portfolios, summing cash is often enough for a
-        # simple example; production strategies may want full mark-to-market
-        # equity including open positions.
+        # Summing `portfolio.cash.values()` is only reasonable when all cash
+        # buckets are already in the same currency as `close`. In
+        # multi-currency portfolios, convert cash first; production strategies
+        # may also want full mark-to-market equity including open positions.
         equity = sum(portfolio.cash.values())
         quantity = floor(VolatilityScaled(0.01).calculate(equity=equity, price=close, atr=atr))
 

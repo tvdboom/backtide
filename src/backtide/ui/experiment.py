@@ -72,6 +72,8 @@ from backtide.utils.utils import _get_timezone
 logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(
     logging.ERROR
 )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -222,6 +224,13 @@ def _build_config_toml(
         ),
     )
     return cfg.to_toml()
+
+
+def _clear_completed_error():
+    """Clear the completed-experiment state only when it represents an error."""
+    completed = st.session_state.get("_exp_completed")
+    if isinstance(completed, dict) and completed.get("status") == "error":
+        st.session_state.pop("_exp_completed", None)
 
 
 def _parse_config_upload(upload: Any) -> ExperimentConfig:
@@ -583,6 +592,7 @@ with tab2:
         default=_default(key, exp.data.instrument_type),
         format_func=lambda x: f"{x.icon()} {x}",
         on_change=lambda k=key: (
+            _clear_completed_error(),
             _clear_state("symbols", default=[]),
             _clear_state("currency", "benchmark", "benchmark_mode"),
             _persist(k),
@@ -1508,7 +1518,17 @@ if not can_run and st.session_state.get("_exp_thread") is None:
 
 # Determine whether the fragment should auto-poll (only while a thread is alive).
 poll_thread = st.session_state.get("_exp_thread")
-poll_interval = 0.4 if (poll_thread is not None and poll_thread.is_alive()) else None
+completed_state = st.session_state.get("_exp_completed")
+now_ts = dt.now().timestamp()
+if isinstance(completed_state, dict) and completed_state.get("status") == "error":
+    err_started = float(completed_state.get("completed_at", now_ts))
+    poll_error = (now_ts - err_started) < 8.0
+else:
+    poll_error = False
+
+poll_interval = (
+    0.4 if (poll_thread is not None and poll_thread.is_alive()) else (1.0 if poll_error else None)
+)
 
 
 @st.fragment(run_every=poll_interval)
@@ -1564,6 +1584,7 @@ def _experiment_fragment():
                 "status": "error",
                 "name": _exp_name,
                 "error": str(thread_result["error"]),
+                "completed_at": dt.now().timestamp(),
             }
         else:
             st.session_state["_exp_completed"] = {
@@ -1580,6 +1601,12 @@ def _experiment_fragment():
     elif completed := st.session_state.get("_exp_completed"):
         # Display the result from the just-finished experiment.
         _exp_name = completed["name"]
+
+        if completed.get("status") == "error":
+            completed.setdefault("completed_at", dt.now().timestamp())
+            if dt.now().timestamp() - completed["completed_at"] >= 8.0:
+                st.session_state.pop("_exp_completed", None)
+                st.rerun(scope="app")
 
         if completed["status"] == "aborted":
             st.warning(

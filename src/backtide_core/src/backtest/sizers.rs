@@ -34,10 +34,10 @@ macro_rules! sizer_pymethods {
             /// price : float
             ///     Reference price of the instrument.
             ///
-            /// stop_distance : float or None, default=None
+            /// stop_distance : float | None, default=None
             ///     Distance from entry to stop loss, in price units.
             ///
-            /// atr : float or None, default=None
+            /// atr : float | None, default=None
             ///     Current ATR value. Required for volatility-based sizers.
             ///
             /// Returns

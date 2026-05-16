@@ -222,14 +222,14 @@ class DisplayConfig:
         Format in which to display timestamps in [momentjs] style. Valid formats
         include `HH:MM:SS` (include seconds), `hh:mm a` (show am/pm).
 
-    timezone : str or None, default=None
+    timezone : str | None, default=None
         IANA timezone name. `None` to use the system's local timezone.
 
     currency_prefix : bool, default=True
         Whether to place currency symbols before the amount (`True`) or after the
         amount (`False`).
 
-    logokit_api_key : str or None, default=None
+    logokit_api_key : str | None, default=None
         API key for the [logokit] website, which is used to fetch images for instruments.
         If `None`, no images are loaded.
 
