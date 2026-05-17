@@ -900,6 +900,9 @@ fn quantity_rejection_reason(
     if !qty.is_finite() {
         return Some(format!("quantity for {symbol} must be finite"));
     }
+    if qty == 0.0 {
+        return Some(format!("quantity for {symbol} must be non-zero"));
+    }
     if !instrument_type.allows_fractional_quantities() && !is_whole_quantity(qty) {
         return Some(format!(
             "fractional quantity {qty} is not allowed for {instrument_type} instrument {symbol}; \
@@ -933,6 +936,9 @@ fn normalize_builtin_order_quantity(
     }
     if !order.quantity.is_finite() {
         return Some(format!("quantity for {} must be finite", order.symbol));
+    }
+    if order.quantity == 0.0 {
+        return Some(format!("quantity for {} must be non-zero", order.symbol));
     }
     if !instrument_type.allows_fractional_quantities() && !is_whole_quantity(order.quantity) {
         let whole_abs = order.quantity.abs().floor();
@@ -2655,9 +2661,21 @@ fn stop_triggered(qty: f64, bar: &Bar, stop: f64, is_take_profit: bool) -> bool 
 
 /// Stop fill price. Realistic gap handling: if the bar opens past the
 /// stop level, the stop fills at the open (worse than the stop) — a
-/// gap-down for sell stops, a gap-up for buy stops. Otherwise the stop
+/// gap-down for sell stops, a gap-up for buy stops. Otherwise, the stop
 /// fills at exactly the stop level.
 fn fill_stop(qty: f64, bar: &Bar, stop: f64) -> TriggerOutcome {
+    if qty == 0.0 {
+        return TriggerOutcome::Cancel {
+            reason: "zero quantity".into(),
+        };
+    }
+
+    // First check if the stop was actually triggered
+    if !stop_triggered(qty, bar, stop, false) {
+        return TriggerOutcome::Pending;
+    }
+
+    // Stop was triggered, now determine the fill price
     if qty < 0.0 {
         if bar.open <= stop {
             TriggerOutcome::Fill {
@@ -2672,7 +2690,7 @@ fn fill_stop(qty: f64, bar: &Bar, stop: f64) -> TriggerOutcome {
                 limit_cap: None,
             }
         }
-    } else if qty > 0.0 {
+    } else {
         if bar.open >= stop {
             TriggerOutcome::Fill {
                 raw_px: bar.open,
@@ -2685,10 +2703,6 @@ fn fill_stop(qty: f64, bar: &Bar, stop: f64) -> TriggerOutcome {
                 reason: "stop triggered".into(),
                 limit_cap: None,
             }
-        }
-    } else {
-        TriggerOutcome::Cancel {
-            reason: "zero quantity".into(),
         }
     }
 }
@@ -3343,17 +3357,28 @@ mod tests {
         m
     }
 
-    fn mk_multi_symbol_aligned(symbols: &[&str], n_bars: usize) -> HashMap<String, Vec<Option<Bar>>> {
+    fn mk_multi_symbol_aligned(
+        symbols: &[&str],
+        n_bars: usize,
+    ) -> HashMap<String, Vec<Option<Bar>>> {
         let mut out: HashMap<String, Vec<Option<Bar>>> = HashMap::new();
         for (sym_idx, symbol) in symbols.iter().enumerate() {
             let mut row = Vec::with_capacity(n_bars);
             for i in 0..n_bars {
                 let t = i as f64;
                 let phase = sym_idx as f64 * 0.85;
-                let regime = if (i / 36) % 2 == 0 { 1.0 } else { -1.0 };
+                let regime = if (i / 36) % 2 == 0 {
+                    1.0
+                } else {
+                    -1.0
+                };
                 let drift = regime * (i % 36) as f64 * 0.35;
                 let oscillation = 9.0 * (0.18 * t + phase).sin() + 4.0 * (0.055 * t + phase).cos();
-                let pulse = if i % 45 == 0 { 5.0 } else { 0.0 };
+                let pulse = if i % 45 == 0 {
+                    5.0
+                } else {
+                    0.0
+                };
                 let close = (90.0 + drift + oscillation + pulse + sym_idx as f64 * 1.5).max(2.0);
                 row.push(Some(mk_bar(1_700_000_000 + i as u64 * 86_400, close)));
             }
@@ -3447,29 +3472,17 @@ mod tests {
                 ),
                 ("Risk Averse".to_owned(), Py::new(py, RiskAverse::new(4, 6))?.into_any()),
                 ("ROC".to_owned(), Py::new(py, Roc::new(3))?.into_any()),
-                (
-                    "ROC Rotation".to_owned(),
-                    Py::new(py, RocRotation::new(3, 2, 1))?.into_any(),
-                ),
+                ("ROC Rotation".to_owned(), Py::new(py, RocRotation::new(3, 2, 1))?.into_any()),
                 ("RSI".to_owned(), Py::new(py, Rsi::new(3, 5, 1.0))?.into_any()),
                 ("RSRS".to_owned(), Py::new(py, Rsrs::new(6))?.into_any()),
-                (
-                    "RSRS Rotation".to_owned(),
-                    Py::new(py, RsrsRotation::new(6, 2, 1))?.into_any(),
-                ),
-                (
-                    "Crossover SMA".to_owned(),
-                    Py::new(py, SmaCrossover::new(3, 8))?.into_any(),
-                ),
+                ("RSRS Rotation".to_owned(), Py::new(py, RsrsRotation::new(6, 2, 1))?.into_any()),
+                ("Crossover SMA".to_owned(), Py::new(py, SmaCrossover::new(3, 8))?.into_any()),
                 ("Naive SMA".to_owned(), Py::new(py, SmaNaive::new(5))?.into_any()),
                 (
                     "Triple RSI Rotation".to_owned(),
                     Py::new(py, TripleRsiRotation::new(2, 3, 5, 2, 1))?.into_any(),
                 ),
-                (
-                    "Turtle Trading".to_owned(),
-                    Py::new(py, TurtleTrading::new(8, 4, 5))?.into_any(),
-                ),
+                ("Turtle Trading".to_owned(), Py::new(py, TurtleTrading::new(8, 4, 5))?.into_any()),
                 ("VCP".to_owned(), Py::new(py, Vcp::new(18, 3))?.into_any()),
             ];
 
@@ -3507,11 +3520,7 @@ mod tests {
                 &timeline,
                 &fx,
             );
-            assert!(
-                run.error.is_none(),
-                "strategy {strategy_name} failed: {:?}",
-                run.error
-            );
+            assert!(run.error.is_none(), "strategy {strategy_name} failed: {:?}", run.error);
 
             let filled: Vec<&OrderRecord> =
                 run.orders.iter().filter(|o| o.status == "filled").collect();
@@ -3530,8 +3539,7 @@ mod tests {
 
         let expected_symbols: HashSet<String> = symbols.iter().map(|s| (*s).to_owned()).collect();
         assert_eq!(
-            all_traded_symbols,
-            expected_symbols,
+            all_traded_symbols, expected_symbols,
             "expected every symbol to be traded at least once across built-ins"
         );
     }
@@ -6550,8 +6558,13 @@ mod tests {
     #[test]
     fn normalize_order_cancel_skips_validation() {
         let mut order = Order {
-            id: "1".into(), symbol: "X".into(), order_type: OrderType::Cancel,
-            quantity: f64::NAN, price: None, limit_price: None, sizer: None,
+            id: "1".into(),
+            symbol: "X".into(),
+            order_type: OrderType::Cancel,
+            quantity: f64::NAN,
+            price: None,
+            limit_price: None,
+            sizer: None,
         };
         assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
     }
@@ -6559,8 +6572,13 @@ mod tests {
     #[test]
     fn normalize_order_settle_skips_validation() {
         let mut order = Order {
-            id: "1".into(), symbol: "X".into(), order_type: OrderType::SettlePosition,
-            quantity: 0.0, price: None, limit_price: None, sizer: None,
+            id: "1".into(),
+            symbol: "X".into(),
+            order_type: OrderType::SettlePosition,
+            quantity: 0.0,
+            price: None,
+            limit_price: None,
+            sizer: None,
         };
         assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
     }
@@ -6568,8 +6586,13 @@ mod tests {
     #[test]
     fn normalize_order_nan_quantity_is_rejected() {
         let mut order = Order {
-            id: "1".into(), symbol: "X".into(), order_type: OrderType::Market,
-            quantity: f64::NAN, price: None, limit_price: None, sizer: None,
+            id: "1".into(),
+            symbol: "X".into(),
+            order_type: OrderType::Market,
+            quantity: f64::NAN,
+            price: None,
+            limit_price: None,
+            sizer: None,
         };
         assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_some());
     }
@@ -6577,8 +6600,13 @@ mod tests {
     #[test]
     fn normalize_order_floors_fractional_stock_qty() {
         let mut order = Order {
-            id: "1".into(), symbol: "AAPL".into(), order_type: OrderType::Market,
-            quantity: 5.7, price: None, limit_price: None, sizer: None,
+            id: "1".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 5.7,
+            price: None,
+            limit_price: None,
+            sizer: None,
         };
         assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
         assert_eq!(order.quantity, 5.0);
@@ -6587,8 +6615,13 @@ mod tests {
     #[test]
     fn normalize_order_floors_negative_fractional_stock_qty() {
         let mut order = Order {
-            id: "1".into(), symbol: "AAPL".into(), order_type: OrderType::Market,
-            quantity: -3.8, price: None, limit_price: None, sizer: None,
+            id: "1".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: -3.8,
+            price: None,
+            limit_price: None,
+            sizer: None,
         };
         assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
         assert_eq!(order.quantity, -3.0);
@@ -6597,8 +6630,13 @@ mod tests {
     #[test]
     fn normalize_order_rejects_below_one_stock_unit() {
         let mut order = Order {
-            id: "1".into(), symbol: "AAPL".into(), order_type: OrderType::Market,
-            quantity: 0.5, price: None, limit_price: None, sizer: None,
+            id: "1".into(),
+            symbol: "AAPL".into(),
+            order_type: OrderType::Market,
+            quantity: 0.5,
+            price: None,
+            limit_price: None,
+            sizer: None,
         };
         assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_some());
     }
@@ -6606,8 +6644,13 @@ mod tests {
     #[test]
     fn normalize_order_keeps_fractional_crypto() {
         let mut order = Order {
-            id: "1".into(), symbol: "BTC".into(), order_type: OrderType::Market,
-            quantity: 0.001, price: None, limit_price: None, sizer: None,
+            id: "1".into(),
+            symbol: "BTC".into(),
+            order_type: OrderType::Market,
+            quantity: 0.001,
+            price: None,
+            limit_price: None,
+            sizer: None,
         };
         assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Crypto).is_none());
         assert_eq!(order.quantity, 0.001);
@@ -6632,10 +6675,14 @@ mod tests {
 
     #[test]
     fn compute_indicators_with_bollinger_bands() {
-        let aligned = mk_aligned("Y", &[10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0]);
+        let aligned =
+            mk_aligned("Y", &[10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0]);
         let indicator_objs: Vec<(String, Py<PyAny>)> = Python::attach(|py| {
             use crate::backtest::indicators::BollingerBands;
-            vec![("BB_5_2".to_owned(), Py::new(py, BollingerBands::new(5, 2.0)).unwrap().into_any())]
+            vec![(
+                "BB_5_2".to_owned(),
+                Py::new(py, BollingerBands::new(5, 2.0)).unwrap().into_any(),
+            )]
         });
         let result = compute_indicators(&indicator_objs, &aligned, None).unwrap();
         let series = &result["BB_5_2"]["Y"];
@@ -6645,7 +6692,8 @@ mod tests {
     #[test]
     fn compute_indicators_empty_objs_returns_empty() {
         let aligned = mk_aligned("X", &[100.0, 101.0]);
-        let result = compute_indicators(&Vec::<(String, Py<PyAny>)>::new(), &aligned, None).unwrap();
+        let result =
+            compute_indicators(&Vec::<(String, Py<PyAny>)>::new(), &aligned, None).unwrap();
         assert!(result.is_empty());
     }
 
@@ -6655,7 +6703,10 @@ mod tests {
         aligned.extend(mk_aligned("B", &[20.0, 21.0, 22.0, 23.0, 24.0]));
         let indicator_objs: Vec<(String, Py<PyAny>)> = Python::attach(|py| {
             use crate::backtest::indicators::ExponentialMovingAverage;
-            vec![("EMA_3".to_owned(), Py::new(py, ExponentialMovingAverage::new(3)).unwrap().into_any())]
+            vec![(
+                "EMA_3".to_owned(),
+                Py::new(py, ExponentialMovingAverage::new(3)).unwrap().into_any(),
+            )]
         });
         let result = compute_indicators(&indicator_objs, &aligned, None).unwrap();
         assert!(result["EMA_3"].contains_key("A"));
@@ -6677,7 +6728,16 @@ mod tests {
             Py::new(py, BuyAndHold::new(None)).unwrap().into_any()
         });
         let indicators = HashMap::new();
-        let run = run_one_strategy("Buy & Hold", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        let run = run_one_strategy(
+            "Buy & Hold",
+            strategy,
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+        );
         assert!(run.error.is_none(), "Buy & Hold failed: {:?}", run.error);
         assert!(!run.equity_curve.is_empty());
         assert!(run.equity_curve.last().unwrap().equity > 10_000.0);
@@ -6702,9 +6762,19 @@ mod tests {
                 objs.push((name, ind));
             }
             Ok((s, objs))
-        }).unwrap();
+        })
+        .unwrap();
         let indicators = compute_indicators(&indicator_objs, &aligned, None).unwrap();
-        let run = run_one_strategy("SMA Crossover", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        let run = run_one_strategy(
+            "SMA Crossover",
+            strategy,
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+        );
         assert!(run.error.is_none(), "SMA Crossover failed: {:?}", run.error);
         assert!(!run.equity_curve.is_empty());
     }
@@ -6718,11 +6788,21 @@ mod tests {
         let mut cfg = mk_cfg("AA");
         cfg.data.symbols = symbols.iter().map(|s| (*s).to_owned()).collect();
         cfg.engine.warmup_period = 0;
-        let profiles: Vec<InstrumentProfile> = symbols.iter().map(|s| mk_profile(s, "USD")).collect();
+        let profiles: Vec<InstrumentProfile> =
+            symbols.iter().map(|s| mk_profile(s, "USD")).collect();
         let fx = FxTable::new("USD");
         let strategy = Python::attach(|py| Py::new(py, BuyAndHold::new(None)).unwrap().into_any());
         let indicators = HashMap::new();
-        let run = run_one_strategy("Buy & Hold", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        let run = run_one_strategy(
+            "Buy & Hold",
+            strategy,
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+        );
         assert!(run.error.is_none());
         assert!(!run.equity_curve.is_empty());
     }
@@ -6739,7 +6819,16 @@ mod tests {
         let fx = FxTable::new("USD");
         let strategy = Python::attach(|py| Py::new(py, BuyAndHold::new(None)).unwrap().into_any());
         let indicators = HashMap::new();
-        let run = run_one_strategy("Buy & Hold", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        let run = run_one_strategy(
+            "Buy & Hold",
+            strategy,
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+        );
         assert!(run.error.is_none());
         let final_eq = run.equity_curve.last().unwrap().equity;
         assert!(final_eq > 10_000.0);
@@ -6758,7 +6847,16 @@ mod tests {
         let fx = FxTable::new("USD");
         let strategy = Python::attach(|py| Py::new(py, BuyAndHold::new(None)).unwrap().into_any());
         let indicators = HashMap::new();
-        let run = run_one_strategy("Buy & Hold", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        let run = run_one_strategy(
+            "Buy & Hold",
+            strategy,
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+        );
         assert!(run.error.is_none());
     }
 
@@ -6816,14 +6914,42 @@ mod tests {
 
     #[test]
     fn compute_metrics_with_winning_and_losing_trades() {
-        let curve: Vec<EquitySample> = (0..10).map(|i| EquitySample {
-            timestamp: 1_700_000_000 + i * 86_400, equity: 10_000.0 + i as f64 * 100.0,
-            cash: HashMap::new(), drawdown: 0.0,
-        }).collect();
+        let curve: Vec<EquitySample> = (0..10)
+            .map(|i| EquitySample {
+                timestamp: 1_700_000_000 + i * 86_400,
+                equity: 10_000.0 + i as f64 * 100.0,
+                cash: HashMap::new(),
+                drawdown: 0.0,
+            })
+            .collect();
         let trades = vec![
-            Trade { symbol: "X".into(), entry_ts: 100, exit_ts: 200, quantity: 1.0, entry_price: 100.0, exit_price: 110.0, pnl: 10.0 },
-            Trade { symbol: "X".into(), entry_ts: 300, exit_ts: 400, quantity: 1.0, entry_price: 110.0, exit_price: 105.0, pnl: -5.0 },
-            Trade { symbol: "X".into(), entry_ts: 500, exit_ts: 600, quantity: 1.0, entry_price: 105.0, exit_price: 115.0, pnl: 10.0 },
+            Trade {
+                symbol: "X".into(),
+                entry_ts: 100,
+                exit_ts: 200,
+                quantity: 1.0,
+                entry_price: 100.0,
+                exit_price: 110.0,
+                pnl: 10.0,
+            },
+            Trade {
+                symbol: "X".into(),
+                entry_ts: 300,
+                exit_ts: 400,
+                quantity: 1.0,
+                entry_price: 110.0,
+                exit_price: 105.0,
+                pnl: -5.0,
+            },
+            Trade {
+                symbol: "X".into(),
+                entry_ts: 500,
+                exit_ts: 600,
+                quantity: 1.0,
+                entry_price: 105.0,
+                exit_price: 115.0,
+                pnl: 10.0,
+            },
         ];
         let m = compute_metrics(10_000.0, 0.0, &curve, &trades);
         assert_eq!(m["n_trades"], 3.0);
@@ -6836,7 +6962,10 @@ mod tests {
     #[test]
     fn align_bars_skip_policy_produces_nones_for_missing() {
         let mut bars: HashMap<String, Vec<Bar>> = HashMap::new();
-        bars.insert("X".to_owned(), vec![mk_bar(1_700_000_000, 100.0), mk_bar(1_700_172_800, 102.0)]);
+        bars.insert(
+            "X".to_owned(),
+            vec![mk_bar(1_700_000_000, 100.0), mk_bar(1_700_172_800, 102.0)],
+        );
         let timeline = vec![1_700_000_000_i64, 1_700_086_400, 1_700_172_800];
         let result = align_bars(&bars, &timeline, EmptyBarPolicy::Skip);
         let row = &result["X"];
@@ -6848,7 +6977,10 @@ mod tests {
     #[test]
     fn align_bars_forward_fill_fills_gap() {
         let mut bars: HashMap<String, Vec<Bar>> = HashMap::new();
-        bars.insert("X".to_owned(), vec![mk_bar(1_700_000_000, 100.0), mk_bar(1_700_172_800, 102.0)]);
+        bars.insert(
+            "X".to_owned(),
+            vec![mk_bar(1_700_000_000, 100.0), mk_bar(1_700_172_800, 102.0)],
+        );
         let timeline = vec![1_700_000_000_i64, 1_700_086_400, 1_700_172_800];
         let result = align_bars(&bars, &timeline, EmptyBarPolicy::ForwardFill);
         let row = &result["X"];
@@ -6860,7 +6992,10 @@ mod tests {
     #[test]
     fn align_bars_fill_with_nan_fills_nan_bar() {
         let mut bars: HashMap<String, Vec<Bar>> = HashMap::new();
-        bars.insert("X".to_owned(), vec![mk_bar(1_700_000_000, 100.0), mk_bar(1_700_172_800, 102.0)]);
+        bars.insert(
+            "X".to_owned(),
+            vec![mk_bar(1_700_000_000, 100.0), mk_bar(1_700_172_800, 102.0)],
+        );
         let timeline = vec![1_700_000_000_i64, 1_700_086_400, 1_700_172_800];
         let result = align_bars(&bars, &timeline, EmptyBarPolicy::FillWithNaN);
         assert!(result["X"][1].as_ref().unwrap().close.is_nan());
@@ -6873,7 +7008,10 @@ mod tests {
         use crate::backtest::models::conversion_period::ConversionPeriod;
         let jan15 = 1_705_276_800_i64;
         let feb15 = jan15 + 31 * 86_400;
-        assert_ne!(period_bucket(jan15, ConversionPeriod::Month), period_bucket(feb15, ConversionPeriod::Month));
+        assert_ne!(
+            period_bucket(jan15, ConversionPeriod::Month),
+            period_bucket(feb15, ConversionPeriod::Month)
+        );
     }
 
     #[test]
@@ -6882,7 +7020,10 @@ mod tests {
         // 2024-01-15 00:00:00 UTC (aligned to midnight)
         let midnight = 1_705_276_800_i64;
         let noon = midnight + 43_200;
-        assert_eq!(period_bucket(midnight, ConversionPeriod::Day), period_bucket(noon, ConversionPeriod::Day));
+        assert_eq!(
+            period_bucket(midnight, ConversionPeriod::Day),
+            period_bucket(noon, ConversionPeriod::Day)
+        );
     }
 
     // ── OrderType/enum coverage ────────────────────────────────────────
@@ -6895,9 +7036,15 @@ mod tests {
         assert_eq!(OrderType::parse_flexible("take_profit").unwrap(), OrderType::TakeProfit);
         assert_eq!(OrderType::parse_flexible("stop").unwrap(), OrderType::StopLoss);
         assert_eq!(OrderType::parse_flexible("stop_loss_limit").unwrap(), OrderType::StopLossLimit);
-        assert_eq!(OrderType::parse_flexible("take_profit_limit").unwrap(), OrderType::TakeProfitLimit);
+        assert_eq!(
+            OrderType::parse_flexible("take_profit_limit").unwrap(),
+            OrderType::TakeProfitLimit
+        );
         assert_eq!(OrderType::parse_flexible("trailing_stop").unwrap(), OrderType::TrailingStop);
-        assert_eq!(OrderType::parse_flexible("trailing_stop_limit").unwrap(), OrderType::TrailingStopLimit);
+        assert_eq!(
+            OrderType::parse_flexible("trailing_stop_limit").unwrap(),
+            OrderType::TrailingStopLimit
+        );
         assert_eq!(OrderType::parse_flexible("settle").unwrap(), OrderType::SettlePosition);
         assert_eq!(OrderType::parse_flexible("cancel").unwrap(), OrderType::Cancel);
         assert!(OrderType::parse_flexible("nonexistent").is_err());
@@ -6905,9 +7052,18 @@ mod tests {
 
     #[test]
     fn order_type_name_and_description_all_variants() {
-        let variants = [OrderType::Market, OrderType::Limit, OrderType::StopLoss, OrderType::TakeProfit,
-            OrderType::StopLossLimit, OrderType::TakeProfitLimit, OrderType::TrailingStop,
-            OrderType::TrailingStopLimit, OrderType::SettlePosition, OrderType::Cancel];
+        let variants = [
+            OrderType::Market,
+            OrderType::Limit,
+            OrderType::StopLoss,
+            OrderType::TakeProfit,
+            OrderType::StopLossLimit,
+            OrderType::TakeProfitLimit,
+            OrderType::TrailingStop,
+            OrderType::TrailingStopLimit,
+            OrderType::SettlePosition,
+            OrderType::Cancel,
+        ];
         for v in &variants {
             assert!(!v.name().is_empty());
             assert!(!v.description().is_empty());
@@ -7020,7 +7176,10 @@ mod tests {
     fn commission_type_from_str() {
         assert_eq!("percentage".parse::<CommissionType>().unwrap(), CommissionType::Percentage);
         assert_eq!("fixed".parse::<CommissionType>().unwrap(), CommissionType::Fixed);
-        assert_eq!("PercentagePlusFixed".parse::<CommissionType>().unwrap(), CommissionType::PercentagePlusFixed);
+        assert_eq!(
+            "PercentagePlusFixed".parse::<CommissionType>().unwrap(),
+            CommissionType::PercentagePlusFixed
+        );
     }
 
     #[test]
@@ -7063,9 +7222,18 @@ mod tests {
     #[test]
     fn currency_conversion_mode_from_str() {
         use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
-        assert_eq!("immediate".parse::<CurrencyConversionMode>().unwrap(), CurrencyConversionMode::Immediate);
-        assert_eq!("HoldUntilThreshold".parse::<CurrencyConversionMode>().unwrap(), CurrencyConversionMode::HoldUntilThreshold);
-        assert_eq!("EndOfPeriod".parse::<CurrencyConversionMode>().unwrap(), CurrencyConversionMode::EndOfPeriod);
+        assert_eq!(
+            "immediate".parse::<CurrencyConversionMode>().unwrap(),
+            CurrencyConversionMode::Immediate
+        );
+        assert_eq!(
+            "HoldUntilThreshold".parse::<CurrencyConversionMode>().unwrap(),
+            CurrencyConversionMode::HoldUntilThreshold
+        );
+        assert_eq!(
+            "EndOfPeriod".parse::<CurrencyConversionMode>().unwrap(),
+            CurrencyConversionMode::EndOfPeriod
+        );
     }
 
     #[test]
@@ -7102,40 +7270,67 @@ mod tests {
                 objs.push((name, ind));
             }
             Ok((s, objs))
-        }).unwrap();
+        })
+        .unwrap();
 
         let indicators = compute_indicators(&indicator_objs, &aligned, None).unwrap();
-        run_one_strategy(strategy_name, strategy_obj, &cfg, &aligned, &indicators, &profiles, &timeline, &fx)
+        run_one_strategy(
+            strategy_name,
+            strategy_obj,
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+        )
     }
 
     #[test]
     fn run_adaptive_rsi_strategy() {
-        let run = run_builtin_single("Adaptive RSI", |py| Ok(Py::new(py, AdaptiveRsi::new(2, 6))?.into_any()), 80);
+        let run = run_builtin_single(
+            "Adaptive RSI",
+            |py| Ok(Py::new(py, AdaptiveRsi::new(2, 6))?.into_any()),
+            80,
+        );
         assert!(run.error.is_none());
         assert!(!run.equity_curve.is_empty());
     }
 
     #[test]
     fn run_alpha_rsi_pro_strategy() {
-        let run = run_builtin_single("AlphaRSI Pro", |py| Ok(Py::new(py, AlphaRsiPro::new(3, 5))?.into_any()), 80);
+        let run = run_builtin_single(
+            "AlphaRSI Pro",
+            |py| Ok(Py::new(py, AlphaRsiPro::new(3, 5))?.into_any()),
+            80,
+        );
         assert!(run.error.is_none());
     }
 
     #[test]
     fn run_bollinger_mean_reversion_strategy() {
-        let run = run_builtin_single("BB Mean Reversion", |py| Ok(Py::new(py, BollingerMeanReversion::new(5, 1.0))?.into_any()), 80);
+        let run = run_builtin_single(
+            "BB Mean Reversion",
+            |py| Ok(Py::new(py, BollingerMeanReversion::new(5, 1.0))?.into_any()),
+            80,
+        );
         assert!(run.error.is_none());
     }
 
     #[test]
     fn run_macd_strategy() {
-        let run = run_builtin_single("MACD", |py| Ok(Py::new(py, Macd::new(3, 7, 3))?.into_any()), 80);
+        let run =
+            run_builtin_single("MACD", |py| Ok(Py::new(py, Macd::new(3, 7, 3))?.into_any()), 80);
         assert!(run.error.is_none());
     }
 
     #[test]
     fn run_momentum_strategy() {
-        let run = run_builtin_single("Momentum", |py| Ok(Py::new(py, Momentum::new(3, 7))?.into_any()), 80);
+        let run = run_builtin_single(
+            "Momentum",
+            |py| Ok(Py::new(py, Momentum::new(3, 7))?.into_any()),
+            80,
+        );
         assert!(run.error.is_none());
     }
 
@@ -7147,7 +7342,8 @@ mod tests {
 
     #[test]
     fn run_rsi_strategy() {
-        let run = run_builtin_single("RSI", |py| Ok(Py::new(py, Rsi::new(3, 5, 1.0))?.into_any()), 80);
+        let run =
+            run_builtin_single("RSI", |py| Ok(Py::new(py, Rsi::new(3, 5, 1.0))?.into_any()), 80);
         assert!(run.error.is_none());
     }
 
@@ -7159,25 +7355,38 @@ mod tests {
 
     #[test]
     fn run_sma_naive_strategy() {
-        let run = run_builtin_single("Naive SMA", |py| Ok(Py::new(py, SmaNaive::new(5))?.into_any()), 80);
+        let run =
+            run_builtin_single("Naive SMA", |py| Ok(Py::new(py, SmaNaive::new(5))?.into_any()), 80);
         assert!(run.error.is_none());
     }
 
     #[test]
     fn run_risk_averse_strategy() {
-        let run = run_builtin_single("Risk Averse", |py| Ok(Py::new(py, RiskAverse::new(4, 6))?.into_any()), 80);
+        let run = run_builtin_single(
+            "Risk Averse",
+            |py| Ok(Py::new(py, RiskAverse::new(4, 6))?.into_any()),
+            80,
+        );
         assert!(run.error.is_none());
     }
 
     #[test]
     fn run_hybrid_alpha_rsi_strategy() {
-        let run = run_builtin_single("Hybrid AlphaRSI", |py| Ok(Py::new(py, HybridAlphaRsi::new(2, 6, 6))?.into_any()), 80);
+        let run = run_builtin_single(
+            "Hybrid AlphaRSI",
+            |py| Ok(Py::new(py, HybridAlphaRsi::new(2, 6, 6))?.into_any()),
+            80,
+        );
         assert!(run.error.is_none());
     }
 
     #[test]
     fn run_turtle_trading_strategy() {
-        let run = run_builtin_single("Turtle Trading", |py| Ok(Py::new(py, TurtleTrading::new(8, 4, 5))?.into_any()), 120);
+        let run = run_builtin_single(
+            "Turtle Trading",
+            |py| Ok(Py::new(py, TurtleTrading::new(8, 4, 5))?.into_any()),
+            120,
+        );
         assert!(run.error.is_none());
     }
 
@@ -7189,7 +7398,11 @@ mod tests {
 
     #[test]
     fn run_double_top_strategy() {
-        let run = run_builtin_single("Double Top", |py| Ok(Py::new(py, DoubleTop::new(10))?.into_any()), 120);
+        let run = run_builtin_single(
+            "Double Top",
+            |py| Ok(Py::new(py, DoubleTop::new(10))?.into_any()),
+            120,
+        );
         assert!(run.error.is_none());
     }
 
@@ -7208,7 +7421,8 @@ mod tests {
         cfg.engine.warmup_period = 0;
         cfg.exchange.allow_short_selling = true;
         cfg.portfolio.initial_cash = 100_000;
-        let profiles: Vec<InstrumentProfile> = symbols.iter().map(|s| mk_profile(s, "USD")).collect();
+        let profiles: Vec<InstrumentProfile> =
+            symbols.iter().map(|s| mk_profile(s, "USD")).collect();
         let fx = FxTable::new("USD");
 
         let (strategy_obj, indicator_objs) = Python::attach(|py| -> PyResult<_> {
@@ -7221,34 +7435,52 @@ mod tests {
                 objs.push((name, ind));
             }
             Ok((s, objs))
-        }).unwrap();
+        })
+        .unwrap();
 
         let indicators = compute_indicators(&indicator_objs, &aligned, None).unwrap();
 
-        run_one_strategy(strategy_name, strategy_obj, &cfg, &aligned, &indicators, &profiles, &timeline, &fx)
+        run_one_strategy(
+            strategy_name,
+            strategy_obj,
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+        )
     }
 
     #[test]
     fn run_roc_rotation_strategy() {
-        let run = run_rotation_helper("ROC Rotation", |py| Ok(Py::new(py, RocRotation::new(3, 2, 1))?.into_any()));
+        let run = run_rotation_helper("ROC Rotation", |py| {
+            Ok(Py::new(py, RocRotation::new(3, 2, 1))?.into_any())
+        });
         assert!(run.error.is_none());
     }
 
     #[test]
     fn run_rsrs_rotation_strategy() {
-        let run = run_rotation_helper("RSRS Rotation", |py| Ok(Py::new(py, RsrsRotation::new(6, 2, 1))?.into_any()));
+        let run = run_rotation_helper("RSRS Rotation", |py| {
+            Ok(Py::new(py, RsrsRotation::new(6, 2, 1))?.into_any())
+        });
         assert!(run.error.is_none());
     }
 
     #[test]
     fn run_multi_bb_rotation_strategy() {
-        let run = run_rotation_helper("Multi BB Rotation", |py| Ok(Py::new(py, MultiBollingerRotation::new(5, 1.0, 2, 1))?.into_any()));
+        let run = run_rotation_helper("Multi BB Rotation", |py| {
+            Ok(Py::new(py, MultiBollingerRotation::new(5, 1.0, 2, 1))?.into_any())
+        });
         assert!(run.error.is_none());
     }
 
     #[test]
     fn run_triple_rsi_rotation_strategy() {
-        let run = run_rotation_helper("Triple RSI Rotation", |py| Ok(Py::new(py, TripleRsiRotation::new(2, 3, 5, 2, 1))?.into_any()));
+        let run = run_rotation_helper("Triple RSI Rotation", |py| {
+            Ok(Py::new(py, TripleRsiRotation::new(2, 3, 5, 2, 1))?.into_any())
+        });
         assert!(run.error.is_none());
     }
 

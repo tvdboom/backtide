@@ -244,16 +244,17 @@ def _set_flash_notice(message: str, *, level: str):
 
 def _render_flash_notice(*, ttl: float = 8.0):
     """Render a transient notice and clear it after `ttl` seconds."""
-    notice = st.session_state.get("_flash_notice", {})
+    notice = st.session_state.get("_flash_notice")
 
-    if dt.now().timestamp() - notice.get("created_at", 0.) >= ttl:
-        st.session_state.pop("_flash_notice", None)
-        return
+    if isinstance(notice, dict):
+        if dt.now().timestamp() - notice["created_at"] >= ttl:
+            st.session_state.pop("_flash_notice", None)
+            return
 
-    if notice.get("level") == "error":
-        st.error(notice["message"])
-    elif notice.get("level") == "success":
-        st.success(notice["message"])
+        if notice.get("level") == "error":
+            st.error(notice["message"])
+        elif notice.get("level") == "success":
+            st.success(notice["message"])
 
 
 def _parse_config_upload(upload: Any) -> ExperimentConfig:
@@ -1550,7 +1551,7 @@ else:
 
 flash_active = False
 if isinstance(flash_notice, dict):
-    if (now_ts - flash_notice.get("created_at", 0.)) < 8.0:
+    if (now_ts - flash_notice.get("created_at", 0.0)) < 8.0:
         flash_active = True
     else:
         st.session_state.pop("_flash_notice", None)

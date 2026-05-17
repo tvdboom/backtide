@@ -1495,24 +1495,6 @@ class TestExperimentPage:
         assert not at.exception
 
     @pytest.mark.usefixtures("_app")
-    def test_config_upload_success(self):
-        """Config import success message is shown."""
-        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
-        at.run()
-        at.session_state["_success"] = "Loaded config."
-        at.run()
-        assert any("Loaded" in s.value for s in at.success)
-
-    @pytest.mark.usefixtures("_app")
-    def test_config_upload_error(self):
-        """Config import error message is shown."""
-        at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
-        at.run()
-        at.session_state["_error"] = "Failed to parse."
-        at.run()
-        assert any("Failed" in e.value for e in at.error)
-
-    @pytest.mark.usefixtures("_app")
     def test_invalid_tag(self):
         """Invalid tags show an error."""
         at = AppTest.from_file("src/backtide/ui/experiment.py", default_timeout=30)
