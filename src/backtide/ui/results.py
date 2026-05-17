@@ -589,7 +589,7 @@ def _render_full_analysis(row: pd.Series):
         st.rerun()
 
     with st.container(key="full_results_toolbar"):
-        col1, col2, _, col_id, col4, col5, col6 = st.columns(
+        col1, col2, _, col4, col5, col6, col7 = st.columns(
             [1.2, 0.7, 3.9, 0.7, 0.7, 0.7, 0.7],
             gap="xxsmall",
         )
@@ -634,7 +634,7 @@ def _render_full_analysis(row: pd.Series):
 
                 if log_text.strip():
                     lines = log_text.splitlines()
-                    max_lines = 1000
+                    max_lines = 500
                     if len(lines) > max_lines:
                         st.caption(
                             f"Showing last {max_lines} of {len(lines)} lines. "
@@ -644,11 +644,11 @@ def _render_full_analysis(row: pd.Series):
                 else:
                     st.info("Log file is empty.")
 
-        with col_id.popover("", icon=":material/tag:", width=400, help="Show the experiment ID."):
+        with col4.popover("", icon=":material/tag:", width=400, help="Show the experiment ID."):
             st.markdown("**Experiment ID**")
             st.code(exp_id, language=None, width=300)
 
-        with col4.popover(
+        with col5.popover(
             "",
             icon=":material/description:",
             disabled=not row["description"],
@@ -661,23 +661,43 @@ def _render_full_analysis(row: pd.Series):
             st.markdown(f"**{name}**")
             st.write(row["description"])
 
-        if col5.button(
+        with col6.popover(
             "",
-            key=f"export_full_{exp_id}",
-            icon=":material/upload:",
-            type="secondary",
-            width="stretch",
+            icon=":material/construction:",
             disabled=not cfg_path.is_file(),
             help=(
-                "Open this experiment's configuration in the **Experiment** page."
+                "View this experiment's configuration."
                 if cfg_path.is_file()
                 else "No saved configuration found for this experiment."
             ),
         ):
-            st.session_state["_pending_experiment_config"] = exp_cfg
-            st.switch_page("experiment.py")
+            try:
+                cfg_text = cfg_path.read_text(encoding="utf-8")
+            except Exception as ex:  # noqa: BLE001
+                st.error(f"Failed to read configuration: {ex}", icon=":material/error:")
+            else:
+                c1, c2 = st.columns([3, 1])
+                c1.markdown(f"**Configuration - {name}**")
+                if c2.button(
+                    label="Open",
+                    key=f"export_full_{exp_id}",
+                    icon=":material/upload:",
+                    type="secondary",
+                    width="stretch",
+                    help="Open the configuration in the **Experiment** page.",
+                ):
+                    try:
+                        exp_cfg = ExperimentConfig.from_toml(cfg_text)
+                    except Exception as ex:  # noqa: BLE001
+                        st.session_state["_error"] = f"Failed to load configuration: {ex}"
+                        st.rerun()
+                    else:
+                        st.session_state["_pending_experiment_config"] = exp_cfg
+                        st.switch_page("experiment.py")
 
-        if col6.button(
+                st.code(cfg_text, language="toml", line_numbers=True, width=1500)
+
+        if col7.button(
             "",
             key=f"delete_full_{exp_id}",
             icon=":material/delete:",
@@ -986,7 +1006,7 @@ for _, row in df.iterrows():
     is_open = exp_id == expanded_id
 
     with st.container(border=True):
-        col1, col2, col3, col4 = st.columns([6, 2, 0.7, 0.7], gap="xxsmall")
+        col1, col2, col3 = st.columns([6, 2, 0.6], gap="xxsmall")
 
         status = ExperimentStatus(row["status"])
         col1.markdown(
@@ -1001,7 +1021,7 @@ for _, row in df.iterrows():
         _render_tags(row["tags"], container=col1)
 
         if col2.button(
-            "Full results",
+            label="Full results",
             key=f"open_analysis_{exp_id}",
             icon=":material/fact_check:",
             type="secondary",
@@ -1010,32 +1030,8 @@ for _, row in df.iterrows():
             st.session_state["selected_experiment"] = row.to_dict()
             st.rerun()
 
-        cfg_path = Path(cfg.data.storage_path) / "experiments" / exp_id / "config.toml"
-        export_disabled = not cfg_path.is_file()
         if col3.button(
-            "",
-            key=f"export_{exp_id}",
-            icon=":material/upload:",
-            type="secondary",
-            width="stretch",
-            disabled=export_disabled,
-            help=(
-                "Open this experiment's configuration in the **Experiment** page."
-                if not export_disabled
-                else "No saved configuration found for this experiment."
-            ),
-        ):
-            try:
-                exp_cfg = ExperimentConfig.from_toml(cfg_path.read_text(encoding="utf-8"))
-            except Exception as ex:  # noqa: BLE001
-                st.session_state["_error"] = f"Failed to load configuration: {ex}"
-                st.rerun()
-            else:
-                st.session_state["_pending_experiment_config"] = exp_cfg
-                st.switch_page("experiment.py")
-
-        if col4.button(
-            "",
+            label="",
             key=f"delete_{exp_id}",
             icon=":material/delete:",
             type="primary",

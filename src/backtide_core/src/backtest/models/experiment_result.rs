@@ -388,7 +388,7 @@ impl ExperimentResult {
             "ExperimentResult(id={:?}, name={:?}, status={:?}, n_strategies={})",
             self.experiment_id,
             self.name,
-            self.status,
+            self.status.to_string(),
             self.strategies.len(),
         )
     }

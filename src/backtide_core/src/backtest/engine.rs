@@ -3315,6 +3315,7 @@ fn accrue_margin_costs(
 mod tests {
     use super::*;
     use crate::backtest::models::experiment_config::*;
+    use crate::backtest::strategies::*;
     use crate::data::models::instrument::Instrument;
 
     fn mk_bar(ts: u64, close: f64) -> Bar {
@@ -3340,6 +3341,25 @@ mod tests {
         let mut m = HashMap::new();
         m.insert(symbol.to_owned(), row);
         m
+    }
+
+    fn mk_multi_symbol_aligned(symbols: &[&str], n_bars: usize) -> HashMap<String, Vec<Option<Bar>>> {
+        let mut out: HashMap<String, Vec<Option<Bar>>> = HashMap::new();
+        for (sym_idx, symbol) in symbols.iter().enumerate() {
+            let mut row = Vec::with_capacity(n_bars);
+            for i in 0..n_bars {
+                let t = i as f64;
+                let phase = sym_idx as f64 * 0.85;
+                let regime = if (i / 36) % 2 == 0 { 1.0 } else { -1.0 };
+                let drift = regime * (i % 36) as f64 * 0.35;
+                let oscillation = 9.0 * (0.18 * t + phase).sin() + 4.0 * (0.055 * t + phase).cos();
+                let pulse = if i % 45 == 0 { 5.0 } else { 0.0 };
+                let close = (90.0 + drift + oscillation + pulse + sym_idx as f64 * 1.5).max(2.0);
+                row.push(Some(mk_bar(1_700_000_000 + i as u64 * 86_400, close)));
+            }
+            out.insert((*symbol).to_owned(), row);
+        }
+        out
     }
 
     fn mk_cfg(symbol: &str) -> ExperimentConfig {
@@ -3387,6 +3407,133 @@ mod tests {
             latest_ts: HashMap::new(),
             legs: vec![],
         }
+    }
+
+    #[test]
+    fn builtin_strategies_trade_multiple_times_and_cover_all_symbols() {
+        let symbols = vec!["AAA", "BBB", "CCC"];
+        let n_bars = 240_usize;
+        let aligned = mk_multi_symbol_aligned(&symbols, n_bars);
+        let timeline: Vec<i64> = (0..n_bars).map(|i| 1_700_000_000 + i as i64 * 86_400).collect();
+
+        let mut cfg = mk_cfg(symbols[0]);
+        cfg.data.symbols = symbols.iter().map(|s| (*s).to_owned()).collect();
+        cfg.portfolio.initial_cash = 1_000_000;
+        cfg.exchange.allow_short_selling = true;
+        cfg.engine.warmup_period = 0;
+
+        let profiles: Vec<InstrumentProfile> =
+            symbols.iter().map(|s| mk_profile(s, "USD")).collect();
+
+        let (strategies, indicator_objs) = Python::attach(|py| -> PyResult<_> {
+            let strategies: Vec<(String, Py<PyAny>)> = vec![
+                ("Adaptive RSI".to_owned(), Py::new(py, AdaptiveRsi::new(2, 6))?.into_any()),
+                ("AlphaRSI Pro".to_owned(), Py::new(py, AlphaRsiPro::new(3, 5))?.into_any()),
+                (
+                    "BB Mean Reversion".to_owned(),
+                    Py::new(py, BollingerMeanReversion::new(5, 1.0))?.into_any(),
+                ),
+                ("Buy & Hold".to_owned(), Py::new(py, BuyAndHold::new(None))?.into_any()),
+                ("Double Top".to_owned(), Py::new(py, DoubleTop::new(10))?.into_any()),
+                (
+                    "Hybrid AlphaRSI".to_owned(),
+                    Py::new(py, HybridAlphaRsi::new(2, 6, 6))?.into_any(),
+                ),
+                ("MACD".to_owned(), Py::new(py, Macd::new(3, 7, 3))?.into_any()),
+                ("Momentum".to_owned(), Py::new(py, Momentum::new(3, 7))?.into_any()),
+                (
+                    "Multi BB Rotation".to_owned(),
+                    Py::new(py, MultiBollingerRotation::new(5, 1.0, 2, 1))?.into_any(),
+                ),
+                ("Risk Averse".to_owned(), Py::new(py, RiskAverse::new(4, 6))?.into_any()),
+                ("ROC".to_owned(), Py::new(py, Roc::new(3))?.into_any()),
+                (
+                    "ROC Rotation".to_owned(),
+                    Py::new(py, RocRotation::new(3, 2, 1))?.into_any(),
+                ),
+                ("RSI".to_owned(), Py::new(py, Rsi::new(3, 5, 1.0))?.into_any()),
+                ("RSRS".to_owned(), Py::new(py, Rsrs::new(6))?.into_any()),
+                (
+                    "RSRS Rotation".to_owned(),
+                    Py::new(py, RsrsRotation::new(6, 2, 1))?.into_any(),
+                ),
+                (
+                    "Crossover SMA".to_owned(),
+                    Py::new(py, SmaCrossover::new(3, 8))?.into_any(),
+                ),
+                ("Naive SMA".to_owned(), Py::new(py, SmaNaive::new(5))?.into_any()),
+                (
+                    "Triple RSI Rotation".to_owned(),
+                    Py::new(py, TripleRsiRotation::new(2, 3, 5, 2, 1))?.into_any(),
+                ),
+                (
+                    "Turtle Trading".to_owned(),
+                    Py::new(py, TurtleTrading::new(8, 4, 5))?.into_any(),
+                ),
+                ("VCP".to_owned(), Py::new(py, Vcp::new(18, 3))?.into_any()),
+            ];
+
+            let mut seen: HashSet<String> = HashSet::new();
+            let mut indicator_objs: Vec<(String, Py<PyAny>)> = Vec::new();
+            for (_, sobj) in &strategies {
+                let raw = sobj.bind(py).call_method0("required_indicators")?;
+                let required: Vec<Py<PyAny>> = raw.extract()?;
+                for ind in required {
+                    let name = auto_indicator_name_for(py, &ind)?;
+                    if seen.insert(name.clone()) {
+                        indicator_objs.push((name, ind));
+                    }
+                }
+            }
+
+            Ok((strategies, indicator_objs))
+        })
+        .expect("failed to instantiate built-in strategy suite");
+
+        let indicators = compute_indicators(&indicator_objs, &aligned, None)
+            .expect("failed to compute auto-injected indicators for built-ins");
+
+        let fx = FxTable::new("USD");
+        let mut all_traded_symbols: HashSet<String> = HashSet::new();
+
+        for (strategy_name, strategy_obj) in strategies {
+            let run = run_one_strategy(
+                &strategy_name,
+                strategy_obj,
+                &cfg,
+                &aligned,
+                &indicators,
+                &profiles,
+                &timeline,
+                &fx,
+            );
+            assert!(
+                run.error.is_none(),
+                "strategy {strategy_name} failed: {:?}",
+                run.error
+            );
+
+            let filled: Vec<&OrderRecord> =
+                run.orders.iter().filter(|o| o.status == "filled").collect();
+            if strategy_name != "Buy & Hold" {
+                assert!(
+                    filled.len() >= 2,
+                    "strategy {strategy_name} should execute multiple fills, got {}",
+                    filled.len()
+                );
+            }
+
+            for record in filled {
+                all_traded_symbols.insert(record.order.symbol.clone());
+            }
+        }
+
+        let expected_symbols: HashSet<String> = symbols.iter().map(|s| (*s).to_owned()).collect();
+        assert_eq!(
+            all_traded_symbols,
+            expected_symbols,
+            "expected every symbol to be traded at least once across built-ins"
+        );
     }
 
     #[test]
@@ -6361,5 +6508,765 @@ mod tests {
         let profiles: Vec<InstrumentProfile> = vec![];
         let m = profile_instrument_types(&profiles);
         assert!(m.is_empty());
+    }
+
+    // ── validate_starting_position_quantities ──────────────────────────
+
+    #[test]
+    fn validate_starting_positions_accepts_whole_stock_qty() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.portfolio.starting_positions.insert("AAPL".into(), 10.0);
+        let profiles = vec![mk_profile("AAPL", "USD")];
+        assert!(validate_starting_position_quantities(&cfg, &profiles).is_ok());
+    }
+
+    #[test]
+    fn validate_starting_positions_rejects_fractional_stock_qty() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.portfolio.starting_positions.insert("AAPL".into(), 1.5);
+        let profiles = vec![mk_profile("AAPL", "USD")];
+        assert!(validate_starting_position_quantities(&cfg, &profiles).is_err());
+    }
+
+    #[test]
+    fn validate_starting_positions_accepts_fractional_crypto_qty() {
+        let mut cfg = mk_cfg("BTC");
+        cfg.data.instrument_type = InstrumentType::Crypto;
+        cfg.portfolio.starting_positions.insert("BTC".into(), 0.001);
+        let profiles = vec![mk_profile_with_type("BTC", "USD", InstrumentType::Crypto)];
+        assert!(validate_starting_position_quantities(&cfg, &profiles).is_ok());
+    }
+
+    #[test]
+    fn validate_starting_positions_rejects_nan_qty() {
+        let mut cfg = mk_cfg("AAPL");
+        cfg.portfolio.starting_positions.insert("AAPL".into(), f64::NAN);
+        let profiles = vec![mk_profile("AAPL", "USD")];
+        assert!(validate_starting_position_quantities(&cfg, &profiles).is_err());
+    }
+
+    // ── normalize_builtin_order_quantity ────────────────────────────────
+
+    #[test]
+    fn normalize_order_cancel_skips_validation() {
+        let mut order = Order {
+            id: "1".into(), symbol: "X".into(), order_type: OrderType::Cancel,
+            quantity: f64::NAN, price: None, limit_price: None, sizer: None,
+        };
+        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
+    }
+
+    #[test]
+    fn normalize_order_settle_skips_validation() {
+        let mut order = Order {
+            id: "1".into(), symbol: "X".into(), order_type: OrderType::SettlePosition,
+            quantity: 0.0, price: None, limit_price: None, sizer: None,
+        };
+        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
+    }
+
+    #[test]
+    fn normalize_order_nan_quantity_is_rejected() {
+        let mut order = Order {
+            id: "1".into(), symbol: "X".into(), order_type: OrderType::Market,
+            quantity: f64::NAN, price: None, limit_price: None, sizer: None,
+        };
+        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_some());
+    }
+
+    #[test]
+    fn normalize_order_floors_fractional_stock_qty() {
+        let mut order = Order {
+            id: "1".into(), symbol: "AAPL".into(), order_type: OrderType::Market,
+            quantity: 5.7, price: None, limit_price: None, sizer: None,
+        };
+        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
+        assert_eq!(order.quantity, 5.0);
+    }
+
+    #[test]
+    fn normalize_order_floors_negative_fractional_stock_qty() {
+        let mut order = Order {
+            id: "1".into(), symbol: "AAPL".into(), order_type: OrderType::Market,
+            quantity: -3.8, price: None, limit_price: None, sizer: None,
+        };
+        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
+        assert_eq!(order.quantity, -3.0);
+    }
+
+    #[test]
+    fn normalize_order_rejects_below_one_stock_unit() {
+        let mut order = Order {
+            id: "1".into(), symbol: "AAPL".into(), order_type: OrderType::Market,
+            quantity: 0.5, price: None, limit_price: None, sizer: None,
+        };
+        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_some());
+    }
+
+    #[test]
+    fn normalize_order_keeps_fractional_crypto() {
+        let mut order = Order {
+            id: "1".into(), symbol: "BTC".into(), order_type: OrderType::Market,
+            quantity: 0.001, price: None, limit_price: None, sizer: None,
+        };
+        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Crypto).is_none());
+        assert_eq!(order.quantity, 0.001);
+    }
+
+    // ── compute_indicators ─────────────────────────────────────────────
+
+    #[test]
+    fn compute_indicators_with_sma() {
+        let aligned = mk_aligned("X", &[100.0, 101.0, 102.0, 103.0, 104.0]);
+        let indicator_objs: Vec<(String, Py<PyAny>)> = Python::attach(|py| {
+            use crate::backtest::indicators::SimpleMovingAverage;
+            vec![("SMA_3".to_owned(), Py::new(py, SimpleMovingAverage::new(3)).unwrap().into_any())]
+        });
+        let result = compute_indicators(&indicator_objs, &aligned, None).unwrap();
+        assert!(result.contains_key("SMA_3"));
+        let series = &result["SMA_3"]["X"];
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].len(), 5);
+        assert!(series[0][2].is_finite());
+    }
+
+    #[test]
+    fn compute_indicators_with_bollinger_bands() {
+        let aligned = mk_aligned("Y", &[10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0]);
+        let indicator_objs: Vec<(String, Py<PyAny>)> = Python::attach(|py| {
+            use crate::backtest::indicators::BollingerBands;
+            vec![("BB_5_2".to_owned(), Py::new(py, BollingerBands::new(5, 2.0)).unwrap().into_any())]
+        });
+        let result = compute_indicators(&indicator_objs, &aligned, None).unwrap();
+        let series = &result["BB_5_2"]["Y"];
+        assert_eq!(series.len(), 3);
+    }
+
+    #[test]
+    fn compute_indicators_empty_objs_returns_empty() {
+        let aligned = mk_aligned("X", &[100.0, 101.0]);
+        let result = compute_indicators(&Vec::<(String, Py<PyAny>)>::new(), &aligned, None).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn compute_indicators_multiple_symbols() {
+        let mut aligned = mk_aligned("A", &[10.0, 11.0, 12.0, 13.0, 14.0]);
+        aligned.extend(mk_aligned("B", &[20.0, 21.0, 22.0, 23.0, 24.0]));
+        let indicator_objs: Vec<(String, Py<PyAny>)> = Python::attach(|py| {
+            use crate::backtest::indicators::ExponentialMovingAverage;
+            vec![("EMA_3".to_owned(), Py::new(py, ExponentialMovingAverage::new(3)).unwrap().into_any())]
+        });
+        let result = compute_indicators(&indicator_objs, &aligned, None).unwrap();
+        assert!(result["EMA_3"].contains_key("A"));
+        assert!(result["EMA_3"].contains_key("B"));
+    }
+
+    // ── run_one_strategy exercises ─────────────────────────────────────
+
+    #[test]
+    fn run_buy_and_hold_strategy_produces_equity_curve() {
+        let prices: Vec<f64> = (0..30).map(|i| 100.0 + i as f64).collect();
+        let aligned = mk_aligned("AAPL", &prices);
+        let timeline: Vec<i64> = (0..30).map(|i| 1_700_000_000 + i as i64 * 86_400).collect();
+        let mut cfg = mk_cfg("AAPL");
+        cfg.engine.warmup_period = 0;
+        let profiles = vec![mk_profile("AAPL", "USD")];
+        let fx = FxTable::new("USD");
+        let strategy = Python::attach(|py| -> Py<PyAny> {
+            Py::new(py, BuyAndHold::new(None)).unwrap().into_any()
+        });
+        let indicators = HashMap::new();
+        let run = run_one_strategy("Buy & Hold", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        assert!(run.error.is_none(), "Buy & Hold failed: {:?}", run.error);
+        assert!(!run.equity_curve.is_empty());
+        assert!(run.equity_curve.last().unwrap().equity > 10_000.0);
+    }
+
+    #[test]
+    fn run_sma_crossover_strategy_produces_trades() {
+        let n_bars = 60;
+        let aligned = mk_multi_symbol_aligned(&["TEST"], n_bars);
+        let timeline: Vec<i64> = (0..n_bars).map(|i| 1_700_000_000 + i as i64 * 86_400).collect();
+        let mut cfg = mk_cfg("TEST");
+        cfg.engine.warmup_period = 0;
+        let profiles = vec![mk_profile("TEST", "USD")];
+        let fx = FxTable::new("USD");
+        let (strategy, indicator_objs) = Python::attach(|py| -> PyResult<_> {
+            let s = Py::new(py, SmaCrossover::new(3, 8))?.into_any();
+            let raw = s.bind(py).call_method0("required_indicators")?;
+            let required: Vec<Py<PyAny>> = raw.extract()?;
+            let mut objs = Vec::new();
+            for ind in required {
+                let name = auto_indicator_name_for(py, &ind)?;
+                objs.push((name, ind));
+            }
+            Ok((s, objs))
+        }).unwrap();
+        let indicators = compute_indicators(&indicator_objs, &aligned, None).unwrap();
+        let run = run_one_strategy("SMA Crossover", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        assert!(run.error.is_none(), "SMA Crossover failed: {:?}", run.error);
+        assert!(!run.equity_curve.is_empty());
+    }
+
+    #[test]
+    fn run_strategy_with_multiple_symbols() {
+        let symbols = vec!["AA", "BB"];
+        let n_bars = 60;
+        let aligned = mk_multi_symbol_aligned(&symbols, n_bars);
+        let timeline: Vec<i64> = (0..n_bars).map(|i| 1_700_000_000 + i as i64 * 86_400).collect();
+        let mut cfg = mk_cfg("AA");
+        cfg.data.symbols = symbols.iter().map(|s| (*s).to_owned()).collect();
+        cfg.engine.warmup_period = 0;
+        let profiles: Vec<InstrumentProfile> = symbols.iter().map(|s| mk_profile(s, "USD")).collect();
+        let fx = FxTable::new("USD");
+        let strategy = Python::attach(|py| Py::new(py, BuyAndHold::new(None)).unwrap().into_any());
+        let indicators = HashMap::new();
+        let run = run_one_strategy("Buy & Hold", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        assert!(run.error.is_none());
+        assert!(!run.equity_curve.is_empty());
+    }
+
+    #[test]
+    fn run_strategy_with_starting_positions() {
+        let prices: Vec<f64> = (0..20).map(|i| 100.0 + i as f64).collect();
+        let aligned = mk_aligned("X", &prices);
+        let timeline: Vec<i64> = (0..20).map(|i| 1_700_000_000 + i as i64 * 86_400).collect();
+        let mut cfg = mk_cfg("X");
+        cfg.engine.warmup_period = 0;
+        cfg.portfolio.starting_positions.insert("X".into(), 5.0);
+        let profiles = vec![mk_profile("X", "USD")];
+        let fx = FxTable::new("USD");
+        let strategy = Python::attach(|py| Py::new(py, BuyAndHold::new(None)).unwrap().into_any());
+        let indicators = HashMap::new();
+        let run = run_one_strategy("Buy & Hold", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        assert!(run.error.is_none());
+        let final_eq = run.equity_curve.last().unwrap().equity;
+        assert!(final_eq > 10_000.0);
+    }
+
+    #[test]
+    fn run_strategy_with_commission() {
+        let prices: Vec<f64> = (0..30).map(|i| 100.0 + i as f64).collect();
+        let aligned = mk_aligned("X", &prices);
+        let timeline: Vec<i64> = (0..30).map(|i| 1_700_000_000 + i as i64 * 86_400).collect();
+        let mut cfg = mk_cfg("X");
+        cfg.engine.warmup_period = 0;
+        cfg.exchange.commission_type = CommissionType::Percentage;
+        cfg.exchange.commission_pct = 0.01;
+        let profiles = vec![mk_profile("X", "USD")];
+        let fx = FxTable::new("USD");
+        let strategy = Python::attach(|py| Py::new(py, BuyAndHold::new(None)).unwrap().into_any());
+        let indicators = HashMap::new();
+        let run = run_one_strategy("Buy & Hold", strategy, &cfg, &aligned, &indicators, &profiles, &timeline, &fx);
+        assert!(run.error.is_none());
+    }
+
+    // ── IndicatorView tests ────────────────────────────────────────────
+
+    #[test]
+    fn indicator_view_value_returns_finite_value() {
+        let mut data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let mut per_sym = HashMap::new();
+        per_sym.insert("AAPL".to_owned(), vec![vec![1.0, 2.0, 3.0]]);
+        data.insert("SMA_5".to_owned(), per_sym);
+        let view = IndicatorView::new(&data, 1);
+        assert_eq!(view.value("SMA_5", "AAPL"), Some(2.0));
+    }
+
+    #[test]
+    fn indicator_view_value_returns_none_for_nan() {
+        let mut data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let mut per_sym = HashMap::new();
+        per_sym.insert("X".to_owned(), vec![vec![f64::NAN, 2.0]]);
+        data.insert("RSI".to_owned(), per_sym);
+        let view = IndicatorView::new(&data, 0);
+        assert_eq!(view.value("RSI", "X"), None);
+    }
+
+    #[test]
+    fn indicator_view_value_returns_none_for_missing_indicator() {
+        let data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let view = IndicatorView::new(&data, 0);
+        assert_eq!(view.value("MISSING", "X"), None);
+    }
+
+    #[test]
+    fn indicator_view_last_returns_multiple_series_values() {
+        let mut data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let mut per_sym = HashMap::new();
+        per_sym.insert("X".to_owned(), vec![vec![10.0, 20.0], vec![5.0, 15.0], vec![1.0, 10.0]]);
+        data.insert("BB".to_owned(), per_sym);
+        let view = IndicatorView::new(&data, 1);
+        let values = view.last("BB", "X").unwrap();
+        assert_eq!(values, vec![20.0, 15.0, 10.0]);
+    }
+
+    #[test]
+    fn indicator_view_out_of_bounds_returns_none() {
+        let mut data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let mut per_sym = HashMap::new();
+        per_sym.insert("X".to_owned(), vec![vec![1.0, 2.0]]);
+        data.insert("SMA".to_owned(), per_sym);
+        let view = IndicatorView::new(&data, 10);
+        assert_eq!(view.last("SMA", "X"), None);
+    }
+
+    // ── compute_metrics additional ─────────────────────────────────────
+
+    #[test]
+    fn compute_metrics_with_winning_and_losing_trades() {
+        let curve: Vec<EquitySample> = (0..10).map(|i| EquitySample {
+            timestamp: 1_700_000_000 + i * 86_400, equity: 10_000.0 + i as f64 * 100.0,
+            cash: HashMap::new(), drawdown: 0.0,
+        }).collect();
+        let trades = vec![
+            Trade { symbol: "X".into(), entry_ts: 100, exit_ts: 200, quantity: 1.0, entry_price: 100.0, exit_price: 110.0, pnl: 10.0 },
+            Trade { symbol: "X".into(), entry_ts: 300, exit_ts: 400, quantity: 1.0, entry_price: 110.0, exit_price: 105.0, pnl: -5.0 },
+            Trade { symbol: "X".into(), entry_ts: 500, exit_ts: 600, quantity: 1.0, entry_price: 105.0, exit_price: 115.0, pnl: 10.0 },
+        ];
+        let m = compute_metrics(10_000.0, 0.0, &curve, &trades);
+        assert_eq!(m["n_trades"], 3.0);
+        assert!((m["win_rate"] - 2.0 / 3.0).abs() < 1e-9);
+        assert!(m["total_return"] > 0.0);
+    }
+
+    // ── align_bars additional ──────────────────────────────────────────
+
+    #[test]
+    fn align_bars_skip_policy_produces_nones_for_missing() {
+        let mut bars: HashMap<String, Vec<Bar>> = HashMap::new();
+        bars.insert("X".to_owned(), vec![mk_bar(1_700_000_000, 100.0), mk_bar(1_700_172_800, 102.0)]);
+        let timeline = vec![1_700_000_000_i64, 1_700_086_400, 1_700_172_800];
+        let result = align_bars(&bars, &timeline, EmptyBarPolicy::Skip);
+        let row = &result["X"];
+        assert!(row[0].is_some());
+        assert!(row[1].is_none());
+        assert!(row[2].is_some());
+    }
+
+    #[test]
+    fn align_bars_forward_fill_fills_gap() {
+        let mut bars: HashMap<String, Vec<Bar>> = HashMap::new();
+        bars.insert("X".to_owned(), vec![mk_bar(1_700_000_000, 100.0), mk_bar(1_700_172_800, 102.0)]);
+        let timeline = vec![1_700_000_000_i64, 1_700_086_400, 1_700_172_800];
+        let result = align_bars(&bars, &timeline, EmptyBarPolicy::ForwardFill);
+        let row = &result["X"];
+        assert!(row[1].is_some());
+        assert_eq!(row[1].as_ref().unwrap().close, 100.0);
+        assert_eq!(row[1].as_ref().unwrap().volume, 0.0);
+    }
+
+    #[test]
+    fn align_bars_fill_with_nan_fills_nan_bar() {
+        let mut bars: HashMap<String, Vec<Bar>> = HashMap::new();
+        bars.insert("X".to_owned(), vec![mk_bar(1_700_000_000, 100.0), mk_bar(1_700_172_800, 102.0)]);
+        let timeline = vec![1_700_000_000_i64, 1_700_086_400, 1_700_172_800];
+        let result = align_bars(&bars, &timeline, EmptyBarPolicy::FillWithNaN);
+        assert!(result["X"][1].as_ref().unwrap().close.is_nan());
+    }
+
+    // ── period_bucket additional ───────────────────────────────────────
+
+    #[test]
+    fn period_bucket_month_changes_across_months() {
+        use crate::backtest::models::conversion_period::ConversionPeriod;
+        let jan15 = 1_705_276_800_i64;
+        let feb15 = jan15 + 31 * 86_400;
+        assert_ne!(period_bucket(jan15, ConversionPeriod::Month), period_bucket(feb15, ConversionPeriod::Month));
+    }
+
+    #[test]
+    fn period_bucket_day_same_day_equal() {
+        use crate::backtest::models::conversion_period::ConversionPeriod;
+        // 2024-01-15 00:00:00 UTC (aligned to midnight)
+        let midnight = 1_705_276_800_i64;
+        let noon = midnight + 43_200;
+        assert_eq!(period_bucket(midnight, ConversionPeriod::Day), period_bucket(noon, ConversionPeriod::Day));
+    }
+
+    // ── OrderType/enum coverage ────────────────────────────────────────
+
+    #[test]
+    fn order_type_parse_flexible_all_variants() {
+        assert_eq!(OrderType::parse_flexible("market").unwrap(), OrderType::Market);
+        assert_eq!(OrderType::parse_flexible("LIMIT").unwrap(), OrderType::Limit);
+        assert_eq!(OrderType::parse_flexible("stop_loss").unwrap(), OrderType::StopLoss);
+        assert_eq!(OrderType::parse_flexible("take_profit").unwrap(), OrderType::TakeProfit);
+        assert_eq!(OrderType::parse_flexible("stop").unwrap(), OrderType::StopLoss);
+        assert_eq!(OrderType::parse_flexible("stop_loss_limit").unwrap(), OrderType::StopLossLimit);
+        assert_eq!(OrderType::parse_flexible("take_profit_limit").unwrap(), OrderType::TakeProfitLimit);
+        assert_eq!(OrderType::parse_flexible("trailing_stop").unwrap(), OrderType::TrailingStop);
+        assert_eq!(OrderType::parse_flexible("trailing_stop_limit").unwrap(), OrderType::TrailingStopLimit);
+        assert_eq!(OrderType::parse_flexible("settle").unwrap(), OrderType::SettlePosition);
+        assert_eq!(OrderType::parse_flexible("cancel").unwrap(), OrderType::Cancel);
+        assert!(OrderType::parse_flexible("nonexistent").is_err());
+    }
+
+    #[test]
+    fn order_type_name_and_description_all_variants() {
+        let variants = [OrderType::Market, OrderType::Limit, OrderType::StopLoss, OrderType::TakeProfit,
+            OrderType::StopLossLimit, OrderType::TakeProfitLimit, OrderType::TrailingStop,
+            OrderType::TrailingStopLimit, OrderType::SettlePosition, OrderType::Cancel];
+        for v in &variants {
+            assert!(!v.name().is_empty());
+            assert!(!v.description().is_empty());
+        }
+    }
+
+    #[test]
+    fn order_type_fromstr() {
+        assert_eq!("market".parse::<OrderType>().unwrap(), OrderType::Market);
+        assert_eq!("trailing_stop".parse::<OrderType>().unwrap(), OrderType::TrailingStop);
+    }
+
+    #[test]
+    fn instrument_type_default_providers() {
+        assert_eq!(InstrumentType::Stocks.default_provider(), Provider::Yahoo);
+        assert_eq!(InstrumentType::Etf.default_provider(), Provider::Yahoo);
+        assert_eq!(InstrumentType::Forex.default_provider(), Provider::Yahoo);
+        assert_eq!(InstrumentType::Crypto.default_provider(), Provider::Binance);
+    }
+
+    #[test]
+    fn instrument_type_allows_fractional_quantities_all() {
+        assert!(InstrumentType::Crypto.allows_fractional_quantities());
+        assert!(!InstrumentType::Stocks.allows_fractional_quantities());
+        assert!(!InstrumentType::Etf.allows_fractional_quantities());
+        assert!(!InstrumentType::Forex.allows_fractional_quantities());
+    }
+
+    #[test]
+    fn instrument_type_is_equity_all() {
+        assert!(InstrumentType::Stocks.is_equity());
+        assert!(InstrumentType::Etf.is_equity());
+        assert!(!InstrumentType::Forex.is_equity());
+        assert!(!InstrumentType::Crypto.is_equity());
+    }
+
+    #[test]
+    fn instrument_type_str_display_all() {
+        assert_eq!(InstrumentType::Stocks.__str__(), "Stocks");
+        assert_eq!(InstrumentType::Etf.__str__(), "ETF");
+        assert_eq!(InstrumentType::Forex.__str__(), "Forex");
+        assert_eq!(InstrumentType::Crypto.__str__(), "Crypto");
+    }
+
+    #[test]
+    fn instrument_type_icon_all() {
+        assert!(!InstrumentType::Stocks.icon().is_empty());
+        assert!(!InstrumentType::Etf.icon().is_empty());
+        assert!(!InstrumentType::Forex.icon().is_empty());
+        assert!(!InstrumentType::Crypto.icon().is_empty());
+    }
+
+    #[test]
+    fn interval_display_all_variants() {
+        assert_eq!(Interval::OneMinute.to_string(), "1m");
+        assert_eq!(Interval::FiveMinutes.to_string(), "5m");
+        assert_eq!(Interval::FifteenMinutes.to_string(), "15m");
+        assert_eq!(Interval::ThirtyMinutes.to_string(), "30m");
+        assert_eq!(Interval::OneHour.to_string(), "1h");
+        assert_eq!(Interval::FourHours.to_string(), "4h");
+        assert_eq!(Interval::OneDay.to_string(), "1d");
+        assert_eq!(Interval::OneWeek.to_string(), "1w");
+    }
+
+    #[test]
+    fn interval_from_str_all_variants() {
+        assert_eq!("1m".parse::<Interval>().unwrap(), Interval::OneMinute);
+        assert_eq!("5m".parse::<Interval>().unwrap(), Interval::FiveMinutes);
+        assert_eq!("15m".parse::<Interval>().unwrap(), Interval::FifteenMinutes);
+        assert_eq!("30m".parse::<Interval>().unwrap(), Interval::ThirtyMinutes);
+        assert_eq!("1h".parse::<Interval>().unwrap(), Interval::OneHour);
+        assert_eq!("4h".parse::<Interval>().unwrap(), Interval::FourHours);
+        assert_eq!("1d".parse::<Interval>().unwrap(), Interval::OneDay);
+        assert_eq!("1w".parse::<Interval>().unwrap(), Interval::OneWeek);
+        assert!("invalid".parse::<Interval>().is_err());
+    }
+
+    #[test]
+    fn interval_is_intraday_all() {
+        assert!(Interval::OneMinute.is_intraday());
+        assert!(Interval::FiveMinutes.is_intraday());
+        assert!(Interval::FifteenMinutes.is_intraday());
+        assert!(Interval::ThirtyMinutes.is_intraday());
+        assert!(Interval::OneHour.is_intraday());
+        assert!(Interval::FourHours.is_intraday());
+        assert!(!Interval::OneDay.is_intraday());
+        assert!(!Interval::OneWeek.is_intraday());
+    }
+
+    #[test]
+    fn interval_minutes_all_variants() {
+        assert_eq!(Interval::OneMinute.minutes(), 1);
+        assert_eq!(Interval::FiveMinutes.minutes(), 5);
+        assert_eq!(Interval::FifteenMinutes.minutes(), 15);
+        assert_eq!(Interval::ThirtyMinutes.minutes(), 30);
+        assert_eq!(Interval::OneHour.minutes(), 60);
+        assert_eq!(Interval::FourHours.minutes(), 240);
+        assert_eq!(Interval::OneDay.minutes(), 1440);
+        assert_eq!(Interval::OneWeek.minutes(), 10080);
+    }
+
+    #[test]
+    fn commission_type_str_all_variants() {
+        assert_eq!(CommissionType::Percentage.__str__(), "Percentage (%)");
+        assert_eq!(CommissionType::Fixed.__str__(), "Fixed amount");
+        assert_eq!(CommissionType::PercentagePlusFixed.__str__(), "Percentage + Fixed");
+    }
+
+    #[test]
+    fn commission_type_from_str() {
+        assert_eq!("percentage".parse::<CommissionType>().unwrap(), CommissionType::Percentage);
+        assert_eq!("fixed".parse::<CommissionType>().unwrap(), CommissionType::Fixed);
+        assert_eq!("PercentagePlusFixed".parse::<CommissionType>().unwrap(), CommissionType::PercentagePlusFixed);
+    }
+
+    #[test]
+    fn empty_bar_policy_name_all_variants() {
+        assert_eq!(EmptyBarPolicy::Skip.name(), "Skip");
+        assert_eq!(EmptyBarPolicy::ForwardFill.name(), "Forward-fill");
+        assert_eq!(EmptyBarPolicy::FillWithNaN.name(), "Fill with NaN");
+    }
+
+    #[test]
+    fn empty_bar_policy_from_str() {
+        assert_eq!("skip".parse::<EmptyBarPolicy>().unwrap(), EmptyBarPolicy::Skip);
+        assert_eq!("forwardfill".parse::<EmptyBarPolicy>().unwrap(), EmptyBarPolicy::ForwardFill);
+        assert_eq!("fillwithnan".parse::<EmptyBarPolicy>().unwrap(), EmptyBarPolicy::FillWithNaN);
+    }
+
+    #[test]
+    fn experiment_status_description_all() {
+        assert!(!ExperimentStatus::Success.description().is_empty());
+        assert!(!ExperimentStatus::Partial.description().is_empty());
+        assert!(!ExperimentStatus::Error.description().is_empty());
+    }
+
+    #[test]
+    fn experiment_status_from_str() {
+        assert_eq!("success".parse::<ExperimentStatus>().unwrap(), ExperimentStatus::Success);
+        assert_eq!("partial".parse::<ExperimentStatus>().unwrap(), ExperimentStatus::Partial);
+        assert_eq!("error".parse::<ExperimentStatus>().unwrap(), ExperimentStatus::Error);
+    }
+
+    #[test]
+    fn currency_conversion_mode_name_all() {
+        use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
+        assert!(!CurrencyConversionMode::Immediate.name().is_empty());
+        assert!(!CurrencyConversionMode::HoldUntilThreshold.name().is_empty());
+        assert!(!CurrencyConversionMode::EndOfPeriod.name().is_empty());
+        assert!(!CurrencyConversionMode::CustomInterval.name().is_empty());
+    }
+
+    #[test]
+    fn currency_conversion_mode_from_str() {
+        use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
+        assert_eq!("immediate".parse::<CurrencyConversionMode>().unwrap(), CurrencyConversionMode::Immediate);
+        assert_eq!("HoldUntilThreshold".parse::<CurrencyConversionMode>().unwrap(), CurrencyConversionMode::HoldUntilThreshold);
+        assert_eq!("EndOfPeriod".parse::<CurrencyConversionMode>().unwrap(), CurrencyConversionMode::EndOfPeriod);
+    }
+
+    #[test]
+    fn conversion_period_from_str() {
+        use crate::backtest::models::conversion_period::ConversionPeriod;
+        assert_eq!("day".parse::<ConversionPeriod>().unwrap(), ConversionPeriod::Day);
+        assert_eq!("week".parse::<ConversionPeriod>().unwrap(), ConversionPeriod::Week);
+        assert_eq!("month".parse::<ConversionPeriod>().unwrap(), ConversionPeriod::Month);
+        assert_eq!("year".parse::<ConversionPeriod>().unwrap(), ConversionPeriod::Year);
+    }
+
+    // ── Additional strategy run tests ──────────────────────────────────
+
+    fn run_builtin_single(
+        strategy_name: &str,
+        make_strategy: fn(Python<'_>) -> PyResult<Py<PyAny>>,
+        n_bars: usize,
+    ) -> RunResult {
+        let aligned = mk_multi_symbol_aligned(&["S1"], n_bars);
+        let timeline: Vec<i64> = (0..n_bars).map(|i| 1_700_000_000 + i as i64 * 86_400).collect();
+        let mut cfg = mk_cfg("S1");
+        cfg.engine.warmup_period = 0;
+        cfg.exchange.allow_short_selling = true;
+        let profiles = vec![mk_profile("S1", "USD")];
+        let fx = FxTable::new("USD");
+
+        let (strategy_obj, indicator_objs) = Python::attach(|py| -> PyResult<_> {
+            let s = make_strategy(py)?;
+            let raw = s.bind(py).call_method0("required_indicators")?;
+            let required: Vec<Py<PyAny>> = raw.extract()?;
+            let mut objs = Vec::new();
+            for ind in required {
+                let name = auto_indicator_name_for(py, &ind)?;
+                objs.push((name, ind));
+            }
+            Ok((s, objs))
+        }).unwrap();
+
+        let indicators = compute_indicators(&indicator_objs, &aligned, None).unwrap();
+        run_one_strategy(strategy_name, strategy_obj, &cfg, &aligned, &indicators, &profiles, &timeline, &fx)
+    }
+
+    #[test]
+    fn run_adaptive_rsi_strategy() {
+        let run = run_builtin_single("Adaptive RSI", |py| Ok(Py::new(py, AdaptiveRsi::new(2, 6))?.into_any()), 80);
+        assert!(run.error.is_none());
+        assert!(!run.equity_curve.is_empty());
+    }
+
+    #[test]
+    fn run_alpha_rsi_pro_strategy() {
+        let run = run_builtin_single("AlphaRSI Pro", |py| Ok(Py::new(py, AlphaRsiPro::new(3, 5))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_bollinger_mean_reversion_strategy() {
+        let run = run_builtin_single("BB Mean Reversion", |py| Ok(Py::new(py, BollingerMeanReversion::new(5, 1.0))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_macd_strategy() {
+        let run = run_builtin_single("MACD", |py| Ok(Py::new(py, Macd::new(3, 7, 3))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_momentum_strategy() {
+        let run = run_builtin_single("Momentum", |py| Ok(Py::new(py, Momentum::new(3, 7))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_roc_strategy() {
+        let run = run_builtin_single("ROC", |py| Ok(Py::new(py, Roc::new(3))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_rsi_strategy() {
+        let run = run_builtin_single("RSI", |py| Ok(Py::new(py, Rsi::new(3, 5, 1.0))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_rsrs_strategy() {
+        let run = run_builtin_single("RSRS", |py| Ok(Py::new(py, Rsrs::new(6))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_sma_naive_strategy() {
+        let run = run_builtin_single("Naive SMA", |py| Ok(Py::new(py, SmaNaive::new(5))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_risk_averse_strategy() {
+        let run = run_builtin_single("Risk Averse", |py| Ok(Py::new(py, RiskAverse::new(4, 6))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_hybrid_alpha_rsi_strategy() {
+        let run = run_builtin_single("Hybrid AlphaRSI", |py| Ok(Py::new(py, HybridAlphaRsi::new(2, 6, 6))?.into_any()), 80);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_turtle_trading_strategy() {
+        let run = run_builtin_single("Turtle Trading", |py| Ok(Py::new(py, TurtleTrading::new(8, 4, 5))?.into_any()), 120);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_vcp_strategy() {
+        let run = run_builtin_single("VCP", |py| Ok(Py::new(py, Vcp::new(18, 3))?.into_any()), 120);
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_double_top_strategy() {
+        let run = run_builtin_single("Double Top", |py| Ok(Py::new(py, DoubleTop::new(10))?.into_any()), 120);
+        assert!(run.error.is_none());
+    }
+
+    // ── Multi-asset rotation strategies ────────────────────────────────
+
+    fn run_rotation_helper(
+        strategy_name: &str,
+        make_strategy: fn(Python<'_>) -> PyResult<Py<PyAny>>,
+    ) -> RunResult {
+        let symbols = vec!["A1", "B1", "C1"];
+        let n_bars = 100;
+        let aligned = mk_multi_symbol_aligned(&symbols, n_bars);
+        let timeline: Vec<i64> = (0..n_bars).map(|i| 1_700_000_000 + i as i64 * 86_400).collect();
+        let mut cfg = mk_cfg("A1");
+        cfg.data.symbols = symbols.iter().map(|s| (*s).to_owned()).collect();
+        cfg.engine.warmup_period = 0;
+        cfg.exchange.allow_short_selling = true;
+        cfg.portfolio.initial_cash = 100_000;
+        let profiles: Vec<InstrumentProfile> = symbols.iter().map(|s| mk_profile(s, "USD")).collect();
+        let fx = FxTable::new("USD");
+
+        let (strategy_obj, indicator_objs) = Python::attach(|py| -> PyResult<_> {
+            let s = make_strategy(py)?;
+            let raw = s.bind(py).call_method0("required_indicators")?;
+            let required: Vec<Py<PyAny>> = raw.extract()?;
+            let mut objs = Vec::new();
+            for ind in required {
+                let name = auto_indicator_name_for(py, &ind)?;
+                objs.push((name, ind));
+            }
+            Ok((s, objs))
+        }).unwrap();
+
+        let indicators = compute_indicators(&indicator_objs, &aligned, None).unwrap();
+
+        run_one_strategy(strategy_name, strategy_obj, &cfg, &aligned, &indicators, &profiles, &timeline, &fx)
+    }
+
+    #[test]
+    fn run_roc_rotation_strategy() {
+        let run = run_rotation_helper("ROC Rotation", |py| Ok(Py::new(py, RocRotation::new(3, 2, 1))?.into_any()));
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_rsrs_rotation_strategy() {
+        let run = run_rotation_helper("RSRS Rotation", |py| Ok(Py::new(py, RsrsRotation::new(6, 2, 1))?.into_any()));
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_multi_bb_rotation_strategy() {
+        let run = run_rotation_helper("Multi BB Rotation", |py| Ok(Py::new(py, MultiBollingerRotation::new(5, 1.0, 2, 1))?.into_any()));
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn run_triple_rsi_rotation_strategy() {
+        let run = run_rotation_helper("Triple RSI Rotation", |py| Ok(Py::new(py, TripleRsiRotation::new(2, 3, 5, 2, 1))?.into_any()));
+        assert!(run.error.is_none());
+    }
+
+    // ── Provider tests ────────────────────────────────────────────────
+
+    #[test]
+    fn provider_from_str() {
+        assert_eq!("yahoo".parse::<Provider>().unwrap(), Provider::Yahoo);
+        assert_eq!("binance".parse::<Provider>().unwrap(), Provider::Binance);
+        assert_eq!("coinbase".parse::<Provider>().unwrap(), Provider::Coinbase);
+        assert_eq!("kraken".parse::<Provider>().unwrap(), Provider::Kraken);
+    }
+
+    #[test]
+    fn instrument_type_from_str() {
+        assert_eq!("stocks".parse::<InstrumentType>().unwrap(), InstrumentType::Stocks);
+        assert_eq!("etf".parse::<InstrumentType>().unwrap(), InstrumentType::Etf);
+        assert_eq!("forex".parse::<InstrumentType>().unwrap(), InstrumentType::Forex);
+        assert_eq!("crypto".parse::<InstrumentType>().unwrap(), InstrumentType::Crypto);
     }
 }

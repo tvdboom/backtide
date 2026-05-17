@@ -85,12 +85,22 @@ Run `backtide --help` to see all available commands.
 Import backtide in any Python script or notebook for full programmatic control.
 
 ```pycon
+from backtide.backtest import run_experiment
 from backtide.data import resolve_profiles, download_bars
 from backtide.storage import query_bars
+from backtide.strategies import MultiBollingerRotation
 
 profiles = resolve_profiles(["AAPL", "MSFT"], "stocks", ["1h", "1d"])
 result = download_bars(profiles)
 
 data = query_bars("AAPL")
 print(data.head())
+
+results = run_experiment(
+    name="test experiment",
+    symbols=["AAPL", "MSFT"],
+    interval="1d",
+    strategies=[MultiBollingerRotation()],
+)
+print(results)
 ```

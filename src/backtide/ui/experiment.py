@@ -233,6 +233,29 @@ def _clear_completed_error():
         st.session_state.pop("_exp_completed", None)
 
 
+def _set_flash_notice(message: str, *, level: str):
+    """Store a transient notice in session state."""
+    st.session_state["_flash_notice"] = {
+        "message": message,
+        "level": level,
+        "created_at": dt.now().timestamp(),
+    }
+
+
+def _render_flash_notice(*, ttl: float = 8.0):
+    """Render a transient notice and clear it after `ttl` seconds."""
+    notice = st.session_state.get("_flash_notice", {})
+
+    if dt.now().timestamp() - notice.get("created_at", 0.) >= ttl:
+        st.session_state.pop("_flash_notice", None)
+        return
+
+    if notice.get("level") == "error":
+        st.error(notice["message"])
+    elif notice.get("level") == "success":
+        st.success(notice["message"])
+
+
 def _parse_config_upload(upload: Any) -> ExperimentConfig:
     """Parse an uploaded config file into an ExperimentConfig."""
     if upload.name.endswith(".json"):
@@ -260,9 +283,9 @@ def _on_config_upload():
         try:
             exp = _parse_config_upload(upload)
             _apply_config_to_state(exp, st.session_state)
-            st.session_state["_success"] = f"Loaded configuration from `{upload.name}`."
+            _set_flash_notice(f"Loaded configuration from `{upload.name}`.", level="success")
         except Exception as ex:  # noqa: BLE001
-            st.session_state["_error"] = f"Failed to parse file: {ex}"
+            _set_flash_notice(f"Failed to parse file: {ex}", level="error")
 
 
 def _on_abort():
@@ -349,10 +372,11 @@ if pending := st.session_state.pop("_pending_experiment_config", None):
     try:
         _apply_config_to_state(pending, st.session_state)
     except Exception as _ex:  # noqa: BLE001
-        st.session_state["_error"] = f"Failed to apply configuration: {_ex}"
+        _set_flash_notice(f"Failed to apply configuration: {_ex}", level="error")
     else:
-        st.session_state["_success"] = (
-            f"Loaded configuration from experiment **{st.session_state.experiment_name}**."
+        _set_flash_notice(
+            f"Loaded configuration from experiment **{st.session_state.experiment_name}**.",
+            level="success",
         )
 
     # Force a fresh experiment_id so the imported run isn't confused with the original.
@@ -573,10 +597,7 @@ with tab1:
         help="Upload a TOML, YAML or JSON file to pre-fill the experiment configuration.",
     )
 
-    if _import_msg := st.session_state.pop("_success", None):
-        st.success(_import_msg)
-    if _import_err := st.session_state.pop("_error", None):
-        st.error(_import_err)
+    _render_flash_notice(ttl=8.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1519,6 +1540,7 @@ if not can_run and st.session_state.get("_exp_thread") is None:
 # Determine whether the fragment should auto-poll (only while a thread is alive).
 poll_thread = st.session_state.get("_exp_thread")
 completed_state = st.session_state.get("_exp_completed")
+flash_notice = st.session_state.get("_flash_notice")
 now_ts = dt.now().timestamp()
 if isinstance(completed_state, dict) and completed_state.get("status") == "error":
     err_started = float(completed_state.get("completed_at", now_ts))
@@ -1526,8 +1548,17 @@ if isinstance(completed_state, dict) and completed_state.get("status") == "error
 else:
     poll_error = False
 
+flash_active = False
+if isinstance(flash_notice, dict):
+    if (now_ts - flash_notice.get("created_at", 0.)) < 8.0:
+        flash_active = True
+    else:
+        st.session_state.pop("_flash_notice", None)
+
 poll_interval = (
-    0.4 if (poll_thread is not None and poll_thread.is_alive()) else (1.0 if poll_error else None)
+    0.4
+    if (poll_thread is not None and poll_thread.is_alive())
+    else (1.0 if (poll_error or flash_active) else None)
 )
 
 

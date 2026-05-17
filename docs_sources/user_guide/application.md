@@ -13,7 +13,7 @@ line of Python.
 
 The fastest way to start the application is through the CLI:
 
-```bash
+```
 backtide launch
 ```
 
@@ -21,7 +21,7 @@ This starts a local Streamlit server (by default on `http://localhost:8501`)
 and opens the app in your browser. You can customize the address and port
 with flags or through the [configuration][configuration]:
 
-```bash
+```
 # Bind to a specific address and port
 backtide launch --address 0.0.0.0 --port 9000
 ```
@@ -39,14 +39,15 @@ main(["launch"])
 
 The sidebar gives access to the following pages:
 
-| Page | Purpose |
-|---|---|
-| **Experiment** | Configure and run a backtest: select symbols, set date ranges, define strategies, pick indicators, and tune exchange & engine parameters. |
-| **Results** | Review the output of completed backtests. |
-| **Indicators** | Create, edit and manage indicators. Add built-in technical indicators (SMA, EMA, RSI, MACD, Bollinger Bands, …) or write your own custom indicator in Python. |
-| **Download** | Fetch OHLCV bars from supported data providers and persist them to the local database. |
-| **Storage** | Inspect and manage the local database: view stored series, date ranges, row counts and delete data you no longer need. |
-| **Analysis** | Explore stored market data. |
+| Page            | Purpose                                                                                                                                                       |
+|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Experiment**  | Configure and run a backtest: select symbols, set date ranges, define strategies, pick indicators, and tune exchange & engine parameters.                     |
+| **Indicators**  | Create, edit and manage indicators. Add built-in technical indicators (SMA, EMA, RSI, MACD, Bollinger Bands, …) or write your own custom indicator in Python. |
+| **Strategies**  | Create, edit and manage strategies. Add built-in strategies or write your own in Python.                                                     |
+| **Results**     | Review the output of completed backtests.                                                                                                                     |
+| **Download**    | Fetch OHLCV bars from supported data providers and persist them to the local database.                                                                        |
+| **Storage**     | Inspect and manage the local database: view stored series, date ranges, row counts and delete data you no longer need.                                        |
+| **Analysis**    | Explore stored market data.                                                                                                                                   |
 
 <br>
 
@@ -63,6 +64,9 @@ The sidebar gives access to the following pages:
   to a field in [ExperimentConfig], so you can also pre-fill the app by importing
   a config file from disk.
 
+<br>
+
+## Screenshots
 
 ![Home](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/home.png)
 ![Experiment](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/experiment.png)

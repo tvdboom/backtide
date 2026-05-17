@@ -54,22 +54,22 @@ makes different tradeoffs between speed, flexibility, ease of use and feature
 scope. The table below summarizes how Backtide sits relative to the most
 popular alternatives.
 
-| Feature                      | Backtide                            | Backtrader            | Zipline          | vectorbt        | bt                |
-|------------------------------|-------------------------------------|-----------------------|------------------|-----------------|-------------------|
-| **Engine language**          | Rust (PyO3)                         | Pure Python           | Python / Cython  | Python / NumPy  | Pure Python       |
-| **Event-driven loop**        | ✅                                  | ✅                     | ✅                | ❌ (vectorized)  | ❌ (vectorized)    |
-| **Built-in strategies**      | 20+ ready to use                    | ❌                     | ❌                | ❌               | ❌                 |
-| **Built-in indicators**      | 12+ (Rust)                          | 100+ (Python)         | ~10 (via ta-lib) | Via pandas-ta   | ❌                 |
-| **Built-in position sizers** | 7 (Rust)                            | 1                     | 1                | ❌               | ❌                 |
-| **Multi-asset support**      | ✅                                  | ✅                     | ✅                | ✅               | ✅                 |
-| **Currency conversion**      | Automatic FX table                  | Manual                | ❌                | ❌               | ❌                 |
-| **Interactive UI**           | Streamlit app                       | ❌                     | ❌                | ❌               | ❌                 |
-| **Data download**            | Yahoo, Binance, Kraken, Coinbase    | Manual                | Quandl bundle    | Manual          | Manual            |
-| **Local storage**            | DuckDB (bars, experiments, results) | ❌                     | HDF5 bundle      | ❌               | ❌                 |
-| **Analysis plots**           | 20+ built-in                        | Manual via matplotlib | Via pyfolio      | Built-in        | Built-in          |
-| **Configuration**            | TOML + Python API                   | Python only           | Python + YAML    | Python only     | Python only       |
-| **Custom strategies**        | Python class                        | Python class          | Python class     | NumPy functions | Python tree       |
-| **Actively maintained**      | ✅                                  | ⚠️ Stale              | ⚠️ Archived      | ✅               | ✅                 |
+| Feature                      | Backtide                         | Backtrader            | Zipline          | vectorbt        | bt             |
+|------------------------------|----------------------------------|-----------------------|------------------|-----------------|----------------|
+| **Engine language**          | Rust                             | Python                | Python / Cython  | Python / NumPy  | Python         |
+| **Event-driven loop**        | ✅                                | ✅                     | ✅                | ❌ (vectorized)  | ❌ (vectorized) |
+| **Built-in strategies**      | 20+ ready to use                 | ❌                     | ❌                | ❌               | ❌              |
+| **Built-in indicators**      | 12+ (Rust)                       | 100+ (Python)         | ~10 (via ta-lib) | Via pandas-ta   | ❌              |
+| **Built-in position sizers** | 7 (Rust)                         | 1                     | 1                | ❌               | ❌              |
+| **Multi-asset support**      | ✅                                | ✅                     | ✅                | ✅               | ✅              |
+| **Currency conversion**      | Automatic FX table               | Manual                | ❌                | ❌               | ❌              |
+| **Interactive UI**           | Streamlit app                    | ❌                     | ❌                | ❌               | ❌              |
+| **Data download**            | Yahoo, Binance, Kraken, Coinbase | Manual                | Quandl bundle    | Manual          | Manual         |
+| **Local storage**            | DuckDB                           | ❌                     | HDF5 bundle      | ❌               | ❌              |
+| **Analysis plots**           | 20+ built-in                     | Manual via matplotlib | Via pyfolio      | Built-in        | Built-in       |
+| **Configuration**            | TOML + Python API                | Python only           | Python + YAML    | Python only     | Python only    |
+| **Custom strategies**        | Python class                     | Python class          | Python class     | NumPy functions | Python tree    |
+| **Actively maintained**      | ✅                                | ⚠️ Stale              | ⚠️ Archived      | ✅               | ✅              |
 
 <br>
 
