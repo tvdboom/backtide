@@ -466,7 +466,6 @@ with tab1:
         # Risk & protection
         "🛡️",
         "⚔️",
-        "🔒",
         # Nature & energy
         "🔥",
         "🌊",

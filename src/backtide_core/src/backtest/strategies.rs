@@ -8,6 +8,7 @@ use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
 use crate::backtest::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer, VolatilityScaled};
+use crate::data::models::instrument_type::InstrumentType;
 
 /// Cheap, pure-Rust indicator-snapshot view passed to strategies on each
 /// bar. The engine pre-computes every auto-injected indicator into a
@@ -21,6 +22,32 @@ pub struct IndicatorView<'a> {
 
     /// Bar position the strategy currently sees (index into each output series).
     pub bar_index: usize,
+}
+
+fn normalize_builtin_orders_by_instrument_type(
+    mut orders: Vec<Order>,
+    instrument_types: &HashMap<String, InstrumentType>,
+    fallback: InstrumentType,
+) -> Vec<Order> {
+    orders.retain_mut(|o| {
+        if matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition) {
+            return true;
+        }
+        if !o.quantity.is_finite() || o.quantity == 0.0 {
+            return false;
+        }
+        let instrument_type = instrument_types.get(&o.symbol).copied().unwrap_or(fallback);
+        if instrument_type.allows_fractional_quantities() {
+            return true;
+        }
+        let whole_abs = o.quantity.abs().floor();
+        if whole_abs <= 0.0 {
+            return false;
+        }
+        o.quantity = whole_abs.copysign(o.quantity);
+        true
+    });
+    orders
 }
 
 impl<'a> IndicatorView<'a> {
@@ -628,7 +655,6 @@ impl Strategy for AlphaRsiPro {
             let shift = (80.0 * trend_bias).clamp(-20.0, 20.0);
             let oversold = (30.0 + shift).clamp(15.0, 50.0);
             let overbought = (70.0 + shift).clamp(50.0, 85.0);
-
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
             if r < oversold && cur <= 0.0 {
                 if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
@@ -963,6 +989,9 @@ impl Strategy for DoubleTop {
 
             let p1 = peaks[peaks.len() - 2];
             let p2 = peaks[peaks.len() - 1];
+            if p2.0 <= p1.0 + 1 {
+                continue;
+            }
             let resistance = p1.1.max(p2.1);
             let neckline = win[p1.0..=p2.0].iter().cloned().fold(f64::INFINITY, f64::min);
 
@@ -1098,6 +1127,10 @@ impl Strategy for HybridAlphaRsi {
             let oversold = (30.0 + shift).clamp(15.0, 50.0);
             let overbought = (70.0 + shift).clamp(50.0, 85.0);
 
+            // Enter on a pullback inside the adaptive band instead of only at
+            // deep oversold extremes, which are rare in persistent uptrends.
+            let entry_level = oversold + 0.25 * (overbought - oversold);
+
             // Trend confirmation: only go long while price is above its
             // ``vol_window``-bar mean (a lightweight MA filter).
             let recent = &c[c.len() - self.vol_window..];
@@ -1105,7 +1138,7 @@ impl Strategy for HybridAlphaRsi {
             let in_uptrend = last > mean;
 
             let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
-            if r < oversold && in_uptrend && cur <= 0.0 {
+            if r < entry_level && in_uptrend && cur <= 0.0 {
                 if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
                 {
                     orders.push(o);
@@ -2621,7 +2654,6 @@ impl Strategy for Vcp {
             // each segment's range is strictly tighter than the previous one.
             let mut prev_range = f64::INFINITY;
             let mut ok = true;
-            let mut ceiling = f64::NEG_INFINITY;
             for k in 0..self.contractions {
                 let seg = &win[k * seg_len..(k + 1) * seg_len];
                 let hi = seg.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -2632,8 +2664,10 @@ impl Strategy for Vcp {
                     break;
                 }
                 prev_range = r;
-                ceiling = hi;
             }
+            // Breakout must clear prior resistance; exclude the latest bar
+            // so `last > ceiling` is achievable.
+            let ceiling = win[..win.len() - 1].iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             if !ok || !ceiling.is_finite() {
                 continue;
             }
@@ -2657,7 +2691,7 @@ impl Strategy for Vcp {
     }
 }
 
-// Apply shared pymethods (alphabetical)
+// Apply shared pymethods
 strategy_pymethods!(AdaptiveRsi);
 strategy_pymethods!(AlphaRsiPro);
 strategy_pymethods!(BollingerMeanReversion);
@@ -2680,17 +2714,14 @@ strategy_pymethods!(TurtleTrading);
 strategy_pymethods!(Vcp);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Built-in strategy dispatch (Rust fast path)
+// Built-in strategy dispatch
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Owned, GIL-free copy of any built-in strategy.
 ///
 /// The engine does the Python downcast **once** at the start of a run
 /// (not per bar) via [`BuiltinStrategy::try_from_py`], then calls
-/// [`BuiltinStrategy::decide`] on every bar in pure Rust. This is the
-/// difference between ~20 s and ~50 ms for a multi-year backtest with
-/// SMA Crossover / BB Mean Reversion: no GIL acquisition per bar, no
-/// pandas slice rebuild, no `Vec<f64>` round-trips through `extract`.
+/// [`BuiltinStrategy::decide`] on every bar in Rust.
 #[derive(Clone, Debug)]
 pub enum BuiltinStrategy {
     AdaptiveRsi(AdaptiveRsi),
@@ -2729,6 +2760,7 @@ impl BuiltinStrategy {
                 )*
             };
         }
+
         try_dispatch!(
             AdaptiveRsi => AdaptiveRsi,
             AlphaRsiPro => AlphaRsiPro,
@@ -2761,6 +2793,8 @@ impl BuiltinStrategy {
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         state: &State,
+        instrument_types: &HashMap<String, InstrumentType>,
+        fallback_instrument_type: InstrumentType,
     ) -> Vec<Order> {
         macro_rules! delegate {
             ($($variant:ident),* $(,)?) => {
@@ -2769,7 +2803,8 @@ impl BuiltinStrategy {
                 }
             };
         }
-        delegate!(
+
+        let raw_orders = delegate!(
             AdaptiveRsi,
             AlphaRsiPro,
             BollingerMeanReversion,
@@ -2790,6 +2825,12 @@ impl BuiltinStrategy {
             TripleRsiRotation,
             TurtleTrading,
             Vcp,
+        );
+
+        normalize_builtin_orders_by_instrument_type(
+            raw_orders,
+            instrument_types,
+            fallback_instrument_type,
         )
     }
 }

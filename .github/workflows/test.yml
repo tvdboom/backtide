@@ -18,6 +18,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - uses: actions/cache@v5
+        with:
+          path: .tox
+          key: tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          restore-keys: |
+            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -36,6 +42,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - uses: actions/cache@v5
+        with:
+          path: .tox
+          key: tox-${{ matrix.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          restore-keys: |
+            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -59,6 +71,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - uses: actions/cache@v5
+        with:
+          path: .tox
+          key: tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          restore-keys: |
+            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -83,6 +101,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - uses: actions/cache@v5
+        with:
+          path: .tox
+          key: tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          restore-keys: |
+            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -103,6 +127,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - uses: actions/cache@v5
+        with:
+          path: .tox
+          key: tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          restore-keys: |
+            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core

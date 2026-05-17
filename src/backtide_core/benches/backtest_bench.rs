@@ -38,6 +38,7 @@ use backtide_core::backtest::strategies::{
 };
 use backtide_core::data::models::bar::Bar;
 use backtide_core::data::models::currency::Currency;
+use backtide_core::data::models::instrument_type::InstrumentType;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -100,8 +101,7 @@ fn generate_aapl_bars() -> Vec<Bar> {
 }
 
 /// Pre-compute all indicators any built-in strategy might need and
-/// return the `name -> symbol -> Vec<series>` map expected by
-/// [`IndicatorView`].
+/// return the `name -> symbol -> Vec<series>` map expected by [`IndicatorView`].
 fn precompute_indicators(bars: &[Bar]) -> HashMap<String, HashMap<String, Vec<Vec<f64>>>> {
     let sym = "AAPL";
     let mut map: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
@@ -175,6 +175,8 @@ fn run_strategy_loop(
 ) -> usize {
     let mut portfolio = starting_portfolio();
     let mut total_orders = 0usize;
+    let mut instrument_types = HashMap::new();
+    instrument_types.insert("AAPL".to_owned(), InstrumentType::Stocks);
 
     for bar_idx in 0..total_bars {
         let slice = &closes[..=bar_idx];
@@ -187,7 +189,14 @@ fn run_strategy_loop(
             is_warmup: false,
         };
 
-        let orders = strategy.decide(&closes_view, &ind_view, &portfolio, &state);
+        let orders = strategy.decide(
+            &closes_view,
+            &ind_view,
+            &portfolio,
+            &state,
+            &instrument_types,
+            InstrumentType::Stocks,
+        );
         total_orders += orders.len();
 
         // Naively apply market orders to portfolio so strategies see

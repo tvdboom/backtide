@@ -833,7 +833,7 @@ impl Engine {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Helper functions (free)
+// Helper functions
 // ────────────────────────────────────────────────────────────────────────────
 
 fn now_secs() -> i64 {
@@ -899,9 +899,6 @@ fn quantity_rejection_reason(
 ) -> Option<String> {
     if !qty.is_finite() {
         return Some(format!("quantity for {symbol} must be finite"));
-    }
-    if qty == 0.0 {
-        return Some(format!("quantity for {symbol} must be non-zero"));
     }
     if !instrument_type.allows_fractional_quantities() && !is_whole_quantity(qty) {
         return Some(format!(
@@ -1713,7 +1710,7 @@ fn run_one_strategy(
                     };
                     Ok(())
                 }) {
-                    let warning_key = format!("{symbol}\0{reason}");
+                    let warning_key = limit_warning_dedupe_key(&symbol, violation, &reason);
                     if margin_limit_warnings.insert(warning_key) {
                         warn!(strategy=%name, order_id=%order.id, "{reason}");
                     } else {
@@ -1982,7 +1979,14 @@ fn run_one_strategy(
                     .map(|(&s, (_, v))| (s.to_owned(), &v[..=bar_index]))
                     .collect();
                 let inds = IndicatorView::new(indicators, bar_index);
-                let orders = b.decide(&closes_view, &inds, &portfolio, &state);
+                let orders = b.decide(
+                    &closes_view,
+                    &inds,
+                    &portfolio,
+                    &state,
+                    &instrument_types,
+                    cfg.data.instrument_type,
+                );
                 for o in &orders {
                     let side = if o.quantity > 0.0 {
                         "BUY"
@@ -3112,6 +3116,32 @@ enum LimitViolation {
     Margin,
 }
 
+fn limit_warning_dedupe_key(symbol: &str, violation: LimitViolation, reason: &str) -> String {
+    let bucket = match violation {
+        LimitViolation::Margin if reason.contains("gross notional already at limit") => {
+            "margin:gross_notional_at_limit"
+        },
+        LimitViolation::Margin if reason.contains("equity is non-positive") => {
+            "margin:equity_non_positive"
+        },
+        LimitViolation::Margin
+            if reason.contains("no headroom under leverage / position-size limits") =>
+        {
+            "margin:no_headroom"
+        },
+        LimitViolation::PositionSize if reason.contains("position already at limit") => {
+            "position_size:at_limit"
+        },
+        LimitViolation::PositionSize
+            if reason.contains("no headroom under leverage / position-size limits") =>
+        {
+            "position_size:no_headroom"
+        },
+        _ => reason,
+    };
+    format!("{symbol}\0{bucket}")
+}
+
 fn check_order_against_limits(
     cfg: &ExperimentConfig,
     symbol: &str,
@@ -3459,10 +3489,10 @@ mod tests {
                     Py::new(py, BollingerMeanReversion::new(5, 1.0))?.into_any(),
                 ),
                 ("Buy & Hold".to_owned(), Py::new(py, BuyAndHold::new(None))?.into_any()),
-                ("Double Top".to_owned(), Py::new(py, DoubleTop::new(10))?.into_any()),
+                ("Double Top".to_owned(), Py::new(py, DoubleTop::new(90))?.into_any()),
                 (
                     "Hybrid AlphaRSI".to_owned(),
-                    Py::new(py, HybridAlphaRsi::new(2, 6, 6))?.into_any(),
+                    Py::new(py, HybridAlphaRsi::new(8, 28, 20))?.into_any(),
                 ),
                 ("MACD".to_owned(), Py::new(py, Macd::new(3, 7, 3))?.into_any()),
                 ("Momentum".to_owned(), Py::new(py, Momentum::new(3, 7))?.into_any()),
@@ -5441,6 +5471,23 @@ mod tests {
     }
 
     #[test]
+    fn limit_warning_dedupe_key_buckets_dynamic_margin_reason() {
+        let r1 = "order would exceed max_leverage (2.00x): gross notional already at limit (current 878.35, cap 869.91)";
+        let r2 = "order would exceed max_leverage (2.00x): gross notional already at limit (current 890.31, cap 849.82)";
+        let k1 = limit_warning_dedupe_key("MSFT", LimitViolation::Margin, r1);
+        let k2 = limit_warning_dedupe_key("MSFT", LimitViolation::Margin, r2);
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn limit_warning_dedupe_key_stays_symbol_scoped() {
+        let reason = "order would exceed max_leverage (2.00x): gross notional already at limit (current 878.35, cap 869.91)";
+        let a = limit_warning_dedupe_key("MSFT", LimitViolation::Margin, reason);
+        let b = limit_warning_dedupe_key("AAPL", LimitViolation::Margin, reason);
+        assert_ne!(a, b);
+    }
+
+    #[test]
     fn check_maintenance_margin_returns_none_with_no_positions() {
         let cfg = mk_cfg("AAPL");
         assert!(check_maintenance_margin(&cfg, 1_000.0, 0.0).is_none());
@@ -6487,11 +6534,6 @@ mod tests {
     }
 
     // ── quantity rejection additional ─────────────────────────────────
-
-    #[test]
-    fn quantity_rejection_zero_qty_is_rejected() {
-        assert!(quantity_rejection_reason("X", 0.0, InstrumentType::Stocks).is_some());
-    }
 
     #[test]
     fn quantity_rejection_infinity_is_rejected() {
