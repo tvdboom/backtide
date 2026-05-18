@@ -28,6 +28,8 @@ jobs:
   documentation:
     runs-on: ubuntu-latest
     needs: validate
+    permissions:
+      contents: write
     env:
       PYTHONPATH: ${{ github.workspace }}
     steps:
@@ -43,6 +45,10 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --group docs
+      - name: Configure git identity for mike
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
       - name: Update documentation
         run: |
           DOC_VERSION="${GITHUB_REF_NAME%.*}"
