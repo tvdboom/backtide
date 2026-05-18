@@ -35,6 +35,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      UV_LOCK_TIMEOUT: "1200"
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
@@ -52,7 +54,7 @@ jobs:
           workspaces: src/backtide_core
       - name: Run tests
         run: |
-          uv run --no-default-groups --group tox tox -m unit -p auto
+          uv run --no-default-groups --group tox tox -m unit -p auto --parallel-no-spinner
       - name: Upload coverage reports to Codecov
         if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: codecov/codecov-action@v5

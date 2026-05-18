@@ -10,8 +10,29 @@ env:
   PYTHON_VERSION: "3.14"
 
 jobs:
+  # Check that the tag matches the version in pyproject.toml
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Validate tag matches pyproject version
+        run: |
+          VERSION=$(python - <<'PY'
+          import pathlib, tomllib
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+          print(data["project"]["version"])
+          PY
+          )
+          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+
   documentation:
     runs-on: ubuntu-latest
+    needs: validate
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - name: Check
         uses: actions/checkout@v6
@@ -22,19 +43,6 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
-      - name: Validate tag matches pyproject version
-        run: |
-          VERSION=$(python - <<'PY'
-          import pathlib
-          import tomllib
-
-          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
-          print(data["project"]["version"])
-          PY
-          )
-          EXPECTED_TAG="v${VERSION}"
-          echo "Tag: ${GITHUB_REF_NAME}, expected: ${EXPECTED_TAG}"
-          test "${GITHUB_REF_NAME}" = "${EXPECTED_TAG}"
       - name: Install dependencies
         run: |
           uv sync --group docs
@@ -44,8 +52,52 @@ jobs:
           echo "Deploying documentation for release ${DOC_VERSION}"
           uv run mike deploy --push --update-aliases "${DOC_VERSION}" latest
 
+  build-wheels:
+      name: Build wheels — ${{ matrix.os }}
+      needs: validate
+      runs-on: ${{ matrix.os }}
+      strategy:
+        fail-fast: false
+        matrix:
+          os: [ubuntu-latest, macos-latest, windows-latest]
+      steps:
+        - uses: actions/checkout@v6
+        - uses: astral-sh/setup-uv@v7
+          with:
+            python-version: ${{ env.PYTHON_VERSION }}
+            enable-cache: true
+        - name: Build wheels
+          uses: PyO3/maturin-action@v1
+          with:
+            command: build
+            args: --release --out dist --find-interpreter
+            manylinux: auto
+            before-script-linux: |
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              echo "$HOME/.local/bin" >> $GITHUB_PATH
+        - uses: actions/upload-artifact@v7
+          with:
+            name: wheels-${{ matrix.os }}
+            path: dist/
+
+  build-sdist:
+    name: Build source distribution
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-sdist
+          path: dist/
+
   publish:
     runs-on: ubuntu-latest
+    needs: [build-wheels, build-sdist, documentation]
     environment:
       name: pypi
     permissions:
@@ -59,22 +111,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
-      - name: Validate tag matches pyproject version
-        run: |
-          VERSION=$(python - <<'PY'
-          import pathlib
-          import tomllib
-
-          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
-          print(data["project"]["version"])
-          PY
-          )
-          EXPECTED_TAG="v${VERSION}"
-          echo "Tag: ${GITHUB_REF_NAME}, expected: ${EXPECTED_TAG}"
-          test "${GITHUB_REF_NAME}" = "${EXPECTED_TAG}"
-      - name: Build
-        run: uv build
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist/
       - name: Check artifacts
-        run: uv tool run twine check dist/*
+        run: |
+          ls -lh dist/
+          uvx twine check dist/*
       - name: Publish
-        run: uv publish
+        run: uv publish dist/*
