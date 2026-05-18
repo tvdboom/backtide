@@ -1,8 +1,10 @@
 # Development task runner for backtide.
 # Install: uv tool install rust-just
-# Usage:   just <recipe>
+# Usage: just <recipe>
 
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+
+version := `uv run python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])'`
 
 # List available recipes
 [private]
@@ -58,3 +60,9 @@ docs:
 
 launch:
     uv run backtide launch
+
+publish:
+    git --no-pager status
+    git --no-pager pull
+    git tag -a v{{version}} -m "v{{version}}"
+    git push origin v{{version}}

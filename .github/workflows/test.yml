@@ -21,15 +21,14 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .tox
-          key: tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          key: tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
           restore-keys: |
-            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+            tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
       - run: |
-          uv sync --group tox
-          uv run tox -e pre-commit
+          uv run --no-default-groups --group tox tox -e pre-commit
 
   unit-tests:
     runs-on: ${{ matrix.os }}
@@ -45,16 +44,15 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .tox
-          key: tox-${{ matrix.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          key: tox-${{ matrix.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
           restore-keys: |
-            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+            tox-${{ matrix.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
       - name: Run tests
         run: |
-          uv sync --group tox
-          uv run tox -m unit
+          uv run --no-default-groups --group tox tox -m unit -p auto
       - name: Upload coverage reports to Codecov
         if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: codecov/codecov-action@v5
@@ -74,9 +72,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .tox
-          key: tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          key: tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
           restore-keys: |
-            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+            tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -84,8 +82,7 @@ jobs:
         run: echo "LD_LIBRARY_PATH=$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" >> "$GITHUB_ENV"
       - name: Run Cargo tests
         run: |
-          uv sync --group tox
-          uv run tox -e cargo-test
+          uv run --no-default-groups --group tox tox -e cargo-test
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -104,9 +101,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .tox
-          key: tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          key: tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
           restore-keys: |
-            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+            tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -114,8 +111,7 @@ jobs:
         run: echo "LD_LIBRARY_PATH=$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" >> "$GITHUB_ENV"
       - name: Run benchmarks
         run: |
-          uv sync --group tox
-          uv run tox -e bench
+          uv run --no-default-groups --group tox tox -e bench
 
   documentation:
     runs-on: ubuntu-latest
@@ -130,12 +126,11 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .tox
-          key: tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
+          key: tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
           restore-keys: |
-            tox-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+            tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
       - run: |
-          uv sync --group tox
-          uv run tox -e docs
+          uv run --no-default-groups --group tox tox -e docs

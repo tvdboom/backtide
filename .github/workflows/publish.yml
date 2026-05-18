@@ -22,6 +22,19 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - name: Validate tag matches pyproject version
+        run: |
+          VERSION=$(python - <<'PY'
+          import pathlib
+          import tomllib
+
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+          print(data["project"]["version"])
+          PY
+          )
+          EXPECTED_TAG="v${VERSION}"
+          echo "Tag: ${GITHUB_REF_NAME}, expected: ${EXPECTED_TAG}"
+          test "${GITHUB_REF_NAME}" = "${EXPECTED_TAG}"
       - name: Install dependencies
         run: |
           uv sync --group docs
@@ -46,6 +59,19 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
+      - name: Validate tag matches pyproject version
+        run: |
+          VERSION=$(python - <<'PY'
+          import pathlib
+          import tomllib
+
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+          print(data["project"]["version"])
+          PY
+          )
+          EXPECTED_TAG="v${VERSION}"
+          echo "Tag: ${GITHUB_REF_NAME}, expected: ${EXPECTED_TAG}"
+          test "${GITHUB_REF_NAME}" = "${EXPECTED_TAG}"
       - name: Build
         run: uv build
       - name: Check artifacts
