@@ -70,7 +70,7 @@ jobs:
           with:
             command: build
             args: --release --out dist --find-interpreter
-            manylinux: auto
+            manylinux: "2_28"
         - uses: actions/upload-artifact@v7
           with:
             name: wheels-${{ matrix.os }}
