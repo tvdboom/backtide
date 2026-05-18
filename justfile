@@ -66,4 +66,3 @@ publish:
     git --no-pager pull
     git tag -a v{{version}} -m "v{{version}}"
     git push origin v{{version}}
-
