@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "backtide"
-version = "0.1.2"
+version = "0.1.3"
 description = "A refreshingly simple trading backtester for beginner retail investors"
 authors = [{name = "Mavs", email = "m.524687@gmail.com"}]
 license = "MIT"
