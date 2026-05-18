@@ -10,6 +10,17 @@ pub mod utils;
 
 use pyo3::prelude::*;
 
+// When running `cargo test` there is no Python host to initialize the
+// interpreter, yet the engine calls `Python::attach` throughout. Without
+// `auto-initialize` (which we deliberately omit from the extension-module
+// build), we must boot the interpreter ourselves once before any test runs.
+// `ctor` executes this at binary-load time, before every test thread starts.
+#[cfg(test)]
+#[ctor::ctor]
+fn init_python_for_tests() {
+    Python::initialize();
+}
+
 // Required for Windows/MSVC builds when using DuckDB.
 // DuckDB internally uses the Windows Restart Manager API (RmStartSession, etc),
 // which lives in `rstrtmgr.lib`. The MSVC linker does not auto-link this system

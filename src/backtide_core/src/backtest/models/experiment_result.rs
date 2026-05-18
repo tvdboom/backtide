@@ -350,9 +350,9 @@ impl RunResult {
 /// status : [ExperimentStatus]
 ///     The status with which the experiment ended. Possible values are:
 ///
-///     - `Success`: Every strategy succeeded.
-///     - `Partial`: At least one strategy failed, but not all.
-///     - `Error`: All strategies failed or the experiment could not run.
+///   - **success:** Every strategy succeeded.
+///   - **partial:** At least one strategy failed, but not all.
+///   - **error:** All strategies failed or the experiment could not run.
 ///
 /// strategies : list[[RunResult]]
 ///     One result entry per evaluated strategy.

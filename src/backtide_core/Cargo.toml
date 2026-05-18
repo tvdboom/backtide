@@ -49,6 +49,7 @@ uuid = { version = "1.23.1", features = ["v4"] }
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports", "async_tokio"] }
+ctor = "0.2.9"
 rstest = "0.26.1"
 tempfile = "3.27.0"
 wiremock = "0.6.5"

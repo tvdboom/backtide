@@ -1,20 +1,6 @@
 //! A `tracing_subscriber::Layer` that mirrors every event emitted inside
 //! an "experiment" span to a dedicated `logs.txt` file attached to that
-//! span.
-//!
-//! Usage from the engine:
-//!
-//! ```ignore
-//! let span = tracing::info_span!(
-//!     "experiment",
-//!     experiment_id = %experiment_id,
-//!     log_path      = %log_path.display(),
-//! );
-//! let _enter = span.enter();
-//! tracing::info!("Anything emitted while this guard is alive lands in the file too.");
-//! ```
-//!
-//! The layer is registered exactly once at process start (see
+//! span. The layer is registered exactly once at process start (see
 //! `init_logging_with_level`) so the engine itself does not need any
 //! bespoke logging plumbing.
 
