@@ -30,7 +30,7 @@ use backtide_core::backtest::indicators::{
 };
 use backtide_core::backtest::models::portfolio::Portfolio;
 use backtide_core::backtest::models::state::State;
-use backtide_core::backtest::strategies::{
+use backtide_core::strategies::interface::{
     AdaptiveRsi, AlphaRsiPro, BollingerMeanReversion, BuiltinStrategy, BuyAndHold, DoubleTop,
     HybridAlphaRsi, IndicatorView, Macd, Momentum, MultiBollingerRotation, RiskAverse, Roc,
     RocRotation, Rsi, Rsrs, RsrsRotation, SmaCrossover, SmaNaive, TripleRsiRotation, TurtleTrading,

@@ -117,7 +117,7 @@ def plot_position_size(
     from backtide.analysis import plot_position_size
     from backtide.storage import query_experiments, query_strategy_runs
 
-    exp = query_experiments().iloc[0]
+    exp = query_experiments().iloc[-1]
     run = query_strategy_runs(exp.id)[-1]
     plot_position_size(run)
     ```

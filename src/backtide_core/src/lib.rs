@@ -5,6 +5,8 @@ pub mod constants;
 pub mod data;
 pub mod engine;
 pub mod errors;
+pub mod indicators;
+pub mod strategies;
 pub mod storage;
 pub mod utils;
 
@@ -40,7 +42,9 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     backtest::register(m)?;
     config::register(m)?;
     data::register(m)?;
+    indicators::register(m)?;
     storage::register(m)?;
+    strategies::register(m)?;
     utils::register(m)?;
     Ok(())
 }

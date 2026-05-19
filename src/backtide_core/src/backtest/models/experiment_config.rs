@@ -8,6 +8,7 @@ use crate::backtest::models::conversion_period::ConversionPeriod;
 use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
 use crate::backtest::models::order_type::OrderType;
+use crate::constants::Positions;
 use crate::data::models::currency::Currency;
 use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
@@ -19,7 +20,6 @@ use pyo3::types::PyDict;
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
 // ────────────────────────────────────────────────────────────────────────────
 // GeneralExpConfig
 // ────────────────────────────────────────────────────────────────────────────
@@ -110,10 +110,10 @@ impl GeneralExpConfig {
 ///     If `True`, use the maximum available history for every symbol.
 ///
 /// start_date : str | None, default=None
-///     ISO-8601 start date. Ignored when `full_history` is `True`.
+///     ISO-8601 start date (YYYY-MM-DD). Ignored when `full_history` is `True`.
 ///
 /// end_date : str | None, default=None
-///     ISO-8601 end date. Ignored when `full_history` is `True`.
+///     ISO-8601 end date (YYYY-MM-DD). Ignored when `full_history` is `True`.
 ///
 /// interval : [Interval], default="1d"
 ///     Bar interval.
@@ -227,7 +227,7 @@ pub struct PortfolioExpConfig {
     pub initial_cash: u64,
     pub base_currency: Currency,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub starting_positions: HashMap<String, f64>,
+    pub starting_positions: Positions,
 }
 
 impl Default for PortfolioExpConfig {
@@ -235,7 +235,7 @@ impl Default for PortfolioExpConfig {
         Self {
             initial_cash: 10_000,
             base_currency: Currency::default(),
-            starting_positions: HashMap::new(),
+            starting_positions: Positions::new(),
         }
     }
 }
@@ -726,7 +726,7 @@ impl EngineExpConfig {
 // ExperimentConfigInner (serde-friendly, no Py<> wrappers)
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Internal (pure-Rust) representation used for serialisation.
+/// Internal (pure-Rust) representation used for serialization.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExperimentConfigInner {

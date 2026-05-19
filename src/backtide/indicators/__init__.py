@@ -5,7 +5,8 @@ Description: Indicator functionalities for backtide.
 
 """
 
-from backtide.core.backtest import (
+from backtide.core.indicators import (
+    _indicator_deterministic_name,
     AverageDirectionalIndex,
     AverageTrueRange,
     BollingerBands,

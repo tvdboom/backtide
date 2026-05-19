@@ -1,5 +1,6 @@
 //! Constants and types shared across the package.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -11,6 +12,9 @@ pub type Symbol = String;
 
 /// A key in the `bars` table, i.e., `(symbol, interval, provider)`.
 pub type BarKey = (Symbol, String, String);
+
+/// Symbol positions in a portfolio.
+pub type Positions = HashMap<String, f64>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Constants

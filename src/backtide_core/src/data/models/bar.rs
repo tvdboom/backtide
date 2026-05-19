@@ -45,7 +45,7 @@ use serde::{Deserialize, Serialize};
 /// - backtide.data:InstrumentType
 /// - backtide.data:Interval
 #[pyclass(from_py_object, get_all, frozen, module = "backtide.data")]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Bar {
     pub open_ts: u64,
     pub close_ts: u64,
@@ -63,4 +63,19 @@ pub struct Bar {
 impl Bar {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
+}
+
+impl Bar {
+    pub const NAN: Self = Self {
+        open_ts: 0,
+        close_ts: 0,
+        open_ts_exchange: 0,
+        open: f64::NAN,
+        high: f64::NAN,
+        low: f64::NAN,
+        close: f64::NAN,
+        adj_close: f64::NAN,
+        volume: f64::NAN,
+        n_trades: None,
+    };
 }

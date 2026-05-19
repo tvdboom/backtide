@@ -111,7 +111,7 @@ def plot_cash_holdings(
     from backtide.analysis import plot_cash_holdings
     from backtide.storage import query_experiments, query_strategy_runs
 
-    exp = query_experiments().iloc[0]
+    exp = query_experiments().iloc[-1]
     runs = query_strategy_runs(exp.id)
     plot_cash_holdings(runs)
     ```
@@ -120,18 +120,16 @@ def plot_cash_holdings(
     if not runs:
         raise ValueError("Parameter runs cannot be empty.")
 
-    runs_l = _to_list(runs)
-
     dash = ("solid", "dash", "dashdot", "dot", "longdash", "longdashdot")
 
     fig = go.Figure()
     all_currencies = {}
-    for idx, run in enumerate(runs_l):
+    for idx, run in enumerate(_to_list(runs)):
         if run.is_benchmark or not run.equity_curve:
             continue
 
         # Build per-currency (timestamp, amount) pairs.
-        currencies: dict[str, tuple[list, list]] = defaultdict(lambda: ([], []))
+        currencies = defaultdict(lambda: ([], []))
         for eq in run.equity_curve:
             ts = pd.to_datetime(eq.timestamp, unit="s")
             for ccy, amount in eq.cash.items():
@@ -147,7 +145,7 @@ def plot_cash_holdings(
                     mode="lines",
                     name=run.strategy_name if len(currencies) == 1 else ccy,
                     legendgroup=run.strategy_name,
-                    legendgrouptitle_text=run.strategy_name,
+                    legendgrouptitle_text=run.strategy_name if len(currencies) > 1 else None,
                     line={
                         "color": cfg.plots.palette[idx % len(cfg.plots.palette)],
                         "dash": dash[idx2 % len(dash)],

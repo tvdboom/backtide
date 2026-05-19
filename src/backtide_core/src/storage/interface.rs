@@ -6,7 +6,7 @@ use crate::data::models::instrument_type::InstrumentType;
 use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
-use crate::utils::dataframe::dict_to_dataframe;
+use crate::utils::python::dict_to_dataframe;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 

@@ -388,7 +388,7 @@ class GeneralConfig:
 class LogLevel:
     """Tracing logging level.
 
-    The minimum logging level that are displayed, i.e., if `log_level="info"`,
+    The minimum logging level that are displayed, i.e., if `info`,
     all `info`, `warn` and `error` messages are displayed.
 
     """

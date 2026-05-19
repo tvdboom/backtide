@@ -1,23 +1,22 @@
 //! Backtest engine logic.
 //!
 //! This module implements the per-strategy event loop, order matching,
-//! multi-currency portfolio bookkeeping and result aggregation. It runs
-//! every selected strategy fully in parallel using [`rayon`].
+//! multi-currency portfolio bookkeeping and result aggregation.
 
 use crate::backtest::fx::FxTable;
-use crate::backtest::indicators::Indicator as BuiltinIndicator;
 use crate::backtest::interface::check_abort;
 use crate::backtest::models::commission_type::CommissionType;
 use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
-use crate::backtest::models::experiment_config::ExperimentConfig;
+use crate::backtest::models::experiment_config::{ExperimentConfig, ExperimentConfigInner};
 use crate::backtest::models::experiment_result::*;
 use crate::backtest::models::experiment_status::ExperimentStatus;
 use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
-use crate::backtest::strategies::{BuiltinStrategy, BuyAndHold, IndicatorView};
-use crate::constants::BENCHMARK;
+use crate::strategies::interface::{BuiltinStrategy, BuyAndHold};
+use crate::config::interface::Config;
+use crate::constants::{Symbol, BENCHMARK};
 use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
 use crate::data::models::instrument_profile::InstrumentProfile;
@@ -26,19 +25,22 @@ use crate::data::models::interval::Interval;
 use crate::data::models::provider::Provider;
 use crate::engine::Engine;
 use crate::errors::{EngineError, EngineResult};
+use crate::indicators::interface::_indicator_deterministic_name;
+use crate::indicators::utils::compute_indicators;
 use crate::utils::experiment_log::{EXPERIMENT_SPAN, LOG_PATH_FIELD};
 use crate::utils::progress::{progress_bar, progress_spinner};
-use indicatif::ProgressBar;
+use crate::utils::python::load_pickle;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use pyo3::Py;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn, Span};
 use uuid::Uuid;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Public interface
 // ────────────────────────────────────────────────────────────────────────────
@@ -52,57 +54,52 @@ impl Engine {
         strategy_overrides: &HashMap<String, Py<PyAny>>,
         indicator_overrides: &HashMap<String, Py<PyAny>>,
     ) -> EngineResult<ExperimentResult> {
-        let started_at = now_secs();
         let started_instant = Instant::now();
+        let started_at =
+            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+
         let experiment_id = Uuid::new_v4().simple().to_string()[..16].to_owned();
         let mut warnings: Vec<String> = Vec::new();
 
-        // ── Set up per-experiment logging ───────────────────────────────
-        //
-        // We open a top-level [`EXPERIMENT_SPAN`] span and let the global
-        // `ExperimentFileLayer` (registered in `init_logging`) mirror every
-        // event emitted while the span is on the stack into a dedicated
-        // `<storage>/experiments/<experiment_id>/logs.txt` file. The UI
-        // exposes that file via a popover on the full-analysis page.
-        //
-        // No bespoke logging plumbing is required in this module — plain
-        // `tracing::info!` / `warn!` / `debug!` calls Just Work, including
-        // those emitted by helper functions called from here.
+        // ── Set up per-experiment logging ───────────────────────────────────
+
         let storage_path = &self.config.data.storage_path;
         let exp_dir = storage_path.join("experiments").join(&experiment_id);
         if let Err(e) = std::fs::create_dir_all(&exp_dir) {
             warn!(experiment_id = %experiment_id, "Failed to create experiment dir: {e}");
             warnings.push(format!("Failed to create experiment dir: {e}"));
         }
-        let log_path = exp_dir.join("logs.txt");
 
-        let experiment_span = tracing::info_span!(
+        let _ = tracing::info_span!(
             EXPERIMENT_SPAN,
             experiment_id = %experiment_id,
-            { LOG_PATH_FIELD } = %log_path.display(),
-        );
-        let _enter = experiment_span.enter();
+            { LOG_PATH_FIELD } = %exp_dir.join("logs.txt").display(),
+        )
+        .enter();
 
+        info!("Starting experiment id={} name={:?}", experiment_id, config.general.name);
         info!(
-            "Starting experiment id={} name={:?} tags={:?}",
-            experiment_id, config.general.name, config.general.tags
-        );
-        info!(
-            "Configuration summary: {} symbols, interval={:?}, instrument_type={:?}, \
-             benchmark={:?}, risk_free_rate={}%, initial_cash={}, {} indicators, \
-             {} strategies",
+            "Configuration summary:\n \
+            Number of symbols: {}\n \
+            Interval: {:?}\n \
+            Instrument type: {:?}\n \
+            Initial_cash: {}\n \
+            Benchmark: {}\n \
+            Number of strategies: {}\n \
+            Number of indicators: {}\n \
+            Risk free rate: {}%",
             config.data.symbols.len(),
-            config.data.interval,
-            config.data.instrument_type,
-            config.strategy.benchmark,
-            config.engine.risk_free_rate,
+            config.data.interval.to_string(),
+            config.data.instrument_type.to_string(),
             config.portfolio.initial_cash,
+            config.strategy.benchmark.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
+            config.strategy.strategies.len(),
             config.indicators.indicators.len(),
-            config.strategy.strategies.len()
+            config.engine.risk_free_rate,
         );
 
         // Persist the source configuration as a TOML file.
-        match persist_experiment_config(storage_path, &experiment_id, config) {
+        match persist_experiment_config(&exp_dir, config) {
             Ok(p) => info!("Persisted experiment config to {}", p.display()),
             Err(e) => {
                 warn!(experiment_id = %experiment_id, "Failed to persist experiment config: {e}");
@@ -110,68 +107,86 @@ impl Engine {
             },
         }
 
-        // Augment the symbol list with the benchmark (if any) so its bars
-        // get downloaded & loaded just like any user symbol.
-        // If the benchmark matches a strategy name, it refers to that strategy
-        // — no extra download needed. Otherwise treat it as a ticker symbol.
         let mut symbols = config.data.symbols.clone();
-        let benchmark = config.strategy.benchmark.as_deref().unwrap_or("").trim().to_owned();
-        let benchmark_from_strategy =
-            !benchmark.is_empty() && config.strategy.strategies.iter().any(|s| s == &benchmark);
-        if !benchmark.is_empty()
-            && !benchmark_from_strategy
-            && !symbols.iter().any(|s| s == &benchmark)
-        {
-            info!("Folding benchmark symbol {:?} into symbol list", benchmark);
-            symbols.push(benchmark.clone());
-        }
         if symbols.is_empty() {
             warn!("Experiment has no symbols — aborting.");
             return Err(EngineError::Experiment("Experiment has no symbols.".to_owned()));
         }
 
-        // ── Phase 1: data ───────────────────────────────────────────────
-        info!("Phase 1: resolving instrument profiles for {} symbol(s)...", symbols.len());
+        // Augment the symbol list with the benchmark (if any) so its bars get downloaded
+        // just like any user symbol. If the benchmark matches a strategy name, it refers
+        // to that strategy, no extra download needed. Otherwise, treat it as a symbol.
+        let benchmark = config.strategy.benchmark.as_deref().unwrap_or("").trim().to_owned();
+        let benchmark_from_strat =
+            !benchmark.is_empty() && config.strategy.strategies.iter().any(|s| s == &benchmark);
 
-        let pb = verbose.then(|| progress_spinner("Resolving instrument profiles..."));
+        if !benchmark.is_empty()
+            && !benchmark_from_strat
+            && !symbols.iter().any(|s| s == &benchmark)
+        {
+            info!("Folding benchmark symbol {:?} into symbol list", benchmark);
+            symbols.push(benchmark.clone());
+        }
+
+        // ── Download data ───────────────────────────────────────────────────
+
+        info!("Resolving instrument profiles for {} symbols...", symbols.len());
+
         let profiles = self.resolve_profiles(
             symbols.clone(),
             config.data.instrument_type,
             vec![config.data.interval],
-            false,
+            verbose,
         )?;
-        info!("Resolved {} instrument profile(s).", profiles.len());
-        if let Some(p) = pb {
-            p.finish_and_clear();
+
+        info!("Resolved {} instrument profiles.", profiles.len());
+
+        let symbol_it_map: HashMap<Symbol, InstrumentType> = profiles
+            .iter()
+            .map(|p| (p.instrument.symbol.clone(), p.instrument.instrument_type))
+            .collect();
+
+        // Check that the starting positions are valid
+        for (symbol, qty) in &config.portfolio.starting_positions {
+            if let Some(it) = symbol_it_map.get(symbol) {
+                if let Some(reason) = validate_position(*qty, *it) {
+                    return Err(EngineError::Experiment(format!(
+                        "Invalid starting position for symbol {symbol}: {reason}, got {qty}."
+                    )));
+                }
+            } else {
+                return Err(EngineError::Experiment(format!(
+                    "Invalid starting position: symbol {symbol} not listed in data."
+                )));
+            }
         }
 
-        validate_starting_position_quantities(config, &profiles)?;
+        let start_clamp = config.data.start_date.as_deref().and_then(iso_to_ts);
+        let end_clamp = config.data.end_date.as_deref().and_then(iso_to_ts);
 
-        let pb = verbose.then(|| progress_spinner("Downloading missing bars..."));
-        let start_clamp = config.data.start_date.as_deref().and_then(parse_iso_date_to_ts);
-        let end_clamp = config.data.end_date.as_deref().and_then(parse_iso_date_to_ts);
         info!(
-            "Downloading missing bars (start_clamp={:?}, end_clamp={:?})...",
+            "Downloading missing bars from {:?} to {:?})...",
             config.data.start_date, config.data.end_date
         );
-        let dl = self.download_bars(&profiles, start_clamp, end_clamp, false)?;
+
+        let dl = self.download_bars(&profiles, start_clamp, end_clamp, verbose)?;
+
         info!(
             "Download complete: {} succeeded, {} failed, {} warning(s).",
             dl.n_succeeded,
             dl.n_failed,
             dl.warnings.len()
         );
-        for w in &dl.warnings {
-            warn!("Download warning: {w}");
-        }
-        warnings.extend(dl.warnings.iter().cloned());
-        if let Some(p) = pb {
-            p.finish_and_clear();
+
+        for warning in &dl.warnings {
+            warn!("Download warning: {warning}");
+            warnings.push(warning.clone());
         }
 
-        // ── Phase 2: load bars ──────────────────────────────────────────
-        info!("Phase 2: loading bars from storage...");
-        let pb = verbose.then(|| progress_spinner("Loading bars from storage..."));
+        // ── Load bars from storage ──────────────────────────────────────────
+
+        info!("Loading bars from storage...");
+
         let bar_map = self.load_bars(
             &symbols,
             config.data.interval,
@@ -184,13 +199,12 @@ impl Engine {
             start_clamp,
             end_clamp,
         )?;
+
         let total_bars: usize = bar_map.values().map(|v| v.len()).sum();
-        info!("Loaded {} bar(s) across {} symbol(s).", total_bars, bar_map.len());
+        info!("Loaded {} bars across {} symbols.", total_bars, bar_map.len());
+
         for (sym, bars) in &bar_map {
-            debug!("  {} → {} bars", sym, bars.len());
-        }
-        if let Some(p) = pb {
-            p.finish_and_clear();
+            debug!(" - {} → {} bars", sym, bars.len());
         }
 
         // Build a master timeline (union of all symbol timestamps, sorted).
@@ -198,11 +212,12 @@ impl Engine {
             bar_map.values().flat_map(|bars| bars.iter().map(|b| b.open_ts as i64)).collect();
         all_ts.sort_unstable();
         all_ts.dedup();
+
         info!("Master timeline has {} unique timestamps.", all_ts.len());
 
         if all_ts.is_empty() {
-            warn!("No bars available for the selected symbols/interval — experiment failed.");
-            warnings.push("No bars available for the selected symbols/interval.".into());
+            warn!("No bars available for the selected symbols/interval — aborting experiment.");
+            warnings.push("No bars available for the selected symbols/interval.".to_owned());
             return Ok(ExperimentResult {
                 experiment_id,
                 name: config.general.name.clone(),
@@ -217,39 +232,22 @@ impl Engine {
 
         // Per-symbol aligned bars indexed by timestamp position.
         let aligned = align_bars(&bar_map, &all_ts, config.engine.empty_bar_policy);
-        info!("Aligned bars using policy={:?}.", config.engine.empty_bar_policy);
+        info!("Aligned bars using policy={:?}.", config.engine.empty_bar_policy.to_string());
 
-        // ── Build FX rate table from currency-conversion legs ───────────
-        //
-        // Every primary instrument whose quote currency differs from the
-        // portfolio base currency carries one or more conversion legs in
-        // its profile (resolved by `Engine::resolve_legs`). We load the
-        // close-price series for each unique leg symbol — possibly from a
-        // different provider than the primary instruments — and feed
-        // them into an `FxTable` keyed by `(from_ccy, to_ccy)` so the
-        // run loop can convert any cash/MTM amount at any timestamp via
-        // forward-fill (latest known rate ≤ ts).
-        let primary_set: HashSet<&str> = symbols.iter().map(String::as_str).collect();
-        let leg_profiles: Vec<&InstrumentProfile> = profiles
-            .iter()
-            .filter(|p| !primary_set.contains(p.instrument.symbol.as_str()))
-            .collect();
+        // ── Build FX rate table from currency-conversion legs ───────────────
+
+        let leg_profiles: Vec<&InstrumentProfile> =
+            profiles.iter().filter(|p| !symbols.contains(&p.instrument.symbol)).collect();
+
         info!("Building FX table from {} conversion leg(s).", leg_profiles.len());
 
         let mut fx = FxTable::new(config.portfolio.base_currency.to_string());
         for leg in &leg_profiles {
-            let leg_provider = match self.config.data.providers.get(&leg.instrument.instrument_type)
-            {
-                Some(p) => *p,
-                None => {
-                    warn!(symbol=%leg.instrument.symbol, "No provider for leg instrument type, skipping.");
-                    continue;
-                },
-            };
+            let provider = self.config.data.providers.get(&leg.instrument.instrument_type).unwrap();
             let leg_bars = match self.load_bars(
                 std::slice::from_ref(&leg.instrument.symbol),
                 config.data.interval,
-                leg_provider,
+                *provider,
                 start_clamp,
                 end_clamp,
             ) {
@@ -259,6 +257,7 @@ impl Engine {
                     continue;
                 },
             };
+
             let bars = match leg_bars.get(&leg.instrument.symbol) {
                 Some(v) if !v.is_empty() => v,
                 _ => {
@@ -267,59 +266,53 @@ impl Engine {
                 },
             };
 
-            // Extract the base/quote identifiers. These can be fiat ISO
-            // codes (EUR, USD) or crypto tickers (ETH, USDT) — the
-            // string-based FxTable accepts both.
+            // Extract the base/quote identifiers.
             let from_str = match leg.instrument.base.as_deref() {
                 Some(s) if !s.is_empty() => s,
                 _ => {
                     debug!(
                         symbol=%leg.instrument.symbol,
-                        "Leg has no base currency; skipping FX series.",
+                        "Leg has no base currency. Skipping FX series.",
                     );
                     continue;
                 },
             };
-            let to_str = &leg.instrument.quote;
 
+            let to_str = &leg.instrument.quote;
             let series: Vec<(i64, f64)> =
                 bars.iter().map(|b| (b.open_ts as i64, b.close)).collect();
+
             debug!(
                 symbol=%leg.instrument.symbol,
-                from=%from_str, to=%to_str,
-                "Adding FX series ({} points).", series.len()
+                from=%from_str,
+                to=%to_str,
+                "Adding FX series ({} bars).", series.len()
             );
+
             fx.add_series(from_str, to_str, series);
         }
 
-        // ── Synthetic crypto/fiat peg ────────────────────────────────
-        //
-        // When the triangulation crypto stablecoin (e.g. USDT) is
-        // configured as pegged to a fiat currency (e.g. USD), add a
-        // synthetic 1:1 rate so the FxTable can bridge the crypto and
-        // fiat sides of the conversion graph.
+        // When the triangulation crypto stablecoin (e.g., USDT) is configured
+        // as pegged to a fiat currency (e.g., USD), add a synthetic 1:1 rate so
+        // the FxTable can bridge the crypto and fiat sides of the conversion graph.
         let tri_crypto = &self.config.general.triangulation_crypto;
         let tri_pegged = self.config.general.triangulation_crypto_pegged.to_string();
         if !tri_crypto.is_empty() && *tri_crypto != tri_pegged {
             fx.add_series(tri_crypto, &tri_pegged, vec![(0, 1.0)]);
-            info!("Added synthetic peg: {} -> {} at 1:1.", tri_crypto, tri_pegged);
+            debug!("Added synthetic peg: {} -> {} at 1:1.", tri_crypto, tri_pegged);
         }
 
-        // ── Phase 3a: load strategies (so we can collect their auto indicators) ──
-        info!("Phase 3: loading {} strategy definition(s)...", config.strategy.strategies.len());
+        // ── Load strategies ─────────────────────────────────────────────────
 
+        info!("Loading {} strategies...", config.strategy.strategies.len());
+
+        let benchmark_name = BENCHMARK.to_owned();
         let mut strategy_objs = load_strategies(&config.strategy.strategies, strategy_overrides)?;
 
-        // Auto-inject a Buy & Hold of the benchmark symbol as a regular strategy,
-        // but only when benchmark_from_strategy is false (i.e. the benchmark is an
-        // external ticker symbol, not one of the user's strategies).
-        let benchmark_name = BENCHMARK.to_owned();
-        if !benchmark.is_empty() && !benchmark_from_strategy {
+        // Inject the benchmark strategy when benchmark_from_strat=false.
+        if !benchmark.is_empty() && !benchmark_from_strat {
             match Python::attach(|py| -> PyResult<Py<PyAny>> {
-                let bh = BuyAndHold {
-                    symbol: Some(benchmark.clone()),
-                };
-                Ok(Py::new(py, bh)?.into_any())
+                Ok(Py::new(py, BuyAndHold::new(Some(benchmark.clone())))?.into_any())
             }) {
                 Ok(obj) => {
                     info!("Injected benchmark strategy BuyAndHold({}).", benchmark);
@@ -332,24 +325,26 @@ impl Engine {
             }
         }
 
-        // ── Phase 3b: collect indicator objects (user-selected + auto-injected) ──
-        //
-        // Built-in strategies declare their dependencies via the
-        // ``required_indicators()`` pymethod. We instantiate those here and
-        // hand them to ``compute_indicators`` alongside any user-selected
-        // indicators loaded from disk. Without this step, every strategy
-        // that relies on auto-included indicators (SMA Crossover, MACD,
-        // RSI, BB Mean Reversion, …) would silently place zero orders
-        // because the lookups in ``decide_inner`` return ``None``.
-        let mut indicator_objs: Vec<(String, Py<PyAny>)> = Vec::new();
-        let mut seen_inds: HashSet<String> = HashSet::new();
+        // ── Load and compute indicators ─────────────────────────────────────
 
+        info!("Loading indicators...");
+
+        let mut indicator_objs: Vec<(String, Py<PyAny>)> = Vec::new();
+
+        let mut seen_inds: HashSet<String> = HashSet::new();
         for name in &config.indicators.indicators {
             match Python::attach(|py| -> PyResult<Py<PyAny>> {
                 if let Some(o) = indicator_overrides.get(name) {
                     Ok(o.clone_ref(py))
                 } else {
-                    load_indicator(py, name)
+                    let path = self
+                        .config
+                        .data
+                        .storage_path
+                        .join("indicators")
+                        .join(format!("{name}.pkl"));
+
+                    load_pickle(py, &path)
                 }
             }) {
                 Ok(obj) => {
@@ -364,165 +359,118 @@ impl Engine {
             }
         }
 
+        // Load the required indicators by the strategies
         for (sname, sobj, _) in &strategy_objs {
             let pairs = Python::attach(|py| -> PyResult<Vec<(String, Py<PyAny>)>> {
                 let bound = sobj.bind(py);
                 if !bound.hasattr("required_indicators")? {
                     return Ok(Vec::new());
                 }
+
                 let raw = bound.call_method0("required_indicators")?;
                 let inds: Vec<Py<PyAny>> = raw.extract()?;
+
                 let mut out = Vec::with_capacity(inds.len());
                 for ind in inds {
-                    let name = auto_indicator_name_for(py, &ind)?;
+                    let name = _indicator_deterministic_name(ind.bind(py).as_any())?;
                     out.push((name, ind));
                 }
+
                 Ok(out)
             });
+
             match pairs {
                 Ok(pairs) => {
                     for (name, obj) in pairs {
                         if seen_inds.insert(name.clone()) {
-                            info!("Auto-injecting indicator {name} required by {sname}");
+                            debug!("Auto-injecting indicator {name} required by strategy {sname}.");
                             indicator_objs.push((name, obj));
                         }
                     }
                 },
-                Err(e) => warn!(
-                    "Failed to collect required indicators for {sname}: {e} \
-                     (strategy will run without auto-indicators)"
-                ),
+                Err(e) => warn!("Failed to collect required indicators for strategy {sname}: {e}."),
             }
         }
 
-        // ── Phase 3c: indicators (computed once) ────────────────────────
         info!("Computing {} indicator(s)...", indicator_objs.len());
 
         let pb =
             verbose.then(|| progress_bar(indicator_objs.len() as u64, "Computing indicators..."));
+
         let indicators = compute_indicators(&indicator_objs, &aligned, pb.as_ref())?;
-        info!("Computed {} indicator series.", indicators.len());
+
+        info!("Finished computing indicators.");
+
         if let Some(p) = pb {
             p.finish_and_clear();
         }
 
-        // ── Phase 4: run strategies in parallel ─────────────────────────
+        // ── Run strategies ──────────────────────────────────────────────────
 
+        let n_strategies = strategy_objs.len() as u64;
         let pb = verbose.then(|| {
-            progress_bar(
-                strategy_objs.len() as u64,
-                format!("Running {} strategies...", strategy_objs.len()),
-            )
+            progress_bar(n_strategies,format!("Running {n_strategies} strategies..."))
         });
-        let pb_arc = pb.as_ref().map(|p| Mutex::new(p.clone()));
 
-        let cfg_clone = config.clone();
-        let aligned_arc = Arc::new(aligned);
-        let indicators_arc = Arc::new(indicators);
-        let profiles_arc = Arc::new(profiles.clone());
-        let fx_arc = Arc::new(fx);
+        let pb_mutex = pb.as_ref().map(Mutex::new);
 
-        // Master timeline shared by all strategies. Built once here from
-        // `all_ts` so per-strategy logic doesn't have to reconstruct it
-        // from per-symbol rows (which would fall back to row indices for
-        // bars where the chosen reference symbol has no data — yielding
-        // bogus timestamps like ``1970-01-01 …`` for any benchmark whose
-        // history starts later than the earliest selected symbol).
-        let timeline_arc = Arc::new(all_ts.clone());
-
-        // Built-in (Rust) strategies are run in parallel via rayon.
-        // Custom (Python) strategies are run sequentially under the GIL.
-        let (custom, builtin): (Vec<(String, Py<PyAny>, bool)>, Vec<(String, Py<PyAny>, bool)>) =
+        let (custom, builtin): (Vec<_>, Vec<_>) =
             strategy_objs.into_iter().partition(|(_, _, is_custom)| *is_custom);
+
         info!(
-            "Dispatching strategies: {} built-in (parallel) and {} custom (sequential).",
+            "Dispatching strategies: {} built-in and {} custom.",
             builtin.len(),
             custom.len()
         );
 
-        let cfg_arc = Arc::new(cfg_clone);
-
-        let cfg_for_par = Arc::clone(&cfg_arc);
-        let aligned_for_par = Arc::clone(&aligned_arc);
-        let indicators_for_par = Arc::clone(&indicators_arc);
-        let profiles_for_par = Arc::clone(&profiles_arc);
-        let timeline_for_par = Arc::clone(&timeline_arc);
-        let fx_for_par = Arc::clone(&fx_arc);
-
-        // Capture the experiment span so each rayon worker can re-enter it
-        // — `tracing` span scope is thread-local, so events from worker
-        // threads would otherwise miss the file layer entirely.
+        // Capture the experiment span so each rayon worker can re-enter it.
         let par_span = Span::current();
 
-        let mut results: Vec<RunResult> = builtin
-            .into_par_iter()
-            .map(|(name, obj, _)| {
-                par_span.in_scope(|| {
-                    info!("▶ Running strategy {:?}...", name);
-                    let r = run_one_strategy(
-                        &name,
-                        obj,
-                        &cfg_for_par,
-                        &aligned_for_par,
-                        &indicators_for_par,
-                        &profiles_for_par,
-                        &timeline_for_par,
-                        &fx_for_par,
-                    );
-                    info!(
-                        "✔ Finished strategy {:?}: {} trades, {} bars in equity curve.",
-                        r.strategy_name,
-                        r.trades.len(),
-                        r.equity_curve.len()
-                    );
-                    if let Some(pb) = &pb_arc {
-                        pb.lock().unwrap().inc(1);
-                    }
-                    r
-                })
-            })
-            .collect();
+        // Borrow everything — rayon's collect() blocks until all workers finish,
+        // so these references are valid for the entire parallel section.
+        let run = |(name, obj, _): (String, _, _)| {
+            par_span.in_scope(|| {
+                info!("▶ Running strategy {:?}...", name);
 
-        for (name, obj, _) in custom {
-            // Check for abort before each sequential strategy.
-            info!("▶ Running custom strategy {:?}...", name);
-            let r = run_one_strategy(
-                &name,
-                obj,
-                &cfg_arc,
-                &aligned_arc,
-                &indicators_arc,
-                &profiles_arc,
-                &timeline_arc,
-                &fx_arc,
-            );
-            info!(
-                "✔ Finished custom strategy {:?}: {} trades, {} bars in equity curve.",
-                r.strategy_name,
-                r.trades.len(),
-                r.equity_curve.len()
-            );
-            if let Some(pb) = &pb_arc {
-                pb.lock().unwrap().inc(1);
-            }
-            results.push(r);
-        }
+                let result = run_one_strategy(
+                    &name,
+                    obj,
+                    &config,
+                    &aligned,
+                    &indicators,
+                    &profiles,
+                    &all_ts,
+                    &fx,
+                );
+
+                info!(
+                    "✔ Finished strategy {:?}: {} trades, {} bars in equity curve.",
+                    result.strategy_name,
+                    result.trades.len(),
+                    result.equity_curve.len()
+                );
+
+                if let Some(pb) = &pb_mutex {
+                    pb.lock().unwrap().inc(1);
+                }
+
+                result
+            })
+        };
+
+        // Run the built-in and custom strategies in parallel.
+        let (mut results, custom_results): (Vec<RunResult>, Vec<RunResult>) = rayon::join(
+            || builtin.into_par_iter().map(&run).collect(),
+            || custom.into_iter().map(&run).collect(),
+        );
+        results.extend(custom_results);
 
         if let Some(p) = pb {
             p.finish_and_clear();
         }
 
-        // ── Compute alpha & excess return for every run ─────────────────
-        //
-        // Alpha is defined as the windowed total-return difference between a
-        // strategy and the benchmark, where the window starts at the *later*
-        // of the two equity-curve start dates. This avoids comparing periods
-        // where one of the two series did not yet exist (e.g. benchmark only
-        // goes back to 2004 while the strategy has data from 1990 — alpha
-        // must then be measured from 2004 onwards on both sides).
-        //
-        // Excess return is the strategy's windowed total return minus the
-        // compounded risk-free return over the same window.
+        // ── Compute alpha & excess return ───────────────────────────────────
+
         info!(
             "Computing alpha & excess return (rf={}%, benchmark={:?}).",
             config.engine.risk_free_rate,
@@ -532,13 +480,14 @@ impl Engine {
                 benchmark.as_str()
             }
         );
+        
         const SECS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0;
         let rf = config.engine.risk_free_rate / 100.0;
 
         // Snapshot of the benchmark's equity curve (ts, equity), if any.
         // When benchmark_from_strategy is true, the benchmark strategy is the
         // user strategy whose name matches the benchmark field; mark it now.
-        if benchmark_from_strategy && !benchmark.is_empty() {
+        if benchmark_from_strat && !benchmark.is_empty() {
             for r in &mut results {
                 if r.strategy_name == benchmark {
                     r.is_benchmark = true;
@@ -547,7 +496,7 @@ impl Engine {
             }
         }
         let bench_run = if !benchmark.is_empty() {
-            if benchmark_from_strategy {
+            if benchmark_from_strat {
                 results.iter().find(|r| r.strategy_name == benchmark)
             } else {
                 results.iter().find(|r| r.strategy_name == benchmark_name)
@@ -613,7 +562,7 @@ impl Engine {
 
             // Alpha is only meaningful for non-benchmark runs.
             if let Some(bench) = bench_snapshot.as_ref() {
-                let is_bench = if benchmark_from_strategy {
+                let is_bench = if benchmark_from_strat {
                     r.strategy_name == benchmark
                 } else {
                     r.strategy_name == benchmark_name
@@ -638,7 +587,7 @@ impl Engine {
 
         // Ensure the benchmark run is always the first entry in the results.
         if !benchmark.is_empty() {
-            let bench_name_to_find = if benchmark_from_strategy {
+            let bench_name_to_find = if benchmark_from_strat {
                 &benchmark
             } else {
                 &benchmark_name
@@ -833,23 +782,13 @@ impl Engine {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Helper functions
+// Utility functions
 // ────────────────────────────────────────────────────────────────────────────
 
-fn now_secs() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
-}
-
 /// Serialize `config` and write it to `/experiments/<experiment_id>/config.toml`.
-fn persist_experiment_config(
-    storage_path: &std::path::Path,
-    experiment_id: &str,
-    config: &ExperimentConfig,
-) -> Result<PathBuf, String> {
-    use crate::backtest::models::experiment_config::ExperimentConfigInner;
-
-    let dir = storage_path.join("experiments").join(experiment_id);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create_dir_all({}): {e}", dir.display()))?;
+fn persist_experiment_config(path: &PathBuf, config: &ExperimentConfig) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(path)
+        .map_err(|e| format!("create_dir_all({}): {e}", path.display()))?;
 
     let inner = ExperimentConfigInner {
         general: config.general.clone(),
@@ -860,68 +799,126 @@ fn persist_experiment_config(
         exchange: config.exchange.clone(),
         engine: config.engine.clone(),
     };
-    let toml_str = toml::to_string_pretty(&inner).map_err(|e| format!("toml serialise: {e}"))?;
+    let toml_str = toml::to_string_pretty(&inner).map_err(|e| format!("toml serialize: {e}"))?;
 
-    let path = dir.join("config.toml");
+    let path = path.join("config.toml");
     std::fs::write(&path, toml_str).map_err(|e| format!("write {}: {e}", path.display()))?;
     Ok(path)
 }
 
-fn parse_iso_date_to_ts(s: &str) -> Option<u64> {
+/// Check whether a position is valid.
+fn validate_position(qty: f64, it: InstrumentType) -> Option<String> {
+    if !qty.is_finite() || !qty.is_nan() || qty < 0. {
+        return Some("quantity must be a finite positive number".to_owned());
+    }
+
+    if !it.allows_fractional_quantities() && qty.fract() != 0. {
+        return Some(format!("fractional quantities aren't allowed for instrument type {it}"));
+    }
+
+    None
+}
+
+/// Parse a date in ISO 8601 format (YYYY-MM-DD) into Unix seconds.
+fn iso_to_ts(s: &str) -> Option<u64> {
     chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .ok()
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|dt| dt.and_utc().timestamp() as u64)
 }
 
-const QUANTITY_EPS: f64 = 1e-9;
+/// Align bars to a master timeline using the configured empty-bar policy.
+///
+/// Uses binary search on the (already-sorted) per-symbol bar vectors.
+fn align_bars(
+    bars: &HashMap<String, Vec<Bar>>,
+    timeline: &[i64],
+    policy: EmptyBarPolicy,
+) -> HashMap<String, Vec<Option<Bar>>> {
+    let mut out: HashMap<String, Vec<Option<Bar>>> = HashMap::with_capacity(bars.len());
+    for (sym, sym_bars) in bars {
+        let mut row: Vec<Option<Bar>> = Vec::with_capacity(timeline.len());
+        let mut last: Option<Bar> = None;
+        for ts in timeline {
+            // Binary search on the sorted bar slice (sorted by open_ts in load_bars).
+            let found = sym_bars
+                .binary_search_by_key(&(*ts as u64), |b| b.open_ts)
+                .ok()
+                .map(|i| &sym_bars[i]);
 
-fn is_whole_quantity(qty: f64) -> bool {
-    qty.is_finite() && (qty - qty.round()).abs() <= QUANTITY_EPS
-}
-
-fn profile_instrument_types(profiles: &[InstrumentProfile]) -> HashMap<String, InstrumentType> {
-    profiles.iter().map(|p| (p.instrument.symbol.clone(), p.instrument.instrument_type)).collect()
-}
-
-fn instrument_type_for_symbol(
-    symbol: &str,
-    instrument_types: &HashMap<String, InstrumentType>,
-    fallback: InstrumentType,
-) -> InstrumentType {
-    instrument_types.get(symbol).copied().unwrap_or(fallback)
-}
-
-fn quantity_rejection_reason(
-    symbol: &str,
-    qty: f64,
-    instrument_type: InstrumentType,
-) -> Option<String> {
-    if !qty.is_finite() {
-        return Some(format!("quantity for {symbol} must be finite"));
-    }
-    if !instrument_type.allows_fractional_quantities() && !is_whole_quantity(qty) {
-        return Some(format!(
-            "fractional quantity {qty} is not allowed for {instrument_type} instrument {symbol}; \
-             only crypto instruments support fractional quantities"
-        ));
-    }
-    None
-}
-
-fn validate_starting_position_quantities(
-    config: &ExperimentConfig,
-    profiles: &[InstrumentProfile],
-) -> EngineResult<()> {
-    let instrument_types = profile_instrument_types(profiles);
-    for (symbol, qty) in &config.portfolio.starting_positions {
-        let instrument_type =
-            instrument_type_for_symbol(symbol, &instrument_types, config.data.instrument_type);
-        if let Some(reason) = quantity_rejection_reason(symbol, *qty, instrument_type) {
-            return Err(EngineError::Experiment(format!("Invalid starting position: {reason}.")));
+            match found {
+                Some(b) => {
+                    last = Some(b.clone());
+                    row.push(Some(b.clone()));
+                },
+                None => match policy {
+                    EmptyBarPolicy::Skip => row.push(None),
+                    EmptyBarPolicy::ForwardFill => {
+                        if let Some(b) = &last {
+                            let mut filled = b.clone();
+                            filled.open_ts = *ts as u64;
+                            filled.close_ts = *ts as u64;
+                            filled.volume = 0.0;
+                            row.push(Some(filled));
+                        } else {
+                            row.push(None);
+                        }
+                    },
+                    EmptyBarPolicy::FillWithNaN => {
+                        row.push(Some(Bar {
+                            open_ts: *ts as u64,
+                            close_ts: *ts as u64,
+                            open_ts_exchange: *ts as u64,
+                            open: f64::NAN,
+                            high: f64::NAN,
+                            low: f64::NAN,
+                            close: f64::NAN,
+                            adj_close: f64::NAN,
+                            volume: f64::NAN,
+                            n_trades: None,
+                        }));
+                    },
+                },
+            }
         }
+        out.insert(sym.clone(), row);
     }
-    Ok(())
+    out
+}
+
+/// Load the selected strategies.
+///
+/// Returns `(name, obj, is_custom)` triples. Names present in `overrides` use
+/// the supplied in-memory instance directly. Other names are resolved from the
+/// local strategies' directory.
+fn load_strategies(
+    names: &[String],
+    overrides: &HashMap<String, Py<PyAny>>,
+) -> EngineResult<Vec<(String, Py<PyAny>, bool)>> {
+    let cfg = Config::get()?;
+
+    Python::attach(|py| -> PyResult<_> {
+        let mut out = Vec::with_capacity(names.len());
+        for name in names {
+            let obj = if let Some(o) = overrides.get(name) {
+                o.clone_ref(py)
+            } else {
+                // Resolve a strategy name to a concrete Python object.
+                let path = cfg.data.storage_path.join("strategies").join(format!("{name}.pkl"));
+                load_pickle(py, &path)?
+            };
+
+            // Determine whether it's a built-in/custom strategy by ther class' module
+            let cls = obj.bind(py).get_type();
+            let module: String = cls.getattr("__module__")?.extract()?;
+            let is_custom = !module.starts_with("backtide.");
+
+            out.push((name.clone(), obj, is_custom));
+        }
+
+        Ok(out)
+    })
+    .map_err(|e: PyErr| EngineError::Io(std::io::Error::other(e.to_string())))
 }
 
 fn normalize_builtin_order_quantity(
@@ -948,294 +945,6 @@ fn normalize_builtin_order_quantity(
         order.quantity = whole_abs.copysign(order.quantity);
     }
     None
-}
-
-/// Align bars to a master timeline using the configured empty-bar policy.
-///
-/// Uses binary search on the (already-sorted) per-symbol bar vectors
-/// instead of building a temporary `HashMap<i64, Bar>` for each symbol.
-/// This avoids O(n) hash-map construction and per-key hashing overhead,
-/// replacing it with O(log n) lookups — a significant win on large
-/// datasets (10 k+ bars per symbol).
-fn align_bars(
-    bars: &HashMap<String, Vec<Bar>>,
-    timeline: &[i64],
-    policy: EmptyBarPolicy,
-) -> HashMap<String, Vec<Option<Bar>>> {
-    let mut out: HashMap<String, Vec<Option<Bar>>> = HashMap::with_capacity(bars.len());
-    for (sym, sym_bars) in bars {
-        let mut row: Vec<Option<Bar>> = Vec::with_capacity(timeline.len());
-        let mut last: Option<Bar> = None;
-        for ts in timeline {
-            // Binary search on the sorted bar slice (sorted by open_ts in load_bars).
-            let found = sym_bars
-                .binary_search_by_key(&(*ts as u64), |b| b.open_ts)
-                .ok()
-                .map(|i| &sym_bars[i]);
-            match found {
-                Some(b) => {
-                    last = Some(b.clone());
-                    row.push(Some(b.clone()));
-                },
-                None => match policy {
-                    EmptyBarPolicy::Skip => row.push(None),
-                    EmptyBarPolicy::ForwardFill => {
-                        if let Some(b) = &last {
-                            let mut filled = b.clone();
-                            filled.open_ts = *ts as u64;
-                            filled.close_ts = *ts as u64;
-                            filled.volume = 0.0;
-                            row.push(Some(filled));
-                        } else {
-                            row.push(None);
-                        }
-                    },
-                    EmptyBarPolicy::FillWithNaN => {
-                        let nan_bar = Bar {
-                            open_ts: *ts as u64,
-                            close_ts: *ts as u64,
-                            open_ts_exchange: *ts as u64,
-                            open: f64::NAN,
-                            high: f64::NAN,
-                            low: f64::NAN,
-                            close: f64::NAN,
-                            adj_close: f64::NAN,
-                            volume: f64::NAN,
-                            n_trades: None,
-                        };
-                        row.push(Some(nan_bar));
-                    },
-                },
-            }
-        }
-        out.insert(sym.clone(), row);
-    }
-    out
-}
-
-/// Compute every requested indicator once over each symbol.
-///
-/// Each input pair is ``(deterministic_name, indicator_object)``: the
-/// caller is expected to have already loaded user-selected indicators
-/// from disk and to have instantiated any strategy-required auto
-/// indicators. We don't load anything by name here so that auto-injected
-/// indicators (which only exist as in-memory objects, never as ``.pkl``
-/// files on disk) are first-class citizens of the pipeline.
-///
-/// Returns a `{indicator_name -> {symbol -> Vec<Vec<f64>>}}` map.
-fn compute_indicators(
-    indicator_objs: &[(String, Py<PyAny>)],
-    aligned: &HashMap<String, Vec<Option<Bar>>>,
-    pb: Option<&ProgressBar>,
-) -> EngineResult<HashMap<String, HashMap<String, Vec<Vec<f64>>>>> {
-    let mut out: HashMap<String, HashMap<String, Vec<Vec<f64>>>> =
-        HashMap::with_capacity(indicator_objs.len());
-
-    // Pre-build a NaN bar template once, reused for every missing bar
-    // across all indicator × symbol combinations.
-    let nan_bar = Bar {
-        open_ts: 0,
-        close_ts: 0,
-        open_ts_exchange: 0,
-        open: f64::NAN,
-        high: f64::NAN,
-        low: f64::NAN,
-        close: f64::NAN,
-        adj_close: f64::NAN,
-        volume: f64::NAN,
-        n_trades: None,
-    };
-
-    for (name, obj) in indicator_objs {
-        let mut per_symbol: HashMap<String, Vec<Vec<f64>>> = HashMap::with_capacity(aligned.len());
-
-        for (sym, row) in aligned {
-            // Build the dense bar slice. Clone existing bars, substitute
-            // the pre-built NaN bar for gaps — avoids constructing a new
-            // Bar struct per missing slot.
-            let bars: Vec<Bar> = row
-                .iter()
-                .map(|b| b.as_ref().cloned().unwrap_or_else(|| nan_bar.clone()))
-                .collect();
-
-            let computed = Python::attach(|py| -> PyResult<Vec<Vec<f64>>> {
-                compute_indicator(py, obj, &bars)
-            });
-
-            match computed {
-                Ok(series) => {
-                    per_symbol.insert(sym.clone(), series);
-                },
-                Err(e) => warn!("Indicator {name} failed for {sym}: {e}"),
-            }
-        }
-        out.insert(name.clone(), per_symbol);
-        if let Some(p) = pb {
-            p.inc(1);
-        }
-    }
-    Ok(out)
-}
-
-/// Try to compute an indicator: built-in (compute_inner via Rust) first,
-/// else fall back to calling Python `.compute(df)`.
-fn compute_indicator(py: Python, obj: &Py<PyAny>, bars: &[Bar]) -> PyResult<Vec<Vec<f64>>> {
-    // Try every built-in indicator type.
-    use crate::backtest::indicators::*;
-    let bound = obj.bind(py);
-    macro_rules! try_builtin {
-        ($($t:ty),* $(,)?) => {
-            $(
-                if let Ok(b) = bound.cast::<$t>() {
-                    let inst: pyo3::PyRef<'_, $t> = b.borrow();
-                    let res: Vec<Vec<f64>> = <$t as BuiltinIndicator>::compute_inner(&inst, bars);
-                    return Ok(res);
-                }
-            )*
-        };
-    }
-    try_builtin!(
-        AverageDirectionalIndex,
-        AverageTrueRange,
-        BollingerBands,
-        CommodityChannelIndex,
-        ExponentialMovingAverage,
-        MovingAverageConvergenceDivergence,
-        OnBalanceVolume,
-        RelativeStrengthIndex,
-        SimpleMovingAverage,
-        StochasticOscillator,
-        VolumeWeightedAveragePrice,
-        WeightedMovingAverage,
-    );
-
-    // Fallback: call `.compute(df)` on the Python object with a numpy/pandas df.
-    let df = bars_to_dataframe(py, bars)?;
-    let result = bound.call_method1("compute", (df,))?;
-
-    // Try to extract as a 2-D structure; otherwise treat as 1-D.
-    let rows_res: PyResult<Vec<Vec<f64>>> = result.extract();
-    if let Ok(rows) = rows_res {
-        // Transpose to (n_series, n_points)
-        if rows.is_empty() {
-            return Ok(vec![]);
-        }
-        let cols = rows[0].len();
-        let mut out: Vec<Vec<f64>> = vec![vec![f64::NAN; rows.len()]; cols];
-        for (i, row) in rows.iter().enumerate() {
-            for (j, v) in row.iter().enumerate() {
-                out[j][i] = *v;
-            }
-        }
-        return Ok(out);
-    }
-
-    let flat: Vec<f64> = result.extract()?;
-    Ok(vec![flat])
-}
-
-fn bars_to_dataframe<'py>(py: Python<'py>, bars: &[Bar]) -> PyResult<Bound<'py, PyAny>> {
-    let dict = PyDict::new(py);
-    dict.set_item("open", PyList::new(py, bars.iter().map(|b| b.open))?)?;
-    dict.set_item("high", PyList::new(py, bars.iter().map(|b| b.high))?)?;
-    dict.set_item("low", PyList::new(py, bars.iter().map(|b| b.low))?)?;
-    dict.set_item("close", PyList::new(py, bars.iter().map(|b| b.close))?)?;
-    dict.set_item("volume", PyList::new(py, bars.iter().map(|b| b.volume))?)?;
-    let pd = py.import("pandas")?;
-    pd.call_method1("DataFrame", (dict,))
-}
-
-/// Resolve an indicator name to a concrete Python object loaded from
-/// the local indicators directory.
-fn load_indicator(py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
-    load_pickled(py, "indicators", name)
-}
-
-/// Resolve a strategy name to a concrete Python object loaded from
-/// the local strategies directory.
-fn load_strategy(py: Python<'_>, name: &str) -> PyResult<(Py<PyAny>, bool)> {
-    let obj = load_pickled(py, "strategies", name)?;
-    // Detect built-in strategies via the module path of their class.
-    let is_custom = Python::attach(|py| -> PyResult<bool> {
-        let cls = obj.bind(py).get_type();
-        let module: String = cls.getattr("__module__")?.extract()?;
-        Ok(!module.starts_with("backtide."))
-    })?;
-    Ok((obj, is_custom))
-}
-
-fn load_pickled(py: Python<'_>, sub: &str, name: &str) -> PyResult<Py<PyAny>> {
-    let cfg = crate::config::interface::Config::get()
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-    let path = cfg.data.storage_path.join(sub).join(format!("{name}.pkl"));
-    let cloudpickle = py.import("cloudpickle")?;
-    let builtins = py.import("builtins")?;
-    let f = builtins.call_method1("open", (path.to_string_lossy().to_string(), "rb"))?;
-    let obj = cloudpickle.call_method1("load", (&f,))?;
-    f.call_method0("close")?;
-    Ok(obj.unbind())
-}
-
-/// Build the deterministic name for a Python indicator
-/// instance. Mirrors `_auto_indicator_name` in the Python strategy utils
-/// and the Rust `auto_indicator_name` used by built-in strategies'
-/// ``decide_inner`` so the engine and the strategies look up indicators
-/// under the *same* key.
-///
-/// Format: ``<ACRONYM>_<arg1>_<arg2>_...`` (or ``<ACRONYM>_default``
-/// when the indicator takes no constructor arguments). ``.``, ``-`` and
-/// spaces are sanitised for filesystem-friendliness.
-fn auto_indicator_name_for(py: Python<'_>, ind: &Py<PyAny>) -> PyResult<String> {
-    let bound = ind.bind(py);
-    let acronym: String = bound.getattr("acronym")?.extract()?;
-
-    // ``__reduce__`` returns ``(cls, args_tuple)`` for picklable objects.
-    let reduce = bound.call_method0("__reduce__")?;
-    let args_any = reduce.get_item(1)?;
-    let args: Vec<Py<PyAny>> = args_any.extract().unwrap_or_default();
-
-    let arg_strs: Vec<String> = args
-        .iter()
-        .map(|a| a.bind(py).str().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default())
-        .collect();
-
-    let arg_str = if arg_strs.is_empty() {
-        "default".to_owned()
-    } else {
-        arg_strs.join("_")
-    };
-    let sanitized = arg_str.replace('.', "p").replace('-', "n").replace(' ', "");
-    Ok(format!("{acronym}_{sanitized}"))
-}
-
-/// Load every requested strategy. Returns `(name, obj, is_custom)` triples.
-///
-/// Names present in `overrides` use the supplied in-memory instance
-/// directly (nothing is read from disk). Other names are resolved from
-/// the local strategies directory.
-fn load_strategies(
-    names: &[String],
-    overrides: &HashMap<String, Py<PyAny>>,
-) -> EngineResult<Vec<(String, Py<PyAny>, bool)>> {
-    Python::attach(|py| -> PyResult<_> {
-        let mut out = Vec::with_capacity(names.len());
-        for name in names {
-            let (obj, is_custom) = if let Some(o) = overrides.get(name) {
-                let obj = o.clone_ref(py);
-                let is_custom = {
-                    let cls = obj.bind(py).get_type();
-                    let module: String = cls.getattr("__module__")?.extract()?;
-                    !module.starts_with("backtide.")
-                };
-                (obj, is_custom)
-            } else {
-                load_strategy(py, name)?
-            };
-            out.push((name.clone(), obj, is_custom));
-        }
-        Ok(out)
-    })
-    .map_err(|e: PyErr| EngineError::Io(std::io::Error::other(e.to_string())))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1373,7 +1082,7 @@ fn run_one_strategy(
             )> {
                 use crate::config::interface::Config as GlobalConfig;
                 use crate::config::models::dataframe_library::DataFrameLibrary;
-                use crate::utils::dataframe::dict_to_dataframe;
+                use crate::utils::python::dict_to_dataframe;
 
                 // Read once: every wrapping decision below uses this.
                 let df_lib = GlobalConfig::get()
@@ -1994,9 +1703,9 @@ fn run_one_strategy(
                         "SELL"
                     };
                     let abs_qty = o.quantity.abs();
-                    info!(
+                    debug!(
                         strategy=%name,
-                        "Order placed: {side} {abs_qty:.4} {} @ bar {bar_index}",
+                        "Order placed: {side} {abs_qty} {} @ bar {bar_index}",
                         o.symbol,
                     );
                 }
@@ -3359,7 +3068,7 @@ fn accrue_margin_costs(
 mod tests {
     use super::*;
     use crate::backtest::models::experiment_config::*;
-    use crate::backtest::strategies::*;
+    use crate::strategies::interface::*;
     use crate::data::models::instrument::Instrument;
 
     fn mk_bar(ts: u64, close: f64) -> Bar {
@@ -3522,7 +3231,7 @@ mod tests {
                 let raw = sobj.bind(py).call_method0("required_indicators")?;
                 let required: Vec<Py<PyAny>> = raw.extract()?;
                 for ind in required {
-                    let name = auto_indicator_name_for(py, &ind)?;
+                    let name = _indicator_deterministic_name(ind.bind(py).as_any())?;
                     if seen.insert(name.clone()) {
                         indicator_objs.push((name, ind));
                     }
@@ -4227,7 +3936,7 @@ mod tests {
 
     #[test]
     fn parse_iso_date_works() {
-        let ts = parse_iso_date_to_ts("2024-01-15").unwrap();
+        let ts = iso_to_ts("2024-01-15").unwrap();
         // 2024-01-15 00:00 UTC
         assert_eq!(ts, 1_705_276_800);
     }
@@ -4241,7 +3950,7 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.portfolio.starting_positions.insert("AAPL".into(), 1.5);
 
-        let err = validate_starting_position_quantities(&cfg, &[mk_profile("AAPL", "USD")])
+        let err = validate_position(&cfg, &[mk_profile("AAPL", "USD")])
             .expect_err("fractional stock starting position should fail");
 
         assert!(err.to_string().contains("fractional quantity"));
@@ -4254,11 +3963,8 @@ mod tests {
         cfg.data.instrument_type = InstrumentType::Crypto;
         cfg.portfolio.starting_positions.insert("BTC-USD".into(), 0.25);
 
-        validate_starting_position_quantities(
-            &cfg,
-            &[mk_profile_with_type("BTC-USD", "USD", InstrumentType::Crypto)],
-        )
-        .expect("fractional crypto starting position should be valid");
+        validate_position(&cfg, &[mk_profile_with_type("BTC-USD", "USD", InstrumentType::Crypto)])
+            .expect("fractional crypto starting position should be valid");
     }
 
     #[test]
@@ -5865,18 +5571,6 @@ mod tests {
         assert!(!stop_triggered(0.0, &bar, 100.0, true));
     }
 
-    // ── is_whole_quantity ──────────────────────────────────────────────
-
-    #[test]
-    fn is_whole_quantity_edge_cases() {
-        assert!(is_whole_quantity(5.0));
-        assert!(is_whole_quantity(0.0));
-        assert!(is_whole_quantity(-3.0));
-        assert!(!is_whole_quantity(3.5));
-        assert!(!is_whole_quantity(f64::NAN));
-        assert!(!is_whole_quantity(f64::INFINITY));
-    }
-
     // ── quantity_rejection_reason ──────────────────────────────────────
 
     #[test]
@@ -5984,24 +5678,19 @@ mod tests {
     fn persist_experiment_config_creates_file() {
         let dir = tempfile::TempDir::new().unwrap();
         let cfg = mk_cfg("AAPL");
-        let path = persist_experiment_config(dir.path(), "t1", &cfg).unwrap();
+        let path = persist_experiment_config(dir.path(), &cfg).unwrap();
         assert!(path.exists());
     }
 
     #[test]
     fn parse_iso_date_to_ts_epoch() {
-        assert_eq!(parse_iso_date_to_ts("1970-01-01").unwrap(), 0);
+        assert_eq!(iso_to_ts("1970-01-01").unwrap(), 0);
     }
 
     #[test]
     fn parse_iso_date_to_ts_invalid() {
-        assert!(parse_iso_date_to_ts("not-a-date").is_none());
-        assert!(parse_iso_date_to_ts("").is_none());
-    }
-
-    #[test]
-    fn now_secs_positive() {
-        assert!(now_secs() > 0);
+        assert!(iso_to_ts("not-a-date").is_none());
+        assert!(iso_to_ts("").is_none());
     }
 
     // ── resolve_trigger additional ────────────────────────────────────
@@ -6160,21 +5849,14 @@ mod tests {
     #[test]
     fn parse_iso_date_to_ts_y2k_boundary() {
         // 2000-01-01 UTC = 946_684_800
-        assert_eq!(parse_iso_date_to_ts("2000-01-01").unwrap(), 946_684_800);
+        assert_eq!(iso_to_ts("2000-01-01").unwrap(), 946_684_800);
     }
 
     #[test]
     fn parse_iso_date_to_ts_with_time_is_invalid() {
         // The function only accepts YYYY-MM-DD; richer ISO 8601 input should
         // be rejected to keep callers from accidentally passing timestamps.
-        assert!(parse_iso_date_to_ts("2024-01-01T00:00:00Z").is_none());
-    }
-
-    #[test]
-    fn now_secs_monotonic_within_call() {
-        let a = now_secs();
-        let b = now_secs();
-        assert!(b >= a, "now_secs() should be monotonic non-decreasing");
+        assert!(iso_to_ts("2024-01-01T00:00:00Z").is_none());
     }
 
     #[test]
@@ -6500,7 +6182,7 @@ mod tests {
     fn persist_experiment_config_writes_toml() {
         let dir = tempfile::TempDir::new().unwrap();
         let cfg = mk_cfg("AAPL");
-        let path = persist_experiment_config(dir.path(), "name", &cfg).unwrap();
+        let path = persist_experiment_config(dir.path(), &cfg).unwrap();
         let contents = std::fs::read_to_string(path).unwrap();
         assert!(contents.contains("symbols"));
     }
@@ -6567,7 +6249,7 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.portfolio.starting_positions.insert("AAPL".into(), 10.0);
         let profiles = vec![mk_profile("AAPL", "USD")];
-        assert!(validate_starting_position_quantities(&cfg, &profiles).is_ok());
+        assert!(validate_position(&cfg, &profiles).is_ok());
     }
 
     #[test]
@@ -6575,7 +6257,7 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.portfolio.starting_positions.insert("AAPL".into(), 1.5);
         let profiles = vec![mk_profile("AAPL", "USD")];
-        assert!(validate_starting_position_quantities(&cfg, &profiles).is_err());
+        assert!(validate_position(&cfg, &profiles).is_err());
     }
 
     #[test]
@@ -6584,7 +6266,7 @@ mod tests {
         cfg.data.instrument_type = InstrumentType::Crypto;
         cfg.portfolio.starting_positions.insert("BTC".into(), 0.001);
         let profiles = vec![mk_profile_with_type("BTC", "USD", InstrumentType::Crypto)];
-        assert!(validate_starting_position_quantities(&cfg, &profiles).is_ok());
+        assert!(validate_position(&cfg, &profiles).is_ok());
     }
 
     #[test]
@@ -6592,7 +6274,7 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.portfolio.starting_positions.insert("AAPL".into(), f64::NAN);
         let profiles = vec![mk_profile("AAPL", "USD")];
-        assert!(validate_starting_position_quantities(&cfg, &profiles).is_err());
+        assert!(validate_position(&cfg, &profiles).is_err());
     }
 
     // ── normalize_builtin_order_quantity ────────────────────────────────
@@ -6800,7 +6482,7 @@ mod tests {
             let required: Vec<Py<PyAny>> = raw.extract()?;
             let mut objs = Vec::new();
             for ind in required {
-                let name = auto_indicator_name_for(py, &ind)?;
+                let name = _indicator_deterministic_name(ind.bind(py).as_any())?;
                 objs.push((name, ind));
             }
             Ok((s, objs))
@@ -7308,7 +6990,7 @@ mod tests {
             let required: Vec<Py<PyAny>> = raw.extract()?;
             let mut objs = Vec::new();
             for ind in required {
-                let name = auto_indicator_name_for(py, &ind)?;
+                let name = _indicator_deterministic_name(ind.bind(py).as_any())?;
                 objs.push((name, ind));
             }
             Ok((s, objs))
@@ -7473,7 +7155,7 @@ mod tests {
             let required: Vec<Py<PyAny>> = raw.extract()?;
             let mut objs = Vec::new();
             for ind in required {
-                let name = auto_indicator_name_for(py, &ind)?;
+                let name = _indicator_deterministic_name(ind.bind(py).as_any())?;
                 objs.push((name, ind));
             }
             Ok((s, objs))

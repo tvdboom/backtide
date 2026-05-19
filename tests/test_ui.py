@@ -11,7 +11,7 @@ import json
 from typing import cast
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
-
+from backtide.indicators import SimpleMovingAverage
 import pandas as pd
 import polars as pl
 import pytest
@@ -725,6 +725,27 @@ class TestIsBuiltinIndicator:
         ind = MagicMock()
         ind.__class__.__module__ = "user_code"
         assert _is_builtin_indicator(ind) is False
+
+
+class TestIndicatorDeterministicName:
+    """Tests for `BaseIndicator.deterministic_name`."""
+
+    def test_custom_indicator_name_is_deterministic(self):
+        """Custom indicators reuse the shared deterministic naming format."""
+
+        class MyIndicator(BaseIndicator):
+            def __init__(self, period: int = 20, scale: float = 2.0, tag: str = "x y"):
+                self.period = period
+                self.scale = scale
+                self.tag = tag
+
+            def compute(self, data): ...
+
+        assert MyIndicator()._deterministic_name() == "MyIndicator_20_2p0_xy"
+
+    def test_builtin_indicator_uses_same_method(self):
+        """Built-in indicators expose the same deterministic-name API."""
+        assert SimpleMovingAverage(20)._deterministic_name() == "SMA_20"
 
 
 class TestSaveLoadIndicator:

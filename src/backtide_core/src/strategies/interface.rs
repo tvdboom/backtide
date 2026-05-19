@@ -2,377 +2,23 @@ use pyo3::prelude::*;
 use pyo3::types::PyType;
 use std::collections::HashMap;
 
-use crate::backtest::indicators::*;
 use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
-use crate::backtest::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer, VolatilityScaled};
+use crate::backtest::sizers::{Sizer, VolatilityScaled};
 use crate::data::models::instrument_type::InstrumentType;
-
-/// Cheap, pure-Rust indicator-snapshot view passed to strategies on each
-/// bar. The engine pre-computes every auto-injected indicator into a
-/// `name -> symbol -> Vec<output_series>` map (each output series is
-/// dense, indexed by bar). [`IndicatorView::value`] / [`last`] read the
-/// value(s) at the current bar without touching Python at all, which is
-/// ~100x faster than the previous `arr[-1]` lookup through the GIL.
-pub struct IndicatorView<'a> {
-    /// Full per-(name, symbol) outputs computed once over the whole timeline.
-    pub data: &'a HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
-
-    /// Bar position the strategy currently sees (index into each output series).
-    pub bar_index: usize,
-}
-
-fn normalize_builtin_orders_by_instrument_type(
-    mut orders: Vec<Order>,
-    instrument_types: &HashMap<String, InstrumentType>,
-    fallback: InstrumentType,
-) -> Vec<Order> {
-    orders.retain_mut(|o| {
-        if matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition) {
-            return true;
-        }
-        if !o.quantity.is_finite() || o.quantity == 0.0 {
-            return false;
-        }
-        let instrument_type = instrument_types.get(&o.symbol).copied().unwrap_or(fallback);
-        if instrument_type.allows_fractional_quantities() {
-            return true;
-        }
-        let whole_abs = o.quantity.abs().floor();
-        if whole_abs <= 0.0 {
-            return false;
-        }
-        o.quantity = whole_abs.copysign(o.quantity);
-        true
-    });
-    orders
-}
-
-impl<'a> IndicatorView<'a> {
-    pub fn new(
-        data: &'a HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
-        bar_index: usize,
-    ) -> Self {
-        Self {
-            data,
-            bar_index,
-        }
-    }
-
-    /// Last value(s) of the indicator named `name` for `symbol`. Returns
-    /// one `f64` per output series (e.g. 2 for Bollinger Bands' upper /
-    /// lower bands; 1 for SMA / RSI / ATR). Returns `None` when the
-    /// indicator hasn't been computed for this symbol.
-    pub fn last(&self, name: &str, symbol: &str) -> Option<Vec<f64>> {
-        let per_sym = self.data.get(name)?;
-        let series = per_sym.get(symbol)?;
-        let mut out = Vec::with_capacity(series.len());
-        for s in series {
-            out.push(*s.get(self.bar_index)?);
-        }
-        (!out.is_empty()).then_some(out)
-    }
-
-    /// Convenience wrapper for single-output indicators. Returns `None`
-    /// when the indicator is missing or its current value is non-finite.
-    pub fn value(&self, name: &str, symbol: &str) -> Option<f64> {
-        self.last(name, symbol).and_then(|v| v.into_iter().next()).filter(|x| x.is_finite())
-    }
-}
-
-/// Trait for all built-in strategies.
-pub trait Strategy {
-    /// Human-readable name (e.g. `"Buy & Hold"`).
-    const NAME: &'static str;
-
-    /// One-sentence explanation of what the strategy does.
-    const DESCRIPTION: &'static str;
-
-    /// Whether this is a portfolio-rotation (multi-asset) strategy.
-    const IS_MULTI_ASSET: bool;
-
-    /// Decide which orders to place on the current bar.
-    ///
-    /// Receives:
-    /// - `closes`: per-symbol close slices, each truncated to `[..=bar_index]`
-    ///   (so `closes[i].1.last()` is always the *current* bar's close).
-    /// - `indicators`: see [`IndicatorView`]. Strategies should read
-    ///   precomputed values via `indicators.value(name, symbol)` /
-    ///   `indicators.last(name, symbol)` rather than recomputing them
-    ///   locally.
-    ///
-    /// The default returns no orders, letting passive strategies opt out
-    /// without boilerplate.
-    fn decide(
-        &self,
-        _closes: &[(String, &[f64])],
-        _indicators: &IndicatorView<'_>,
-        _portfolio: &Portfolio,
-        _state: &State,
-    ) -> Vec<Order> {
-        Vec::new()
-    }
-
-    /// Indicators that must be computed up-front for this strategy.
-    ///
-    /// The default returns an empty list, suitable for strategies that
-    /// don't rely on any pre-computed indicator.
-    fn required_indicators_inner(&self, _py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
-        Ok(Vec::new())
-    }
-}
-
-/// Build a market buy order whose quantity is determined by `sizer`.
-///
-/// `capital` is the cash / equity amount the sizer should size against
-/// (interpretation depends on the concrete sizer — `EqualWeight` divides
-/// it by `n_positions`, `FixedNotional` ignores it, etc.). Returns `None`
-/// when the sizer would yield a non-positive quantity.
-fn buy_with_sizer<S: Sizer>(symbol: &str, sizer: &S, capital: f64, price: f64) -> Option<Order> {
-    if price <= 0.0 {
-        return None;
-    }
-    let qty = sizer.calculate(capital, price, None, None).ok()?;
-    if qty <= 0.0 {
-        return None;
-    }
-    Some(Order {
-        id: new_order_id(),
-        symbol: symbol.to_owned(),
-        order_type: OrderType::Market,
-        quantity: qty,
-        price: None,
-        limit_price: None,
-        sizer: None,
-    })
-}
-
-/// Build a market buy order sized to spend `target_cash` (uses the
-/// [`FixedNotional`] sizer under the hood). Strategies size their orders
-/// against `portfolio.cash`, but the actual fill happens on the *next*
-/// bar with slippage and commission applied — so the cost frequently
-/// exceeds the requested `target_cash` by a small margin. The engine
-/// handles that by auto-shrinking the qty at fill time so equal-weight
-/// allocations like `cash / n_symbols` don't lose their last leg to a
-/// fractional overshoot.
-fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
-    if target_cash <= 0.0 {
-        return None;
-    }
-    buy_with_sizer(symbol, &FixedNotional::new(target_cash), 0.0, price)
-}
-
-/// Build a market buy order that allocates `capital / n_positions` worth
-/// of `price` to one slot of an equal-weight portfolio. Uses the
-/// [`EqualWeight`] sizer under the hood.
-fn buy_equal_weight(symbol: &str, n_positions: usize, capital: f64, price: f64) -> Option<Order> {
-    if n_positions == 0 || capital <= 0.0 {
-        return None;
-    }
-    buy_with_sizer(symbol, &EqualWeight::new(n_positions as u32), capital, price)
-}
-
-/// Build a market sell order to flatten an existing long position. Uses
-/// the [`FixedQuantity`] sizer under the hood (negated).
-fn sell_order(symbol: &str, quantity: f64) -> Option<Order> {
-    if quantity <= 0.0 {
-        return None;
-    }
-    let sizer = FixedQuantity::new(quantity);
-    let qty = sizer.calculate(0.0, 1.0, None, None).ok()?;
-    if qty <= 0.0 {
-        return None;
-    }
-    Some(Order {
-        id: new_order_id(),
-        symbol: symbol.to_owned(),
-        order_type: OrderType::Market,
-        quantity: -qty,
-        price: None,
-        limit_price: None,
-        sizer: None,
-    })
-}
-
-/// Estimate cash available in the portfolio (sum of all currency balances).
-fn portfolio_cash(portfolio: &Portfolio) -> f64 {
-    portfolio.cash.values().sum()
-}
-
-/// Total portfolio equity: cash + positions marked to their latest close.
-fn portfolio_equity(portfolio: &Portfolio, closes: &[(String, &[f64])]) -> f64 {
-    let mut equity = portfolio_cash(portfolio);
-    for (sym, c) in closes {
-        let qty = portfolio.positions.get(sym.as_str()).copied().unwrap_or(0.0);
-        if qty.abs() > 1e-12 {
-            let last = *c.last().unwrap_or(&0.0);
-            equity += qty * last;
-        }
-    }
-    equity
-}
-
-/// Generic single-asset signal: place a buy when `signal == true` and
-/// the position is flat, place a sell when `signal == false` and we are
-/// long. `target_notional` is the desired position size (in cash terms),
-/// capped at available cash to avoid over-allocation.
-fn react_to_signal(
-    symbol: &str,
-    signal_long: bool,
-    last_price: f64,
-    portfolio: &Portfolio,
-    target_notional: f64,
-) -> Vec<Order> {
-    let cur = portfolio.positions.get(symbol).copied().unwrap_or(0.0);
-    if signal_long && cur <= 0.0 {
-        let cash = portfolio_cash(portfolio);
-        let alloc = target_notional.min(cash);
-        if let Some(o) = buy_order(symbol, alloc, last_price) {
-            return vec![o];
-        }
-    } else if !signal_long && cur > 0.0 {
-        if let Some(o) = sell_order(symbol, cur) {
-            return vec![o];
-        }
-    }
-    Vec::new()
-}
-
-/// Linear regression slope of `series` against the index ``0..len``.
-/// Returns `(slope, mean_y)`. Returns `None` when the input is empty
-/// or has zero variance on the x axis.
-fn linreg_slope(series: &[f64]) -> Option<(f64, f64)> {
-    let m = series.len() as f64;
-    if m < 2.0 {
-        return None;
-    }
-    let mean_x = (m - 1.0) / 2.0;
-    let mean_y = series.iter().sum::<f64>() / m;
-    let mut num = 0.0;
-    let mut den = 0.0;
-    for (i, &y) in series.iter().enumerate() {
-        let dx = i as f64 - mean_x;
-        num += dx * (y - mean_y);
-        den += dx * dx;
-    }
-    if den == 0.0 {
-        return None;
-    }
-    Some((num / den, mean_y))
-}
-
-/// Sample standard deviation of `series`. Returns `None` for short inputs.
-#[allow(dead_code)]
-fn stddev(series: &[f64]) -> Option<f64> {
-    if series.len() < 2 {
-        return None;
-    }
-    let m = series.len() as f64;
-    let mean = series.iter().sum::<f64>() / m;
-    let var = series.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (m - 1.0);
-    Some(var.sqrt())
-}
-
-/// Sample standard deviation of the bar-to-bar returns implied by
-/// `prices`. Returns `None` when fewer than two valid returns can be
-/// derived (e.g. shorter than 3 bars, all-NaN, or every base price ≤ 0).
-/// Used as a lightweight realised-volatility estimate by strategies
-/// that adapt their behaviour to the current regime.
-fn window_return_std(prices: &[f64]) -> Option<f64> {
-    let returns: Vec<f64> = prices
-        .windows(2)
-        .filter_map(|w| {
-            if w[0].is_finite() && w[1].is_finite() && w[0] > 0.0 {
-                Some(w[1] / w[0] - 1.0)
-            } else {
-                None
-            }
-        })
-        .collect();
-    stddev(&returns)
-}
-
-/// Top-K rotation across symbols. Closes positions not in the top, then
-/// buys equal-weight into the top `k`.
-fn rotation_orders(
-    scores: &[(String, f64)],
-    top_k: usize,
-    portfolio: &Portfolio,
-    last_prices: &HashMap<String, f64>,
-) -> Vec<Order> {
-    use std::collections::HashSet;
-
-    let mut sorted: Vec<&(String, f64)> = scores.iter().filter(|(_, s)| s.is_finite()).collect();
-    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let target: HashSet<String> = sorted.iter().take(top_k).map(|(s, _)| s.clone()).collect();
-
-    let mut orders: Vec<Order> = Vec::new();
-
-    // Close positions not in target.
-    for (sym, qty) in &portfolio.positions {
-        if *qty > 0.0 && !target.contains(sym) {
-            if let Some(o) = sell_order(sym, *qty) {
-                orders.push(o);
-            }
-        }
-    }
-
-    // Open new positions equal-weight.
-    if !target.is_empty() {
-        let cash = portfolio_cash(portfolio);
-        let n = target.len();
-        for sym in &target {
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
-            if cur > 0.0 {
-                continue;
-            }
-            if let Some(px) = last_prices.get(sym).copied() {
-                if let Some(o) = buy_equal_weight(sym, n, cash, px) {
-                    orders.push(o);
-                }
-            }
-        }
-    }
-
-    orders
-}
-
-/// Format a value the same way Python's ``str()`` does, for use in
-/// auto-indicator names. Floats render with their decimal point
-/// (e.g. ``2.0`` → ``"2.0"``); integers and other types fall back to
-/// their ``Debug`` representation.
-fn fmt_arg<T: std::fmt::Debug>(v: T) -> String {
-    format!("{:?}", v)
-}
-
-/// Build the deterministic name used by the engine for an auto-included
-/// indicator. Mirrors `_auto_indicator_name` in the Python strategy utils
-/// and [`auto_indicator_name_for`] in the engine so built-in strategies'
-/// lookups and the engine's writes agree on the same key.
-///
-/// Format: ``<ACRONYM>_<arg1>_<arg2>_...`` (or ``<ACRONYM>_default``
-/// when the indicator takes no constructor arguments). ``.``, ``-`` and
-/// spaces are sanitized for filesystem-friendliness.
-fn auto_indicator_name(acronym: &str, args: &[String]) -> String {
-    let arg_str = if args.is_empty() {
-        "default".to_owned()
-    } else {
-        args.join("_")
-    };
-    let sanitized = arg_str.replace('.', "p").replace('-', "n").replace(' ', "");
-    format!("{acronym}_{sanitized}")
-}
+use crate::indicators::interface::*;
+use crate::indicators::utils::indicator_deterministic_name;
+use crate::strategies::traits::Strategy;
+use crate::strategies::utils::*;
 
 /// Shared pymethods macro for all strategy structs.
 ///
-/// Each built-in strategy carries pure-Rust trading logic (the
-/// [`Strategy::decide`] trait method); the engine dispatches to that
-/// directly via [`BuiltinStrategy`], without going through the Python
-/// interpreter on the hot path. This macro therefore only exposes the
-/// metadata + factory bits the Python side actually uses (name,
-/// description, parameter introspection, required indicators, repr).
+/// Each built-in strategy carries pure-Rust trading logic. The engine dispatches
+/// to that directly via [`BuiltinStrategy`], without going through the Python
+/// interpreter on the hot path. This macro therefore only exposes the metadata
+/// and factory bits the Python side actually uses.
 macro_rules! strategy_pymethods {
     ($ty:ident) => {
         #[pymethods]
@@ -400,17 +46,64 @@ macro_rules! strategy_pymethods {
                 <$ty as Strategy>::IS_MULTI_ASSET
             }
 
-            /// Indicators that must be computed up-front for this
-            /// strategy.
+            /// Evaluate the strategy and return orders.
             ///
-            /// Returns a list of indicator instances, already
-            /// parameterised with this strategy's current settings,
-            /// that the engine will auto-include before the simulation
-            /// starts.
+            /// Parameters
+            /// ----------
+            /// data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+            ///     Keys are the experiment's symbols and values are the historical
+            ///     OHLCV data available up to the current bar.
+            ///
+            /// portfolio : [Portfolio]
+            ///     Current portfolio holdings (cash, positions and open orders).
+            ///
+            /// state : [State]
+            ///     Current simulation state.
+            ///
+            /// indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+            ///     The first keys are the indicator names. The second keys are the
+            ///     experiment's symbols. The values are the pre-computed indicator
+            ///     values. `None` if no indicators were selected.
             ///
             /// Returns
             /// -------
-            /// list
+            /// list[[Order]]
+            ///     Orders to place this tick.
+            #[pyo3(
+                signature = (
+                    data: "dict[str, np.array | pd.DataFrame | pl.DataFrame]",
+                    portfolio: "Portfolio",
+                    state: "State",
+                    indicators: "dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None" = None
+                )
+            )]
+            fn evaluate<'py>(
+                &self,
+                _py: Python<'py>,
+                data: &Bound<'py, PyAny>,
+                portfolio: &Portfolio,
+                state: &State,
+                indicators: Option<Bound<'py, PyAny>>,
+            ) -> PyResult<Vec<Order>> {
+                let closes_owned = extract_close_from_python(data)?;
+                let closes: Vec<(String, &[f64])> =
+                    closes_owned.iter().map(|(s, c)| (s.clone(), c.as_slice())).collect();
+
+                let indicator_data = extract_indicators_from_python(indicators.as_ref())?;
+                let indicators = IndicatorView::new(&indicator_data, state.bar_index);
+
+                Ok(self.evaluate_inner(&closes, &indicators, portfolio, state))
+            }
+
+            /// Indicators that must be computed up-front for this strategy.
+            ///
+            /// Returns a list of indicator instances, already parameterized
+            /// with this strategy's current settings, that the engine will
+            /// auto-include before the backtest starts.
+            ///
+            /// Returns
+            /// -------
+            /// list[[BaseIndicator]]
             ///     The required indicator instances.
             fn required_indicators(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
                 <$ty as Strategy>::required_indicators_inner(self, py)
@@ -424,8 +117,9 @@ macro_rules! strategy_pymethods {
     };
 }
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Strategy structs (alphabetical order)
+// Strategy structs
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Relative Strength Index with a dynamically adaptive look-back period.
@@ -500,15 +194,15 @@ impl Strategy for AdaptiveRsi {
     /// implicitly adapts the look-back to the current regime, matching
     /// the docstring: shorter window in choppy/volatile markets, longer
     /// window when conditions are calm.
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let rsi_short = auto_indicator_name("RSI", &[fmt_arg(self.min_period)]);
-        let rsi_long = auto_indicator_name("RSI", &[fmt_arg(self.max_period)]);
+        let rsi_short = indicator_deterministic_name("RSI", &[fmt_arg(self.min_period)]);
+        let rsi_long = indicator_deterministic_name("RSI", &[fmt_arg(self.max_period)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
@@ -624,14 +318,14 @@ impl Strategy for AlphaRsiPro {
     const DESCRIPTION: &'static str = "Advanced RSI with adaptive overbought/oversold levels based on volatility and trend bias filtering.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let rsi_name = auto_indicator_name("RSI", &[fmt_arg(self.period)]);
+        let rsi_name = indicator_deterministic_name("RSI", &[fmt_arg(self.period)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
@@ -738,14 +432,15 @@ impl Strategy for BollingerMeanReversion {
         "A mean-reversion strategy that buys at the lower band and sells at the upper band.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let bb_name = auto_indicator_name("BB", &[fmt_arg(self.period), fmt_arg(self.std_dev)]);
+        let bb_name =
+            indicator_deterministic_name("BB", &[fmt_arg(self.period), fmt_arg(self.std_dev)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
@@ -834,7 +529,7 @@ impl Strategy for BuyAndHold {
         "Buys on the first day and holds to the end. A baseline for performance comparison.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         _indicators: &IndicatorView<'_>,
@@ -961,7 +656,7 @@ impl Strategy for DoubleTop {
         "Buys on a breakout after a double top pattern, with trend and volume confirmation.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         _indicators: &IndicatorView<'_>,
@@ -1088,15 +783,15 @@ impl Strategy for HybridAlphaRsi {
     const DESCRIPTION: &'static str = "Most sophisticated RSI variant combining adaptive period, adaptive levels, and trend confirmation.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let rsi_short = auto_indicator_name("RSI", &[fmt_arg(self.min_period)]);
-        let rsi_long = auto_indicator_name("RSI", &[fmt_arg(self.max_period)]);
+        let rsi_short = indicator_deterministic_name("RSI", &[fmt_arg(self.min_period)]);
+        let rsi_long = indicator_deterministic_name("RSI", &[fmt_arg(self.max_period)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
@@ -1231,14 +926,14 @@ impl Strategy for Macd {
     const DESCRIPTION: &'static str = "Buys on a MACD golden cross and sells on a death cross.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let macd_name = auto_indicator_name(
+        let macd_name = indicator_deterministic_name(
             "MACD",
             &[fmt_arg(self.fast_period), fmt_arg(self.slow_period), fmt_arg(self.signal_period)],
         );
@@ -1334,7 +1029,7 @@ impl Strategy for Momentum {
         "Buys when momentum turns positive, sells when price falls below a trend-filtering MA.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
@@ -1343,7 +1038,7 @@ impl Strategy for Momentum {
     ) -> Vec<Order> {
         // Trend filter uses the auto-included ``SMA(ma_period)``; momentum
         // confirmation is a pure price comparison (no indicator required).
-        let sma_name = auto_indicator_name("SMA", &[fmt_arg(self.ma_period)]);
+        let sma_name = indicator_deterministic_name("SMA", &[fmt_arg(self.ma_period)]);
         let n = closes.len().max(1) as f64;
         let target = portfolio_equity(portfolio, closes) / n;
         let mut orders = Vec::new();
@@ -1453,7 +1148,7 @@ impl Strategy for MultiBollingerRotation {
         "A breakout rotation strategy that buys stocks crossing above their upper Bollinger Band.";
     const IS_MULTI_ASSET: bool = true;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
@@ -1463,7 +1158,8 @@ impl Strategy for MultiBollingerRotation {
         if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
-        let bb_name = auto_indicator_name("BB", &[fmt_arg(self.period), fmt_arg(self.std_dev)]);
+        let bb_name =
+            indicator_deterministic_name("BB", &[fmt_arg(self.period), fmt_arg(self.std_dev)]);
         let scores: Vec<(String, f64)> = closes
             .iter()
             .map(|(s, c)| {
@@ -1550,14 +1246,14 @@ impl Strategy for RiskAverse {
     const DESCRIPTION: &'static str = "Buys low-volatility stocks making new highs on high volume.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let atr_name = auto_indicator_name("ATR", &[fmt_arg(self.vol_period)]);
+        let atr_name = indicator_deterministic_name("ATR", &[fmt_arg(self.vol_period)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
@@ -1655,7 +1351,7 @@ impl Strategy for Roc {
         "A simple momentum strategy that buys on a high Rate of Change and sells on a low one.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         _indicators: &IndicatorView<'_>,
@@ -1753,7 +1449,7 @@ impl Strategy for RocRotation {
         "Periodically rotates into the top K stocks with the highest Rate of Change (momentum).";
     const IS_MULTI_ASSET: bool = true;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         _indicators: &IndicatorView<'_>,
@@ -1858,15 +1554,16 @@ impl Strategy for Rsi {
     const DESCRIPTION: &'static str = "Combines RSI and Bollinger Bands. Buys when RSI is oversold and price is below the lower band.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let rsi_name = auto_indicator_name("RSI", &[fmt_arg(self.rsi_period)]);
-        let bb_name = auto_indicator_name("BB", &[fmt_arg(self.bb_period), fmt_arg(self.bb_std)]);
+        let rsi_name = indicator_deterministic_name("RSI", &[fmt_arg(self.rsi_period)]);
+        let bb_name =
+            indicator_deterministic_name("BB", &[fmt_arg(self.bb_period), fmt_arg(self.bb_std)]);
         let n = closes.len().max(1) as f64;
         let mut orders = Vec::new();
         for (sym, c) in closes {
@@ -1960,7 +1657,7 @@ impl Strategy for Rsrs {
         "Uses linear regression of high/low prices to buy on signals of strengthening support.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         _indicators: &IndicatorView<'_>,
@@ -2065,7 +1762,7 @@ impl Strategy for RsrsRotation {
         "Periodically rotates into stocks with high RSRS indicator values (strong support).";
     const IS_MULTI_ASSET: bool = true;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         _indicators: &IndicatorView<'_>,
@@ -2160,15 +1857,15 @@ impl Strategy for SmaCrossover {
         "Buys on a golden cross (fast MA over slow MA), sells on a death cross.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let fast_name = auto_indicator_name("SMA", &[fmt_arg(self.fast_period)]);
-        let slow_name = auto_indicator_name("SMA", &[fmt_arg(self.slow_period)]);
+        let fast_name = indicator_deterministic_name("SMA", &[fmt_arg(self.fast_period)]);
+        let slow_name = indicator_deterministic_name("SMA", &[fmt_arg(self.slow_period)]);
         let n = closes.len().max(1) as f64;
         let target = portfolio_equity(portfolio, closes) / n;
         let mut orders = Vec::new();
@@ -2250,14 +1947,14 @@ impl Strategy for SmaNaive {
         "Buys when price is above a moving average, sells when below.";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         _state: &State,
     ) -> Vec<Order> {
-        let name = auto_indicator_name("SMA", &[fmt_arg(self.period)]);
+        let name = indicator_deterministic_name("SMA", &[fmt_arg(self.period)]);
         let n = closes.len().max(1) as f64;
         let target = portfolio_equity(portfolio, closes) / n;
         let mut orders = Vec::new();
@@ -2381,7 +2078,7 @@ impl Strategy for TripleRsiRotation {
         "Rotates stocks based on a combination of long, medium, and short-term RSI signals.";
     const IS_MULTI_ASSET: bool = true;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
@@ -2391,9 +2088,9 @@ impl Strategy for TripleRsiRotation {
         if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
-        let short_name = auto_indicator_name("RSI", &[fmt_arg(self.short_period)]);
-        let medium_name = auto_indicator_name("RSI", &[fmt_arg(self.medium_period)]);
-        let long_name = auto_indicator_name("RSI", &[fmt_arg(self.long_period)]);
+        let short_name = indicator_deterministic_name("RSI", &[fmt_arg(self.short_period)]);
+        let medium_name = indicator_deterministic_name("RSI", &[fmt_arg(self.medium_period)]);
+        let long_name = indicator_deterministic_name("RSI", &[fmt_arg(self.long_period)]);
         let scores: Vec<(String, f64)> = closes
             .iter()
             .map(|(s, _c)| {
@@ -2503,7 +2200,7 @@ impl Strategy for TurtleTrading {
     /// (where N = ATR(`atr_period`)). The order quantity is therefore
     /// `qty = (0.01 × equity) / ATR`, capped by available cash to
     /// avoid over-allocating.
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         indicators: &IndicatorView<'_>,
@@ -2512,7 +2209,7 @@ impl Strategy for TurtleTrading {
     ) -> Vec<Order> {
         // Donchian channel breakouts are pure price extremes – no indicator
         // computation required for the signal itself.
-        let atr_name = auto_indicator_name("ATR", &[fmt_arg(self.atr_period)]);
+        let atr_name = indicator_deterministic_name("ATR", &[fmt_arg(self.atr_period)]);
         let equity = portfolio_equity(portfolio, closes);
         let cash = portfolio_cash(portfolio);
         let risk_pct = 0.01_f64;
@@ -2631,7 +2328,7 @@ impl Strategy for Vcp {
     const DESCRIPTION: &'static str = "Buys on breakouts after price and volume volatility have contracted (Volatility Contraction Pattern).";
     const IS_MULTI_ASSET: bool = false;
 
-    fn decide(
+    fn evaluate_inner(
         &self,
         closes: &[(String, &[f64])],
         _indicators: &IndicatorView<'_>,
@@ -2786,7 +2483,7 @@ impl BuiltinStrategy {
         None
     }
 
-    /// Pure-Rust dispatch to the underlying strategy's [`Strategy::decide`].
+    /// Pure-Rust dispatch to the underlying strategy's [`Strategy::evaluate_inner`].
     pub fn decide(
         &self,
         closes: &[(String, &[f64])],
@@ -2799,7 +2496,7 @@ impl BuiltinStrategy {
         macro_rules! delegate {
             ($($variant:ident),* $(,)?) => {
                 match self {
-                    $(BuiltinStrategy::$variant(s) => s.decide(closes, indicators, portfolio, state),)*
+                    $(BuiltinStrategy::$variant(s) => s.evaluate_inner(closes, indicators, portfolio, state),)*
                 }
             };
         }

@@ -15,9 +15,9 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::registry::LookupSpan;
 
-/// The well-known span name used to scope per-experiment logging. Events
-/// emitted while a span with this name is on the stack are mirrored into
-/// the file referenced by the span's `log_path` field.
+/// The span name used to scope per-experiment logging. Events emitted while a
+/// span with this name is on the stack are mirrored into the file referenced
+/// by the span's `log_path` field.
 pub const EXPERIMENT_SPAN: &str = "experiment";
 
 /// Field name carrying the absolute path of the per-experiment log file.

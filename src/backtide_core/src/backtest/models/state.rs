@@ -44,10 +44,13 @@ use serde::{Deserialize, Serialize};
 pub struct State {
     /// UTC timestamp of the current bar (seconds since Unix epoch).
     pub timestamp: i64,
+
     /// Zero-based index of the current bar in the dataset.
     pub bar_index: u64,
+
     /// Total number of bars in the dataset.
     pub total_bars: u64,
+
     /// Whether the engine is currently in the warmup phase.
     pub is_warmup: bool,
 }

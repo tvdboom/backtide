@@ -34,8 +34,10 @@ use std::collections::HashMap;
 pub struct Portfolio {
     /// Cash balances keyed by currency.
     pub cash: HashMap<Currency, f64>,
+
     /// Open positions keyed by ticker symbol.
     pub positions: HashMap<String, f64>,
+
     /// Currently open (unfilled) orders.
     pub orders: Vec<Order>,
 }

@@ -1,6 +1,6 @@
 //! Analysis module — statistics computed in parallel over symbols.
 
-use crate::utils::dataframe::dict_to_dataframe;
+use crate::utils::python::dict_to_dataframe;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 use rayon::prelude::*;

@@ -167,7 +167,7 @@ def plot_price(
     plot_price(aapl, indicators=BollingerBands())
 
     # Add trades to the chart
-    exp = query_experiments().iloc[0]
+    exp = query_experiments().iloc[-1]
     run = query_strategy_runs(exp.id)[-1]
     plot_price(aapl, run=run)
     ```

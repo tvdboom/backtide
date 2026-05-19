@@ -15,7 +15,7 @@ import cloudpickle
 import streamlit as st
 
 from backtide.config import Config
-from backtide.indicators import BaseIndicator
+from backtide.indicators import BaseIndicator, _indicator_deterministic_name
 from backtide.strategies.base import BaseStrategy
 
 
@@ -126,11 +126,10 @@ def _load_stored_strategies(cfg: Config) -> dict[str, BaseStrategy]:
 def _resolve_auto_indicators(strats: Sequence[Any]) -> list[tuple[str, BaseIndicator, str]]:
     """Return indicators required by the given strategies.
 
-    Accepts any iterable of objects (built-in Rust strategies don't inherit from
-    [`BaseStrategy`][backtide.strategies.BaseStrategy] in the Python class
-    hierarchy, so a strict `BaseStrategy` bound would needlessly exclude them at
-    type-check time). The function itself duck-types on `required_indicators` and
-    silently skips objects that lack it.
+    Accepts any iterable of objects (built-in Rust strategies don't inherit
+    from `BaseStrategy` in the Python class hierarchy, so a strict `BaseStrategy`
+    bound would needlessly exclude them at type-check time). The function itself
+    duck-types on `required_indicators` and silently skips objects that lack it.
 
     """
     out = []
@@ -142,21 +141,7 @@ def _resolve_auto_indicators(strats: Sequence[Any]) -> list[tuple[str, BaseIndic
                 source = getattr(cls, "name", cls.__name__)
 
                 for ind in get():
-                    # Create a deterministic name for the indicator
-                    cls = type(ind)
-                    acronym = getattr(cls, "acronym", cls.__name__)
-
-                    try:
-                        _, args = ind.__reduce__()
-                    except Exception:  # noqa: BLE001
-                        args = ()
-
-                    arg_str = "_".join(str(a) for a in args) if args else "default"
-
-                    # Sanitize for filesystems
-                    arg_str = arg_str.replace(".", "p").replace("-", "n").replace(" ", "")
-                    name = f"{acronym}_{arg_str}"
-
+                    name = _indicator_deterministic_name(ind)
                     if name not in seen:
                         seen.add(name)
                         out.append((name, ind, source))

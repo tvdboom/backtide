@@ -14,7 +14,7 @@
 **General Information** | |
 --- | ---
 **Repository** | [![Project Status: Active](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active) [![License: MIT](https://img.shields.io/github/license/tvdboom/backtide)](https://opensource.org/licenses/MIT) [![Downloads](https://static.pepy.tech/badge/backtide)](https://pepy.tech/project/backtide) [![PyPI version](https://img.shields.io/pypi/v/backtide)](https://pypi.org/project/backtide/)
-**Build** | [![Build and release](https://github.com/tvdboom/backtide/actions/workflows/publish.yml/badge.svg)](https://github.com/tvdboom/backtide/actions/workflows/release.yml) [![Linting and tests](https://github.com/tvdboom/backtide/actions/workflows/test.yml/badge.svg)](https://github.com/tvdboom/backtide/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/tvdboom/backtide/branch/master/graph/badge.svg)](https://codecov.io/gh/tvdboom/backtide)
+**Build** | [![Publish](https://github.com/tvdboom/backtide/actions/workflows/publish.yml/badge.svg)](https://github.com/tvdboom/backtide/actions/workflows/release.yml) [![Linting and tests](https://github.com/tvdboom/backtide/actions/workflows/test.yml/badge.svg)](https://github.com/tvdboom/backtide/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/tvdboom/backtide/branch/master/graph/badge.svg)](https://codecov.io/gh/tvdboom/backtide)
 **Code** | [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue?logo=python)](https://www.python.org) [![uv-managed](https://img.shields.io/badge/uv-managed-blueviolet)](https://docs.astral.sh/uv/) [![PEP8](https://img.shields.io/badge/code%20style-pep8-orange.svg)](https://www.python.org/dev/peps/pep-0008/) [![ruff](https://custom-icon-badges.demolab.com/badge/Ruff-261230.svg?logo=ruff-logo)](https://docs.astral.sh/ruff/) [![ty](https://custom-icon-badges.demolab.com/badge/ty-261230.svg?logo=ty-astral-logo)](https://docs.astral.sh/ty/)
 
 <br>
@@ -77,7 +77,7 @@ Based on comprehensive [benchmarks](https://tvdboom.github.io/backtide/latest/co
 | Historical read (1000 bars)    | ~1.5ms         | Backtesting     |
 | Historical read (1M bars)      | ~711ms         | Backtesting     |
 
-*\*Downloads hit real network endpoints. Yahoo Finance applies rate limits, so these numbers are meant as a reference, not a strict benchmark.*
+*\*Downloads hit real network endpoints. Yahoo Finance applies rate limits, so these numbers are meant as a reference, not as a real benchmark.*
 
 <br>
 

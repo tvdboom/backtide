@@ -1,295 +1,8 @@
+use crate::data::models::bar::Bar;
+use crate::indicators::traits::Indicator;
+use crate::indicators::utils::*;
 use pyo3::prelude::*;
 use pyo3::types::PyType;
-
-use crate::config::interface::Config;
-use crate::config::models::dataframe_library::DataFrameLibrary;
-use crate::data::models::bar::Bar;
-
-/// Trait for all built-in indicators.
-pub trait Indicator {
-    /// Short ticker-style acronym (e.g. `"SMA"`).
-    const ACRONYM: &'static str;
-
-    /// Human-readable name (e.g. `"Simple Moving Average"`).
-    const NAME: &'static str;
-
-    /// One-sentence explanation of what the indicator measures.
-    const DESCRIPTION: &'static str;
-
-    /// Compute the indicator values from a slice of [`Bar`].
-    ///
-    /// Returns one or more series (e.g. MACD returns two: the MACD line
-    /// and the signal line).
-    fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>>;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper functions
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Extract parallel `(open, high, low, close, volume)` arrays from a bar slice.
-fn extract_ohlcv_from_bars(bars: &[Bar]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
-    (
-        bars.iter().map(|b| b.open).collect(),
-        bars.iter().map(|b| b.high).collect(),
-        bars.iter().map(|b| b.low).collect(),
-        bars.iter().map(|b| b.close).collect(),
-        bars.iter().map(|b| b.volume).collect(),
-    )
-}
-
-/// Compute a simple rolling mean over `data` with the given `period`.
-///
-/// The first `period - 1` elements are [`f64::NAN`]. Uses an incremental
-/// sum for O(n) performance. Windows containing non-finite values remain
-/// `NAN`, then recover once a full finite window is available.
-fn rolling_mean(data: &[f64], period: usize) -> Vec<f64> {
-    let n = data.len();
-    let mut out = vec![f64::NAN; n];
-    if period == 0 || n < period {
-        return out;
-    }
-    let mut sum = 0.0;
-    let mut finite = 0usize;
-    for i in 0..n {
-        if data[i].is_finite() {
-            sum += data[i];
-            finite += 1;
-        }
-        if i >= period {
-            let old = data[i - period];
-            if old.is_finite() {
-                sum -= old;
-                finite -= 1;
-            }
-        }
-        if i + 1 >= period && finite == period {
-            out[i] = sum / period as f64;
-        }
-    }
-    out
-}
-
-/// Compute Wilder's smoothing (a.k.a. Wilder's MA / RMA) over `data`.
-///
-/// Wilder's smoothing is an EMA with `α = 1 / period`, seeded with the
-/// SMA of the first `period` values. It is the smoothing used by the
-/// textbook definitions of [`RelativeStrengthIndex`], [`AverageTrueRange`]
-/// and [`AverageDirectionalIndex`] — distinct from the standard EMA
-/// (α = 2 / (n + 1)) used by [`ExponentialMovingAverage`] / [`MovingAverageConvergenceDivergence`].
-///
-/// Handles leading non-finite values by seeding at the first index whose
-/// look-back window of size `period` is fully finite. Subsequent
-/// non-finite samples are skipped (the previous value carries through).
-fn wilder_smooth(data: &[f64], period: usize) -> Vec<f64> {
-    let n = data.len();
-    let mut out = vec![f64::NAN; n];
-    if period == 0 || n < period {
-        return out;
-    }
-    let alpha = 1.0 / period as f64;
-    // Seed at the first index i >= period-1 whose look-back window
-    // [i+1-period..=i] is fully finite.
-    let mut seeded_at: Option<usize> = None;
-    for i in (period - 1)..n {
-        let window = &data[i + 1 - period..=i];
-        if window.iter().all(|x| x.is_finite()) {
-            out[i] = window.iter().sum::<f64>() / period as f64;
-            seeded_at = Some(i);
-            break;
-        }
-    }
-    if let Some(start) = seeded_at {
-        for i in (start + 1)..n {
-            let prev = out[i - 1];
-            if !prev.is_finite() || !data[i].is_finite() {
-                continue;
-            }
-            out[i] = prev + alpha * (data[i] - prev);
-        }
-    }
-    out
-}
-
-/// Compute an exponential weighted moving average with the given `span`.
-///
-/// Uses the standard smoothing factor `α = 2 / (span + 1)`. For Wilder's
-/// smoothing (α = 1 / period), use [`wilder_smooth`] instead.
-fn ewm(data: &[f64], span: usize) -> Vec<f64> {
-    let n = data.len();
-    let mut out = vec![f64::NAN; n];
-    if n == 0 || span == 0 {
-        return out;
-    }
-    let alpha = 2.0 / (span as f64 + 1.0);
-    out[0] = data[0];
-    for i in 1..n {
-        let prev = out[i - 1];
-        out[i] = if prev.is_nan() {
-            data[i]
-        } else {
-            alpha * data[i] + (1.0 - alpha) * prev
-        };
-    }
-    out
-}
-
-/// Compute the sample rolling standard deviation over `data` with `period`.
-///
-/// Uses Bessel's correction (denominator `period - 1`). The first
-/// `period - 1` elements are [`f64::NAN`].
-///
-/// Implements an incremental sum / sum-of-squares algorithm for O(n)
-/// performance instead of the naïve O(n × period) double loop. Windows
-/// containing any non-finite value produce NAN; the window recovers
-/// as soon as all values in the window are finite.
-fn rolling_std(data: &[f64], period: usize) -> Vec<f64> {
-    let n = data.len();
-    let mut out = vec![f64::NAN; n];
-    if period < 2 || n < period {
-        return out;
-    }
-    let p = period as f64;
-
-    // Seed: compute sum and sum-of-squares for the first full window.
-    let mut sum = 0.0_f64;
-    let mut sum_sq = 0.0_f64;
-    let mut finite_count = 0_usize;
-    for item in data.iter().take(period) {
-        if item.is_finite() {
-            sum += item;
-            sum_sq += item * item;
-            finite_count += 1;
-        }
-    }
-    if finite_count == period {
-        let mean = sum / p;
-        let var = (sum_sq - p * mean * mean) / (p - 1.0);
-        out[period - 1] = var.max(0.0).sqrt();
-    }
-
-    // Slide the window one step at a time.
-    for i in period..n {
-        let new = data[i];
-        let old = data[i - period];
-        // Update finite count.
-        if old.is_finite() {
-            sum -= old;
-            sum_sq -= old * old;
-            finite_count -= 1;
-        }
-        if new.is_finite() {
-            sum += new;
-            sum_sq += new * new;
-            finite_count += 1;
-        }
-        if finite_count == period {
-            let mean = sum / p;
-            let var = (sum_sq - p * mean * mean) / (p - 1.0);
-            out[i] = var.max(0.0).sqrt();
-        }
-    }
-    out
-}
-
-/// Compute the True Range for each bar.
-///
-/// TR = max(high − low, |high − prev_close|, |low − prev_close|).
-/// The first element uses `high[0] − low[0]` since there is no previous close.
-fn true_range(high: &[f64], low: &[f64], close: &[f64]) -> Vec<f64> {
-    let n = high.len();
-    let mut tr = vec![f64::NAN; n];
-    if n == 0 {
-        return tr;
-    }
-    if high[0].is_finite() && low[0].is_finite() {
-        tr[0] = high[0] - low[0];
-    }
-    for i in 1..n {
-        if !high[i].is_finite() || !low[i].is_finite() {
-            continue;
-        }
-        let hl = high[i] - low[i];
-        tr[i] = if close[i - 1].is_finite() {
-            let hc = (high[i] - close[i - 1]).abs();
-            let lc = (low[i] - close[i - 1]).abs();
-            hl.max(hc).max(lc)
-        } else {
-            hl
-        };
-    }
-    tr
-}
-
-/// Extract `open`, `high`, `low`, `close`, `volume` arrays from a pandas DataFrame.
-///
-/// Falls back to a zero-filled volume array when the column is missing.
-fn extract_ohlcv(
-    df: &Bound<'_, PyAny>,
-) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> {
-    let extract_col = |name: &str| -> PyResult<Vec<f64>> {
-        let col = df.get_item(name)?;
-
-        // Fast path: direct extract works for numpy arrays and lists.
-        // Fallback: pandas/polars Series need .values or .to_numpy() first.
-        col.extract::<Vec<f64>>().or_else(|_| {
-            col.getattr("values")
-                .and_then(|v| v.extract::<Vec<f64>>())
-                .or_else(|_| col.call_method0("to_numpy")?.extract::<Vec<f64>>())
-        })
-    };
-
-    Ok((
-        extract_col("open")?,
-        extract_col("high")?,
-        extract_col("low")?,
-        extract_col("close")?,
-        extract_col("volume").unwrap_or_else(|_| vec![0.0; df.len().unwrap_or(0)]),
-    ))
-}
-
-/// Convert indicator output series into the configured data backend format.
-///
-/// Each inner `Vec<f64>` is one output series (e.g. upper band, lower band).
-/// The result is shaped as (n_points, n_series) — i.e. rows x columns.
-/// Single-series indicators return a 1-D array / single-column frame.
-fn to_backend_type(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
-    let backend =
-        Config::get().map(|c| c.data.dataframe_library).unwrap_or(DataFrameLibrary::Pandas);
-
-    let np = py.import("numpy")?;
-
-    if series.len() == 1 {
-        // Single series → 1-D
-        let arr = np.call_method1("array", (series.into_iter().next().unwrap(),))?;
-        match backend {
-            DataFrameLibrary::Numpy => Ok(arr),
-            DataFrameLibrary::Pandas => {
-                let pd = py.import("pandas")?;
-                pd.call_method1("Series", (&arr,))
-            },
-            DataFrameLibrary::Polars => {
-                let pl = py.import("polars")?;
-                pl.call_method1("Series", (&arr,))
-            },
-        }
-    } else {
-        // Multiple series → transpose to (n_points, n_series)
-        let arr_2d = np.call_method1("array", (series,))?;
-        let arr_t = arr_2d.getattr("T")?;
-        match backend {
-            DataFrameLibrary::Numpy => Ok(arr_t),
-            DataFrameLibrary::Pandas => {
-                let pd = py.import("pandas")?;
-                pd.call_method1("DataFrame", (&arr_t,))
-            },
-            DataFrameLibrary::Polars => {
-                let pl = py.import("polars")?;
-                pl.call_method1("from_numpy", (&arr_t,))
-            },
-        }
-    }
-}
 
 /// Shared pymethods macro for all indicator structs.
 ///
@@ -339,7 +52,7 @@ macro_rules! indicator_pymethods {
                 py: Python<'py>,
                 data: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
-                let (o, h, l, c, v) = extract_ohlcv(data)?;
+                let (o, h, l, c, v) = extract_ohlcv_from_python(data)?;
                 let bars: Vec<Bar> = (0..c.len())
                     .map(|i| Bar {
                         open_ts: 0,
@@ -354,6 +67,7 @@ macro_rules! indicator_pymethods {
                         n_trades: None,
                     })
                     .collect();
+
                 to_backend_type(py, self.compute_inner(&bars))
             }
 
@@ -366,8 +80,18 @@ macro_rules! indicator_pymethods {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Indicator structs
+// Python API
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Get the deterministic name for an indicator instance.
+#[pyfunction]
+#[pyo3(signature = (indicator: "BaseIndicator"))]
+pub fn _indicator_deterministic_name(indicator: &Bound<'_, PyAny>) -> PyResult<String> {
+    let acronym = indicator_acronym_from_py(indicator)?;
+    let args = indicator_args_from_py(indicator)?;
+
+    Ok(indicator_deterministic_name(&acronym, &args))
+}
 
 /// Average Directional Index (ADX).
 ///

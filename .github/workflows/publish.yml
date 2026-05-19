@@ -54,6 +54,7 @@ jobs:
           DOC_VERSION="${GITHUB_REF_NAME%.*}"
           echo "Deploying documentation for release ${DOC_VERSION}"
           uv run mike deploy --push --update-aliases "${DOC_VERSION}" latest
+          uv run mike set-default --push latest
 
   build-wheels:
       name: Build wheels - ${{ matrix.os }}
