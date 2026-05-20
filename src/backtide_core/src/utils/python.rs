@@ -68,7 +68,7 @@ pub fn extract_bars_from_python(df: &Bound<'_, PyAny>) -> PyResult<Vec<Bar>> {
 ///
 /// The result is shaped as (n_points, n_series), i.e., rows x columns.
 /// Single-series return a 1-D array / single-column frame.
-pub fn to_python(py: Python, data: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
+pub fn to_python<'py>(py: Python<'py>, data: &[Vec<f64>]) -> PyResult<Bound<'py, PyAny>> {
     let backend = Config::get()?.data.dataframe_library;
 
     if data.len() == 1 {

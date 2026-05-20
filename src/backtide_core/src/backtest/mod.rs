@@ -1,6 +1,5 @@
 use crate::backtest::interface::{experiment_log, request_abort, run_experiment};
 use crate::backtest::models::*;
-use crate::backtest::sizers::*;
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
@@ -8,8 +7,9 @@ pub mod engine;
 pub mod fx;
 pub mod interface;
 pub mod models;
-pub mod sizers;
 mod utils;
+mod margin;
+mod orders;
 
 /// Register the Python interface for `backtide.core.backtest`.
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -26,15 +26,6 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OrderType>()?;
     m.add_class::<Portfolio>()?;
     m.add_class::<State>()?;
-
-    // Sizers
-    m.add_class::<EqualWeight>()?;
-    m.add_class::<FixedFractional>()?;
-    m.add_class::<FixedNotional>()?;
-    m.add_class::<FixedQuantity>()?;
-    m.add_class::<KellyCriterion>()?;
-    m.add_class::<RiskBased>()?;
-    m.add_class::<VolatilityScaled>()?;
 
     // Experiment config
     m.add_class::<DataExpConfig>()?;

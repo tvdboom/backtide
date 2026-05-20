@@ -7,9 +7,7 @@ use crate::backtest::fx::FxTable;
 use crate::backtest::interface::check_abort;
 use crate::backtest::models::*;
 use crate::backtest::utils::*;
-use crate::config::interface::Config;
-use crate::config::models::DataFrameLibrary;
-use crate::constants::{Cash, Positions, Symbol, BENCHMARK};
+use crate::constants::{Cash, Positions, Symbol, BENCHMARK, SECS_PER_YEAR};
 use crate::data::models::*;
 use crate::engine::Engine;
 use crate::errors::{EngineError, EngineResult};
@@ -19,7 +17,7 @@ use crate::strategies::interface::{BuiltinStrategy, BuyAndHold};
 use crate::strategies::utils::load_strategies;
 use crate::utils::experiment_log::{EXPERIMENT_SPAN, LOG_PATH_FIELD};
 use crate::utils::progress::{progress_bar, progress_spinner};
-use crate::utils::python::{dict_to_dataframe, load_pickle};
+use crate::utils::python::{dict_to_dataframe, load_pickle, to_python};
 use itertools::Itertools;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -30,6 +28,8 @@ use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn, Span};
 use uuid::Uuid;
+use crate::backtest::margin::accrue_margin_costs;
+use crate::backtest::orders::{resolve_trigger, TriggerOutcome};
 
 impl Engine {
     /// Run a single backtest experiment end-to-end.
@@ -466,7 +466,6 @@ impl Engine {
             }
         );
 
-        const SECS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0;
         let rf = config.engine.risk_free_rate / 100.;
 
         // Snapshot of the benchmark's equity curve (ts, equity), if any.
@@ -720,71 +719,47 @@ impl Engine {
 // Python data-cache helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Pre-built per-symbol DataFrame cache (symbol → full DataFrame).
-type DataCache = HashMap<String, Py<PyAny>>;
+/// Pre-built per-symbol data cache (symbol → full dataset).
+type DataT = HashMap<String, Py<PyAny>>;
 
-/// Pre-built per-indicator cache (indicator → symbol → list of Series).
-type IndCache = HashMap<String, HashMap<String, Vec<Py<PyAny>>>>;
+/// Pre-built per-indicator cache (indicator → symbol → dataset).
+type IndicatorsT = HashMap<String, HashMap<String, Py<PyAny>>>;
 
 /// Build a Python data/indicator cache under the GIL.
 fn build_py_cache(
     py: Python<'_>,
     aligned: &HashMap<Symbol, Vec<Option<Bar>>>,
     indicators: &HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>,
-    symbols: &Vec<Symbol>,
-) -> PyResult<(DataCache, IndCache)> {
-    let cfg = Config::get()?;
+    symbols: &[Symbol],
+) -> PyResult<(DataT, IndicatorsT)> {
+    let data_full: DataT = aligned
+        .iter()
+        .filter(|(sym, _)| symbols.contains(sym))
+        .map(|(sym, row)| {
+            let extract = |f: fn(&Bar) -> f64| -> PyResult<Py<PyAny>> {
+                Ok(PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, f)))?.into())
+            };
 
-    let wrap_series = |py: Python<'_>, s: &Vec<f64>| -> PyResult<Py<PyAny>> {
-        let list = PyList::new(py, s)?;
-        let obj: Bound<'_, PyAny> = match cfg.data.dataframe_library {
-            DataFrameLibrary::Pandas => py.import("pandas")?.call_method1("Series", (list,))?,
-            DataFrameLibrary::Polars => py.import("polars")?.call_method1("Series", (list,))?,
-        };
-        Ok(obj.unbind())
-    };
+            let dict = PyDict::new(py);
+            dict.set_item("open", extract(|b| b.open)?)?;
+            dict.set_item("high", extract(|b| b.high)?)?;
+            dict.set_item("low", extract(|b| b.low)?)?;
+            dict.set_item("close", extract(|b| b.close)?)?;
+            dict.set_item("volume", extract(|b| b.volume)?)?;
+            Ok((sym.clone(), dict_to_dataframe(py, &dict)?.unbind()))
+        })
+        .collect::<PyResult<_>>()?;
 
-    let mut data_full: DataCache = HashMap::with_capacity(aligned.len());
-    for (sym, row) in aligned {
-        if !symbols.contains(sym) {
-            continue;
-        }
-        let dict = PyDict::new(py);
-        dict.set_item(
-            "open",
-            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.open)))?,
-        )?;
-        dict.set_item(
-            "high",
-            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.high)))?,
-        )?;
-        dict.set_item(
-            "low",
-            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.low)))?,
-        )?;
-        dict.set_item(
-            "close",
-            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.close)))?,
-        )?;
-        dict.set_item(
-            "volume",
-            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.volume)))?,
-        )?;
-        let df = dict_to_dataframe(py, &dict)?;
-        data_full.insert(sym.clone(), df.unbind());
-    }
+    let mut ind_full: IndicatorsT = HashMap::with_capacity(indicators.len());
+    for (name, per_sym) in indicators {
+        let by_sym: HashMap<String, Py<PyAny>> = per_sym
+            .iter()
+            .map(|(sym, data)| -> PyResult<(String, Py<PyAny>)> {
+                Ok((sym.clone(), to_python(py, data)?.unbind()))
+            })
+            .collect::<PyResult<_>>()?;
 
-    let mut ind_full: IndCache = HashMap::with_capacity(indicators.len());
-    for (ind_name, per_sym) in indicators {
-        let mut by_sym: HashMap<Symbol, Vec<Py<PyAny>>> = HashMap::with_capacity(per_sym.len());
-        for (sym, series) in per_sym {
-            let mut arrs: Vec<Py<PyAny>> = Vec::with_capacity(series.len());
-            for s in series {
-                arrs.push(wrap_series(py, s)?);
-            }
-            by_sym.insert(sym.clone(), arrs);
-        }
-        ind_full.insert(ind_name.clone(), by_sym);
+        ind_full.insert(name.clone(), by_sym);
     }
 
     Ok((data_full, ind_full))
@@ -804,7 +779,7 @@ fn run_one_strategy(
     profiles: &[InstrumentProfile],
     timeline: &[i64],
     fx: &FxTable,
-    py_cache: Option<&(DataCache, IndCache)>,
+    py_cache: Option<&(DataT, IndicatorsT)>,
 ) -> RunResult {
     let benchmark = cfg.strategy.benchmark.as_deref().unwrap_or("").trim();
     let is_benchmark_run = name == benchmark || name == BENCHMARK;
@@ -877,18 +852,14 @@ fn run_one_strategy(
         .sorted_by(|a, b| a.0.cmp(&b.0))
         .collect();
 
-    // Resolve per-symbol DataFrames and per-indicator Series for the Python
-    // evaluate path. Built-in strategies skip this entirely. Non-benchmark
-    // custom strategies receive a pre-built cache that was constructed once
-    // before the strategy loop; benchmark strategies (rare custom case) fall
-    // back to building their own filtered copy.
+    // Pre-build the Python data/indicator cache for benchmark custom strategies.
     //
     // We hold references (`&DataCache`, `&IndCache`) to avoid cloning
     // Python object maps: `_empty_*` provides the view for built-ins and
     // `_fresh` owns the on-demand build for the benchmark-custom case.
-    let _empty_data: DataCache = HashMap::new();
-    let _empty_ind: IndCache = HashMap::new();
-    let _fresh: Option<(DataCache, IndCache)> = if builtin.is_none() && py_cache.is_none() {
+    let _empty_data: DataT = HashMap::new();
+    let _empty_ind: IndicatorsT = HashMap::new();
+    let _fresh: Option<(DataT, IndicatorsT)> = if builtin.is_none() && py_cache.is_none() {
         Some(Python::attach(|py| build_py_cache(py, aligned, indicators, &symbols)).unwrap_or_else(
             |e| {
                 let msg = format!("Failed to pre-build strategy view: {e}");
@@ -901,8 +872,8 @@ fn run_one_strategy(
         None
     };
 
-    let cached_data: &DataCache;
-    let cached_indicators: &IndCache;
+    let cached_data: &DataT;
+    let cached_indicators: &IndicatorsT;
     if builtin.is_some() {
         cached_data = &_empty_data;
         cached_indicators = &_empty_ind;
@@ -918,18 +889,16 @@ fn run_one_strategy(
     }
 
     for bar_index in 0..total_bars {
-        // Check for abort periodically. An atomic Relaxed load is essentially
-        // free, so checking every 16 bars gives sub-second abort latency
-        // even for very fast bars.
+        // Check if the user aborted the experiment periodically.
         if bar_index & 15 == 0 && check_abort() {
             break;
         }
 
         let ts = timeline[bar_index];
-        let is_warmup = bar_index < warmup;
+        let is_warmup = bar_index < cfg.engine.warmup_period as usize;
 
-        // ── 0. Per-bar margin interest & short-borrow accrual ───────────
-        //
+        // ── Per-bar margin interest & short-borrow accrual ──────────────────
+
         // Charges are prorated by the gap between consecutive bars in the
         // master timeline (which absorbs weekends/holidays without any
         // bespoke calendar logic — the timeline is the truth of when the
@@ -939,6 +908,7 @@ fn run_one_strategy(
         } else {
             (timeline[bar_index] - timeline[bar_index - 1]).max(0)
         };
+
         accrue_margin_costs(
             cfg,
             &mut cash,
@@ -952,28 +922,33 @@ fn run_one_strategy(
             bar_seconds,
         );
 
-        // ── 1. Resolve open orders against the *current* bar ────────────
+        // ── Resolve open orders against the current bar ─────────────────────
+
         let mut still_open: Vec<Order> = Vec::new();
         let drained: Vec<Order> = std::mem::take(&mut open_orders);
         for mut order in drained {
-            // Cancel orders take effect immediately and do not need a price.
+            // Cancel orders take effect immediately.
             if order.order_type == OrderType::Cancel {
-                still_open.retain(|o| o.id != order.id);
-                trail_state.remove(&order.id);
-                order_records.push(OrderRecord {
-                    order: order.clone(),
-                    timestamp: ts,
-                    status: "canceled".into(),
-                    fill_price: None,
-                    reason: "cancel".into(),
-                    commission: 0.0,
-                    pnl: None,
-                });
-                continue;
+                if let Some(order) = still_open.iter().find(|o| o.id == order.id) {
+                    still_open.retain(|o| o.id != order.id);
+                    trail_state.remove(&order.id);
+
+                    order_records.push(OrderRecord {
+                        order: order.clone(),
+                        timestamp: ts,
+                        status: OrderStatus::Canceled,
+                        fill_price: None,
+                        reason: "canceled by cancellation order".into(),
+                        commission: 0.0,
+                        pnl: None,
+                    });
+
+                    continue;
+                }
             }
 
-            let symbol = order.symbol.clone();
-            let bar = match aligned.get(&symbol).and_then(|r| r[bar_index].clone()) {
+            // Get the bar for the symbol for which the order was called.
+            let bar = match aligned.get(&order.symbol).and_then(|r| r[bar_index]) {
                 Some(b) => b,
                 None => {
                     still_open.push(order);
@@ -981,7 +956,7 @@ fn run_one_strategy(
                 },
             };
 
-            // Decide whether this order fires this bar (and at what price).
+            // Decide whether this order fires this bar and at what price.
             let outcome = resolve_trigger(
                 &mut order,
                 &bar,
@@ -989,6 +964,7 @@ fn run_one_strategy(
                 &mut trail_state,
                 cfg.engine.trade_on_close,
             );
+
             let (raw_px, mut fill_reason, limit_cap) = match outcome {
                 TriggerOutcome::Fill {
                     raw_px,
@@ -1006,7 +982,7 @@ fn run_one_strategy(
                     order_records.push(OrderRecord {
                         order: order.clone(),
                         timestamp: ts,
-                        status: "canceled".into(),
+                        status: OrderStatus::Canceled,
                         fill_price: None,
                         reason,
                         commission: 0.0,
@@ -1806,332 +1782,6 @@ fn run_one_strategy(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Order trigger resolution
-// ─────────────────────────────────────────────────────────────────────────
-//
-// `resolve_trigger` decides whether an open order fills against the
-// current bar, returning a `TriggerOutcome`:
-//
-//   * `Fill { raw_px, .. }` — the order fills at `raw_px` (before
-//     slippage). The caller is responsible for applying slippage and
-//     bookkeeping (cash, positions, commissions, …).
-//   * `Pending`             — the order does not fill this bar; keep it open.
-//   * `Cancel { .. }`       — the order cannot make sense (e.g.
-//     SettlePosition with no current position); record as canceled.
-//
-// Stop-into-limit variants mutate `order` in place: when the stop fires
-// we replace `order_type` with `OrderType::Limit` and copy
-// `order.limit_price` into `order.price`, so that on subsequent bars
-// the order rests as a regular limit order.
-//
-// Trailing variants share `trail_state`, keyed by `order.id`, holding
-// `(running_high, running_low)` since the order was placed.
-
-#[derive(Debug)]
-enum TriggerOutcome {
-    /// The order fills at `raw_px` (before slippage).
-    /// `limit_cap` constrains slippage so the slipped fill never crosses
-    /// the resting limit price (used for Limit and *Limit variants).
-    Fill {
-        raw_px: f64,
-        reason: String,
-        limit_cap: Option<f64>,
-    },
-    /// The order does not fill this bar.
-    Pending,
-    /// The order is invalid against current state and should be canceled.
-    Cancel {
-        reason: String,
-    },
-}
-
-/// Decide whether `order` fills this bar. May mutate `order` for the
-/// stop-into-limit transition, and may mutate `trail_state` for trailing
-/// variants. `positions` is read-only and only used by `SettlePosition`.
-fn resolve_trigger(
-    order: &mut Order,
-    bar: &Bar,
-    positions: &HashMap<String, f64>,
-    trail_state: &mut HashMap<String, (f64, f64)>,
-    trade_on_close: bool,
-) -> TriggerOutcome {
-    use OrderType::*;
-
-    match order.order_type {
-        // Cancel is handled before resolve_trigger is called.
-        Cancel => TriggerOutcome::Cancel {
-            reason: "cancel".into(),
-        },
-
-        Market => {
-            let px = if trade_on_close {
-                bar.close
-            } else {
-                bar.open
-            };
-            TriggerOutcome::Fill {
-                raw_px: px,
-                reason: String::new(),
-                limit_cap: None,
-            }
-        },
-
-        SettlePosition => {
-            let cur = *positions.get(&order.symbol).unwrap_or(&0.0);
-            if cur.abs() < 1e-12 {
-                return TriggerOutcome::Cancel {
-                    reason: "no position to settle".into(),
-                };
-            }
-            // Translate to a market order that flattens the position.
-            order.quantity = -cur;
-            order.order_type = Market;
-            let px = if trade_on_close {
-                bar.close
-            } else {
-                bar.open
-            };
-            TriggerOutcome::Fill {
-                raw_px: px,
-                reason: "settle position".into(),
-                limit_cap: None,
-            }
-        },
-
-        Limit => match order.price {
-            Some(lim) => fill_limit(order.quantity, bar, lim),
-            None => TriggerOutcome::Cancel {
-                reason: "limit order missing price".into(),
-            },
-        },
-
-        TakeProfit => match order.price {
-            // Take-profit is a profit-target limit: same execution
-            // semantics as Limit (a buy fills at-or-below, a sell at-or-above).
-            Some(target) => fill_limit(order.quantity, bar, target),
-            None => TriggerOutcome::Cancel {
-                reason: "take-profit missing price".into(),
-            },
-        },
-
-        StopLoss => {
-            let stop = match order.price {
-                Some(p) => p,
-                None => {
-                    return TriggerOutcome::Cancel {
-                        reason: "stop-loss missing price".into(),
-                    }
-                },
-            };
-            if stop_triggered(order.quantity, bar, stop, /*is_take_profit=*/ false) {
-                fill_stop(order.quantity, bar, stop)
-            } else {
-                TriggerOutcome::Pending
-            }
-        },
-
-        StopLossLimit | TakeProfitLimit => {
-            let stop = match order.price {
-                Some(p) => p,
-                None => {
-                    return TriggerOutcome::Cancel {
-                        reason: "stop-limit missing stop price".into(),
-                    }
-                },
-            };
-            let is_tp = order.order_type == TakeProfitLimit;
-            if !stop_triggered(order.quantity, bar, stop, is_tp) {
-                return TriggerOutcome::Pending;
-            }
-            // Convert to a resting Limit at `limit_price` (or stop as fallback).
-            let lim = order.limit_price.unwrap_or(stop);
-            order.order_type = Limit;
-            order.price = Some(lim);
-            order.limit_price = None;
-            // Try to fill same bar; if the limit can't be hit on this bar
-            // it will rest and re-evaluate next bar via the new Limit path.
-            fill_limit(order.quantity, bar, lim)
-        },
-
-        TrailingStop | TrailingStopLimit => {
-            let trail = match order.price {
-                Some(p) if p > 0.0 => p,
-                _ => {
-                    return TriggerOutcome::Cancel {
-                        reason: "trailing stop missing/invalid trail amount".into(),
-                    }
-                },
-            };
-
-            // First-bar initialisation: seed extremes from this bar.
-            let entry = trail_state.entry(order.id.clone()).or_insert_with(|| (bar.high, bar.low));
-            entry.0 = entry.0.max(bar.high);
-            entry.1 = entry.1.min(bar.low);
-            let (running_high, running_low) = (entry.0, entry.1);
-
-            // Effective stop: sells trail running_high downward; buys
-            // trail running_low upward. `qty == 0` is meaningless here.
-            let stop = if order.quantity < 0.0 {
-                running_high - trail
-            } else if order.quantity > 0.0 {
-                running_low + trail
-            } else {
-                return TriggerOutcome::Cancel {
-                    reason: "zero quantity".into(),
-                };
-            };
-
-            // Re-use the regular stop-trigger / stop-fill helpers.
-            if !stop_triggered(order.quantity, bar, stop, /*is_take_profit=*/ false) {
-                return TriggerOutcome::Pending;
-            }
-
-            if order.order_type == TrailingStopLimit {
-                let lim = order.limit_price.unwrap_or(stop);
-                order.order_type = Limit;
-                order.price = Some(lim);
-                order.limit_price = None;
-                fill_limit(order.quantity, bar, lim)
-            } else {
-                trail_state.remove(&order.id);
-                fill_stop(order.quantity, bar, stop)
-            }
-        },
-    }
-}
-
-/// Fill semantics for a Limit (or TakeProfit, identical execution-wise):
-///
-/// * Buy (qty > 0): fill if price reached the limit *or below*. If the
-///   bar opens at-or-below the limit, fill at the open (better than
-///   limit). Otherwise, if `bar.low <= lim`, fill at the limit price.
-/// * Sell (qty < 0): symmetric — fill at open if open ≥ limit, else at
-///   limit if `bar.high >= lim`.
-fn fill_limit(qty: f64, bar: &Bar, lim: f64) -> TriggerOutcome {
-    if qty > 0.0 {
-        if bar.open <= lim {
-            TriggerOutcome::Fill {
-                raw_px: bar.open,
-                reason: "limit (open through)".into(),
-                limit_cap: Some(lim),
-            }
-        } else if bar.low <= lim {
-            TriggerOutcome::Fill {
-                raw_px: lim,
-                reason: "limit hit".into(),
-                limit_cap: Some(lim),
-            }
-        } else {
-            TriggerOutcome::Pending
-        }
-    } else if qty < 0.0 {
-        if bar.open >= lim {
-            TriggerOutcome::Fill {
-                raw_px: bar.open,
-                reason: "limit (open through)".into(),
-                limit_cap: Some(lim),
-            }
-        } else if bar.high >= lim {
-            TriggerOutcome::Fill {
-                raw_px: lim,
-                reason: "limit hit".into(),
-                limit_cap: Some(lim),
-            }
-        } else {
-            TriggerOutcome::Pending
-        }
-    } else {
-        TriggerOutcome::Cancel {
-            reason: "zero quantity".into(),
-        }
-    }
-}
-
-/// Stop trigger predicate.
-///
-/// * Stop-loss sell (qty < 0, long-protection): triggers when price
-///   *falls* to `stop` — `bar.low <= stop` or gap-down (`bar.open <= stop`).
-/// * Stop-loss buy  (qty > 0, short-cover): triggers when price *rises*
-///   to `stop` — `bar.high >= stop` or gap-up (`bar.open >= stop`).
-/// * Take-profit-limit reverses both directions (a sell TP triggers on
-///   a price rise, a buy TP on a price drop).
-fn stop_triggered(qty: f64, bar: &Bar, stop: f64, is_take_profit: bool) -> bool {
-    let down_trigger = (qty < 0.0 && !is_take_profit) || (qty > 0.0 && is_take_profit);
-    let up_trigger = (qty > 0.0 && !is_take_profit) || (qty < 0.0 && is_take_profit);
-    if down_trigger {
-        bar.open <= stop || bar.low <= stop
-    } else if up_trigger {
-        bar.open >= stop || bar.high >= stop
-    } else {
-        false
-    }
-}
-
-/// Stop fill price. Realistic gap handling: if the bar opens past the
-/// stop level, the stop fills at the open (worse than the stop) — a
-/// gap-down for sell stops, a gap-up for buy stops. Otherwise, the stop
-/// fills at exactly the stop level.
-fn fill_stop(qty: f64, bar: &Bar, stop: f64) -> TriggerOutcome {
-    if qty == 0.0 {
-        return TriggerOutcome::Cancel {
-            reason: "zero quantity".into(),
-        };
-    }
-
-    // First check if the stop was actually triggered
-    if !stop_triggered(qty, bar, stop, false) {
-        return TriggerOutcome::Pending;
-    }
-
-    // Stop was triggered, now determine the fill price
-    if qty < 0.0 {
-        if bar.open <= stop {
-            TriggerOutcome::Fill {
-                raw_px: bar.open,
-                reason: "stop triggered (gap-down)".into(),
-                limit_cap: None,
-            }
-        } else {
-            TriggerOutcome::Fill {
-                raw_px: stop,
-                reason: "stop triggered".into(),
-                limit_cap: None,
-            }
-        }
-    } else {
-        if bar.open >= stop {
-            TriggerOutcome::Fill {
-                raw_px: bar.open,
-                reason: "stop triggered (gap-up)".into(),
-                limit_cap: None,
-            }
-        } else {
-            TriggerOutcome::Fill {
-                raw_px: stop,
-                reason: "stop triggered".into(),
-                limit_cap: None,
-            }
-        }
-    }
-}
-
-/// Apply slippage to a raw fill price, optionally capping at the limit
-/// price so a buy never pays above its limit (and a sell never receives
-/// below). `slippage_pct` is the fraction (e.g. 0.005 = 0.5 %).
-fn apply_slippage(raw_px: f64, qty: f64, slippage_pct: f64, limit_cap: Option<f64>) -> f64 {
-    let slipped = if qty >= 0.0 {
-        raw_px * (1.0 + slippage_pct)
-    } else {
-        raw_px * (1.0 - slippage_pct)
-    };
-    match limit_cap {
-        Some(cap) if qty > 0.0 => slipped.min(cap),
-        Some(cap) if qty < 0.0 => slipped.max(cap),
-        _ => slipped,
-    }
-}
-
 /// Try to debit `amount` of `ccy` from `cash`. If `ccy` doesn't have enough,
 /// fall back to the base currency (and finally any other foreign bucket)
 /// converting at the FX rate observed at `ts`. Returns `false` if no
@@ -2284,21 +1934,20 @@ fn sweep_foreign_to_base(
 /// trigger an end-of-period sweep.
 fn period_bucket(
     ts: i64,
-    period: crate::backtest::models::conversion_period::ConversionPeriod,
+    period: ConversionPeriod,
 ) -> i64 {
-    use crate::backtest::models::conversion_period::ConversionPeriod::*;
     use chrono::{DateTime, Datelike, Utc};
     let dt = DateTime::<Utc>::from_timestamp(ts, 0)
         .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap());
     match period {
-        Day => ts.div_euclid(86_400),
-        Week => {
+        ConversionPeriod::Day => ts.div_euclid(86_400),
+        ConversionPeriod::Week => {
             // ISO week-year combined identifier.
             let iso = dt.iso_week();
             (iso.year() as i64) * 100 + iso.week() as i64
         },
-        Month => (dt.year() as i64) * 12 + (dt.month0() as i64),
-        Year => dt.year() as i64,
+        ConversionPeriod::Month => (dt.year() as i64) * 12 + (dt.month0() as i64),
+        ConversionPeriod::Year => dt.year() as i64,
     }
 }
 
@@ -2452,320 +2101,12 @@ fn build_indicator_view<'py>(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Margin & leverage helpers
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Effective leverage cap given the `allow_margin`, `max_leverage` and
-/// `initial_margin` settings. When margin is disabled, the cap is 1.0
-/// (no borrowing). Otherwise `max_leverage` and `100/initial_margin`
-/// are intersected so the more restrictive of the two wins.
-fn effective_leverage_cap(cfg: &ExperimentConfig) -> f64 {
-    if !cfg.exchange.allow_margin {
-        return 1.0;
-    }
-    let im = cfg.exchange.initial_margin;
-    let from_im = if im > 0.0 {
-        100.0 / im
-    } else {
-        f64::INFINITY
-    };
-    let from_ml = if cfg.exchange.max_leverage > 0.0 {
-        cfg.exchange.max_leverage
-    } else {
-        f64::INFINITY
-    };
-    from_ml.min(from_im).max(1.0)
-}
-
-/// Compute the *gross* notional currently invested across all positions,
-/// expressed in `target_ccy`. Open shorts contribute their absolute
-/// notional just like longs — this is what the leverage / maintenance
-/// margin checks compare against equity.
-fn gross_notional_in_currency(
-    positions: &HashMap<String, f64>,
-    aligned: &HashMap<String, Vec<Option<Bar>>>,
-    bar_index: usize,
-    quote_ccy: &HashMap<String, String>,
-    target_ccy: &str,
-    fx: &FxTable,
-    ts: i64,
-) -> f64 {
-    let mut total = 0.0_f64;
-    for (sym, qty) in positions {
-        if qty.abs() < 1e-12 {
-            continue;
-        }
-        if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
-            let value = qty.abs() * b.close;
-            let ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(target_ccy);
-            total += fx.convert(value, ccy, target_ccy, ts).unwrap_or(value);
-        }
-    }
-    total
-}
-
-/// Check whether an order of `qty @ fill_px` (in `order_ccy`) for `symbol`
-/// satisfies the configured leverage and position-size limits. Returns
-/// either the (possibly shrunk) acceptable quantity, or an error string
-/// describing which limit was breached.
-///
-/// `equity_base` and `gross_base` must already be expressed in the
-/// portfolio base currency.
-/// Classification of a limit-check rejection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LimitViolation {
-    /// Per-symbol concentration limit (`max_position_size`). Not related
-    /// to margin — always enforced regardless of `raise_on_margin_limit`.
-    PositionSize,
-    /// Leverage / margin / equity constraint. Gated by `raise_on_margin_limit`.
-    Margin,
-}
-
-fn limit_warning_dedupe_key(symbol: &str, violation: LimitViolation, reason: &str) -> String {
-    let bucket = match violation {
-        LimitViolation::Margin if reason.contains("gross notional already at limit") => {
-            "margin:gross_notional_at_limit"
-        },
-        LimitViolation::Margin if reason.contains("equity is non-positive") => {
-            "margin:equity_non_positive"
-        },
-        LimitViolation::Margin
-            if reason.contains("no headroom under leverage / position-size limits") =>
-        {
-            "margin:no_headroom"
-        },
-        LimitViolation::PositionSize if reason.contains("position already at limit") => {
-            "position_size:at_limit"
-        },
-        LimitViolation::PositionSize
-            if reason.contains("no headroom under leverage / position-size limits") =>
-        {
-            "position_size:no_headroom"
-        },
-        _ => reason,
-    };
-    format!("{symbol}\0{bucket}")
-}
-
-fn check_order_against_limits(
-    cfg: &ExperimentConfig,
-    symbol: &str,
-    qty: f64,
-    fill_px: f64,
-    order_ccy: &str,
-    base_ccy: &str,
-    equity_base: f64,
-    gross_base: f64,
-    current_qty: f64,
-    current_pos_base: f64,
-    fx: &FxTable,
-    ts: i64,
-) -> Result<f64, (LimitViolation, String)> {
-    let abs_qty = qty.abs();
-    if abs_qty <= 0.0 || !abs_qty.is_finite() {
-        return Ok(qty);
-    }
-    if fill_px <= 0.0 || !fill_px.is_finite() {
-        return Ok(qty);
-    }
-    let order_notional_base =
-        fx.convert(abs_qty * fill_px, order_ccy, base_ccy, ts).unwrap_or(abs_qty * fill_px);
-    let unit_base = order_notional_base / abs_qty;
-    if unit_base <= 0.0 || !unit_base.is_finite() {
-        return Ok(qty);
-    }
-
-    let current_pos_base = current_pos_base.max(0.0);
-    let current_abs_qty = current_qty.abs();
-
-    let max_qty_for_final_exposure = |cap_base: f64| -> f64 {
-        let same_direction = current_abs_qty <= 1e-12 || current_qty.signum() == qty.signum();
-        if same_direction {
-            return ((cap_base - current_pos_base) / unit_base).max(0.0);
-        }
-
-        // Opposite-side orders reduce existing exposure first. Always allow
-        // the requested size when it only closes/reduces the position, even if
-        // the account is currently at/over a cap. If it flips the position,
-        // only the post-flip exposure consumes cap room.
-        if abs_qty <= current_abs_qty + 1e-12 {
-            abs_qty
-        } else {
-            current_abs_qty + (cap_base / unit_base).max(0.0)
-        }
-    };
-
-    let mut max_abs_qty = abs_qty;
-
-    // ── max_position_size ─────────────────────────────────────────────
-    //
-    // Per-symbol exposure (existing absolute notional + new order
-    // notional) must not exceed `max_position_size / 100` of equity.
-    // `max_position_size == 0` is treated as "no cap". When the order
-    // would push past the cap, the quantity is *shrunk* to whatever
-    // fits rather than rejected outright — this matches real-broker
-    // behaviour and prevents an entire equal-weight allocation from
-    // being silently dropped over a fractional slippage overshoot.
-    let pos_cap_pct = cfg.exchange.max_position_size as f64;
-    if pos_cap_pct > 0.0 && equity_base > 0.0 {
-        let max_per_pos = equity_base * pos_cap_pct / 100.0;
-        let allowed_abs_qty = max_qty_for_final_exposure(max_per_pos);
-        if allowed_abs_qty <= 1e-12 {
-            return Err((
-                LimitViolation::PositionSize,
-                format!(
-                "order would exceed max_position_size ({pos_cap_pct}% of equity) for {symbol}: \
-                 position already at limit (current {current_pos_base:.2}, cap {max_per_pos:.2})"
-            ),
-            ));
-        }
-        max_abs_qty = max_abs_qty.min(allowed_abs_qty);
-    }
-
-    // ── max_leverage / allow_margin ───────────────────────────────────
-    //
-    // The total gross notional after this fill (including existing
-    // exposure) must not exceed `equity * effective_leverage_cap`.
-    // Same shrink-not-reject philosophy as above.
-    let cap = effective_leverage_cap(cfg);
-    if equity_base > 0.0 && cap.is_finite() {
-        let max_gross = equity_base * cap;
-        let other_gross_base = (gross_base - current_pos_base).max(0.0);
-        let symbol_cap_base = max_gross - other_gross_base;
-        let allowed_abs_qty = max_qty_for_final_exposure(symbol_cap_base);
-        if allowed_abs_qty <= 1e-12 {
-            return Err((
-                LimitViolation::Margin,
-                format!(
-                    "order would exceed max_leverage ({cap:.2}x): gross notional already at limit \
-                 (current {gross_base:.2}, cap {max_gross:.2})"
-                ),
-            ));
-        }
-        max_abs_qty = max_abs_qty.min(allowed_abs_qty);
-    } else if equity_base <= 0.0 {
-        // Account already wiped out — nothing more can be opened.
-        return Err((
-            LimitViolation::Margin,
-            "equity is non-positive; cannot open new exposure".to_owned(),
-        ));
-    }
-
-    if !max_abs_qty.is_finite() || max_abs_qty <= 1e-12 {
-        return Err((
-            LimitViolation::Margin,
-            format!("no headroom under leverage / position-size limits for {symbol}"),
-        ));
-    }
-    Ok(qty.signum() * max_abs_qty.min(abs_qty))
-}
-
-/// Post-bar maintenance-margin check.
-///
-/// Returns `Some(message)` when `equity / gross_notional < maintenance_margin/100`
-/// (i.e. the account is undercollateralised), `None` otherwise. The caller
-/// decides whether to force-liquidate, record a warning, or abort the run
-/// based on `cfg.exchange.raise_on_margin_limit`.
-fn check_maintenance_margin(
-    cfg: &ExperimentConfig,
-    equity_base: f64,
-    gross_base: f64,
-) -> Option<String> {
-    let mm = cfg.exchange.maintenance_margin;
-    if mm <= 0.0 || gross_base <= 0.0 {
-        return None;
-    }
-    // Negative equity is always a margin call.
-    if equity_base <= 0.0 {
-        return Some(format!(
-            "margin call: equity {equity_base:.2} ≤ 0 with gross notional {gross_base:.2}"
-        ));
-    }
-    let ratio = equity_base / gross_base;
-    if ratio < mm / 100.0 {
-        Some(format!(
-            "margin call: equity/notional ratio {:.2}% below maintenance_margin {mm:.2}%",
-            ratio * 100.0
-        ))
-    } else {
-        None
-    }
-}
-
-/// Accrue per-bar margin interest and short-borrow cost. Both rates are
-/// annual percentages; the cost is prorated by `bar_seconds / SECS_PER_YEAR`.
-///
-/// * `margin_interest` is charged on negative base cash (borrowed funds).
-/// * `borrow_rate` is charged on the gross value of open short positions.
-///
-/// Charges are taken from the base-currency cash bucket (which may go
-/// further negative — the next leverage / maintenance-margin check will
-/// surface that).
-fn accrue_margin_costs(
-    cfg: &ExperimentConfig,
-    cash: &mut Cash,
-    positions: &HashMap<String, f64>,
-    aligned: &HashMap<Symbol, Vec<Option<Bar>>>,
-    bar_index: usize,
-    quote_ccy: &HashMap<String, String>,
-    base_ccy: Currency,
-    fx: &FxTable,
-    ts: i64,
-    bar_seconds: i64,
-) {
-    const SECS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0;
-    if bar_seconds <= 0 {
-        return;
-    }
-    let frac = bar_seconds as f64 / SECS_PER_YEAR;
-
-    // Margin interest on borrowed cash (any negative cash bucket, converted to base).
-    if cfg.exchange.margin_interest > 0.0 {
-        let mut borrowed_base = 0.0_f64;
-        for (ccy, amt) in cash.iter() {
-            if *amt < 0.0 {
-                let v = -*amt;
-                borrowed_base +=
-                    fx.convert(v, &ccy.to_string(), &base_ccy.to_string(), ts).unwrap_or(v);
-            }
-        }
-        if borrowed_base > 0.0 {
-            let cost = borrowed_base * cfg.exchange.margin_interest / 100.0 * frac;
-            *cash.entry(base_ccy).or_insert(0.0) -= cost;
-        }
-    }
-
-    // Borrow cost on short positions.
-    if cfg.exchange.borrow_rate > 0.0 {
-        let mut shorts_value_base = 0.0_f64;
-        for (sym, qty) in positions {
-            if *qty >= 0.0 {
-                continue;
-            }
-            if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
-                let v = qty.abs() * b.close;
-                let base_str = base_ccy.to_string();
-                let ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(&base_str);
-                shorts_value_base += fx.convert(v, ccy, &base_str, ts).unwrap_or(v);
-            }
-        }
-        if shorts_value_base > 0.0 {
-            let cost = shorts_value_base * cfg.exchange.borrow_rate / 100.0 * frac;
-            *cash.entry(base_ccy).or_insert(0.0) -= cost;
-        }
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────────────
 // Tests
 // ────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::models::experiment_config::*;
-    use crate::data::models::instrument::Instrument;
-    use crate::strategies::interface::*;
 
     fn mk_bar(ts: u64, close: f64) -> Bar {
         Bar {
@@ -5614,8 +4955,8 @@ mod tests {
 
     #[test]
     fn gross_notional_in_currency_empty_positions() {
-        let aligned: HashMap<String, Vec<Option<Bar>>> = HashMap::new();
-        let positions: HashMap<String, f64> = HashMap::new();
+        let aligned: HashMap<Symbol, Vec<Option<Bar>>> = HashMap::new();
+        let positions: Positions = HashMap::new();
         let quote_ccy: HashMap<String, String> = HashMap::new();
         let fx = empty_fx(Currency::USD);
         let g = gross_notional_in_currency(&positions, &aligned, 0, &quote_ccy, "USD", &fx, 0);

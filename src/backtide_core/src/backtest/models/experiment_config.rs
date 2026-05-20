@@ -245,7 +245,7 @@ impl PortfolioExpConfig {
     fn new(
         initial_cash: u64,
         base_currency: Currency,
-        starting_positions: HashMap<String, f64>,
+        starting_positions: Positions,
     ) -> Self {
         Self {
             initial_cash,

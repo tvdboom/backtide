@@ -54,7 +54,7 @@ macro_rules! indicator_pymethods {
                 data: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
                 let bars = extract_bars_from_python(data)?;
-                to_python(py, self.compute_inner(&bars))
+                to_python(py, &self.compute_inner(&bars))
             }
 
             /// Return a debug representation.

@@ -1,5 +1,5 @@
 use crate::backtest::models::{new_order_id, Order, OrderType, Portfolio};
-use crate::backtest::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
+use crate::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
 use crate::config::interface::Config;
 use crate::constants::Symbol;
 use crate::data::models::Bar;

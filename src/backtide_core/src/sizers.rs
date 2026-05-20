@@ -1,6 +1,25 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// Register the Python interface for `backtide.core.sizers`.
+pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
+    let m = PyModule::new(parent.py(), "backtide.sizers")?;
+
+    m.add_class::<EqualWeight>()?;
+    m.add_class::<FixedFractional>()?;
+    m.add_class::<FixedNotional>()?;
+    m.add_class::<FixedQuantity>()?;
+    m.add_class::<KellyCriterion>()?;
+    m.add_class::<RiskBased>()?;
+    m.add_class::<VolatilityScaled>()?;
+
+    parent.add_submodule(&m)?;
+
+    parent.py().import("sys")?.getattr("modules")?.set_item("backtide.core.sizers", &m)?;
+
+    Ok(())
+}
+
 /// Trait carrying the actual sizing logic for every sizer.
 pub trait Sizer {
     /// Calculate the quantity to trade.

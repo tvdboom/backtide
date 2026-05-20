@@ -9,6 +9,7 @@ pub mod indicators;
 pub mod storage;
 pub mod strategies;
 pub mod utils;
+pub mod sizers;
 
 use pyo3::prelude::*;
 
@@ -24,7 +25,7 @@ fn init_python_for_tests() {
 }
 
 // Required for Windows/MSVC builds when using DuckDB.
-// DuckDB internally uses the Windows Restart Manager API (RmStartSession, etc),
+// DuckDB internally uses the Windows Restart Manager API (RmStartSession, etc...),
 // which lives in `rstrtmgr.lib`. The MSVC linker does not auto-link this system
 // library, and build tools like maturin may ignore Cargo rustflags/config,
 // leading to unresolved externals (LNK2019).
@@ -43,6 +44,7 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     config::register(m)?;
     data::register(m)?;
     indicators::register(m)?;
+    sizers::register(m)?;
     storage::register(m)?;
     strategies::register(m)?;
     utils::register(m)?;

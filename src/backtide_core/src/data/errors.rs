@@ -1,6 +1,5 @@
 use crate::constants::Symbol;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
+use crate::data::models::{InstrumentType, Interval};
 use crate::utils::http::HttpError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;

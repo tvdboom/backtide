@@ -40,5 +40,8 @@ pub const TASK_TIMEOUT: Duration = Duration::from_secs(300);
 /// and all remaining tasks are skipped.
 pub const CIRCUIT_BREAKER_THRESHOLD: usize = 20;
 
-/// Name used for the benchmark run
+/// Name used for the benchmark run.
 pub const BENCHMARK: &str = "Benchmark";
+
+/// Seconds in a year.
+pub const SECS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0;

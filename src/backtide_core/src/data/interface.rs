@@ -1,12 +1,7 @@
 //! Python interface for the data module.
 
 use crate::constants::Symbol;
-use crate::data::models::download_result::DownloadResult;
-use crate::data::models::exchange::Exchange;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_profile::InstrumentProfile;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
+use crate::data::models::*;
 use crate::engine::Engine;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::PyAnyMethods;
