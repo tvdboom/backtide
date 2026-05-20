@@ -5,6 +5,7 @@
 
 use crate::backtest::models::experiment_status::ExperimentStatus;
 use crate::backtest::models::order::Order;
+pub use crate::backtest::models::order_status::OrderStatus;
 use crate::data::models::currency::Currency;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -161,8 +162,8 @@ impl Trade {
 /// timestamp : int
 ///     The bar timestamp at which the order was processed (in Unix seconds).
 ///
-/// status : str
-///     One of: "filled", "canceled", "rejected" or "pending".
+/// status : [OrderStatus]
+///     One of: `filled`, `canceled`, `rejected` or `pending`.
 ///
 /// fill_price : float | None
 ///     Average fill price. `None` if not filled.
@@ -190,7 +191,7 @@ impl Trade {
 pub struct OrderRecord {
     pub order: Order,
     pub timestamp: i64,
-    pub status: String,
+    pub status: OrderStatus,
     pub fill_price: Option<f64>,
     pub reason: String,
     #[serde(default)]

@@ -153,9 +153,7 @@ def _get_timezone(tz: str | None) -> ZoneInfo:
         return get_localzone()
 
 
-def _make_dummy_bars(
-    backend: DataFrameLibrary, n: int = 5
-) -> np.ndarray | pd.DataFrame | pl.DataFrame:
+def _make_dummy_bars(backend: DataFrameLibrary, n: int = 5) -> pd.DataFrame | pl.DataFrame:
     """Create a dummy OHLCV dataset matching the configured backend."""
     rng = np.random.default_rng(42)
 
@@ -166,8 +164,6 @@ def _make_dummy_bars(
     v = rng.uniform(1_000, 10_000, n)
 
     match backend:
-        case DataFrameLibrary.Numpy:
-            result = np.column_stack([o, h, l, c, v])
         case DataFrameLibrary.Pandas:
             result = pd.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume": v})
         case DataFrameLibrary.Polars:

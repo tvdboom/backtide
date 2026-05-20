@@ -2,7 +2,6 @@
 
 __all__ = ["compute_statistics"]
 
-import numpy as np
 import pandas as pd
 import polars as pl
 
@@ -12,7 +11,7 @@ def compute_statistics(
     price_col="adj_close",
     risk_free_rate=0.0,
     periods_per_year=None,
-) -> np.ndarray | pd.DataFrame | pl.DataFrame:
+) -> pd.DataFrame | pl.DataFrame:
     """Compute per-symbol summary statistics.
 
     Calculates key performance and risk metrics for each symbol in `data`.
@@ -39,7 +38,7 @@ def compute_statistics(
 
     Returns
     -------
-    np.ndarray | pd.DataFrame | pl.DataFrame
+    pd.DataFrame | pl.DataFrame
         Dataset with one row per symbol and columns for each metric.
 
     See Also

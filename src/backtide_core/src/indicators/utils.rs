@@ -1,5 +1,3 @@
-use crate::config::interface::Config;
-use crate::config::models::dataframe_library::DataFrameLibrary;
 use crate::data::models::bar::Bar;
 use crate::errors::EngineResult;
 use crate::indicators::interface::*;
@@ -9,7 +7,7 @@ use indicatif::ProgressBar;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::{PyAnyMethods, PyDictMethods};
 use pyo3::types::{PyDict, PyList, PyTuple};
-use pyo3::{Bound, Py, PyAny, PyErr, PyResult, Python};
+use pyo3::{Bound, Py, PyAny, PyResult, Python};
 use rayon::iter::IntoParallelRefIterator;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -180,7 +178,7 @@ fn extract_indicator_result(py: Python, result: &Bound<PyAny>) -> PyResult<Vec<V
             let series: Vec<Vec<f64>> = transposed.extract()?;
             Ok(series)
         },
-        other => Err(PyErr::new::<PyValueError, _>(format!(
+        other => Err(PyValueError::new_err(format!(
             "indicator returned a {other}-D array. Expected 1-D or 2-D"
         ))),
     }
@@ -251,7 +249,7 @@ pub fn indicator_deterministic_name(acronym: &str, args: &[String]) -> String {
     }
 }
 
-/// Extract parallel `(open, high, low, close, volume)` arrays from a bar slice.
+/// Extract `(open, high, low, close, volume)` arrays from a bar slice.
 pub fn extract_ohlcv_from_bars(bars: &[Bar]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
     let mut o = Vec::with_capacity(bars.len());
     let mut h = Vec::with_capacity(bars.len());
@@ -268,72 +266,6 @@ pub fn extract_ohlcv_from_bars(bars: &[Bar]) -> (Vec<f64>, Vec<f64>, Vec<f64>, V
     }
 
     (o, h, l, c, v)
-}
-
-/// Extract `open`, `high`, `low`, `close`, `volume` arrays from a pandas DataFrame.
-///
-/// Falls back to a zero-filled volume array when the column is missing.
-pub fn extract_ohlcv_from_python(
-    df: &Bound<'_, PyAny>,
-) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> {
-    let extract_col = |name: &str| -> PyResult<Vec<f64>> {
-        let col = df.get_item(name)?;
-
-        // Fast path: direct extract works for numpy arrays and lists.
-        // Fallback: pandas/polars Series need .to_numpy().
-        col.extract::<Vec<f64>>().or_else(|_| col.call_method0("to_numpy")?.extract::<Vec<f64>>())
-    };
-
-    Ok((
-        extract_col("open")?,
-        extract_col("high")?,
-        extract_col("low")?,
-        extract_col("close")?,
-        extract_col("volume").unwrap_or_else(|_| vec![0.0; df.len().unwrap_or(0)]),
-    ))
-}
-
-/// Convert indicator output series into the configured data backend format.
-///
-/// Each inner `Vec<f64>` is one output series (e.g., upper band, lower band).
-/// The result is shaped as (n_points, n_series), i.e., rows x columns.
-/// Single-series indicators return a 1-D array / single-column frame.
-pub fn to_backend_type(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
-    let backend =
-        Config::get().map(|c| c.data.dataframe_library).unwrap_or(DataFrameLibrary::Pandas);
-
-    let np = py.import("numpy")?;
-
-    if series.len() == 1 {
-        // Single series → 1-D
-        let arr = np.call_method1("array", (series.into_iter().next().unwrap(),))?;
-        match backend {
-            DataFrameLibrary::Numpy => Ok(arr),
-            DataFrameLibrary::Pandas => {
-                let pd = py.import("pandas")?;
-                pd.call_method1("Series", (&arr,))
-            },
-            DataFrameLibrary::Polars => {
-                let pl = py.import("polars")?;
-                pl.call_method1("Series", (&arr,))
-            },
-        }
-    } else {
-        // Multiple series → transpose to (n_points, n_series)
-        let arr_2d = np.call_method1("array", (series,))?;
-        let arr_t = arr_2d.getattr("T")?;
-        match backend {
-            DataFrameLibrary::Numpy => Ok(arr_t),
-            DataFrameLibrary::Pandas => {
-                let pd = py.import("pandas")?;
-                pd.call_method1("DataFrame", (&arr_t,))
-            },
-            DataFrameLibrary::Polars => {
-                let pl = py.import("polars")?;
-                pl.call_method1("from_numpy", (&arr_t,))
-            },
-        }
-    }
 }
 
 /// Compute a simple rolling mean over `data` with the given `period`.

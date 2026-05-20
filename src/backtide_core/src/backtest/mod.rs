@@ -7,6 +7,7 @@ use crate::backtest::models::experiment_config::*;
 use crate::backtest::models::experiment_result::*;
 use crate::backtest::models::experiment_status::ExperimentStatus;
 use crate::backtest::models::order::Order;
+use crate::backtest::models::order_status::OrderStatus;
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
@@ -31,6 +32,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<EmptyBarPolicy>()?;
     m.add_class::<ExperimentStatus>()?;
     m.add_class::<Order>()?;
+    m.add_class::<OrderStatus>()?;
     m.add_class::<OrderType>()?;
     m.add_class::<Portfolio>()?;
     m.add_class::<State>()?;

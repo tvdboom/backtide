@@ -157,12 +157,6 @@ class TestFormatPrice:
 class TestMakeDummyBars:
     """Tests for the _make_dummy_bars helper."""
 
-    def test_numpy_backend(self):
-        """Numpy backend returns an ndarray."""
-        result = _make_dummy_bars(DataFrameLibrary.Numpy)
-        assert isinstance(result, np.ndarray)
-        assert result.shape == (5, 5)
-
     def test_pandas_backend(self):
         """Pandas backend returns a DataFrame."""
         result = _make_dummy_bars(DataFrameLibrary.Pandas)

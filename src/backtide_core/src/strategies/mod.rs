@@ -1,10 +1,10 @@
+use crate::strategies::interface::*;
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
-use crate::strategies::interface::*;
 
 pub mod interface;
-mod utils;
 mod traits;
+pub mod utils;
 
 /// Register the Python interface for `backtide.core.strategies`.
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {

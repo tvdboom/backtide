@@ -14,8 +14,6 @@ use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
-use crate::strategies::interface::{BuiltinStrategy, BuyAndHold};
-use crate::config::interface::Config;
 use crate::constants::{Symbol, BENCHMARK};
 use crate::data::models::bar::Bar;
 use crate::data::models::currency::Currency;
@@ -27,20 +25,22 @@ use crate::engine::Engine;
 use crate::errors::{EngineError, EngineResult};
 use crate::indicators::interface::_indicator_deterministic_name;
 use crate::indicators::utils::compute_indicators;
+use crate::strategies::interface::{BuiltinStrategy, BuyAndHold};
 use crate::utils::experiment_log::{EXPERIMENT_SPAN, LOG_PATH_FIELD};
 use crate::utils::progress::{progress_bar, progress_spinner};
-use crate::utils::python::load_pickle;
+use crate::utils::python::{dict_to_dataframe, load_pickle};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use pyo3::Py;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Mutex};
+use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn, Span};
 use uuid::Uuid;
-
+use crate::config::models::dataframe_library::DataFrameLibrary;
+use crate::strategies::utils::load_strategies;
 // ────────────────────────────────────────────────────────────────────────────
 // Public interface
 // ────────────────────────────────────────────────────────────────────────────
@@ -408,20 +408,15 @@ impl Engine {
         // ── Run strategies ──────────────────────────────────────────────────
 
         let n_strategies = strategy_objs.len() as u64;
-        let pb = verbose.then(|| {
-            progress_bar(n_strategies,format!("Running {n_strategies} strategies..."))
-        });
+        let pb = verbose
+            .then(|| progress_bar(n_strategies, format!("Running {n_strategies} strategies...")));
 
         let pb_mutex = pb.as_ref().map(Mutex::new);
 
         let (custom, builtin): (Vec<_>, Vec<_>) =
             strategy_objs.into_iter().partition(|(_, _, is_custom)| *is_custom);
 
-        info!(
-            "Dispatching strategies: {} built-in and {} custom.",
-            builtin.len(),
-            custom.len()
-        );
+        info!("Dispatching strategies: {} built-in and {} custom.", builtin.len(), custom.len());
 
         // Capture the experiment span so each rayon worker can re-enter it.
         let par_span = Span::current();
@@ -472,51 +467,35 @@ impl Engine {
         // ── Compute alpha & excess return ───────────────────────────────────
 
         info!(
-            "Computing alpha & excess return (rf={}%, benchmark={:?}).",
+            "Computing alpha & excess return (risk_free_rate={}%{}).",
             config.engine.risk_free_rate,
             if benchmark.is_empty() {
-                "<none>"
+                "".to_owned()
             } else {
-                benchmark.as_str()
+                format!(", benchmark={benchmark:?}")
             }
         );
-        
+
         const SECS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0;
-        let rf = config.engine.risk_free_rate / 100.0;
+        let rf = config.engine.risk_free_rate / 100.;
 
         // Snapshot of the benchmark's equity curve (ts, equity), if any.
-        // When benchmark_from_strategy is true, the benchmark strategy is the
-        // user strategy whose name matches the benchmark field; mark it now.
-        if benchmark_from_strat && !benchmark.is_empty() {
-            for r in &mut results {
-                if r.strategy_name == benchmark {
-                    r.is_benchmark = true;
-                    break;
-                }
-            }
-        }
-        let bench_run = if !benchmark.is_empty() {
-            if benchmark_from_strat {
-                results.iter().find(|r| r.strategy_name == benchmark)
-            } else {
-                results.iter().find(|r| r.strategy_name == benchmark_name)
-            }
-        } else {
-            None
-        };
-        let bench_snapshot: Option<Vec<(i64, f64)>> =
-            bench_run.map(|r| r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect());
+        let bench_run = results
+            .iter()
+            .find(|r| r.is_benchmark);
+
+        let bench_snapshot: Option<Vec<(i64, f64)>> = bench_run
+            .map(|r| r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect());
 
         // Benchmark availability starts when the benchmark can actually be
         // traded (first entry trade), not at the first synthetic equity sample.
         let bench_start_ts = bench_run.and_then(|r| r.trades.iter().map(|t| t.entry_ts).min());
 
-        // Windowed total return: (final_equity - first_equity_at_or_after_ws)
-        //                       / first_equity_at_or_after_ws.
+        // Windowed total return.
         let windowed_return = |curve: &[(i64, f64)], window_start: i64| -> Option<f64> {
             let (_, start_eq) = curve.iter().find(|(t, _)| *t >= window_start).copied()?;
             let (_, end_eq) = curve.last().copied()?;
-            if start_eq <= 0.0 {
+            if start_eq <= 0. {
                 None
             } else {
                 Some((end_eq - start_eq) / start_eq)
@@ -526,14 +505,16 @@ impl Engine {
         for r in &mut results {
             let curve_pts: Vec<(i64, f64)> =
                 r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect();
+
             let curve_start = match curve_pts.first() {
                 Some((t, _)) => *t,
                 None => continue,
             };
+
             let strat_end = curve_pts.last().map(|(t, _)| *t).unwrap_or(curve_start);
 
-            // For delayed listings, the strategy only becomes investable at
-            // first fill; before that, equity is a placeholder flat segment.
+            // For delayed listings, the strategy only becomes investable at first fill.
+            // Before that, equity is a placeholder flat segment.
             let strat_start = r.trades.iter().map(|t| t.entry_ts).min().unwrap_or(curve_start);
 
             // Align with benchmark when available.
@@ -552,8 +533,10 @@ impl Engine {
                 } else {
                     0.0
                 };
+
                 ret - rf_ret
             });
+
             if let Some(v) = excess_return {
                 r.metrics.insert("excess_return".into(), v);
             } else {
@@ -562,17 +545,13 @@ impl Engine {
 
             // Alpha is only meaningful for non-benchmark runs.
             if let Some(bench) = bench_snapshot.as_ref() {
-                let is_bench = if benchmark_from_strat {
-                    r.strategy_name == benchmark
-                } else {
-                    r.strategy_name == benchmark_name
-                };
-                if !is_bench {
+                if !r.is_benchmark {
                     // If benchmark never became investable, alpha is unavailable.
                     let alpha = bench_start_ts.and_then(|_| {
                         strat_ret
                             .and_then(|ret| windowed_return(bench, window_start).map(|b| ret - b))
                     });
+
                     if let Some(v) = alpha {
                         r.metrics.insert("alpha".into(), v);
                     } else {
@@ -581,21 +560,6 @@ impl Engine {
                 } else {
                     // Benchmark strategy always has zero alpha.
                     r.metrics.insert("alpha".into(), 0.0);
-                }
-            }
-        }
-
-        // Ensure the benchmark run is always the first entry in the results.
-        if !benchmark.is_empty() {
-            let bench_name_to_find = if benchmark_from_strat {
-                &benchmark
-            } else {
-                &benchmark_name
-            };
-            if let Some(idx) = results.iter().position(|r| r.strategy_name == *bench_name_to_find) {
-                if idx != 0 {
-                    let bench = results.remove(idx);
-                    results.insert(0, bench);
                 }
             }
         }
@@ -609,12 +573,8 @@ impl Engine {
             return Err(EngineError::Aborted);
         }
 
-        // Surface per-strategy failures: log each one and roll the
-        // experiment status up to "failed" if any strategy errored out.
-        // The benchmark is excluded from the status calculation.
-        let non_bench: Vec<&_> = results.iter().filter(|r| r.strategy_name != BENCHMARK).collect();
-        let n_failed = non_bench.iter().filter(|r| r.error.is_some()).count();
-        let n_non_bench = non_bench.len();
+        // Surface per-strategy failures: log each one and roll the experiment
+        // status up to "failed" if any strategy errored out.
         for r in &results {
             if let Some(err) = &r.error {
                 warn!(strategy = %r.strategy_name, "Strategy failed: {err}");
@@ -622,48 +582,28 @@ impl Engine {
                 continue;
             }
 
-            // Diagnose the two "no fills" cases separately:
-            //
-            // 1. The strategy never produced an order at all — it simply
-            //    did not signal during the backtest window (data range too
-            //    short, indicators never crossed, parameters too tight,
-            //    etc.). `initial_cash` is irrelevant here.
-            //
-            // 2. The strategy produced orders but *every* one was rejected
-            //    or canceled — typically because the initial cash was
-            //    too small to afford a single whole unit of a non-crypto
-            //    instrument, or because the broker ran out of cash. In
-            //    that case we surface the (first) rejection reason and
-            //    point the user at `initial_cash`.
-            let n_filled = r.orders.iter().filter(|o| o.status == "filled").count();
-            if n_filled > 0 {
-                continue;
-            }
+            // Diagnose two cases were no trades were filled.
             if r.orders.is_empty() {
                 let msg = format!(
-                    "Strategy {:?} produced no orders — no buy/sell signal was triggered \
-                     during the backtest window. Try a longer date range, different \
-                     strategy parameters, or different symbols.",
+                    "Strategy {:?} produced no orders. No buy/sell signal was triggered during \
+                     the backtest window.",
                     r.strategy_name
                 );
+
                 warn!(strategy = %r.strategy_name, "{msg}");
                 warnings.push(msg);
-            } else {
-                // All orders rejected/canceled. Use the first non-empty reason as the
-                // headline cause; fall back to a generic message when no reason was recorded.
+            } else if r.orders.iter().all(|o| o.status != OrderStatus::Filled) {
+                // All orders are pending/rejected/canceled. Use the first non-empty
+                // reason as the headline cause or fall back to a generic message when
+                // no reason was recorded.
                 let first_reason = r
                     .orders
                     .iter()
-                    .find(|o| !o.reason.is_empty())
-                    .map(|o| o.reason.as_str())
+                    .find_map(|o| (!o.reason.is_empty()).then_some(o.reason.as_str()))
                     .unwrap_or("see per-order rejection reasons");
 
                 let msg = format!(
-                    "Strategy {:?} produced {} order(s) but none filled ({}). \
-                     If the rejection is about quantity or insufficient funds, the \
-                     initial cash may be too low: non-crypto quantities must be whole \
-                     numbers (crypto allows fractional), so per-symbol allocation must \
-                     be ≥ price. Consider increasing initial_cash.",
+                    "Strategy {:?} produced {} orders but none were filled (first reason: {}).",
                     r.strategy_name,
                     r.orders.len(),
                     first_reason,
@@ -673,36 +613,37 @@ impl Engine {
                 warnings.push(msg);
             }
         }
+
+        let n_failed = results.iter().filter(|r| r.error.is_some()).count();
         let status = if n_failed == 0 {
             ExperimentStatus::Success
-        } else if n_failed >= n_non_bench {
+        } else if n_failed == results.len() {
             ExperimentStatus::Error
         } else {
             ExperimentStatus::Partial
         };
+
         info!(
-            "All strategies completed in {}s ({} result(s), {} failed, status={}).",
+            "All strategies completed in {}s ({} results, {} failed, status={}).",
             finished_at - started_at,
             results.len(),
             n_failed,
             status,
         );
+
         for r in &results {
-            if r.error.is_some() {
-                info!("  ✗ {:<32} FAILED — {}", r.strategy_name, r.error.as_deref().unwrap_or(""));
+            if let Some(error) = r.error.as_deref() {
+                info!("  ✗ {:<32} FAILED — {error}", r.strategy_name);
                 continue;
             }
-            let tr = r.metrics.get("total_return").copied().unwrap_or(0.0);
-            let sh = r.metrics.get("sharpe").copied().unwrap_or(0.0);
-            let alpha = r.metrics.get("alpha").copied();
-            let excess = r.metrics.get("excess_return").copied();
+
             info!(
-                "  • {:<32} total_return={:+.4} sharpe={:+.3} excess={} alpha={}",
+                "  • {:<32} sharpe={:+.3}  total_return={:+.4}  excess={}  alpha={}",
                 r.strategy_name,
-                tr,
-                sh,
-                excess.map(|e| format!("{e:+.4}")).unwrap_or_else(|| "n/a".into()),
-                alpha.map(|a| format!("{a:+.4}")).unwrap_or_else(|| "n/a".into())
+                r.metrics.get("sharpe").map(|e| format!("{e:+.4}")).unwrap_or("n/a".into()),
+                r.metrics.get("total_return").map(|e| format!("{e:+.4}")).unwrap_or("n/a".into()),
+                r.metrics.get("excess_return").map(|e| format!("{e:+.4}")).unwrap_or("n/a".into()),
+                r.metrics.get("alpha").map(|a| format!("{a:+.4}")).unwrap_or("n/a".into())
             );
         }
 
@@ -717,32 +658,34 @@ impl Engine {
             warnings,
         };
 
-        // ── Phase 5: persist ────────────────────────────────────────────
+        // ── Persist results ─────────────────────────────────────────────────
 
-        info!("Phase 5: persisting experiment to DuckDB...");
+        info!("Persisting experiment to the database...");
+
         let pb = verbose.then(|| progress_spinner("Persisting experiment results..."));
-        // Refresh finished_at right before the upsert so it reflects every
-        // bit of work done up to the persist (logging / status roll-up
-        // included), then write everything in a single transaction.
+
         result.finished_at = started_at + started_instant.elapsed().as_secs() as i64;
+
         let persist_start = Instant::now();
         if let Err(e) = self.db.write_experiment(config, &result) {
             warn!("Failed to persist experiment: {e}");
         } else {
             info!("Experiment persisted successfully in {:?}.", persist_start.elapsed());
         }
+
         if let Some(p) = pb {
             p.finish_and_clear();
         }
 
         info!(
-            "Experiment {} finished with status={} ({} strategies, {} warnings) in {:?}.",
+            "Experiment {} finished with status={:?} ({} strategies, {} warnings) in {:?}.",
             experiment_id,
-            result.status,
+            result.status.to_string(),
             result.strategies.len(),
             result.warnings.len(),
             started_instant.elapsed(),
         );
+
         Ok(result)
     }
 
@@ -767,16 +710,20 @@ impl Engine {
                     continue;
                 }
             }
+
             if let Some(e) = end {
                 if ts >= e {
                     continue;
                 }
             }
+
             map.entry(r.symbol).or_default().push(r.bar);
         }
+
         for v in map.values_mut() {
             v.sort_by_key(|b| b.open_ts);
         }
+
         Ok(map)
     }
 }
@@ -884,41 +831,6 @@ fn align_bars(
         out.insert(sym.clone(), row);
     }
     out
-}
-
-/// Load the selected strategies.
-///
-/// Returns `(name, obj, is_custom)` triples. Names present in `overrides` use
-/// the supplied in-memory instance directly. Other names are resolved from the
-/// local strategies' directory.
-fn load_strategies(
-    names: &[String],
-    overrides: &HashMap<String, Py<PyAny>>,
-) -> EngineResult<Vec<(String, Py<PyAny>, bool)>> {
-    let cfg = Config::get()?;
-
-    Python::attach(|py| -> PyResult<_> {
-        let mut out = Vec::with_capacity(names.len());
-        for name in names {
-            let obj = if let Some(o) = overrides.get(name) {
-                o.clone_ref(py)
-            } else {
-                // Resolve a strategy name to a concrete Python object.
-                let path = cfg.data.storage_path.join("strategies").join(format!("{name}.pkl"));
-                load_pickle(py, &path)?
-            };
-
-            // Determine whether it's a built-in/custom strategy by ther class' module
-            let cls = obj.bind(py).get_type();
-            let module: String = cls.getattr("__module__")?.extract()?;
-            let is_custom = !module.starts_with("backtide.");
-
-            out.push((name.clone(), obj, is_custom));
-        }
-
-        Ok(out)
-    })
-    .map_err(|e: PyErr| EngineError::Io(std::io::Error::other(e.to_string())))
 }
 
 fn normalize_builtin_order_quantity(
@@ -1043,26 +955,25 @@ fn run_one_strategy(
     let builtin: Option<BuiltinStrategy> =
         Python::attach(|py| BuiltinStrategy::try_from_py(py, &strategy));
 
-    // Pre-extract per-symbol close arrays once. Pure Rust, dense, ready
-    // to be sliced as `&closes_full[sym][..=bar_index]` per bar. Filtered
+    // Pre-extract per-symbol bar arrays once. Pure Rust, dense, ready
+    // to be sliced as `&bars_full[sym][..=bar_index]` per bar. Filtered
     // to only the symbols this strategy is allowed to trade (see
     // `allowed_symbols` above).
-    let mut closes_full: Vec<(String, Vec<f64>)> = aligned
+    let mut bars_full: Vec<(String, Vec<Bar>)> = aligned
         .iter()
         .filter(|(s, _)| allowed_symbols.contains(s.as_str()))
         .map(|(s, row)| {
-            let v: Vec<f64> =
-                row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.close)).collect();
+            let v: Vec<Bar> = row.iter().map(|b| b.as_ref().cloned().unwrap_or(Bar::NAN)).collect();
             (s.clone(), v)
         })
         .collect();
     // Stable order (matches HashMap iteration would otherwise be random).
-    closes_full.sort_by(|a, b| a.0.cmp(&b.0));
+    bars_full.sort_by(|a, b| a.0.cmp(&b.0));
 
-    // Pre-borrow symbol names so the per-bar `closes_view` construction
+    // Pre-borrow symbol names so the per-bar `bars_view` construction
     // reuses `&str` references instead of cloning `String` on every bar.
     // This eliminates ~n_symbols × n_bars heap allocations on the hot path.
-    let symbol_refs: Vec<&str> = closes_full.iter().map(|(s, _)| s.as_str()).collect();
+    let symbol_refs: Vec<&str> = bars_full.iter().map(|(s, _)| s.as_str()).collect();
 
     // Pre-build per-symbol full DataFrames and per-indicator full series
     // for the *Python* path only. Built-in strategies don't need these and we
@@ -1081,8 +992,6 @@ fn run_one_strategy(
                 HashMap<String, HashMap<String, Vec<Py<PyAny>>>>,
             )> {
                 use crate::config::interface::Config as GlobalConfig;
-                use crate::config::models::dataframe_library::DataFrameLibrary;
-                use crate::utils::python::dict_to_dataframe;
 
                 // Read once: every wrapping decision below uses this.
                 let df_lib = GlobalConfig::get()
@@ -1090,14 +999,11 @@ fn run_one_strategy(
                     .unwrap_or(DataFrameLibrary::Pandas);
 
                 // Closure: wrap a flat Vec<f64> into the configured 1-D
-                // container — np.ndarray, pd.Series or pl.Series. Used
+                // container — pd.Series or pl.Series. Used
                 // for individual indicator output series.
                 let wrap_series = |py: Python<'_>, s: &Vec<f64>| -> PyResult<Py<PyAny>> {
                     let list = PyList::new(py, s)?;
                     let obj: Bound<'_, PyAny> = match df_lib {
-                        DataFrameLibrary::Numpy => {
-                            py.import("numpy")?.call_method1("asarray", (list,))?
-                        },
                         DataFrameLibrary::Pandas => {
                             py.import("pandas")?.call_method1("Series", (list,))?
                         },
@@ -1682,14 +1588,14 @@ fn run_one_strategy(
                 // Fast path: pure-Rust dispatch, no GIL, no DataFrame slicing.
                 // Reuses pre-borrowed `symbol_refs` to avoid cloning Strings
                 // on every bar — a significant allocation saving on long runs.
-                let closes_view: Vec<(String, &[f64])> = symbol_refs
+                let bars_view: Vec<(String, &[Bar])> = symbol_refs
                     .iter()
-                    .zip(closes_full.iter())
+                    .zip(bars_full.iter())
                     .map(|(&s, (_, v))| (s.to_owned(), &v[..=bar_index]))
                     .collect();
                 let inds = IndicatorView::new(indicators, bar_index);
                 let orders = b.decide(
-                    &closes_view,
+                    &bars_view,
                     &inds,
                     &portfolio,
                     &state,
@@ -3068,8 +2974,8 @@ fn accrue_margin_costs(
 mod tests {
     use super::*;
     use crate::backtest::models::experiment_config::*;
-    use crate::strategies::interface::*;
     use crate::data::models::instrument::Instrument;
+    use crate::strategies::interface::*;
 
     fn mk_bar(ts: u64, close: f64) -> Bar {
         Bar {

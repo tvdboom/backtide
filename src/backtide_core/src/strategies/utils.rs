@@ -1,80 +1,75 @@
-use std::collections::HashMap;
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
 use crate::backtest::models::order::{new_order_id, Order};
 use crate::backtest::models::order_type::OrderType;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
+use crate::config::interface::Config;
+use crate::data::models::bar::Bar;
 use crate::data::models::instrument_type::InstrumentType;
+use crate::errors::{EngineError, EngineResult};
+use crate::utils::python::{extract_bars_from_python, load_pickle, extract_2d_from_python};
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use pyo3::types::{PyDict};
+use std::collections::HashMap;
 
-fn extract_close_series_from_python(data: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
-    if let Ok(col) = data.get_item("close") {
-        return col
-            .extract::<Vec<f64>>()
-            .or_else(|_| col.call_method0("to_numpy")?.extract::<Vec<f64>>());
-    }
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine utilities
+// ─────────────────────────────────────────────────────────────────────────────
 
-    let py = data.py();
-    let np = py.import("numpy")?;
-    let arr = np.call_method1("asarray", (data,))?;
-    let ndim: usize = arr.getattr("ndim")?.extract()?;
+/// Load the selected strategies.
+///
+/// Returns `(name, obj, is_custom)` triples. Names present in `overrides` use
+/// the supplied in-memory instance directly. Other names are resolved from the
+/// local strategies' directory.
+pub fn load_strategies(
+    names: &[String],
+    overrides: &HashMap<String, Py<PyAny>>,
+) -> EngineResult<Vec<(String, Py<PyAny>, bool)>> {
+    let cfg = Config::get()?;
 
-    match ndim {
-        1 => arr.extract::<Vec<f64>>(),
-        2 => {
-            let shape: Vec<usize> = arr.getattr("shape")?.extract()?;
-            if shape.get(1).copied().unwrap_or(0) <= 3 {
-                return Err(PyErr::new::<PyValueError, _>(
-                    "strategy data array must include a close column at index 3",
-                ));
-            }
+    Python::attach(|py| -> PyResult<_> {
+        let mut out = Vec::with_capacity(names.len());
+        for name in names {
+            let obj = if let Some(o) = overrides.get(name) {
+                o.clone_ref(py)
+            } else {
+                // Resolve a strategy name to a concrete Python object.
+                let path = cfg.data.storage_path.join("strategies").join(format!("{name}.pkl"));
+                load_pickle(py, &path)?
+            };
 
-            let kwargs = PyDict::new(py);
-            kwargs.set_item("axis", 1)?;
-            arr.call_method("take", (3,), Some(&kwargs))?.extract::<Vec<f64>>()
-        },
-        other => Err(PyErr::new::<PyValueError, _>(format!(
-            "strategy data must be 1-D close data or 2-D OHLCV data, got {other}-D"
-        ))),
-    }
+            // Determine whether it's a built-in/custom strategy by ther class' module
+            let cls = obj.bind(py).get_type();
+            let module: String = cls.getattr("__module__")?.extract()?;
+            let is_custom = !module.starts_with("backtide.");
+
+            out.push((name.clone(), obj, is_custom));
+        }
+
+        Ok(out)
+    })
+    .map_err(|e: PyErr| EngineError::Io(std::io::Error::other(e.to_string())))
 }
 
-fn extract_numeric_series_from_python(data: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
-    data.extract::<Vec<f64>>()
-        .or_else(|_| data.call_method0("to_numpy")?.extract::<Vec<f64>>())
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Interface utilities
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// Extract `(symbol, close_series)` pairs from a Python mapping of symbol -> market data.
-pub fn extract_close_from_python(data: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Vec<f64>)>> {
-    let per_symbol = data.cast::<PyDict>().map_err(|_| {
-        PyErr::new::<PyValueError, _>(
-            "strategy data must be a dict[str, np.ndarray | pd.DataFrame | pl.DataFrame]",
-        )
-    })?;
+/// Extract `(symbol, bars)` pairs from a Python mapping of symbol -> data.
+pub fn extract_strategy_data_from_python(data: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Vec<Bar>)>> {
+    let per_symbol =
+        data.cast::<PyDict>().map_err(|_| PyValueError::new_err("strategy data must be a dict"))?;
 
     let mut out = Vec::with_capacity(per_symbol.len());
-    for (symbol, dataset) in per_symbol.iter() {
-        out.push((symbol.extract::<String>()?, extract_close_series_from_python(&dataset)?));
+    for (symbol, data) in per_symbol.iter() {
+        out.push((symbol.extract::<String>()?, extract_bars_from_python(&data)?));
     }
 
     Ok(out)
 }
 
-fn extract_indicator_series_from_python(data: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
-    if let Ok(list) = data.cast::<PyList>() {
-        let mut out = Vec::with_capacity(list.len());
-        for item in list.iter() {
-            out.push(extract_numeric_series_from_python(&item)?);
-        }
-        return Ok(out);
-    }
-
-    Ok(vec![extract_numeric_series_from_python(data)?])
-}
-
 /// Extract Python indicator payloads into the Rust backing map used by [`IndicatorView`].
-pub fn extract_indicators_from_python(
+pub fn extract_indicator_data_from_python(
     indicators: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<HashMap<String, HashMap<String, Vec<Vec<f64>>>>> {
     let Some(indicators) = indicators else {
@@ -82,25 +77,20 @@ pub fn extract_indicators_from_python(
     };
 
     let outer = indicators.cast::<PyDict>().map_err(|_| {
-        PyErr::new::<PyValueError, _>(
-            "strategy indicators must be a dict[str, dict[str, np.ndarray | list[np.ndarray]] ]",
-        )
+        PyValueError::new_err("strategy indicators must be a dict")
     })?;
 
     let mut out = HashMap::with_capacity(outer.len());
     for (name, per_symbol) in outer.iter() {
         let per_symbol_dict = per_symbol.cast::<PyDict>().map_err(|_| {
-            PyErr::new::<PyValueError, _>(
+            PyValueError::new_err(
                 "strategy indicator payload must map each indicator name to a dict of symbols",
             )
         })?;
 
         let mut by_symbol = HashMap::with_capacity(per_symbol_dict.len());
         for (symbol, value) in per_symbol_dict.iter() {
-            by_symbol.insert(
-                symbol.extract::<String>()?,
-                extract_indicator_series_from_python(&value)?,
-            );
+            by_symbol.insert(symbol.extract::<String>()?, extract_2d_from_python(&value)?);
         }
 
         out.insert(name.extract::<String>()?, by_symbol);
@@ -111,22 +101,19 @@ pub fn extract_indicators_from_python(
 
 /// Cheap, pure-Rust indicator-snapshot view passed to strategies on each
 /// bar. The engine pre-computes every auto-injected indicator into a
-/// `name -> symbol -> Vec<output_series>` map (each output series is
-/// dense, indexed by bar). [`IndicatorView::value`] / [`last`] read the
-/// value(s) at the current bar without touching Python at all, which is
-/// ~100x faster than the previous `arr[-1]` lookup through the GIL.
+/// `name -> symbol -> Vec<series>` map.
 pub struct IndicatorView<'a> {
-    /// Full per-(name, symbol) outputs computed once over the whole timeline.
+    /// Full (name, symbol) computed values over the whole timeline.
     pub data: &'a HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
 
     /// Bar position the strategy currently sees (index into each output series).
-    pub bar_index: usize,
+    pub bar_index: u64,
 }
 
 impl<'a> IndicatorView<'a> {
     pub fn new(
         data: &'a HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
-        bar_index: usize,
+        bar_index: u64,
     ) -> Self {
         Self {
             data,
@@ -134,17 +121,18 @@ impl<'a> IndicatorView<'a> {
         }
     }
 
-    /// Last value(s) of the indicator named `name` for `symbol`. Returns
-    /// one `f64` per output series (e.g. 2 for Bollinger Bands' upper /
-    /// lower bands; 1 for SMA / RSI / ATR). Returns `None` when the
-    /// indicator hasn't been computed for this symbol.
+    /// Last value of the indicator named `name` for `symbol`. Returns one
+    /// `f64` per output series (e.g., 3 for Bollinger Bands). Returns `None`
+    /// when the indicator hasn't been computed for this symbol.
     pub fn last(&self, name: &str, symbol: &str) -> Option<Vec<f64>> {
         let per_sym = self.data.get(name)?;
         let series = per_sym.get(symbol)?;
+
         let mut out = Vec::with_capacity(series.len());
         for s in series {
-            out.push(*s.get(self.bar_index)?);
+            out.push(*s.get(self.bar_index as usize)?);
         }
+
         (!out.is_empty()).then_some(out)
     }
 
@@ -193,7 +181,12 @@ pub fn normalize_builtin_orders_by_instrument_type(
 /// (interpretation depends on the concrete sizer — `EqualWeight` divides
 /// it by `n_positions`, `FixedNotional` ignores it, etc.). Returns `None`
 /// when the sizer would yield a non-positive quantity.
-pub fn buy_with_sizer<S: Sizer>(symbol: &str, sizer: &S, capital: f64, price: f64) -> Option<Order> {
+pub fn buy_with_sizer<S: Sizer>(
+    symbol: &str,
+    sizer: &S,
+    capital: f64,
+    price: f64,
+) -> Option<Order> {
     if price <= 0.0 {
         return None;
     }
@@ -230,7 +223,12 @@ pub fn buy_order(symbol: &str, target_cash: f64, price: f64) -> Option<Order> {
 /// Build a market buy order that allocates `capital / n_positions` worth
 /// of `price` to one slot of an equal-weight portfolio. Uses the
 /// [`EqualWeight`] sizer under the hood.
-pub fn buy_equal_weight(symbol: &str, n_positions: usize, capital: f64, price: f64) -> Option<Order> {
+pub fn buy_equal_weight(
+    symbol: &str,
+    n_positions: usize,
+    capital: f64,
+    price: f64,
+) -> Option<Order> {
     if n_positions == 0 || capital <= 0.0 {
         return None;
     }
@@ -265,12 +263,12 @@ pub fn portfolio_cash(portfolio: &Portfolio) -> f64 {
 }
 
 /// Total portfolio equity: cash + positions marked to their latest close.
-pub fn portfolio_equity(portfolio: &Portfolio, closes: &[(String, &[f64])]) -> f64 {
+pub fn portfolio_equity(portfolio: &Portfolio, bars: &[(String, Vec<Bar>)]) -> f64 {
     let mut equity = portfolio_cash(portfolio);
-    for (sym, c) in closes {
+    for (sym, b) in bars {
         let qty = portfolio.positions.get(sym.as_str()).copied().unwrap_or(0.0);
         if qty.abs() > 1e-12 {
-            let last = *c.last().unwrap_or(&0.0);
+            let last = b.last().map(|bar| bar.close).unwrap_or(0.0);
             equity += qty * last;
         }
     }

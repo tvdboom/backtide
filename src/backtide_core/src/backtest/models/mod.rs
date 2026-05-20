@@ -6,6 +6,7 @@ pub mod experiment_config;
 pub mod experiment_result;
 pub mod experiment_status;
 pub mod order;
+pub mod order_status;
 pub mod order_type;
 pub mod portfolio;
 pub mod state;

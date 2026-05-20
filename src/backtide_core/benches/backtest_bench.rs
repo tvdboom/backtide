@@ -30,15 +30,15 @@ use backtide_core::backtest::indicators::{
 };
 use backtide_core::backtest::models::portfolio::Portfolio;
 use backtide_core::backtest::models::state::State;
+use backtide_core::data::models::bar::Bar;
+use backtide_core::data::models::currency::Currency;
+use backtide_core::data::models::instrument_type::InstrumentType;
 use backtide_core::strategies::interface::{
     AdaptiveRsi, AlphaRsiPro, BollingerMeanReversion, BuiltinStrategy, BuyAndHold, DoubleTop,
     HybridAlphaRsi, IndicatorView, Macd, Momentum, MultiBollingerRotation, RiskAverse, Roc,
     RocRotation, Rsi, Rsrs, RsrsRotation, SmaCrossover, SmaNaive, TripleRsiRotation, TurtleTrading,
     Vcp,
 };
-use backtide_core::data::models::bar::Bar;
-use backtide_core::data::models::currency::Currency;
-use backtide_core::data::models::instrument_type::InstrumentType;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers

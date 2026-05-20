@@ -1,6 +1,7 @@
 use crate::data::models::bar::Bar;
 use crate::indicators::traits::Indicator;
 use crate::indicators::utils::*;
+use crate::utils::python::{to_python, extract_bars_from_python};
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 
@@ -39,12 +40,12 @@ macro_rules! indicator_pymethods {
             ///
             /// Parameters
             /// ----------
-            /// data : np.ndarray | pd.DataFrame | pl.DataFrame
+            /// data : pd.DataFrame | pl.DataFrame
             ///     Historical OHLCV data.
             ///
             /// Returns
             /// -------
-            /// np.ndarray | pd.Series | pl.Series |  pd.DataFrame | pl.DataFrame
+            /// pd.Series | pl.Series |  pd.DataFrame | pl.DataFrame
             ///     The computed values. For multi-output indicators (e.g., upper
             ///     and lower bounds), return a 2d structure.
             fn compute<'py>(
@@ -52,23 +53,8 @@ macro_rules! indicator_pymethods {
                 py: Python<'py>,
                 data: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
-                let (o, h, l, c, v) = extract_ohlcv_from_python(data)?;
-                let bars: Vec<Bar> = (0..c.len())
-                    .map(|i| Bar {
-                        open_ts: 0,
-                        close_ts: 0,
-                        open_ts_exchange: 0,
-                        open: o[i],
-                        high: h[i],
-                        low: l[i],
-                        close: c[i],
-                        adj_close: c[i],
-                        volume: v[i],
-                        n_trades: None,
-                    })
-                    .collect();
-
-                to_backend_type(py, self.compute_inner(&bars))
+                let bars = extract_bars_from_python(data)?;
+                to_python(py, self.compute_inner(&bars))
             }
 
             /// Return a debug representation.
@@ -160,8 +146,7 @@ impl Indicator for AverageDirectionalIndex {
     const DESCRIPTION: &'static str = "Quantifies trend strength (0\u{2013}100) regardless of direction, helping distinguish trending from ranging markets.";
 
     fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
-        let (_o, h, l, _c, _v) = extract_ohlcv_from_bars(bars);
-        let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
+        let (_o, h, l, c, _v) = extract_ohlcv_from_bars(bars);
         let n = c.len();
         let p = self.period;
         if n < 2 {

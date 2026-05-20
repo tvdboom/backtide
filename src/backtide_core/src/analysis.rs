@@ -295,13 +295,14 @@ fn compute_single(
 ///
 /// Returns
 /// -------
-/// np.ndarray | pd.DataFrame | pl.DataFrame
+/// pd.DataFrame | pl.DataFrame
 ///     Dataset with one row per symbol and columns for each metric.
 ///
 /// See Also
 /// --------
 /// backtide.analysis:plot_returns
 /// backtide.analysis:plot_drawdown
+/// backtide.analysis:plot_mae_mfe
 ///
 /// Examples
 /// --------

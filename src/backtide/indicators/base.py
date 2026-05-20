@@ -39,18 +39,18 @@ class BaseIndicator(ABC):
     acronym: str | None = None
 
     @abstractmethod
-    def compute(self, data: np.ndarray | pd.DataFrame | pl.DataFrame) -> Any:
+    def compute(self, data: pd.DataFrame | pl.DataFrame) -> Any:
         """Compute the indicator values.
 
         Parameters
         ----------
-        data : np.array | pd.DataFrame | pl.DataFrame
+        data : pd.DataFrame | pl.DataFrame
             Historical OHLCV data. The type depends on the [`dataframe_library `][dataconfig]
             configuration.
 
         Returns
         -------
-        np.ndarray | pd.Series | pd.DataFrame | pl.Series | pl.DataFrame
+        pd.Series | pd.DataFrame | pl.Series | pl.DataFrame
             Single series for one-output indicators, or 2d for multi-output
             indicators (e.g., Bollinger Bands).
 

@@ -101,8 +101,7 @@ class DataConfig:
 
     dataframe_library : [DataFrameLibrary], default="pandas"
         Which library to use for tabular data exchanged with user code (e.g.,
-        storage query results, indicator inputs/outputs). Choose from: "numpy",
-        "pandas", "polars".
+        storage query results, indicator and strategies inputs/outputs).
 
     See Also
     --------

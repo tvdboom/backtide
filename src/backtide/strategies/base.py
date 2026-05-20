@@ -71,16 +71,16 @@ class BaseStrategy(ABC):
     @abstractmethod
     def evaluate(
         self,
-        data: dict[str, np.ndarray | pd.DataFrame | pl.DataFrame],
+        data: dict[str, pd.DataFrame | pl.DataFrame],
         portfolio: Portfolio,
         state: State,
-        indicators: dict[str, dict[str, np.ndarray | pd.DataFrame | pl.DataFrame]] | None,
+        indicators: dict[str, dict[str, pd.DataFrame | pl.DataFrame]] | None,
     ) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, pd.DataFrame | pl.DataFrame]
             Keys are the experiment's symbols and values are the historical
             OHLCV data available up to the current bar.
 
@@ -90,7 +90,7 @@ class BaseStrategy(ABC):
         state : [State]
             Current simulation state.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, pd.DataFrame | pl.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
             values. `None` if no indicators were selected.

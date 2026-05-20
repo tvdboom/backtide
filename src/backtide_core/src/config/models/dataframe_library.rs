@@ -3,10 +3,10 @@ use pyo3::prelude::*;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
-/// DataFrame library used for returning tabular data.
+/// DataFrame library used by the engine's frontend.
 ///
-/// Which library to use for tabular data exchanged with user code (e.g.,
-/// storage query results, indicator inputs/outputs). Read more in the
+/// Tabular data exchanged with user code (e.g., storage query results,
+/// indicator and strategies inputs/outputs). Read more in the
 /// [user guide][configuration].
 ///
 /// Attributes
@@ -30,7 +30,6 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 )]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 pub enum DataFrameLibrary {
-    Numpy,
     #[default]
     Pandas,
     Polars,
@@ -49,7 +48,6 @@ impl DataFrameLibrary {
     #[getter]
     fn class_name(&self) -> &str {
         match self {
-            DataFrameLibrary::Numpy => "np.ndarray",
             DataFrameLibrary::Pandas => "pd.DataFrame",
             DataFrameLibrary::Polars => "pl.DataFrame",
         }

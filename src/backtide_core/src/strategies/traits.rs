@@ -1,8 +1,9 @@
-use pyo3::{Py, PyAny, PyResult, Python};
 use crate::backtest::models::order::Order;
 use crate::backtest::models::portfolio::Portfolio;
 use crate::backtest::models::state::State;
+use crate::data::models::bar::Bar;
 use crate::strategies::utils::IndicatorView;
+use pyo3::{Py, PyAny, PyResult, Python};
 
 /// Trait for all built-in strategies.
 pub trait Strategy {
@@ -18,10 +19,10 @@ pub trait Strategy {
     /// Decide which orders to place on the current bar.
     fn evaluate_inner(
         &self,
-        _closes: &[(String, &[f64])],
-        _indicators: &IndicatorView<'_>,
-        _portfolio: &Portfolio,
-        _state: &State,
+        bars: &[(String, Vec<Bar>)],
+        portfolio: &Portfolio,
+        state: &State,
+        indicators: &IndicatorView<'_>,
     ) -> Vec<Order>;
 
     /// Indicators that must be computed up-front for this strategy.

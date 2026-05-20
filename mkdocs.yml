@@ -187,6 +187,7 @@ nav:
                 - IndicatorExpConfig: api/models/backtest/indicatorexpconfig.md
                 - Order: api/models/backtest/order.md
                 - OrderRecord: api/models/backtest/orderrecord.md
+                - OrderStatus: api/models/backtest/orderstatus.md
                 - OrderType: api/models/backtest/ordertype.md
                 - Portfolio: api/models/backtest/portfolio.md
                 - PortfolioExpConfig: api/models/backtest/portfolioexpconfig.md
