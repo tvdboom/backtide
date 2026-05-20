@@ -1,7 +1,5 @@
-use crate::backtest::models::order::Order;
-use crate::backtest::models::portfolio::Portfolio;
-use crate::backtest::models::state::State;
-use crate::data::models::bar::Bar;
+use crate::backtest::models::{Order, Portfolio, State};
+use crate::data::models::Bar;
 use crate::strategies::utils::IndicatorView;
 use pyo3::{Py, PyAny, PyResult, Python};
 

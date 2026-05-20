@@ -6,7 +6,6 @@ Description: Indicator functionalities for backtide.
 """
 
 from backtide.core.indicators import (
-    _indicator_deterministic_name,
     AverageDirectionalIndex,
     AverageTrueRange,
     BollingerBands,
@@ -19,6 +18,7 @@ from backtide.core.indicators import (
     StochasticOscillator,
     VolumeWeightedAveragePrice,
     WeightedMovingAverage,
+    _indicator_deterministic_name,
 )
 from backtide.indicators.base import BaseIndicator
 

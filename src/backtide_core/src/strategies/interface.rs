@@ -87,7 +87,7 @@ macro_rules! strategy_pymethods {
                 indicators: Option<Bound<'py, PyAny>>,
             ) -> PyResult<Vec<Order>> {
                 let bars = extract_strategy_data_from_python(data)?;
-                
+
                 let indicator_data = extract_indicator_data_from_python(indicators.as_ref())?;
                 let indicators = IndicatorView::new(&indicator_data, state.bar_index);
 
@@ -2471,14 +2471,13 @@ impl BuiltinStrategy {
     }
 
     /// Pure-Rust dispatch to the underlying [`Strategy::evaluate_inner`].
-    pub fn decide(
+    pub fn evaluate(
         &self,
         bars: &[(String, Vec<Bar>)],
-        indicators: &IndicatorView<'_>,
         portfolio: &Portfolio,
         state: &State,
-        instrument_types: &HashMap<String, InstrumentType>,
-        fallback_instrument_type: InstrumentType,
+        indicators: &IndicatorView<'_>,
+        it_map: &HashMap<String, InstrumentType>,
     ) -> Vec<Order> {
         macro_rules! delegate {
             ($($variant:ident),* $(,)?) => {
@@ -2488,7 +2487,7 @@ impl BuiltinStrategy {
             };
         }
 
-        let raw_orders = delegate!(
+        let mut orders = delegate!(
             AdaptiveRsi,
             AlphaRsiPro,
             BollingerMeanReversion,
@@ -2511,10 +2510,22 @@ impl BuiltinStrategy {
             Vcp,
         );
 
-        normalize_builtin_orders_by_instrument_type(
-            raw_orders,
-            instrument_types,
-            fallback_instrument_type,
-        )
+        // Return rounded quantities for instruments that don't allow fractional shares.
+        orders.retain_mut(|o| {
+            let it = it_map.get(&o.symbol).unwrap();
+
+            if !it.allows_fractional_quantities() && o.quantity.fract() != 0. {
+                let whole_abs = o.quantity.abs().floor();
+                if whole_abs <= 0.0 {
+                    return false; // Exclude orders with qty=0
+                }
+
+                o.quantity = whole_abs.copysign(o.quantity);
+            }
+
+            true
+        });
+
+        orders
     }
 }

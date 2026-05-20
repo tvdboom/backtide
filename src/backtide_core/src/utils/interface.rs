@@ -1,7 +1,7 @@
 //! Python interface for the engine's utilities.
 
 use crate::config::interface::Config;
-use crate::config::models::log_level::LogLevel;
+use crate::config::models::LogLevel;
 use crate::engine::Engine;
 use crate::utils::experiment_log::ExperimentFileLayer;
 use pyo3::prelude::*;
@@ -12,9 +12,6 @@ use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
-// ────────────────────────────────────────────────────────────────────────────
-// Private API
-// ────────────────────────────────────────────────────────────────────────────
 
 /// Process-wide lock to set the tracing.
 static TRACING: OnceLock<()> = OnceLock::new();

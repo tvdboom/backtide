@@ -3,15 +3,9 @@
 //! A complete specification for a single backtest experiment, split into
 //! logical sections that mirror the tabs on the Streamlit experiment page.
 
-use crate::backtest::models::commission_type::CommissionType;
-use crate::backtest::models::conversion_period::ConversionPeriod;
-use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
-use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
-use crate::backtest::models::order_type::OrderType;
-use crate::constants::Positions;
-use crate::data::models::currency::Currency;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
+use crate::backtest::models::*;
+use crate::constants::{Positions, Symbol};
+use crate::data::models::{Currency, InstrumentType, Interval};
 use itertools::Itertools;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::PyValueError;
@@ -20,9 +14,6 @@ use pyo3::types::PyDict;
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-// ────────────────────────────────────────────────────────────────────────────
-// GeneralExpConfig
-// ────────────────────────────────────────────────────────────────────────────
 
 /// General metadata for an experiment.
 ///
@@ -128,7 +119,7 @@ impl GeneralExpConfig {
 #[serde(default)]
 pub struct DataExpConfig {
     pub instrument_type: InstrumentType,
-    pub symbols: Vec<String>,
+    pub symbols: Vec<Symbol>,
     pub full_history: bool,
     pub start_date: Option<String>,
     pub end_date: Option<String>,

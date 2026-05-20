@@ -4,14 +4,7 @@
 
 use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
-use crate::data::models::bar::Bar;
-use crate::data::models::bar_download::BarDownload;
-use crate::data::models::currency::Currency;
-use crate::data::models::exchange::Exchange;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
+use crate::data::models::*;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
 use crate::utils::http::{HttpClient, HttpClientConfig, HttpError};

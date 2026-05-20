@@ -1,21 +1,12 @@
 //! Implementation of data related methods for [`Engine`].
 
-use crate::config::models::triangulation_strategy::TriangulationStrategy;
+use crate::config::models::TriangulationStrategy;
 use crate::constants::{Symbol, CIRCUIT_BREAKER_THRESHOLD, MAX_CONCURRENT_REQUESTS, TASK_TIMEOUT};
 use crate::data::errors::{DataError, DataResult};
-use crate::data::models::currency::Currency;
-use crate::data::models::download_result::DownloadResult;
-use crate::data::models::exchange::Exchange;
-use crate::data::models::forex_pair::ForexPair;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_profile::InstrumentProfile;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
+use crate::data::models::*;
 use crate::engine::Engine;
 use crate::errors::EngineResult;
-use crate::storage::models::bar_series::BarSeries;
-use crate::storage::models::dividend_series::DividendSeries;
+use crate::storage::models::{BarSeries, DividendSeries};
 use crate::utils::progress::{progress_bar, progress_spinner};
 use futures::future::{join_all, try_join_all};
 use futures::stream::{self, StreamExt};
@@ -680,8 +671,8 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::config::interface::Config;
-    use crate::data::models::bar_download::BarDownload;
-    use crate::data::providers::traits::DataProvider;
+    use crate::data::models::BarDownload;
+    use crate::data::providers::DataProvider;
     use crate::engine::EngineCache;
     use crate::storage::duckdb::DuckDb;
     use crate::storage::traits::Storage;
@@ -694,7 +685,7 @@ mod tests {
     struct MockProvider {
         instrument: Instrument,
         range: (u64, u64),
-        bars: Vec<crate::data::models::bar::Bar>,
+        bars: Vec<Bar>,
     }
 
     impl MockProvider {
@@ -893,8 +884,8 @@ mod tests {
     // ── download_bars ───────────────────────────────────────────────────
 
     /// Build a synthetic OHLCV bar at the given timestamp.
-    fn sample_bar(open_ts: u64) -> crate::data::models::bar::Bar {
-        crate::data::models::bar::Bar {
+    fn sample_bar(open_ts: u64) -> Bar {
+        Bar {
             open_ts,
             close_ts: open_ts + 86_399,
             open_ts_exchange: open_ts,
@@ -1116,7 +1107,7 @@ mod tests {
         instruments: HashMap<Symbol, Instrument>,
         ranges: HashMap<Symbol, (u64, u64)>,
         list: Vec<Instrument>,
-        bars: HashMap<Symbol, Vec<crate::data::models::bar::Bar>>,
+        bars: HashMap<Symbol, Vec<Bar>>,
     }
 
     impl MultiProvider {

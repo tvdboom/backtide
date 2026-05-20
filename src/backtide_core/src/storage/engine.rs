@@ -1,18 +1,10 @@
 //! Implementation of storage related methods for [`Engine`].
 
 use crate::constants::BarKey;
-use crate::data::models::exchange::Exchange;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
+use crate::data::models::{Exchange, Instrument, InstrumentType, Interval, Provider};
 use crate::engine::Engine;
 use crate::storage::errors::StorageResult;
-use crate::storage::models::bar_series::BarSeries;
-use crate::storage::models::bar_summary::BarSummary;
-use crate::storage::models::dividend_series::DividendSeries;
-use crate::storage::models::stored_bar::StoredBar;
-use crate::storage::models::stored_dividend::StoredDividend;
+use crate::storage::models::{BarSeries, BarSummary, DividendSeries, StoredBar, StoredDividend};
 use std::collections::HashMap;
 
 impl Engine {
@@ -106,15 +98,10 @@ mod tests {
     use crate::config::interface::Config;
     use crate::constants::Symbol;
     use crate::data::errors::DataResult;
-    use crate::data::models::bar::Bar;
-    use crate::data::models::bar_download::BarDownload;
-    use crate::data::models::dividend::Dividend;
-    use crate::data::models::exchange::Exchange;
-    use crate::data::providers::traits::DataProvider;
+    use crate::data::models::{Bar, BarDownload, Dividend};
+    use crate::data::providers::DataProvider;
     use crate::engine::{Engine, EngineCache};
     use crate::storage::duckdb::DuckDb;
-    use crate::storage::models::bar_series::BarSeries;
-    use crate::storage::models::dividend_series::DividendSeries;
     use crate::storage::traits::Storage;
     use async_trait::async_trait;
     use std::sync::Arc;

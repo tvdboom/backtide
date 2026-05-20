@@ -369,7 +369,8 @@ pub fn compute_statistics<'py>(
         })
         .collect();
 
-    let results: Vec<SymbolStats> = symbol_data
+    // Sort results by symbol for deterministic output.
+    let mut results: Vec<SymbolStats> = symbol_data
         .into_par_iter()
         .filter_map(|sd| {
             compute_single(sd.symbol, &sd.prices, &sd.timestamps, risk_free_rate, periods_per_year)
@@ -377,7 +378,6 @@ pub fn compute_statistics<'py>(
         .collect();
 
     // Sort results by symbol for deterministic output
-    let mut results = results;
     results.sort_by(|a, b| a.symbol.cmp(&b.symbol));
 
     let out = PyDict::new(py);
@@ -457,7 +457,7 @@ mod tests {
         // Annualised return must be positive on a strict uptrend
         assert!(stats.cagr > 0.0);
         // Max drawdown is 0 for a monotonic uptrend
-        assert!((stats.max_dd).abs() < 1e-9);
+        assert!(stats.max_dd.abs() < 1e-9);
     }
 
     // ── compute_single: explicit periods_per_year ───────────────────────

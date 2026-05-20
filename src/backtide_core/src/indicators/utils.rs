@@ -1,4 +1,5 @@
-use crate::data::models::bar::Bar;
+use crate::constants::Symbol;
+use crate::data::models::Bar;
 use crate::errors::EngineResult;
 use crate::indicators::interface::*;
 use crate::indicators::traits::Indicator;
@@ -13,10 +14,6 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Engine utilities
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// One-time resolved compute strategy for an indicator.
 pub enum IndicatorCompute {
@@ -79,7 +76,7 @@ pub fn compute_indicators(
     indicator_objs: &[(String, Py<PyAny>)],
     aligned: &HashMap<String, Vec<Option<Bar>>>,
     pb: Option<&ProgressBar>,
-) -> EngineResult<HashMap<String, HashMap<String, Vec<Vec<f64>>>>> {
+) -> EngineResult<HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>> {
     // Build dense bar slices once, shared across all indicators.
     let symbol_bars: Vec<(&String, Vec<Bar>)> = aligned
         .iter()
@@ -100,7 +97,7 @@ pub fn compute_indicators(
 
     // Parallel over indicators. Builtins also parallelize over symbols
     // internally; Python fallbacks acquire the GIL per symbol and serialize.
-    let results: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = resolved
+    let results: HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> = resolved
         .par_iter()
         .map(|(name, compute)| {
             let per_symbol = match compute {

@@ -2,11 +2,7 @@
 
 use crate::constants::Symbol;
 use crate::data::errors::DataResult;
-use crate::data::models::bar_download::BarDownload;
-use crate::data::models::exchange::Exchange;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
+use crate::data::models::*;
 use async_trait::async_trait;
 
 /// Abstraction over a market-data source.

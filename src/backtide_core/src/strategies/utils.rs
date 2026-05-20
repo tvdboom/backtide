@@ -1,20 +1,16 @@
-use crate::backtest::models::order::{new_order_id, Order};
-use crate::backtest::models::order_type::OrderType;
-use crate::backtest::models::portfolio::Portfolio;
+use crate::backtest::models::{new_order_id, Order, OrderType, Portfolio};
 use crate::backtest::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
 use crate::config::interface::Config;
-use crate::data::models::bar::Bar;
-use crate::data::models::instrument_type::InstrumentType;
+use crate::constants::Symbol;
+use crate::data::models::Bar;
 use crate::errors::{EngineError, EngineResult};
-use crate::utils::python::{extract_bars_from_python, load_pickle, extract_2d_from_python};
+use crate::utils::python::{extract_2d_from_python, extract_bars_from_python, load_pickle};
+use itertools::Itertools;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict};
-use std::collections::HashMap;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Engine utilities
-// ─────────────────────────────────────────────────────────────────────────────
+use pyo3::types::PyDict;
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 
 /// Load the selected strategies.
 ///
@@ -56,7 +52,9 @@ pub fn load_strategies(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Extract `(symbol, bars)` pairs from a Python mapping of symbol -> data.
-pub fn extract_strategy_data_from_python(data: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Vec<Bar>)>> {
+pub fn extract_strategy_data_from_python(
+    data: &Bound<'_, PyAny>,
+) -> PyResult<Vec<(String, Vec<Bar>)>> {
     let per_symbol =
         data.cast::<PyDict>().map_err(|_| PyValueError::new_err("strategy data must be a dict"))?;
 
@@ -71,14 +69,14 @@ pub fn extract_strategy_data_from_python(data: &Bound<'_, PyAny>) -> PyResult<Ve
 /// Extract Python indicator payloads into the Rust backing map used by [`IndicatorView`].
 pub fn extract_indicator_data_from_python(
     indicators: Option<&Bound<'_, PyAny>>,
-) -> PyResult<HashMap<String, HashMap<String, Vec<Vec<f64>>>>> {
+) -> PyResult<HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>> {
     let Some(indicators) = indicators else {
         return Ok(HashMap::new());
     };
 
-    let outer = indicators.cast::<PyDict>().map_err(|_| {
-        PyValueError::new_err("strategy indicators must be a dict")
-    })?;
+    let outer = indicators
+        .cast::<PyDict>()
+        .map_err(|_| PyValueError::new_err("strategy indicators must be a dict"))?;
 
     let mut out = HashMap::with_capacity(outer.len());
     for (name, per_symbol) in outer.iter() {
@@ -104,17 +102,14 @@ pub fn extract_indicator_data_from_python(
 /// `name -> symbol -> Vec<series>` map.
 pub struct IndicatorView<'a> {
     /// Full (name, symbol) computed values over the whole timeline.
-    pub data: &'a HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
+    pub data: &'a HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>,
 
     /// Bar position the strategy currently sees (index into each output series).
     pub bar_index: u64,
 }
 
 impl<'a> IndicatorView<'a> {
-    pub fn new(
-        data: &'a HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
-        bar_index: u64,
-    ) -> Self {
+    pub fn new(data: &'a HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>, bar_index: u64) -> Self {
         Self {
             data,
             bar_index,
@@ -147,32 +142,6 @@ impl<'a> IndicatorView<'a> {
 #[inline]
 pub fn fmt_arg<T: std::fmt::Debug>(v: T) -> String {
     format!("{:?}", v)
-}
-
-pub fn normalize_builtin_orders_by_instrument_type(
-    mut orders: Vec<Order>,
-    instrument_types: &HashMap<String, InstrumentType>,
-    fallback: InstrumentType,
-) -> Vec<Order> {
-    orders.retain_mut(|o| {
-        if matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition) {
-            return true;
-        }
-        if !o.quantity.is_finite() || o.quantity == 0.0 {
-            return false;
-        }
-        let instrument_type = instrument_types.get(&o.symbol).copied().unwrap_or(fallback);
-        if instrument_type.allows_fractional_quantities() {
-            return true;
-        }
-        let whole_abs = o.quantity.abs().floor();
-        if whole_abs <= 0.0 {
-            return false;
-        }
-        o.quantity = whole_abs.copysign(o.quantity);
-        true
-    });
-    orders
 }
 
 /// Build a market buy order whose quantity is determined by `sizer`.
@@ -363,10 +332,12 @@ pub fn rotation_orders(
     portfolio: &Portfolio,
     last_prices: &HashMap<String, f64>,
 ) -> Vec<Order> {
-    use std::collections::HashSet;
+    let sorted: Vec<&(String, f64)> = scores
+        .iter()
+        .filter(|(_, s)| s.is_finite())
+        .sorted_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal))
+        .collect();
 
-    let mut sorted: Vec<&(String, f64)> = scores.iter().filter(|(_, s)| s.is_finite()).collect();
-    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let target: HashSet<String> = sorted.iter().take(top_k).map(|(s, _)| s.clone()).collect();
 
     let mut orders: Vec<Order> = Vec::new();

@@ -11,7 +11,7 @@ import json
 from typing import cast
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
-from backtide.indicators import SimpleMovingAverage
+
 import pandas as pd
 import polars as pl
 import pytest
@@ -30,7 +30,7 @@ from backtide.backtest import (
 )
 from backtide.config import Config, DataConfig, get_config
 from backtide.data import Instrument, InstrumentProfile, InstrumentType, Interval, Provider
-from backtide.indicators import BUILTIN_INDICATORS, BaseIndicator
+from backtide.indicators import BUILTIN_INDICATORS, BaseIndicator, SimpleMovingAverage
 from backtide.indicators.utils import (
     _build_custom_indicator,
     _check_indicator_code,

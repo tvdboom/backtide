@@ -1,7 +1,7 @@
-use crate::data::models::bar::Bar;
+use crate::data::models::Bar;
 use crate::indicators::traits::Indicator;
 use crate::indicators::utils::*;
-use crate::utils::python::{to_python, extract_bars_from_python};
+use crate::utils::python::{extract_bars_from_python, to_python};
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 

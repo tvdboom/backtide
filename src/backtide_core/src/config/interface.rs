@@ -14,14 +14,10 @@
 //! | `[plots]`   | Plot appearance settings                             |
 
 use crate::config::errors::{ConfigError, ConfigResult};
-use crate::config::models::dataframe_library::DataFrameLibrary;
-use crate::config::models::log_level::LogLevel;
-use crate::config::models::triangulation_strategy::TriangulationStrategy;
+use crate::config::models::{DataFrameLibrary, LogLevel, TriangulationStrategy};
 use crate::config::utils::{fetch_config, parse_config};
 use crate::constants::DEFAULT_STORAGE_PATH;
-use crate::data::models::currency::Currency;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::provider::Provider;
+use crate::data::models::{Currency, InstrumentType, Provider};
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;

@@ -1,16 +1,8 @@
 use crate::data::interface::{
     download_bars, fetch_instruments, list_instruments, resolve_profiles,
 };
-use crate::data::models::bar::Bar;
-use crate::data::models::country::Country;
-use crate::data::models::currency::Currency;
-use crate::data::models::download_result::DownloadResult;
-use crate::data::models::exchange::Exchange;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_profile::InstrumentProfile;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use models::provider::Provider;
+use crate::data::models::*;
+use models::Provider;
 use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 

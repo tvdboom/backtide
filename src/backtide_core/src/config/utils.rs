@@ -1,8 +1,7 @@
 use crate::config::errors::{ConfigError, ConfigResult};
 use crate::config::interface::Config;
 use crate::constants::CONFIG_FILE_NAME;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::provider::Provider;
+use crate::data::models::{InstrumentType, Provider};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

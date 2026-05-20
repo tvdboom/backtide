@@ -5,45 +5,31 @@
 
 use crate::backtest::fx::FxTable;
 use crate::backtest::interface::check_abort;
-use crate::backtest::models::commission_type::CommissionType;
-use crate::backtest::models::empty_bar_policy::EmptyBarPolicy;
-use crate::backtest::models::experiment_config::{ExperimentConfig, ExperimentConfigInner};
-use crate::backtest::models::experiment_result::*;
-use crate::backtest::models::experiment_status::ExperimentStatus;
-use crate::backtest::models::order::{new_order_id, Order};
-use crate::backtest::models::order_type::OrderType;
-use crate::backtest::models::portfolio::Portfolio;
-use crate::backtest::models::state::State;
-use crate::constants::{Symbol, BENCHMARK};
-use crate::data::models::bar::Bar;
-use crate::data::models::currency::Currency;
-use crate::data::models::instrument_profile::InstrumentProfile;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
+use crate::backtest::models::*;
+use crate::backtest::utils::*;
+use crate::config::interface::Config;
+use crate::config::models::DataFrameLibrary;
+use crate::constants::{Cash, Positions, Symbol, BENCHMARK};
+use crate::data::models::*;
 use crate::engine::Engine;
 use crate::errors::{EngineError, EngineResult};
 use crate::indicators::interface::_indicator_deterministic_name;
 use crate::indicators::utils::compute_indicators;
 use crate::strategies::interface::{BuiltinStrategy, BuyAndHold};
+use crate::strategies::utils::load_strategies;
 use crate::utils::experiment_log::{EXPERIMENT_SPAN, LOG_PATH_FIELD};
 use crate::utils::progress::{progress_bar, progress_spinner};
 use crate::utils::python::{dict_to_dataframe, load_pickle};
+use itertools::Itertools;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use pyo3::Py;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn, Span};
 use uuid::Uuid;
-use crate::config::models::dataframe_library::DataFrameLibrary;
-use crate::strategies::utils::load_strategies;
-// ────────────────────────────────────────────────────────────────────────────
-// Public interface
-// ────────────────────────────────────────────────────────────────────────────
 
 impl Engine {
     /// Run a single backtest experiment end-to-end.
@@ -117,14 +103,10 @@ impl Engine {
         // just like any user symbol. If the benchmark matches a strategy name, it refers
         // to that strategy, no extra download needed. Otherwise, treat it as a symbol.
         let benchmark = config.strategy.benchmark.as_deref().unwrap_or("").trim().to_owned();
-        let benchmark_from_strat =
-            !benchmark.is_empty() && config.strategy.strategies.iter().any(|s| s == &benchmark);
+        let benchmark_from_strat = config.strategy.strategies.iter().any(|s| s == &benchmark);
 
-        if !benchmark.is_empty()
-            && !benchmark_from_strat
-            && !symbols.iter().any(|s| s == &benchmark)
-        {
-            info!("Folding benchmark symbol {:?} into symbol list", benchmark);
+        if !benchmark_from_strat && !symbols.iter().any(|s| s == &benchmark) {
+            info!("Folding benchmark symbol {benchmark:?} into symbol list");
             symbols.push(benchmark.clone());
         }
 
@@ -149,7 +131,7 @@ impl Engine {
         // Check that the starting positions are valid
         for (symbol, qty) in &config.portfolio.starting_positions {
             if let Some(it) = symbol_it_map.get(symbol) {
-                if let Some(reason) = validate_position(*qty, *it) {
+                if let Some(reason) = validate_qty(*qty, *it) {
                     return Err(EngineError::Experiment(format!(
                         "Invalid starting position for symbol {symbol}: {reason}, got {qty}."
                     )));
@@ -267,8 +249,8 @@ impl Engine {
             };
 
             // Extract the base/quote identifiers.
-            let from_str = match leg.instrument.base.as_deref() {
-                Some(s) if !s.is_empty() => s,
+            let (from_str, to_str) = match leg.instrument.base.as_deref() {
+                Some(s) if !s.is_empty() => (s, &leg.instrument.quote),
                 _ => {
                     debug!(
                         symbol=%leg.instrument.symbol,
@@ -277,8 +259,6 @@ impl Engine {
                     continue;
                 },
             };
-
-            let to_str = &leg.instrument.quote;
             let series: Vec<(i64, f64)> =
                 bars.iter().map(|b| (b.open_ts as i64, b.close)).collect();
 
@@ -306,7 +286,6 @@ impl Engine {
 
         info!("Loading {} strategies...", config.strategy.strategies.len());
 
-        let benchmark_name = BENCHMARK.to_owned();
         let mut strategy_objs = load_strategies(&config.strategy.strategies, strategy_overrides)?;
 
         // Inject the benchmark strategy when benchmark_from_strat=false.
@@ -316,7 +295,7 @@ impl Engine {
             }) {
                 Ok(obj) => {
                     info!("Injected benchmark strategy BuyAndHold({}).", benchmark);
-                    strategy_objs.push((benchmark_name.clone(), obj, false));
+                    strategy_objs.push((BENCHMARK.to_owned(), obj, false));
                 },
                 Err(e) => {
                     warn!("Failed to instantiate benchmark: {e}");
@@ -418,6 +397,16 @@ impl Engine {
 
         info!("Dispatching strategies: {} built-in and {} custom.", builtin.len(), custom.len());
 
+        // Pre-build the Python data/indicator cache. Benchmark custom strategies
+        // receive `None` and fall back to their own copy inside `run_one_strategy`.
+        let py_cache = if custom.iter().any(|(n, _, _)| n != &benchmark) {
+            Python::attach(|py| build_py_cache(py, &aligned, &indicators, &config.data.symbols))
+                .map_err(|e| warn!("Failed to pre-build shared strategy cache: {e}"))
+                .ok()
+        } else {
+            None
+        };
+
         // Capture the experiment span so each rayon worker can re-enter it.
         let par_span = Span::current();
 
@@ -436,6 +425,7 @@ impl Engine {
                     &profiles,
                     &all_ts,
                     &fx,
+                    py_cache.as_ref(),
                 );
 
                 info!(
@@ -480,12 +470,10 @@ impl Engine {
         let rf = config.engine.risk_free_rate / 100.;
 
         // Snapshot of the benchmark's equity curve (ts, equity), if any.
-        let bench_run = results
-            .iter()
-            .find(|r| r.is_benchmark);
+        let bench_run = results.iter().find(|r| r.is_benchmark);
 
-        let bench_snapshot: Option<Vec<(i64, f64)>> = bench_run
-            .map(|r| r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect());
+        let bench_snapshot: Option<Vec<(i64, f64)>> =
+            bench_run.map(|r| r.equity_curve.iter().map(|s| (s.timestamp, s.equity)).collect());
 
         // Benchmark availability starts when the benchmark can actually be
         // traded (first entry trade), not at the first synthetic equity sample.
@@ -729,134 +717,77 @@ impl Engine {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Utility functions
+// Python data-cache helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Serialize `config` and write it to `/experiments/<experiment_id>/config.toml`.
-fn persist_experiment_config(path: &PathBuf, config: &ExperimentConfig) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(path)
-        .map_err(|e| format!("create_dir_all({}): {e}", path.display()))?;
+/// Pre-built per-symbol DataFrame cache (symbol → full DataFrame).
+type DataCache = HashMap<String, Py<PyAny>>;
 
-    let inner = ExperimentConfigInner {
-        general: config.general.clone(),
-        data: config.data.clone(),
-        portfolio: config.portfolio.clone(),
-        strategy: config.strategy.clone(),
-        indicators: config.indicators.clone(),
-        exchange: config.exchange.clone(),
-        engine: config.engine.clone(),
+/// Pre-built per-indicator cache (indicator → symbol → list of Series).
+type IndCache = HashMap<String, HashMap<String, Vec<Py<PyAny>>>>;
+
+/// Build a Python data/indicator cache under the GIL.
+fn build_py_cache(
+    py: Python<'_>,
+    aligned: &HashMap<Symbol, Vec<Option<Bar>>>,
+    indicators: &HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>,
+    symbols: &Vec<Symbol>,
+) -> PyResult<(DataCache, IndCache)> {
+    let cfg = Config::get()?;
+
+    let wrap_series = |py: Python<'_>, s: &Vec<f64>| -> PyResult<Py<PyAny>> {
+        let list = PyList::new(py, s)?;
+        let obj: Bound<'_, PyAny> = match cfg.data.dataframe_library {
+            DataFrameLibrary::Pandas => py.import("pandas")?.call_method1("Series", (list,))?,
+            DataFrameLibrary::Polars => py.import("polars")?.call_method1("Series", (list,))?,
+        };
+        Ok(obj.unbind())
     };
-    let toml_str = toml::to_string_pretty(&inner).map_err(|e| format!("toml serialize: {e}"))?;
 
-    let path = path.join("config.toml");
-    std::fs::write(&path, toml_str).map_err(|e| format!("write {}: {e}", path.display()))?;
-    Ok(path)
-}
-
-/// Check whether a position is valid.
-fn validate_position(qty: f64, it: InstrumentType) -> Option<String> {
-    if !qty.is_finite() || !qty.is_nan() || qty < 0. {
-        return Some("quantity must be a finite positive number".to_owned());
+    let mut data_full: DataCache = HashMap::with_capacity(aligned.len());
+    for (sym, row) in aligned {
+        if !symbols.contains(sym) {
+            continue;
+        }
+        let dict = PyDict::new(py);
+        dict.set_item(
+            "open",
+            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.open)))?,
+        )?;
+        dict.set_item(
+            "high",
+            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.high)))?,
+        )?;
+        dict.set_item(
+            "low",
+            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.low)))?,
+        )?;
+        dict.set_item(
+            "close",
+            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.close)))?,
+        )?;
+        dict.set_item(
+            "volume",
+            PyList::new(py, row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.volume)))?,
+        )?;
+        let df = dict_to_dataframe(py, &dict)?;
+        data_full.insert(sym.clone(), df.unbind());
     }
 
-    if !it.allows_fractional_quantities() && qty.fract() != 0. {
-        return Some(format!("fractional quantities aren't allowed for instrument type {it}"));
-    }
-
-    None
-}
-
-/// Parse a date in ISO 8601 format (YYYY-MM-DD) into Unix seconds.
-fn iso_to_ts(s: &str) -> Option<u64> {
-    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
-        .ok()
-        .and_then(|d| d.and_hms_opt(0, 0, 0))
-        .map(|dt| dt.and_utc().timestamp() as u64)
-}
-
-/// Align bars to a master timeline using the configured empty-bar policy.
-///
-/// Uses binary search on the (already-sorted) per-symbol bar vectors.
-fn align_bars(
-    bars: &HashMap<String, Vec<Bar>>,
-    timeline: &[i64],
-    policy: EmptyBarPolicy,
-) -> HashMap<String, Vec<Option<Bar>>> {
-    let mut out: HashMap<String, Vec<Option<Bar>>> = HashMap::with_capacity(bars.len());
-    for (sym, sym_bars) in bars {
-        let mut row: Vec<Option<Bar>> = Vec::with_capacity(timeline.len());
-        let mut last: Option<Bar> = None;
-        for ts in timeline {
-            // Binary search on the sorted bar slice (sorted by open_ts in load_bars).
-            let found = sym_bars
-                .binary_search_by_key(&(*ts as u64), |b| b.open_ts)
-                .ok()
-                .map(|i| &sym_bars[i]);
-
-            match found {
-                Some(b) => {
-                    last = Some(b.clone());
-                    row.push(Some(b.clone()));
-                },
-                None => match policy {
-                    EmptyBarPolicy::Skip => row.push(None),
-                    EmptyBarPolicy::ForwardFill => {
-                        if let Some(b) = &last {
-                            let mut filled = b.clone();
-                            filled.open_ts = *ts as u64;
-                            filled.close_ts = *ts as u64;
-                            filled.volume = 0.0;
-                            row.push(Some(filled));
-                        } else {
-                            row.push(None);
-                        }
-                    },
-                    EmptyBarPolicy::FillWithNaN => {
-                        row.push(Some(Bar {
-                            open_ts: *ts as u64,
-                            close_ts: *ts as u64,
-                            open_ts_exchange: *ts as u64,
-                            open: f64::NAN,
-                            high: f64::NAN,
-                            low: f64::NAN,
-                            close: f64::NAN,
-                            adj_close: f64::NAN,
-                            volume: f64::NAN,
-                            n_trades: None,
-                        }));
-                    },
-                },
+    let mut ind_full: IndCache = HashMap::with_capacity(indicators.len());
+    for (ind_name, per_sym) in indicators {
+        let mut by_sym: HashMap<Symbol, Vec<Py<PyAny>>> = HashMap::with_capacity(per_sym.len());
+        for (sym, series) in per_sym {
+            let mut arrs: Vec<Py<PyAny>> = Vec::with_capacity(series.len());
+            for s in series {
+                arrs.push(wrap_series(py, s)?);
             }
+            by_sym.insert(sym.clone(), arrs);
         }
-        out.insert(sym.clone(), row);
+        ind_full.insert(ind_name.clone(), by_sym);
     }
-    out
-}
 
-fn normalize_builtin_order_quantity(
-    order: &mut Order,
-    instrument_type: InstrumentType,
-) -> Option<String> {
-    if matches!(order.order_type, OrderType::Cancel | OrderType::SettlePosition) {
-        return None;
-    }
-    if !order.quantity.is_finite() {
-        return Some(format!("quantity for {} must be finite", order.symbol));
-    }
-    if order.quantity == 0.0 {
-        return Some(format!("quantity for {} must be non-zero", order.symbol));
-    }
-    if !instrument_type.allows_fractional_quantities() && !is_whole_quantity(order.quantity) {
-        let whole_abs = order.quantity.abs().floor();
-        if whole_abs <= 0.0 {
-            return Some(format!(
-                "quantity for {} is less than one whole {instrument_type} unit",
-                order.symbol
-            ));
-        }
-        order.quantity = whole_abs.copysign(order.quantity);
-    }
-    None
+    Ok((data_full, ind_full))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -868,222 +799,123 @@ fn run_one_strategy(
     name: &str,
     strategy: Py<PyAny>,
     cfg: &ExperimentConfig,
-    aligned: &HashMap<String, Vec<Option<Bar>>>,
-    indicators: &HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
+    aligned: &HashMap<Symbol, Vec<Option<Bar>>>,
+    indicators: &HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>,
     profiles: &[InstrumentProfile],
     timeline: &[i64],
     fx: &FxTable,
+    py_cache: Option<&(DataCache, IndCache)>,
 ) -> RunResult {
-    let symbols: Vec<String> = cfg.data.symbols.clone();
-    let _ = &symbols;
-    let total_bars: usize = aligned.values().map(|v| v.len()).next().unwrap_or(0);
-    let warmup = cfg.engine.warmup_period as usize;
+    let benchmark = cfg.strategy.benchmark.as_deref().unwrap_or("").trim();
+    let is_benchmark_run = name == benchmark || name == BENCHMARK;
 
-    // Each strategy may only "see" the symbols the user explicitly
-    // selected in the data tab. The benchmark symbol is folded into the
-    // global symbol list (and downloaded / aligned) so its bars are
-    // available for the auto-injected benchmark strategy and so
-    // the engine can value any benchmark-only positions, but it must
-    // *not* be visible to user strategies — otherwise SMA Crossover &
-    // friends would silently trade the benchmark too. The auto-injected
-    // benchmark strategy is detected by name and gets a closes view
-    // restricted to just the benchmark symbol.
-    let benchmark = cfg.strategy.benchmark.as_deref().unwrap_or("").trim().to_owned();
-    let is_benchmark_run = !benchmark.is_empty() && name == BENCHMARK;
-    let allowed_symbols: HashSet<String> = if is_benchmark_run {
-        std::iter::once(benchmark.clone()).collect()
+    // The benchmark strategy gets a view restricted to just the benchmark symbol.
+    let symbols: HashSet<&str> = if is_benchmark_run {
+        std::iter::once(benchmark).collect()
     } else {
-        symbols.iter().cloned().collect()
+        cfg.data.symbols.iter().map(String::as_str).collect()
     };
 
-    // First fatal error encountered during the run, if any. Recorded on
-    // the result so the UI can flag the strategy as failed and surface
-    // the message — the rest of the experiment continues.
+    // First fatal error encountered during the run.
     let mut run_error: Option<String> = None;
 
     // Initial portfolio: all initial cash in base currency.
     let base_ccy = cfg.portfolio.base_currency;
     let base_ccy_str = base_ccy.to_string();
-    let mut cash: HashMap<Currency, f64> = HashMap::new();
-    cash.insert(base_ccy, cfg.portfolio.initial_cash as f64);
+    let mut cash: Cash = Cash::from([(base_ccy, cfg.portfolio.initial_cash as f64)]);
+
     // The benchmark strategy always starts with a clean slate (no pre-existing
     // holdings) so its return reflects a pure buy-and-hold from cash.
-    let mut positions: HashMap<String, f64> = if is_benchmark_run {
-        HashMap::new()
+    let mut positions: Positions = if is_benchmark_run {
+        Positions::new()
     } else {
         cfg.portfolio.starting_positions.clone()
     };
+
     let mut open_orders: Vec<Order> = Vec::new();
+
     // Per-order extremes for trailing stops: (running_high, running_low)
     // observed since the order was first seen. Cleared on fill / cancel.
     let mut trail_state: HashMap<String, (f64, f64)> = HashMap::new();
 
+    let total_bars: usize = aligned.values().map(|v| v.len()).next().unwrap_or(0);
     let mut equity_curve: Vec<EquitySample> = Vec::with_capacity(total_bars);
     let mut order_records: Vec<OrderRecord> = Vec::new();
     let mut closed_trades: Vec<Trade> = Vec::new();
+
     // Open trade tracker per symbol: (entry_ts, qty_remaining, entry_price)
-    let mut open_trades: HashMap<String, (i64, f64, f64)> = HashMap::new();
+    let mut open_trades: HashMap<Symbol, (i64, f64, f64)> = HashMap::new();
     let mut margin_limit_warnings: HashSet<String> = HashSet::new();
 
     let mut peak_equity = cfg.portfolio.initial_cash as f64;
 
-    // ── Currency-conversion state ──────────────────────────────────────
-    //
-    // Tracks the boundary used by `EndOfPeriod` (last seen day/week/...
-    // bucket) and the bar counter used by `CustomInterval`.
-    use crate::backtest::models::currency_conversion_mode::CurrencyConversionMode;
-    let conv_mode = cfg.exchange.conversion_mode;
-    let conv_threshold = cfg.exchange.conversion_threshold.unwrap_or(0.0);
-    let conv_period = cfg.exchange.conversion_period;
-    let conv_interval = cfg.exchange.conversion_interval.unwrap_or(0) as usize;
+    // Tracks the boundary used by `EndOfPeriod` and the counter used by `CustomInterval`.
     let mut last_period_bucket: Option<i64> = None;
     let mut bars_since_conv: usize = 0;
 
     // Pre-compute instrument quote currency lookup.
-    let quote_ccy: HashMap<String, String> = profiles
+    let quote_ccy: HashMap<&str, &str> = profiles
         .iter()
-        .map(|p| (p.instrument.symbol.clone(), p.instrument.quote.clone()))
+        .map(|p| (p.instrument.symbol.as_str(), p.instrument.quote.as_str()))
         .collect();
-    let instrument_types = profile_instrument_types(profiles);
 
-    // Try to take a Rust-only snapshot of the strategy. If this succeeds
-    // (every built-in strategy succeeds), the bar loop runs entirely
-    // without the GIL — no Python::attach per bar, no DataFrame/numpy
-    // slicing, no Vec<f64> round-trips. For multi-year backtests this
-    // turns ~20 s runs into ~50 ms ones. Custom (Python-defined)
-    // strategies fall back to the Python evaluate dispatch below.
+    // Create mapping from symbol to instrument type.
+    let it_map: HashMap<&str, InstrumentType> = profiles
+        .iter()
+        .map(|p| (p.instrument.symbol.as_str(), p.instrument.instrument_type))
+        .collect();
+
+    // Try to take a Rust-only snapshot of the strategy.
     let builtin: Option<BuiltinStrategy> =
         Python::attach(|py| BuiltinStrategy::try_from_py(py, &strategy));
 
-    // Pre-extract per-symbol bar arrays once. Pure Rust, dense, ready
-    // to be sliced as `&bars_full[sym][..=bar_index]` per bar. Filtered
-    // to only the symbols this strategy is allowed to trade (see
-    // `allowed_symbols` above).
-    let mut bars_full: Vec<(String, Vec<Bar>)> = aligned
+    // Pre-extract per-symbol bar arrays once.
+    let mut bars_full: Vec<(&str, Vec<Bar>)> = aligned
         .iter()
-        .filter(|(s, _)| allowed_symbols.contains(s.as_str()))
-        .map(|(s, row)| {
-            let v: Vec<Bar> = row.iter().map(|b| b.as_ref().cloned().unwrap_or(Bar::NAN)).collect();
-            (s.clone(), v)
-        })
+        .filter(|(s, _)| symbols.contains(s.as_str()))
+        .map(|(s, row)| (s.as_str(), row.iter().map(|b| b.unwrap_or(Bar::NAN)).collect()))
+        .sorted_by(|a, b| a.0.cmp(&b.0))
         .collect();
-    // Stable order (matches HashMap iteration would otherwise be random).
-    bars_full.sort_by(|a, b| a.0.cmp(&b.0));
 
-    // Pre-borrow symbol names so the per-bar `bars_view` construction
-    // reuses `&str` references instead of cloning `String` on every bar.
-    // This eliminates ~n_symbols × n_bars heap allocations on the hot path.
-    let symbol_refs: Vec<&str> = bars_full.iter().map(|(s, _)| s.as_str()).collect();
-
-    // Pre-build per-symbol full DataFrames and per-indicator full series
-    // for the *Python* path only. Built-in strategies don't need these and we
-    // skip the GIL-heavy pre-build entirely. For custom strategies this turns
-    // the loop from O(n^2) Python work into O(n) cheap slice views.
+    // Resolve per-symbol DataFrames and per-indicator Series for the Python
+    // evaluate path. Built-in strategies skip this entirely. Non-benchmark
+    // custom strategies receive a pre-built cache that was constructed once
+    // before the strategy loop; benchmark strategies (rare custom case) fall
+    // back to building their own filtered copy.
     //
-    // The container types follow the user's `cfg.data.dataframe_library`
-    // setting (numpy / pandas / polars) so custom strategies receive
-    // exactly the data shape they configured.
-    let (cached_data, cached_indicators) = if builtin.is_some() {
-        (HashMap::new(), HashMap::new())
-    } else {
-        Python::attach(
-            |py| -> PyResult<(
-                HashMap<String, Py<PyAny>>,
-                HashMap<String, HashMap<String, Vec<Py<PyAny>>>>,
-            )> {
-                use crate::config::interface::Config as GlobalConfig;
-
-                // Read once: every wrapping decision below uses this.
-                let df_lib = GlobalConfig::get()
-                    .map(|c| c.data.dataframe_library)
-                    .unwrap_or(DataFrameLibrary::Pandas);
-
-                // Closure: wrap a flat Vec<f64> into the configured 1-D
-                // container — pd.Series or pl.Series. Used
-                // for individual indicator output series.
-                let wrap_series = |py: Python<'_>, s: &Vec<f64>| -> PyResult<Py<PyAny>> {
-                    let list = PyList::new(py, s)?;
-                    let obj: Bound<'_, PyAny> = match df_lib {
-                        DataFrameLibrary::Pandas => {
-                            py.import("pandas")?.call_method1("Series", (list,))?
-                        },
-                        DataFrameLibrary::Polars => {
-                            py.import("polars")?.call_method1("Series", (list,))?
-                        },
-                    };
-                    Ok(obj.unbind())
-                };
-
-                let mut data_full: HashMap<String, Py<PyAny>> =
-                    HashMap::with_capacity(aligned.len());
-                for (sym, row) in aligned {
-                    if !allowed_symbols.contains(sym.as_str()) {
-                        continue;
-                    }
-                    let dict = PyDict::new(py);
-                    dict.set_item(
-                        "open",
-                        PyList::new(
-                            py,
-                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.open)),
-                        )?,
-                    )?;
-                    dict.set_item(
-                        "high",
-                        PyList::new(
-                            py,
-                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.high)),
-                        )?,
-                    )?;
-                    dict.set_item(
-                        "low",
-                        PyList::new(
-                            py,
-                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.low)),
-                        )?,
-                    )?;
-                    dict.set_item(
-                        "close",
-                        PyList::new(
-                            py,
-                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.close)),
-                        )?,
-                    )?;
-                    dict.set_item(
-                        "volume",
-                        PyList::new(
-                            py,
-                            row.iter().map(|b| b.as_ref().map_or(f64::NAN, |x| x.volume)),
-                        )?,
-                    )?;
-                    let df = dict_to_dataframe(py, &dict)?;
-                    data_full.insert(sym.clone(), df.unbind());
-                }
-
-                let mut ind_full: HashMap<String, HashMap<String, Vec<Py<PyAny>>>> =
-                    HashMap::with_capacity(indicators.len());
-                for (name, per_sym) in indicators {
-                    let mut by_sym: HashMap<String, Vec<Py<PyAny>>> =
-                        HashMap::with_capacity(per_sym.len());
-                    for (sym, series) in per_sym {
-                        let mut arrs: Vec<Py<PyAny>> = Vec::with_capacity(series.len());
-                        for s in series {
-                            arrs.push(wrap_series(py, s)?);
-                        }
-                        by_sym.insert(sym.clone(), arrs);
-                    }
-                    ind_full.insert(name.clone(), by_sym);
-                }
-                Ok((data_full, ind_full))
+    // We hold references (`&DataCache`, `&IndCache`) to avoid cloning
+    // Python object maps: `_empty_*` provides the view for built-ins and
+    // `_fresh` owns the on-demand build for the benchmark-custom case.
+    let _empty_data: DataCache = HashMap::new();
+    let _empty_ind: IndCache = HashMap::new();
+    let _fresh: Option<(DataCache, IndCache)> = if builtin.is_none() && py_cache.is_none() {
+        Some(Python::attach(|py| build_py_cache(py, aligned, indicators, &symbols)).unwrap_or_else(
+            |e| {
+                let msg = format!("Failed to pre-build strategy view: {e}");
+                warn!(strategy=%name, "{msg}");
+                run_error.get_or_insert(msg);
+                (HashMap::new(), HashMap::new())
             },
-        )
-        .unwrap_or_else(|e| {
-            let msg = format!("Failed to pre-build strategy view: {e}");
-            warn!(strategy=%name, "{msg}");
-            run_error.get_or_insert(msg);
-            (HashMap::new(), HashMap::new())
-        })
+        ))
+    } else {
+        None
     };
+
+    let cached_data: &DataCache;
+    let cached_indicators: &IndCache;
+    if builtin.is_some() {
+        cached_data = &_empty_data;
+        cached_indicators = &_empty_ind;
+    } else if let Some((d, i)) = py_cache {
+        cached_data = d;
+        cached_indicators = i;
+    } else if let Some((d, i)) = &_fresh {
+        cached_data = d;
+        cached_indicators = i;
+    } else {
+        cached_data = &_empty_data;
+        cached_indicators = &_empty_ind;
+    }
 
     for bar_index in 0..total_bars {
         // Check for abort periodically. An atomic Relaxed load is essentially
@@ -1281,11 +1113,8 @@ fn run_one_strategy(
                         return Ok(());
                     }
                     let abs_new = new_qty.abs();
-                    let instrument_type = instrument_type_for_symbol(
-                        &symbol,
-                        &instrument_types,
-                        cfg.data.instrument_type,
-                    );
+                    let instrument_type =
+                        instrument_type_for_symbol(&symbol, &it_map, cfg.data.instrument_type);
                     let mut abs_after = abs_new;
                     if !instrument_type.allows_fractional_quantities() {
                         abs_after = abs_after.floor();
@@ -1401,11 +1230,8 @@ fn run_one_strategy(
                     } else {
                         0.0
                     };
-                    let instrument_type = instrument_type_for_symbol(
-                        &symbol,
-                        &instrument_types,
-                        cfg.data.instrument_type,
-                    );
+                    let instrument_type =
+                        instrument_type_for_symbol(&symbol, &it_map, cfg.data.instrument_type);
                     if !instrument_type.allows_fractional_quantities() {
                         max_qty = max_qty.floor();
                     }
@@ -1522,7 +1348,7 @@ fn run_one_strategy(
             order_records.push(OrderRecord {
                 order: order.clone(),
                 timestamp: ts,
-                status: "filled".into(),
+                status: OrderStatus::Filled,
                 fill_price: Some(fill_px),
                 reason: fill_reason,
                 commission,
@@ -1542,15 +1368,21 @@ fn run_one_strategy(
         //                           (in base ccy units) every bar.
         //   * EndOfPeriod         → sweep when day/week/month/year flips.
         //   * CustomInterval      → sweep every N bars.
-        match conv_mode {
+        match cfg.exchange.conversion_mode {
             CurrencyConversionMode::Immediate => {
                 sweep_foreign_to_base(&mut cash, base_ccy, fx, ts, None);
             },
             CurrencyConversionMode::HoldUntilThreshold => {
-                sweep_foreign_to_base(&mut cash, base_ccy, fx, ts, Some(conv_threshold));
+                sweep_foreign_to_base(
+                    &mut cash,
+                    base_ccy,
+                    fx,
+                    ts,
+                    Some(cfg.exchange.conversion_threshold.unwrap_or(0.)),
+                );
             },
             CurrencyConversionMode::EndOfPeriod => {
-                if let Some(period) = conv_period {
+                if let Some(period) = cfg.exchange.conversion_period {
                     let bucket = period_bucket(ts, period);
                     if let Some(prev) = last_period_bucket {
                         if bucket != prev {
@@ -1562,6 +1394,7 @@ fn run_one_strategy(
             },
             CurrencyConversionMode::CustomInterval => {
                 bars_since_conv += 1;
+                let conv_interval = cfg.exchange.conversion_interval.unwrap_or(0) as usize;
                 if conv_interval > 0 && bars_since_conv >= conv_interval {
                     sweep_foreign_to_base(&mut cash, base_ccy, fx, ts, None);
                     bars_since_conv = 0;
@@ -1594,12 +1427,12 @@ fn run_one_strategy(
                     .map(|(&s, (_, v))| (s.to_owned(), &v[..=bar_index]))
                     .collect();
                 let inds = IndicatorView::new(indicators, bar_index);
-                let orders = b.decide(
+                let orders = b.evaluate(
                     &bars_view,
                     &inds,
                     &portfolio,
                     &state,
-                    &instrument_types,
+                    &it_map,
                     cfg.data.instrument_type,
                 );
                 for o in &orders {
@@ -1619,8 +1452,8 @@ fn run_one_strategy(
             } else {
                 // Custom (Python) strategy: original evaluate path.
                 Python::attach(|py| -> PyResult<Vec<Order>> {
-                    let data = build_per_symbol_view(py, &cached_data, bar_index)?;
-                    let inds = build_indicator_view(py, &cached_indicators, bar_index)?;
+                    let data = build_per_symbol_view(py, cached_data, bar_index)?;
+                    let inds = build_indicator_view(py, cached_indicators, bar_index)?;
                     let res = strategy
                         .bind(py)
                         .call_method1("evaluate", (data, portfolio.clone(), state.clone(), inds))?;
@@ -1719,7 +1552,6 @@ fn run_one_strategy(
 
                     // Validate allowed types/quantities & ensure ids are populated.
                     let allowed = &cfg.exchange.allowed_order_types;
-                    let is_builtin_strategy = builtin.is_some();
                     ords.retain_mut(|o| {
                         if o.id.is_empty() {
                             o.id = new_order_id();
@@ -1742,36 +1574,22 @@ fn run_one_strategy(
                         if !matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition) {
                             let instrument_type = instrument_type_for_symbol(
                                 &o.symbol,
-                                &instrument_types,
+                                &it_map,
                                 cfg.data.instrument_type,
                             );
-                            if is_builtin_strategy {
-                                if let Some(reason) = normalize_builtin_order_quantity(o, instrument_type) {
-                                    warn!(strategy=%name, "Invalid built-in order quantity, dropping: {reason}.");
-                                    order_records.push(OrderRecord {
-                                        order: o.clone(),
-                                        timestamp: ts,
-                                        status: "rejected".into(),
-                                        fill_price: None,
-                                        reason,
-                                        commission: 0.0,
-                                        pnl: None,
-                                    });
-                                    return false;
-                                }
-                            } else if let Some(reason) =
-                                quantity_rejection_reason(&o.symbol, o.quantity, instrument_type)
-                            {
-                                warn!(strategy=%name, "Invalid order quantity, dropping: {reason}.");
+
+                            if let Some(reason) = validate_qty(o.quantity, instrument_type) {
+                                warn!(strategy=%name, "Invalid order quantity: {}. Reason: {reason}. The order has been rejected.", o.quantity);
                                 order_records.push(OrderRecord {
                                     order: o.clone(),
                                     timestamp: ts,
-                                    status: "rejected".into(),
+                                    status: OrderStatus::Rejected,
                                     fill_price: None,
                                     reason,
                                     commission: 0.0,
                                     pnl: None,
                                 });
+
                                 return false;
                             }
                         }
@@ -1791,7 +1609,7 @@ fn run_one_strategy(
                             order_records.push(OrderRecord {
                                 order: o.clone(),
                                 timestamp: ts,
-                                status: "rejected".into(),
+                                status: OrderStatus::Rejected,
                                 fill_price: None,
                                 reason: format!("duplicate order id {:?}", o.id),
                                 commission: 0.0,
@@ -1986,34 +1804,6 @@ fn run_one_strategy(
         error: run_error,
         is_benchmark: is_benchmark_run,
     }
-}
-
-fn portfolio_equity_in_currency(
-    cash: &HashMap<Currency, f64>,
-    positions: &HashMap<String, f64>,
-    aligned: &HashMap<String, Vec<Option<Bar>>>,
-    bar_index: usize,
-    quote_ccy: &HashMap<String, String>,
-    base_ccy: &str,
-    target_ccy: &str,
-    fx: &FxTable,
-    ts: i64,
-) -> f64 {
-    let mut equity = 0.0_f64;
-    for (ccy, amount) in cash {
-        equity += fx.convert(*amount, &ccy.to_string(), target_ccy, ts).unwrap_or(*amount);
-    }
-    for (sym, qty) in positions {
-        if qty.abs() < 1e-12 {
-            continue;
-        }
-        if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
-            let value = *qty * b.close;
-            let pos_ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(base_ccy);
-            equity += fx.convert(value, pos_ccy, target_ccy, ts).unwrap_or(value);
-        }
-    }
-    equity
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -2347,7 +2137,7 @@ fn apply_slippage(raw_px: f64, qty: f64, slippage_pct: f64, limit_cap: Option<f6
 /// converting at the FX rate observed at `ts`. Returns `false` if no
 /// combination of available cash covers the debit.
 fn try_debit(
-    cash: &mut HashMap<Currency, f64>,
+    cash: &mut Cash,
     ccy: Currency,
     amount: f64,
     base: Currency,
@@ -2459,7 +2249,7 @@ fn try_debit(
 /// foreign bucket with a positive (or negative) finite balance is
 /// converted. Buckets without an available FX rate are left untouched.
 fn sweep_foreign_to_base(
-    cash: &mut HashMap<Currency, f64>,
+    cash: &mut Cash,
     base: Currency,
     fx: &FxTable,
     ts: i64,
@@ -2913,9 +2703,9 @@ fn check_maintenance_margin(
 /// surface that).
 fn accrue_margin_costs(
     cfg: &ExperimentConfig,
-    cash: &mut HashMap<Currency, f64>,
+    cash: &mut Cash,
     positions: &HashMap<String, f64>,
-    aligned: &HashMap<String, Vec<Option<Bar>>>,
+    aligned: &HashMap<Symbol, Vec<Option<Bar>>>,
     bar_index: usize,
     quote_ccy: &HashMap<String, String>,
     base_ccy: Currency,
@@ -3164,6 +2954,7 @@ mod tests {
                 &profiles,
                 &timeline,
                 &fx,
+                None,
             );
             assert!(run.error.is_none(), "strategy {strategy_name} failed: {:?}", run.error);
 
@@ -3254,9 +3045,8 @@ mod tests {
 
         let base_ccy = cfg.portfolio.base_currency;
         let base_ccy_str = base_ccy.to_string();
-        let mut cash: HashMap<Currency, f64> = HashMap::new();
-        cash.insert(base_ccy, cfg.portfolio.initial_cash as f64);
-        let mut positions: HashMap<String, f64> = cfg.portfolio.starting_positions.clone();
+        let mut cash: Cash = Cash::from([(base_ccy, cfg.portfolio.initial_cash as f64)]);
+        let mut positions: Positions = cfg.portfolio.starting_positions.clone();
         let mut open_orders: Vec<Order> = Vec::new();
         let mut trail_state: HashMap<String, (f64, f64)> = HashMap::new();
         let mut equity_curve: Vec<EquitySample> = Vec::with_capacity(total_bars);
@@ -3856,7 +3646,7 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.portfolio.starting_positions.insert("AAPL".into(), 1.5);
 
-        let err = validate_position(&cfg, &[mk_profile("AAPL", "USD")])
+        let err = validate_qty(&cfg, &[mk_profile("AAPL", "USD")])
             .expect_err("fractional stock starting position should fail");
 
         assert!(err.to_string().contains("fractional quantity"));
@@ -3869,7 +3659,7 @@ mod tests {
         cfg.data.instrument_type = InstrumentType::Crypto;
         cfg.portfolio.starting_positions.insert("BTC-USD".into(), 0.25);
 
-        validate_position(&cfg, &[mk_profile_with_type("BTC-USD", "USD", InstrumentType::Crypto)])
+        validate_qty(&cfg, &[mk_profile_with_type("BTC-USD", "USD", InstrumentType::Crypto)])
             .expect("fractional crypto starting position should be valid");
     }
 
@@ -3931,7 +3721,7 @@ mod tests {
             sizer: None,
         };
 
-        let err = normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks);
+        let err = validate_order(&mut order, InstrumentType::Stocks);
 
         assert!(err.is_none());
         assert_eq!(order.quantity, 3.0);
@@ -3949,7 +3739,7 @@ mod tests {
             sizer: None,
         };
 
-        let err = normalize_builtin_order_quantity(&mut order, InstrumentType::Crypto);
+        let err = validate_order(&mut order, InstrumentType::Crypto);
 
         assert!(err.is_none());
         assert_eq!(order.quantity, 0.125);
@@ -3967,7 +3757,7 @@ mod tests {
             sizer: None,
         };
 
-        let err = normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks)
+        let err = validate_order(&mut order, InstrumentType::Stocks)
             .expect("sub-one stock order should be rejected");
 
         assert!(err.contains("less than one whole"));
@@ -5781,8 +5571,8 @@ mod tests {
     #[test]
     fn portfolio_equity_in_currency_empty_inputs_returns_zero() {
         let aligned: HashMap<String, Vec<Option<Bar>>> = HashMap::new();
-        let cash: HashMap<Currency, f64> = HashMap::new();
-        let positions: HashMap<String, f64> = HashMap::new();
+        let cash: Cash = Cash::new();
+        let positions: Positions = Positions::new();
         let quote_ccy: HashMap<String, String> = HashMap::new();
         let fx = empty_fx(Currency::USD);
         let eq = portfolio_equity_in_currency(
@@ -6155,7 +5945,7 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.portfolio.starting_positions.insert("AAPL".into(), 10.0);
         let profiles = vec![mk_profile("AAPL", "USD")];
-        assert!(validate_position(&cfg, &profiles).is_ok());
+        assert!(validate_qty(&cfg, &profiles).is_ok());
     }
 
     #[test]
@@ -6163,7 +5953,7 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.portfolio.starting_positions.insert("AAPL".into(), 1.5);
         let profiles = vec![mk_profile("AAPL", "USD")];
-        assert!(validate_position(&cfg, &profiles).is_err());
+        assert!(validate_qty(&cfg, &profiles).is_err());
     }
 
     #[test]
@@ -6172,7 +5962,7 @@ mod tests {
         cfg.data.instrument_type = InstrumentType::Crypto;
         cfg.portfolio.starting_positions.insert("BTC".into(), 0.001);
         let profiles = vec![mk_profile_with_type("BTC", "USD", InstrumentType::Crypto)];
-        assert!(validate_position(&cfg, &profiles).is_ok());
+        assert!(validate_qty(&cfg, &profiles).is_ok());
     }
 
     #[test]
@@ -6180,7 +5970,7 @@ mod tests {
         let mut cfg = mk_cfg("AAPL");
         cfg.portfolio.starting_positions.insert("AAPL".into(), f64::NAN);
         let profiles = vec![mk_profile("AAPL", "USD")];
-        assert!(validate_position(&cfg, &profiles).is_err());
+        assert!(validate_qty(&cfg, &profiles).is_err());
     }
 
     // ── normalize_builtin_order_quantity ────────────────────────────────
@@ -6196,7 +5986,7 @@ mod tests {
             limit_price: None,
             sizer: None,
         };
-        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
+        assert!(validate_order(&mut order, InstrumentType::Stocks).is_none());
     }
 
     #[test]
@@ -6210,7 +6000,7 @@ mod tests {
             limit_price: None,
             sizer: None,
         };
-        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
+        assert!(validate_order(&mut order, InstrumentType::Stocks).is_none());
     }
 
     #[test]
@@ -6224,7 +6014,7 @@ mod tests {
             limit_price: None,
             sizer: None,
         };
-        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_some());
+        assert!(validate_order(&mut order, InstrumentType::Stocks).is_some());
     }
 
     #[test]
@@ -6238,7 +6028,7 @@ mod tests {
             limit_price: None,
             sizer: None,
         };
-        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
+        assert!(validate_order(&mut order, InstrumentType::Stocks).is_none());
         assert_eq!(order.quantity, 5.0);
     }
 
@@ -6253,7 +6043,7 @@ mod tests {
             limit_price: None,
             sizer: None,
         };
-        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_none());
+        assert!(validate_order(&mut order, InstrumentType::Stocks).is_none());
         assert_eq!(order.quantity, -3.0);
     }
 
@@ -6268,7 +6058,7 @@ mod tests {
             limit_price: None,
             sizer: None,
         };
-        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Stocks).is_some());
+        assert!(validate_order(&mut order, InstrumentType::Stocks).is_some());
     }
 
     #[test]
@@ -6282,7 +6072,7 @@ mod tests {
             limit_price: None,
             sizer: None,
         };
-        assert!(normalize_builtin_order_quantity(&mut order, InstrumentType::Crypto).is_none());
+        assert!(validate_order(&mut order, InstrumentType::Crypto).is_none());
         assert_eq!(order.quantity, 0.001);
     }
 
@@ -6367,6 +6157,7 @@ mod tests {
             &profiles,
             &timeline,
             &fx,
+            None,
         );
         assert!(run.error.is_none(), "Buy & Hold failed: {:?}", run.error);
         assert!(!run.equity_curve.is_empty());
@@ -6404,6 +6195,7 @@ mod tests {
             &profiles,
             &timeline,
             &fx,
+            None,
         );
         assert!(run.error.is_none(), "SMA Crossover failed: {:?}", run.error);
         assert!(!run.equity_curve.is_empty());
@@ -6432,6 +6224,7 @@ mod tests {
             &profiles,
             &timeline,
             &fx,
+            None,
         );
         assert!(run.error.is_none());
         assert!(!run.equity_curve.is_empty());
@@ -6458,6 +6251,7 @@ mod tests {
             &profiles,
             &timeline,
             &fx,
+            None,
         );
         assert!(run.error.is_none());
         let final_eq = run.equity_curve.last().unwrap().equity;
@@ -6486,6 +6280,7 @@ mod tests {
             &profiles,
             &timeline,
             &fx,
+            None,
         );
         assert!(run.error.is_none());
     }
@@ -6494,7 +6289,7 @@ mod tests {
 
     #[test]
     fn indicator_view_value_returns_finite_value() {
-        let mut data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let mut data: HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> = HashMap::new();
         let mut per_sym = HashMap::new();
         per_sym.insert("AAPL".to_owned(), vec![vec![1.0, 2.0, 3.0]]);
         data.insert("SMA_5".to_owned(), per_sym);
@@ -6504,7 +6299,7 @@ mod tests {
 
     #[test]
     fn indicator_view_value_returns_none_for_nan() {
-        let mut data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let mut data: HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> = HashMap::new();
         let mut per_sym = HashMap::new();
         per_sym.insert("X".to_owned(), vec![vec![f64::NAN, 2.0]]);
         data.insert("RSI".to_owned(), per_sym);
@@ -6514,14 +6309,14 @@ mod tests {
 
     #[test]
     fn indicator_view_value_returns_none_for_missing_indicator() {
-        let data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let data: HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> = HashMap::new();
         let view = IndicatorView::new(&data, 0);
         assert_eq!(view.value("MISSING", "X"), None);
     }
 
     #[test]
     fn indicator_view_last_returns_multiple_series_values() {
-        let mut data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let mut data: HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> = HashMap::new();
         let mut per_sym = HashMap::new();
         per_sym.insert("X".to_owned(), vec![vec![10.0, 20.0], vec![5.0, 15.0], vec![1.0, 10.0]]);
         data.insert("BB".to_owned(), per_sym);
@@ -6532,7 +6327,7 @@ mod tests {
 
     #[test]
     fn indicator_view_out_of_bounds_returns_none() {
-        let mut data: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+        let mut data: HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> = HashMap::new();
         let mut per_sym = HashMap::new();
         per_sym.insert("X".to_owned(), vec![vec![1.0, 2.0]]);
         data.insert("SMA".to_owned(), per_sym);
@@ -6913,6 +6708,7 @@ mod tests {
             &profiles,
             &timeline,
             &fx,
+            None,
         )
     }
 
@@ -7079,6 +6875,7 @@ mod tests {
             &profiles,
             &timeline,
             &fx,
+            None,
         )
     }
 

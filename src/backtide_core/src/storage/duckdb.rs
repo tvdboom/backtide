@@ -1,24 +1,10 @@
 //! DuckDB storage solution.
 
-use crate::backtest::models::experiment_config::*;
-use crate::backtest::models::experiment_result::*;
-use crate::backtest::models::order::Order;
-use crate::backtest::models::order_type::OrderType;
-use crate::data::models::bar::Bar;
-use crate::data::models::currency::Currency;
-use crate::data::models::dividend::Dividend;
-use crate::data::models::exchange::Exchange;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
+use crate::backtest::models::*;
+use crate::constants::Cash;
+use crate::data::models::*;
 use crate::storage::errors::{StorageError, StorageResult};
-use crate::storage::models::bar_series::BarSeries;
-use crate::storage::models::bar_summary::BarSummary;
-use crate::storage::models::dividend_series::DividendSeries;
-use crate::storage::models::stored_bar::StoredBar;
-use crate::storage::models::stored_dividend::StoredDividend;
-use crate::storage::models::stored_experiment::StoredExperiment;
+use crate::storage::models::*;
 use crate::storage::traits::Storage;
 use duckdb::params;
 use duckdb::params_from_iter;
@@ -838,7 +824,7 @@ impl Storage for DuckDb {
                             o.order.quantity,
                             o.order.price,
                             o.order.limit_price,
-                            o.status,
+                            o.status.to_string(),
                             o.fill_price,
                             o.reason,
                             o.commission,
@@ -987,8 +973,7 @@ impl Storage for DuckDb {
                     // Backward compatible: old rows might contain a scalar,
                     // newer rows store a JSON object keyed by currency code.
                     let cash = if cash_raw.trim_start().starts_with('{') {
-                        serde_json::from_str::<HashMap<Currency, f64>>(&cash_raw)
-                            .unwrap_or_default()
+                        serde_json::from_str::<Cash>(&cash_raw).unwrap_or_default()
                     } else {
                         let v = cash_raw.parse::<f64>().unwrap_or(0.0);
                         HashMap::from([(base_currency, v)])
@@ -1009,19 +994,23 @@ impl Storage for DuckDb {
             let orders = o_stmt
                 .query_map(params![run_id], |row| {
                     let ot: String = row.get(3)?;
-                    let order_type: OrderType = ot.parse().unwrap_or_default();
+                    let status: String = row.get(7)?;
                     Ok(OrderRecord {
                         order: Order {
                             id: row.get(0)?,
                             symbol: row.get(2)?,
-                            order_type,
+                            order_type: ot
+                                .parse()
+                                .expect(format!("unknown order type: {ot}").as_str()),
                             quantity: row.get(4)?,
                             price: row.get(5)?,
                             limit_price: row.get(6)?,
                             sizer: None,
                         },
                         timestamp: row.get(1)?,
-                        status: row.get(7)?,
+                        status: status
+                            .parse()
+                            .expect(format!("unknown order status: {status}").as_str()),
                         fill_price: row.get(8)?,
                         reason: row.get(9)?,
                         commission: row.get::<_, Option<f64>>(10)?.unwrap_or(0.0),
@@ -1097,7 +1086,6 @@ impl Storage for DuckDb {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::models::experiment_status::ExperimentStatus;
     use tempfile::TempDir;
 
     fn make_db() -> (TempDir, DuckDb) {
@@ -1187,7 +1175,7 @@ mod tests {
                         sizer: None,
                     },
                     timestamp: 1_700_000_000,
-                    status: "filled".to_owned(),
+                    status: OrderStatus::Filled,
                     fill_price: Some(100.0),
                     reason: String::new(),
                     commission: 0.0,
@@ -1536,7 +1524,6 @@ mod tests {
     #[test]
     fn test_write_and_query_dividends() {
         let (_dir, db) = make_db();
-        use crate::data::models::dividend::Dividend;
         let series = vec![DividendSeries {
             symbol: "AAPL".to_owned(),
             provider: Provider::Yahoo,
@@ -1582,7 +1569,6 @@ mod tests {
     #[test]
     fn test_query_dividends_filter_by_symbol() {
         let (_dir, db) = make_db();
-        use crate::data::models::dividend::Dividend;
         let series = vec![
             DividendSeries {
                 symbol: "AAPL".to_owned(),
@@ -1611,7 +1597,6 @@ mod tests {
     #[test]
     fn test_query_dividends_filter_by_provider() {
         let (_dir, db) = make_db();
-        use crate::data::models::dividend::Dividend;
         let series = vec![DividendSeries {
             symbol: "AAPL".to_owned(),
             provider: Provider::Yahoo,
@@ -1629,7 +1614,6 @@ mod tests {
     #[test]
     fn test_query_dividends_with_limit() {
         let (_dir, db) = make_db();
-        use crate::data::models::dividend::Dividend;
         let divs: Vec<Dividend> = (0..5)
             .map(|i| Dividend {
                 ex_date: 1_000_000 + i * 86400,
@@ -1742,8 +1726,6 @@ mod tests {
     #[test]
     fn test_delete_symbols_cleans_orphaned_dividends() {
         let (_dir, db) = make_db();
-        use crate::data::models::dividend::Dividend;
-
         let bar_series = vec![BarSeries {
             symbol: "AAPL".to_owned(),
             interval: Interval::OneDay,
@@ -1973,7 +1955,6 @@ mod tests {
     #[test]
     fn test_query_bars_summary_with_dividends_too() {
         let (_dir, db) = make_db();
-        use crate::data::models::dividend::Dividend;
         db.write_instruments(&[sample_instrument("AAPL")]).unwrap();
         db.write_bars_bulk(&[BarSeries {
             symbol: "AAPL".to_owned(),
@@ -2065,7 +2046,6 @@ mod tests {
     #[test]
     fn test_query_dividends_empty_symbol_filter() {
         let (_dir, db) = make_db();
-        use crate::data::models::dividend::Dividend;
         db.write_dividends_bulk(&[DividendSeries {
             symbol: "AAPL".to_owned(),
             provider: Provider::Yahoo,
@@ -2083,7 +2063,6 @@ mod tests {
     #[test]
     fn test_query_dividends_empty_provider_filter() {
         let (_dir, db) = make_db();
-        use crate::data::models::dividend::Dividend;
         db.write_dividends_bulk(&[DividendSeries {
             symbol: "AAPL".to_owned(),
             provider: Provider::Yahoo,

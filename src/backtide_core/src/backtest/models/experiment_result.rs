@@ -3,10 +3,9 @@
 //! Holds everything produced by a single backtest run: per-strategy
 //! equity curves, executed trades, order history, and summary metrics.
 
-use crate::backtest::models::experiment_status::ExperimentStatus;
-use crate::backtest::models::order::Order;
-pub use crate::backtest::models::order_status::OrderStatus;
-use crate::data::models::currency::Currency;
+use crate::backtest::models::{ExperimentStatus, Order, OrderStatus};
+use crate::constants::Cash;
+use crate::data::models::Currency;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use serde::{Deserialize, Serialize};
@@ -39,7 +38,7 @@ use std::collections::HashMap;
 pub struct EquitySample {
     pub timestamp: i64,
     pub equity: f64,
-    pub cash: HashMap<Currency, f64>,
+    pub cash: Cash,
     pub drawdown: f64,
 }
 

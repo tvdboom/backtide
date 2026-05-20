@@ -1,16 +1,8 @@
+use crate::backtest::models::{ExperimentConfig, ExperimentResult, RunResult};
 use crate::constants::BarKey;
-use crate::data::models::exchange::Exchange;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
+use crate::data::models::{Exchange, Instrument, InstrumentType, Interval, Provider};
 use crate::storage::errors::StorageResult;
-use crate::storage::models::bar_series::BarSeries;
-use crate::storage::models::bar_summary::BarSummary;
-use crate::storage::models::dividend_series::DividendSeries;
-use crate::storage::models::stored_bar::StoredBar;
-use crate::storage::models::stored_dividend::StoredDividend;
-use crate::storage::models::stored_experiment::StoredExperiment;
+use crate::storage::models::*;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -70,8 +62,8 @@ pub trait Storage: Send + Sync {
     /// Persist one experiment run to the database (all related tables).
     fn write_experiment(
         &self,
-        config: &crate::backtest::models::experiment_config::ExperimentConfig,
-        result: &crate::backtest::models::experiment_result::ExperimentResult,
+        config: &ExperimentConfig,
+        result: &ExperimentResult,
     ) -> StorageResult<()>;
 
     /// Query experiments, optionally filtered by `experiment_id` (one or
@@ -85,10 +77,7 @@ pub trait Storage: Send + Sync {
     ) -> StorageResult<Vec<StoredExperiment>>;
 
     /// Load every persisted [`RunResult`] for a given experiment.
-    fn query_strategy_runs(
-        &self,
-        experiment_id: &str,
-    ) -> StorageResult<Vec<crate::backtest::models::experiment_result::RunResult>>;
+    fn query_strategy_runs(&self, experiment_id: &str) -> StorageResult<Vec<RunResult>>;
 
     /// Delete a single experiment and all its child rows.
     fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64>;

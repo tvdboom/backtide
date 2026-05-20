@@ -1,8 +1,8 @@
 //! Constants and types shared across the package.
 
+use crate::data::models::Currency;
 use std::collections::HashMap;
 use std::time::Duration;
-
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
@@ -13,8 +13,11 @@ pub type Symbol = String;
 /// A key in the `bars` table, i.e., `(symbol, interval, provider)`.
 pub type BarKey = (Symbol, String, String);
 
+/// Cash values in a portfolio.
+pub type Cash = HashMap<Currency, f64>;
+
 /// Symbol positions in a portfolio.
-pub type Positions = HashMap<String, f64>;
+pub type Positions = HashMap<Symbol, f64>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Constants

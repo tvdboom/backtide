@@ -6,15 +6,9 @@
 
 use crate::config::interface::Config;
 use crate::constants::Symbol;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
-use crate::data::providers::binance::Binance;
-use crate::data::providers::coinbase::Coinbase;
-use crate::data::providers::kraken::Kraken;
-use crate::data::providers::traits::DataProvider;
-use crate::data::providers::yahoo::YahooFinance;
+use crate::data::models::Provider;
+use crate::data::models::{Instrument, InstrumentType, Interval};
+use crate::data::providers::{Binance, Coinbase, DataProvider, Kraken, YahooFinance};
 use crate::errors::EngineResult;
 use crate::storage::duckdb::DuckDb;
 use crate::storage::traits::Storage;

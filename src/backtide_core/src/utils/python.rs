@@ -1,10 +1,10 @@
 //! Shared utilities to convert from/to Python objects.
 
 use crate::config::interface::Config;
-use crate::config::models::dataframe_library::DataFrameLibrary;
-use crate::data::models::bar::Bar;
+use crate::config::models::DataFrameLibrary;
+use crate::data::models::Bar;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict};
+use pyo3::types::PyDict;
 use std::path::PathBuf;
 
 /// Build a DataFrame from a Python dict, using the configured backend.
@@ -31,8 +31,7 @@ pub fn extract_1d_from_python(data: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
 
 /// Extract a 2d dataframe from a Python object.
 pub fn extract_2d_from_python(data: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
-    data
-        .extract::<Vec<Vec<f64>>>()
+    data.extract::<Vec<Vec<f64>>>()
         .or_else(|_| data.call_method0("to_numpy")?.extract::<Vec<Vec<f64>>>())
 }
 
@@ -69,12 +68,12 @@ pub fn extract_bars_from_python(df: &Bound<'_, PyAny>) -> PyResult<Vec<Bar>> {
 ///
 /// The result is shaped as (n_points, n_series), i.e., rows x columns.
 /// Single-series return a 1-D array / single-column frame.
-pub fn to_python(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
+pub fn to_python(py: Python, data: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
     let backend = Config::get()?.data.dataframe_library;
 
-    if series.len() == 1 {
+    if data.len() == 1 {
         // Single series → 1-D
-        let arr = series.into_iter().next().unwrap();
+        let arr = data.into_iter().next().unwrap();
         match backend {
             DataFrameLibrary::Pandas => {
                 let pd = py.import("pandas")?;
@@ -88,7 +87,7 @@ pub fn to_python(py: Python, series: Vec<Vec<f64>>) -> PyResult<Bound<PyAny>> {
     } else {
         // Multiple series → transpose to (n_points, n_series)
         let np = py.import("numpy")?;
-        let arr_2d = np.call_method1("array", (series,))?;
+        let arr_2d = np.call_method1("array", (data,))?;
         let arr_t = arr_2d.getattr("T")?;
         match backend {
             DataFrameLibrary::Pandas => {

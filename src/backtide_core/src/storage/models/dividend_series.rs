@@ -1,10 +1,10 @@
-use crate::data::models::dividend::Dividend;
-use crate::data::models::provider::Provider;
+use crate::constants::Symbol;
+use crate::data::models::{Dividend, Provider};
 
 /// One batch of dividends sharing the same keys.
 pub struct DividendSeries {
     /// Canonical ticker symbol.
-    pub symbol: String,
+    pub symbol: Symbol,
 
     /// Data provider that sourced the dividends.
     pub provider: Provider,

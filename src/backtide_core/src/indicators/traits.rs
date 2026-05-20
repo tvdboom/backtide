@@ -1,4 +1,4 @@
-use crate::data::models::bar::Bar;
+use crate::data::models::Bar;
 
 /// Trait for all built-in indicators.
 pub trait Indicator {

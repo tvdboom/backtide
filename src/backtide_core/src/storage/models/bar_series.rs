@@ -1,6 +1,4 @@
-use crate::data::models::bar::Bar;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
+use crate::data::models::{Bar, Interval, Provider};
 
 /// One batch of bars sharing the same keys.
 pub struct BarSeries {

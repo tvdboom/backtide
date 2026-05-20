@@ -102,9 +102,9 @@ fn generate_aapl_bars() -> Vec<Bar> {
 
 /// Pre-compute all indicators any built-in strategy might need and
 /// return the `name -> symbol -> Vec<series>` map expected by [`IndicatorView`].
-fn precompute_indicators(bars: &[Bar]) -> HashMap<String, HashMap<String, Vec<Vec<f64>>>> {
+fn precompute_indicators(bars: &[Bar]) -> HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> {
     let sym = "AAPL";
-    let mut map: HashMap<String, HashMap<String, Vec<Vec<f64>>>> = HashMap::new();
+    let mut map: HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> = HashMap::new();
 
     // Helper to insert indicator results under the canonical name.
     let mut insert = |name: String, series: Vec<Vec<f64>>| {
@@ -170,7 +170,7 @@ fn starting_portfolio() -> Portfolio {
 fn run_strategy_loop(
     strategy: &BuiltinStrategy,
     closes: &[f64],
-    indicators: &HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
+    indicators: &HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>,
     total_bars: usize,
 ) -> usize {
     let mut portfolio = starting_portfolio();
@@ -189,7 +189,7 @@ fn run_strategy_loop(
             is_warmup: false,
         };
 
-        let orders = strategy.decide(
+        let orders = strategy.evaluate(
             &closes_view,
             &ind_view,
             &portfolio,

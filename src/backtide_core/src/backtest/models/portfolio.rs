@@ -1,5 +1,6 @@
 use crate::backtest::models::order::Order;
-use crate::data::models::currency::Currency;
+use crate::constants::{Cash, Positions};
+use crate::data::models::Currency;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -33,10 +34,10 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Portfolio {
     /// Cash balances keyed by currency.
-    pub cash: HashMap<Currency, f64>,
+    pub cash: Cash,
 
     /// Open positions keyed by ticker symbol.
-    pub positions: HashMap<String, f64>,
+    pub positions: Positions,
 
     /// Currently open (unfilled) orders.
     pub orders: Vec<Order>,
@@ -44,11 +45,11 @@ pub struct Portfolio {
 
 impl Default for Portfolio {
     fn default() -> Self {
-        let mut cash = HashMap::new();
+        let mut cash = Cash::new();
         cash.insert(Currency::default(), 0.0);
         Self {
             cash,
-            positions: HashMap::new(),
+            positions: Positions::new(),
             orders: Vec::new(),
         }
     }
@@ -61,15 +62,11 @@ impl Portfolio {
 
     #[new]
     #[pyo3(signature = (
-        cash: "dict[str | Currency, float]" = HashMap::from([(Currency::default(), 0.0)]),
-        positions: "dict[str, float]" = HashMap::new(),
+        cash: "dict[str | Currency, float]" = Cash::from([(Currency::default(), 0.)]),
+        positions: "dict[str, float]" = Positions::new(),
         orders: "list[Order]" = vec![],
     ))]
-    fn new(
-        cash: HashMap<Currency, f64>,
-        positions: HashMap<String, f64>,
-        orders: Vec<Order>,
-    ) -> Self {
+    fn new(cash: Cash, positions: Positions, orders: Vec<Order>) -> Self {
         Self {
             cash,
             positions,

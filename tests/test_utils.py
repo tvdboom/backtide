@@ -7,7 +7,6 @@ Description: Unit tests for utility functions and constants.
 
 from zoneinfo import ZoneInfo
 
-import numpy as np
 import pandas as pd
 import polars as pl
 import pytest

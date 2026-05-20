@@ -5,16 +5,7 @@
 
 use crate::constants::Symbol;
 use crate::data::errors::{DataError, DataResult};
-use crate::data::models::bar::Bar;
-use crate::data::models::bar_download::BarDownload;
-use crate::data::models::currency::Currency;
-use crate::data::models::dividend::Dividend;
-use crate::data::models::exchange::Exchange;
-use crate::data::models::forex_pair::ForexPair;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
+use crate::data::models::*;
 use crate::data::providers::traits::DataProvider;
 use crate::data::utils::canonical_symbol;
 use crate::utils::http::{paginate, HttpClient, HttpClientConfig};
@@ -1352,8 +1343,8 @@ mod tests {
         let yf = YahooFinance {
             client: HttpClient::with_config(HttpClientConfig {
                 max_concurrent_requests: 1,
-                connect_timeout: std::time::Duration::from_secs(1),
-                request_timeout: std::time::Duration::from_secs(1),
+                connect_timeout: Duration::from_secs(1),
+                request_timeout: Duration::from_secs(1),
                 min_request_interval: None,
             })
             .unwrap(),
@@ -1373,7 +1364,7 @@ mod tests {
 
     #[test]
     fn chart_response_with_error_deserializes() {
-        let body = serde_json::json!({
+        let body = json!({
             "chart": {
                 "result": [],
                 "error": { "code": "Not Found", "description": "bad symbol" }
@@ -1387,7 +1378,7 @@ mod tests {
 
     #[test]
     fn chart_response_without_error_deserializes() {
-        let body = serde_json::json!({
+        let body = json!({
             "chart": {
                 "result": [{
                     "meta": {
@@ -1408,7 +1399,7 @@ mod tests {
 
     #[test]
     fn screener_response_deserializes() {
-        let body = serde_json::json!({
+        let body = json!({
             "finance": {
                 "result": [{
                     "quotes": [{

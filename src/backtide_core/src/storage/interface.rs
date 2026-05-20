@@ -1,15 +1,11 @@
 //! Python interface for the storage module.
 
-use crate::data::models::exchange::Exchange;
-use crate::data::models::instrument::Instrument;
-use crate::data::models::instrument_type::InstrumentType;
-use crate::data::models::interval::Interval;
-use crate::data::models::provider::Provider;
+use crate::data::models::{Exchange, Instrument, InstrumentType, Interval, Provider};
 use crate::engine::Engine;
 use crate::utils::python::dict_to_dataframe;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-
+use crate::backtest::models::RunResult;
 // ────────────────────────────────────────────────────────────────────────────
 // Helper functions
 // ────────────────────────────────────────────────────────────────────────────
@@ -388,7 +384,7 @@ pub fn query_dividends(
 #[pyo3(signature = (experiment_id: "str") -> "list[RunResult]")]
 pub fn query_strategy_runs(
     experiment_id: &str,
-) -> PyResult<Vec<crate::backtest::models::experiment_result::RunResult>> {
+) -> PyResult<Vec<RunResult>> {
     Ok(Engine::get()?.db.query_strategy_runs(experiment_id)?)
 }
 

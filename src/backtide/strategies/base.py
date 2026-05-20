@@ -11,7 +11,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import numpy as np
     import pandas as pd
     import polars as pl
 

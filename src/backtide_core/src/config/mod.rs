@@ -1,7 +1,5 @@
 use crate::config::interface::*;
-use crate::config::models::dataframe_library::DataFrameLibrary;
-use crate::config::models::log_level::LogLevel;
-use crate::config::models::triangulation_strategy::TriangulationStrategy;
+use crate::config::models::{DataFrameLibrary, LogLevel, TriangulationStrategy};
 use pyo3::prelude::*;
 
 pub mod errors;

@@ -1,8 +1,7 @@
 //! Python interface for the backtest module.
 
-use crate::backtest::models::experiment_config::ExperimentConfig;
-use crate::backtest::models::experiment_result::ExperimentResult;
-use crate::config::models::log_level::LogLevel;
+use crate::backtest::models::{ExperimentConfig, ExperimentResult};
+use crate::config::models::LogLevel;
 use crate::engine::Engine;
 use pyo3::prelude::*;
 use std::collections::HashMap;
