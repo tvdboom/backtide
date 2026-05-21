@@ -1,5 +1,5 @@
 //! Order trigger helpers.
-//! 
+//!
 //! `resolve_trigger` decides whether an open order fills against the
 //! current bar, returning a `TriggerOutcome`:
 //!
@@ -18,11 +18,10 @@
 //! Trailing variants share `trail_state`, keyed by `order.id`, holding
 //! `(running_high, running_low)` since the order was placed.
 
-use std::collections::HashMap;
-use crate::backtest::models::Order;
-use crate::backtest::models::OrderType::{Cancel, Limit, Market, SettlePosition, StopLoss, StopLossLimit, TakeProfit, TakeProfitLimit, TrailingStop, TrailingStopLimit};
-use crate::constants::Positions;
+use crate::backtest::models::{Order, OrderType};
+use crate::constants::{Positions, MIN_POSITION};
 use crate::data::models::Bar;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum TriggerOutcome {
@@ -34,10 +33,10 @@ pub enum TriggerOutcome {
         reason: String,
         limit_cap: Option<f64>,
     },
-    
+
     /// The order does not fill this bar.
     Pending,
-    
+
     /// The order is invalid against the current state and should be canceled.
     Cancel {
         reason: String,
@@ -57,49 +56,48 @@ pub fn resolve_trigger(
 ) -> TriggerOutcome {
     match order.order_type {
         // Cancel is handled before resolve_trigger is called.
-        Cancel => TriggerOutcome::Cancel {
+        OrderType::Cancel => TriggerOutcome::Cancel {
             reason: "canceled by cancellation order".into(),
         },
-        Market => {
-            let px = if trade_on_close {
+        OrderType::Market => TriggerOutcome::Fill {
+            raw_px: if trade_on_close {
                 bar.close
             } else {
                 bar.open
-            };
-            TriggerOutcome::Fill {
-                raw_px: px,
-                reason: String::new(),
-                limit_cap: None,
-            }
+            },
+            reason: String::new(),
+            limit_cap: None,
         },
-        SettlePosition => {
+        OrderType::SettlePosition => {
             let cur = *positions.get(&order.symbol).unwrap_or(&0.0);
-            if cur.abs() < 1e-12 {
+
+            if cur.abs() < MIN_POSITION {
                 return TriggerOutcome::Cancel {
                     reason: "no position to settle".into(),
                 };
             }
+
             // Translate to a market order that flattens the position.
             order.quantity = -cur;
-            order.order_type = Market;
-            let px = if trade_on_close {
-                bar.close
-            } else {
-                bar.open
-            };
+            order.order_type = OrderType::Market;
+
             TriggerOutcome::Fill {
-                raw_px: px,
+                raw_px: if trade_on_close {
+                    bar.close
+                } else {
+                    bar.open
+                },
                 reason: "settle position".into(),
                 limit_cap: None,
             }
         },
-        Limit => match order.price {
+        OrderType::Limit => match order.price {
             Some(lim) => fill_limit(order.quantity, bar, lim),
             None => TriggerOutcome::Cancel {
                 reason: "limit order missing price".into(),
             },
         },
-        TakeProfit => match order.price {
+        OrderType::TakeProfit => match order.price {
             // Take-profit is a profit-target limit: same execution
             // semantics as Limit (a buy fills at-or-below, a sell at-or-above).
             Some(target) => fill_limit(order.quantity, bar, target),
@@ -107,7 +105,7 @@ pub fn resolve_trigger(
                 reason: "take-profit missing price".into(),
             },
         },
-        StopLoss => {
+        OrderType::StopLoss => {
             let stop = match order.price {
                 Some(p) => p,
                 None => {
@@ -116,13 +114,14 @@ pub fn resolve_trigger(
                     }
                 },
             };
-            if stop_triggered(order.quantity, bar, stop, /*is_take_profit=*/ false) {
+
+            if stop_triggered(order.quantity, bar, stop, false) {
                 fill_stop(order.quantity, bar, stop)
             } else {
                 TriggerOutcome::Pending
             }
         },
-        StopLossLimit | TakeProfitLimit => {
+        OrderType::StopLossLimit | OrderType::TakeProfitLimit => {
             let stop = match order.price {
                 Some(p) => p,
                 None => {
@@ -131,20 +130,23 @@ pub fn resolve_trigger(
                     }
                 },
             };
-            let is_tp = order.order_type == crate::backtest::models::OrderType::TakeProfitLimit;
+
+            let is_tp = order.order_type == OrderType::TakeProfitLimit;
             if !stop_triggered(order.quantity, bar, stop, is_tp) {
                 return TriggerOutcome::Pending;
             }
+
             // Convert to a resting Limit at `limit_price` (or stop as fallback).
             let lim = order.limit_price.unwrap_or(stop);
-            order.order_type = Limit;
+            order.order_type = OrderType::Limit;
             order.price = Some(lim);
             order.limit_price = None;
+
             // Try to fill same bar; if the limit can't be hit on this bar
             // it will rest and re-evaluate next bar via the new Limit path.
             fill_limit(order.quantity, bar, lim)
         },
-        TrailingStop | TrailingStopLimit => {
+        OrderType::TrailingStop | OrderType::TrailingStopLimit => {
             let trail = match order.price {
                 Some(p) if p > 0.0 => p,
                 _ => {
@@ -154,10 +156,11 @@ pub fn resolve_trigger(
                 },
             };
 
-            // First-bar initialisation: seed extremes from this bar.
+            // First-bar initialization: seed extremes from this bar.
             let entry = trail_state.entry(order.id.clone()).or_insert_with(|| (bar.high, bar.low));
             entry.0 = entry.0.max(bar.high);
             entry.1 = entry.1.min(bar.low);
+
             let (running_high, running_low) = (entry.0, entry.1);
 
             // Effective stop: sells trail running_high downward; buys
@@ -173,13 +176,13 @@ pub fn resolve_trigger(
             };
 
             // Re-use the regular stop-trigger / stop-fill helpers.
-            if !stop_triggered(order.quantity, bar, stop, /*is_take_profit=*/ false) {
+            if !stop_triggered(order.quantity, bar, stop, false) {
                 return TriggerOutcome::Pending;
             }
 
-            if order.order_type == crate::backtest::models::OrderType::TrailingStopLimit {
+            if order.order_type == OrderType::TrailingStopLimit {
                 let lim = order.limit_price.unwrap_or(stop);
-                order.order_type = Limit;
+                order.order_type = OrderType::Limit;
                 order.price = Some(lim);
                 order.limit_price = None;
                 fill_limit(order.quantity, bar, lim)
@@ -188,6 +191,24 @@ pub fn resolve_trigger(
                 fill_stop(order.quantity, bar, stop)
             }
         },
+    }
+}
+
+/// Apply slippage to a raw fill price, optionally capping at the limit
+/// price so a buy never pays above its limit (and a sell never receives
+/// below).
+pub fn apply_slippage(raw_px: f64, qty: f64, slippage: f64, limit_cap: Option<f64>) -> f64 {
+    // slippage_pct is the fraction (e.g., 0.005 = 0.5%)
+    let slipped = if qty >= 0.0 {
+        raw_px * (1.0 + slippage / 100.)
+    } else {
+        raw_px * (1.0 - slippage / 100.)
+    };
+
+    match limit_cap {
+        Some(cap) if qty > 0.0 => slipped.min(cap),
+        Some(cap) if qty < 0.0 => slipped.max(cap),
+        _ => slipped,
     }
 }
 
@@ -303,21 +324,5 @@ fn fill_stop(qty: f64, bar: &Bar, stop: f64) -> TriggerOutcome {
                 limit_cap: None,
             }
         }
-    }
-}
-
-/// Apply slippage to a raw fill price, optionally capping at the limit
-/// price so a buy never pays above its limit (and a sell never receives
-/// below). `slippage_pct` is the fraction (e.g. 0.005 = 0.5 %).
-fn apply_slippage(raw_px: f64, qty: f64, slippage_pct: f64, limit_cap: Option<f64>) -> f64 {
-    let slipped = if qty >= 0.0 {
-        raw_px * (1.0 + slippage_pct)
-    } else {
-        raw_px * (1.0 - slippage_pct)
-    };
-    match limit_cap {
-        Some(cap) if qty > 0.0 => slipped.min(cap),
-        Some(cap) if qty < 0.0 => slipped.max(cap),
-        _ => slipped,
     }
 }

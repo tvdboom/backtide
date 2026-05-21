@@ -109,30 +109,49 @@ pub fn align_bars(
     out
 }
 
-pub fn portfolio_equity_in_currency(
+/// Compute the currently invested across all positions in the target currency.
+pub fn compute_invested_equity(
+    positions: &Positions,
+    aligned: &HashMap<Symbol, Vec<Option<Bar>>>,
+    bar_index: usize,
+    quote_ccy: &HashMap<&str, &str>,
+    target_ccy: &str,
+    fx: &FxTable,
+    ts: i64,
+) -> f64 {
+    let mut total = 0.0_f64;
+
+    for (sym, qty) in positions {
+        if qty.abs() < MIN_POSITION {
+            continue;
+        }
+
+        if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
+            let value = qty.abs() * b.close;
+            let ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(target_ccy);
+            total += fx.convert(value, ccy, target_ccy, ts).unwrap_or(value);
+        }
+    }
+
+    total
+}
+
+/// Return the total portfolio equity (cash + positions) in the target currency.
+pub fn compute_portfolio_equity(
     cash: &Cash,
     positions: &Positions,
     aligned: &HashMap<Symbol, Vec<Option<Bar>>>,
     bar_index: usize,
-    quote_ccy: &HashMap<String, String>,
-    base_ccy: &str,
+    quote_ccy: &HashMap<&str, &str>,
     target_ccy: &str,
     fx: &FxTable,
     ts: i64,
 ) -> f64 {
     let mut equity = 0.0_f64;
+
     for (ccy, amount) in cash {
         equity += fx.convert(*amount, &ccy.to_string(), target_ccy, ts).unwrap_or(*amount);
     }
-    for (sym, qty) in positions {
-        if qty.abs() < 1e-12 {
-            continue;
-        }
-        if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
-            let value = *qty * b.close;
-            let pos_ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(base_ccy);
-            equity += fx.convert(value, pos_ccy, target_ccy, ts).unwrap_or(value);
-        }
-    }
-    equity
+    
+    equity + compute_invested_equity(positions, aligned, bar_index, quote_ccy, target_ccy, fx, ts)
 }

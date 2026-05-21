@@ -45,3 +45,6 @@ pub const BENCHMARK: &str = "Benchmark";
 
 /// Seconds in a year.
 pub const SECS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0;
+
+/// Minimum position value to be used in order management.
+pub const MIN_POSITION: f64 = 1e-12;

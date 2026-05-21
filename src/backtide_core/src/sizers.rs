@@ -550,7 +550,7 @@ mod tests {
         // 10_000 / 4 slots = 2_500 per slot; at price 50 → 50 units.
         let sizer = EqualWeight::new(4);
         let qty = sizer.calculate(10_000.0, 50.0, None, None).unwrap();
-        assert!((qty - 50.0).abs() < 1e-12);
+        assert!((qty - 50.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -582,7 +582,7 @@ mod tests {
         // 10% of 10_000 = 1_000; at price 25 → 40 units.
         let sizer = FixedFractional::new(0.10);
         let qty = sizer.calculate(10_000.0, 25.0, None, None).unwrap();
-        assert!((qty - 40.0).abs() < 1e-12);
+        assert!((qty - 40.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -615,7 +615,7 @@ mod tests {
         let small_equity = sizer.calculate(100.0, 50.0, None, None).unwrap();
         let big_equity = sizer.calculate(1_000_000.0, 50.0, None, None).unwrap();
         assert_eq!(small_equity, big_equity);
-        assert!((small_equity - 10.0).abs() < 1e-12);
+        assert!((small_equity - 10.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -644,7 +644,7 @@ mod tests {
         // At price 100 → 20 units.
         let sizer = KellyCriterion::new(0.6, 2.0, 1.0, 0.5);
         let qty = sizer.calculate(10_000.0, 100.0, None, None).unwrap();
-        assert!((qty - 20.0).abs() < 1e-12);
+        assert!((qty - 20.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -680,7 +680,7 @@ mod tests {
         // 1% of 10_000 = 100 at risk; stop_distance=2 → 50 units.
         let sizer = RiskBased::new(0.01);
         let qty = sizer.calculate(10_000.0, 100.0, Some(2.0), None).unwrap();
-        assert!((qty - 50.0).abs() < 1e-12);
+        assert!((qty - 50.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -697,7 +697,7 @@ mod tests {
         // 2% of 10_000 = 200 at risk; atr=4 → 50 units.
         let sizer = VolatilityScaled::new(0.02);
         let qty = sizer.calculate(10_000.0, 100.0, None, Some(4.0)).unwrap();
-        assert!((qty - 50.0).abs() < 1e-12);
+        assert!((qty - 50.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -752,7 +752,7 @@ mod tests {
     fn fixed_fractional_fraction_one_allocates_full_equity() {
         let sizer = FixedFractional::new(1.0);
         let qty = sizer.calculate(1_000.0, 50.0, None, None).unwrap();
-        assert!((qty - 20.0).abs() < 1e-12);
+        assert!((qty - 20.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -767,7 +767,7 @@ mod tests {
     fn fixed_notional_amt_larger_than_price() {
         let sizer = FixedNotional::new(1_000.0);
         let qty = sizer.calculate(10_000.0, 100.0, None, None).unwrap();
-        assert!((qty - 10.0).abs() < 1e-12);
+        assert!((qty - 10.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -792,7 +792,7 @@ mod tests {
         let sizer = KellyCriterion::new(0.6, 2.0, 1.0, 1.0);
         let qty = sizer.calculate(10_000.0, 100.0, None, None).unwrap();
         // kelly_pct = 0.6 - 0.4/2 = 0.4; allocation = 10000 * 0.4 = 4000; qty = 40
-        assert!((qty - 40.0).abs() < 1e-12);
+        assert!((qty - 40.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -807,6 +807,6 @@ mod tests {
     fn equal_weight_one_position() {
         let sizer = EqualWeight::new(1);
         let qty = sizer.calculate(5_000.0, 50.0, None, None).unwrap();
-        assert!((qty - 100.0).abs() < 1e-12);
+        assert!((qty - 100.0).abs() < MIN_POSITION);
     }
 }

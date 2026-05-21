@@ -242,11 +242,7 @@ impl PortfolioExpConfig {
         base_currency: "str | Currency" = Currency::default(),
         starting_positions: "dict[str, float]" = HashMap::new(),
     ))]
-    fn new(
-        initial_cash: u64,
-        base_currency: Currency,
-        starting_positions: Positions,
-    ) -> Self {
+    fn new(initial_cash: u64, base_currency: Currency, starting_positions: Positions) -> Self {
         Self {
             initial_cash,
             base_currency,

@@ -1,10 +1,24 @@
 //! Margin & leverage helpers.
 
-use std::collections::HashMap;
 use crate::backtest::fx::FxTable;
 use crate::backtest::models::ExperimentConfig;
-use crate::constants::{Cash, Positions, Symbol, SECS_PER_YEAR};
+use crate::constants::{Cash, Positions, Symbol, MIN_POSITION, SECS_PER_YEAR};
 use crate::data::models::{Bar, Currency};
+use std::collections::HashMap;
+
+/// Classification of a limit-check rejection.
+///
+/// Check whether an order satisfies the configured leverage and position
+/// limits. Returns either the (possibly shrunk) acceptable quantity, or
+/// an error string describing which limit was breached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitViolation {
+    /// Per-symbol concentration limit (`max_position_size`).
+    PositionSize,
+
+    /// Leverage / margin / equity constraint.
+    Margin,
+}
 
 /// Accrue per-bar margin interest and short-borrow cost.
 ///
@@ -74,6 +88,122 @@ pub fn accrue_margin_costs(
     }
 }
 
+/// Validate an order against the configured position-size and leverage limits.
+///
+/// This function either:
+///
+/// * Returns `Ok(accepted_qty)`, where the accepted quantity may be smaller than
+///   the requested `qty` when the order would push past a cap.
+/// * Returns `Err((violation, reason))` when the existing exposure already
+///   exhausts the relevant cap and there is no room at all for the order.
+pub fn check_order_against_limits(
+    cfg: &ExperimentConfig,
+    symbol: &str,
+    qty: f64,
+    fill_px: f64,
+    order_ccy: &str,
+    base_ccy: &str,
+    equity_base: f64,
+    gross_base: f64,
+    current_qty: f64,
+    current_pos_base: f64,
+    fx: &FxTable,
+    ts: i64,
+) -> Result<f64, (LimitViolation, String)> {
+    let abs_qty = qty.abs();
+    if abs_qty <= 0.0 || !abs_qty.is_finite() || fill_px <= 0.0 || !fill_px.is_finite() {
+        return Ok(qty);
+    }
+    
+    let order_notional_base =
+        fx.convert(abs_qty * fill_px, order_ccy, base_ccy, ts).unwrap_or(abs_qty * fill_px);
+
+    let unit_base = order_notional_base / abs_qty;
+    if unit_base <= 0.0 || !unit_base.is_finite() {
+        return Ok(qty);
+    }
+
+    let current_pos_base = current_pos_base.max(0.0);
+    let current_abs_qty = current_qty.abs();
+
+    let max_qty_for_final_exposure = |cap_base: f64| -> f64 {
+        // Check if they move in the same direction.
+        if current_abs_qty <= MIN_POSITION || current_qty.signum() == qty.signum() {
+            return ((cap_base - current_pos_base) / unit_base).max(0.0);
+        }
+
+        // Opposite-side orders reduce existing exposure first. Always allow
+        // the requested size when it only closes/reduces the position, even
+        // if the account is currently at/over a cap. If it flips the position,
+        // only the post-flip exposure consumes cap room.
+        if abs_qty <= current_abs_qty + MIN_POSITION {
+            abs_qty
+        } else {
+            current_abs_qty + (cap_base / unit_base).max(0.0)
+        }
+    };
+
+    let mut max_abs_qty = abs_qty;
+
+    // Per-symbol exposure (existing notional + new order notional) must not
+    // exceed `max_position_size / 100` of equity. When the order would push
+    // past the cap, the quantity is shrunk to whatever fits rather than rejected
+    // outright. This matches real-broker behavior and prevents an entire
+    // equal-weight allocation from being silently dropped.
+    let pos_cap_pct = cfg.exchange.max_position_size as f64;
+    if pos_cap_pct > 0.0 && equity_base > 0.0 {
+        let max_per_pos = equity_base * pos_cap_pct / 100.0;
+        let allowed_abs_qty = max_qty_for_final_exposure(max_per_pos);
+        if allowed_abs_qty <= MIN_POSITION {
+            return Err((
+                LimitViolation::PositionSize,
+                format!(
+                "order would exceed max_position_size ({pos_cap_pct}% of equity) for {symbol}: \
+                 position already at limit (current {current_pos_base:.2}, cap {max_per_pos:.2})"
+            ),
+            ));
+        }
+
+        max_abs_qty = max_abs_qty.min(allowed_abs_qty);
+    }
+
+    // The total gross notional after this fill (including existing exposure)
+    // must not exceed `equity * effective_leverage_cap`.
+    let cap = effective_leverage_cap(cfg);
+    if equity_base > 0.0 && cap.is_finite() {
+        let max_gross = equity_base * cap;
+        let other_gross_base = (gross_base - current_pos_base).max(0.0);
+        let symbol_cap_base = max_gross - other_gross_base;
+        let allowed_abs_qty = max_qty_for_final_exposure(symbol_cap_base);
+        if allowed_abs_qty <= MIN_POSITION {
+            return Err((
+                LimitViolation::Margin,
+                format!(
+                    "order would exceed max_leverage ({cap:.2}x): gross notional \
+                    at limit (current {gross_base:.2}, cap {max_gross:.2})"
+                ),
+            ));
+        }
+
+        max_abs_qty = max_abs_qty.min(allowed_abs_qty);
+    } else if equity_base <= 0.0 {
+        // Account already wiped out — nothing more can be opened.
+        return Err((
+            LimitViolation::Margin,
+            "equity is non-positive; cannot open new exposure".to_owned(),
+        ));
+    }
+
+    if !max_abs_qty.is_finite() || max_abs_qty <= MIN_POSITION {
+        return Err((
+            LimitViolation::Margin,
+            format!("no headroom under leverage / position-size limits for {symbol}"),
+        ));
+    }
+
+    Ok(qty.signum() * max_abs_qty.min(abs_qty))
+}
+
 /// Effective leverage cap given the `allow_margin`, `max_leverage` and
 /// `initial_margin` settings. When margin is disabled, the cap is 1.0
 /// (no borrowing). Otherwise `max_leverage` and `100/initial_margin`
@@ -94,50 +224,6 @@ pub fn effective_leverage_cap(cfg: &ExperimentConfig) -> f64 {
         f64::INFINITY
     };
     from_ml.min(from_im).max(1.0)
-}
-
-/// Compute the *gross* notional currently invested across all positions,
-/// expressed in `target_ccy`. Open shorts contribute their absolute
-/// notional just like longs — this is what the leverage / maintenance
-/// margin checks compare against equity.
-pub fn gross_notional_in_currency(
-    positions: &Positions,
-    aligned: &HashMap<Symbol, Vec<Option<Bar>>>,
-    bar_index: usize,
-    quote_ccy: &HashMap<String, String>,
-    target_ccy: &str,
-    fx: &FxTable,
-    ts: i64,
-) -> f64 {
-    let mut total = 0.0_f64;
-    for (sym, qty) in positions {
-        if qty.abs() < 1e-12 {
-            continue;
-        }
-        if let Some(b) = aligned.get(sym).and_then(|r| r[bar_index].as_ref()) {
-            let value = qty.abs() * b.close;
-            let ccy = quote_ccy.get(sym).map(String::as_str).unwrap_or(target_ccy);
-            total += fx.convert(value, ccy, target_ccy, ts).unwrap_or(value);
-        }
-    }
-    total
-}
-
-/// Check whether an order of `qty @ fill_px` (in `order_ccy`) for `symbol`
-/// satisfies the configured leverage and position-size limits. Returns
-/// either the (possibly shrunk) acceptable quantity, or an error string
-/// describing which limit was breached.
-///
-/// `equity_base` and `gross_base` must already be expressed in the
-/// portfolio base currency.
-/// Classification of a limit-check rejection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LimitViolation {
-    /// Per-symbol concentration limit (`max_position_size`). Not related
-    /// to margin — always enforced regardless of `raise_on_margin_limit`.
-    PositionSize,
-    /// Leverage / margin / equity constraint. Gated by `raise_on_margin_limit`.
-    Margin,
 }
 
 pub fn limit_warning_dedupe_key(symbol: &str, violation: LimitViolation, reason: &str) -> String {
@@ -164,119 +250,6 @@ pub fn limit_warning_dedupe_key(symbol: &str, violation: LimitViolation, reason:
         _ => reason,
     };
     format!("{symbol}\0{bucket}")
-}
-
-pub fn check_order_against_limits(
-    cfg: &ExperimentConfig,
-    symbol: &str,
-    qty: f64,
-    fill_px: f64,
-    order_ccy: &str,
-    base_ccy: &str,
-    equity_base: f64,
-    gross_base: f64,
-    current_qty: f64,
-    current_pos_base: f64,
-    fx: &FxTable,
-    ts: i64,
-) -> Result<f64, (LimitViolation, String)> {
-    let abs_qty = qty.abs();
-    if abs_qty <= 0.0 || !abs_qty.is_finite() {
-        return Ok(qty);
-    }
-    if fill_px <= 0.0 || !fill_px.is_finite() {
-        return Ok(qty);
-    }
-    let order_notional_base =
-        fx.convert(abs_qty * fill_px, order_ccy, base_ccy, ts).unwrap_or(abs_qty * fill_px);
-    let unit_base = order_notional_base / abs_qty;
-    if unit_base <= 0.0 || !unit_base.is_finite() {
-        return Ok(qty);
-    }
-
-    let current_pos_base = current_pos_base.max(0.0);
-    let current_abs_qty = current_qty.abs();
-
-    let max_qty_for_final_exposure = |cap_base: f64| -> f64 {
-        let same_direction = current_abs_qty <= 1e-12 || current_qty.signum() == qty.signum();
-        if same_direction {
-            return ((cap_base - current_pos_base) / unit_base).max(0.0);
-        }
-
-        // Opposite-side orders reduce existing exposure first. Always allow
-        // the requested size when it only closes/reduces the position, even if
-        // the account is currently at/over a cap. If it flips the position,
-        // only the post-flip exposure consumes cap room.
-        if abs_qty <= current_abs_qty + 1e-12 {
-            abs_qty
-        } else {
-            current_abs_qty + (cap_base / unit_base).max(0.0)
-        }
-    };
-
-    let mut max_abs_qty = abs_qty;
-
-    // ── max_position_size ─────────────────────────────────────────────
-    //
-    // Per-symbol exposure (existing absolute notional + new order
-    // notional) must not exceed `max_position_size / 100` of equity.
-    // `max_position_size == 0` is treated as "no cap". When the order
-    // would push past the cap, the quantity is *shrunk* to whatever
-    // fits rather than rejected outright — this matches real-broker
-    // behaviour and prevents an entire equal-weight allocation from
-    // being silently dropped over a fractional slippage overshoot.
-    let pos_cap_pct = cfg.exchange.max_position_size as f64;
-    if pos_cap_pct > 0.0 && equity_base > 0.0 {
-        let max_per_pos = equity_base * pos_cap_pct / 100.0;
-        let allowed_abs_qty = max_qty_for_final_exposure(max_per_pos);
-        if allowed_abs_qty <= 1e-12 {
-            return Err((
-                LimitViolation::PositionSize,
-                format!(
-                "order would exceed max_position_size ({pos_cap_pct}% of equity) for {symbol}: \
-                 position already at limit (current {current_pos_base:.2}, cap {max_per_pos:.2})"
-            ),
-            ));
-        }
-        max_abs_qty = max_abs_qty.min(allowed_abs_qty);
-    }
-
-    // ── max_leverage / allow_margin ───────────────────────────────────
-    //
-    // The total gross notional after this fill (including existing
-    // exposure) must not exceed `equity * effective_leverage_cap`.
-    // Same shrink-not-reject philosophy as above.
-    let cap = effective_leverage_cap(cfg);
-    if equity_base > 0.0 && cap.is_finite() {
-        let max_gross = equity_base * cap;
-        let other_gross_base = (gross_base - current_pos_base).max(0.0);
-        let symbol_cap_base = max_gross - other_gross_base;
-        let allowed_abs_qty = max_qty_for_final_exposure(symbol_cap_base);
-        if allowed_abs_qty <= 1e-12 {
-            return Err((
-                LimitViolation::Margin,
-                format!(
-                    "order would exceed max_leverage ({cap:.2}x): gross notional already at limit \
-                 (current {gross_base:.2}, cap {max_gross:.2})"
-                ),
-            ));
-        }
-        max_abs_qty = max_abs_qty.min(allowed_abs_qty);
-    } else if equity_base <= 0.0 {
-        // Account already wiped out — nothing more can be opened.
-        return Err((
-            LimitViolation::Margin,
-            "equity is non-positive; cannot open new exposure".to_owned(),
-        ));
-    }
-
-    if !max_abs_qty.is_finite() || max_abs_qty <= 1e-12 {
-        return Err((
-            LimitViolation::Margin,
-            format!("no headroom under leverage / position-size limits for {symbol}"),
-        ));
-    }
-    Ok(qty.signum() * max_abs_qty.min(abs_qty))
 }
 
 /// Post-bar maintenance-margin check.

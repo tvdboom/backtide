@@ -127,7 +127,7 @@ mod tests {
         // 1 EUR = 1.10 USD
         fx.add_series("EUR", "USD", vec![(0, 1.10)]);
         assert_eq!(fx.rate("EUR", "USD", 0), Some(1.10));
-        assert!((fx.rate("USD", "EUR", 0).unwrap() - 1.0 / 1.10).abs() < 1e-12);
+        assert!((fx.rate("USD", "EUR", 0).unwrap() - 1.0 / 1.10).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -180,7 +180,7 @@ mod tests {
         fx.add_series("EUR", "USD", vec![(0, 1.10)]);
         // CNY -> USD = 0.13 * 1.10
         let got = fx.convert(1.0, "CNY", "USD", 0).unwrap();
-        assert!((got - 0.13 * 1.10).abs() < 1e-12);
+        assert!((got - 0.13 * 1.10).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -245,7 +245,7 @@ mod tests {
         let mut fx = FxTable::new("EUR");
         fx.add_series("EUR", "USD", vec![(0, 1.25)]);
         let got = fx.convert(100.0, "USD", "EUR", 0).unwrap();
-        assert!((got - 80.0).abs() < 1e-12);
+        assert!((got - 80.0).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -296,11 +296,11 @@ mod tests {
         fx.add_series("USD", "CHF", vec![(0, 0.90)]);
 
         let eth_usdt = fx.rate("ETH", "USDT", 0).unwrap();
-        assert!((eth_usdt - 3_000.0).abs() < 1e-12);
+        assert!((eth_usdt - 3_000.0).abs() < MIN_POSITION);
         let usdt_usd = fx.rate("USDT", "USD", 0).unwrap();
-        assert!((usdt_usd - 1.0).abs() < 1e-12);
+        assert!((usdt_usd - 1.0).abs() < MIN_POSITION);
         let usd_chf = fx.rate("USD", "CHF", 0).unwrap();
-        assert!((usd_chf - 0.90).abs() < 1e-12);
+        assert!((usd_chf - 0.90).abs() < MIN_POSITION);
     }
 
     #[test]

@@ -1,9 +1,9 @@
 use crate::backtest::models::{new_order_id, Order, OrderType, Portfolio};
-use crate::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
 use crate::config::interface::Config;
 use crate::constants::Symbol;
 use crate::data::models::Bar;
 use crate::errors::{EngineError, EngineResult};
+use crate::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
 use crate::utils::python::{extract_2d_from_python, extract_bars_from_python, load_pickle};
 use itertools::Itertools;
 use pyo3::exceptions::PyValueError;
@@ -236,7 +236,7 @@ pub fn portfolio_equity(portfolio: &Portfolio, bars: &[(String, Vec<Bar>)]) -> f
     let mut equity = portfolio_cash(portfolio);
     for (sym, b) in bars {
         let qty = portfolio.positions.get(sym.as_str()).copied().unwrap_or(0.0);
-        if qty.abs() > 1e-12 {
+        if qty.abs() > MIN_POSITION {
             let last = b.last().map(|bar| bar.close).unwrap_or(0.0);
             equity += qty * last;
         }

@@ -6,10 +6,10 @@ pub mod data;
 pub mod engine;
 pub mod errors;
 pub mod indicators;
+pub mod sizers;
 pub mod storage;
 pub mod strategies;
 pub mod utils;
-pub mod sizers;
 
 use pyo3::prelude::*;
 

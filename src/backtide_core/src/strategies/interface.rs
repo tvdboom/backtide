@@ -3,10 +3,10 @@ use pyo3::types::PyType;
 use std::collections::HashMap;
 
 use crate::backtest::models::{new_order_id, Order, OrderType, Portfolio, State};
-use crate::sizers::{Sizer, VolatilityScaled};
 use crate::data::models::{Bar, InstrumentType};
 use crate::indicators::interface::*;
 use crate::indicators::utils::indicator_deterministic_name;
+use crate::sizers::{Sizer, VolatilityScaled};
 use crate::strategies::traits::Strategy;
 use crate::strategies::utils::*;
 

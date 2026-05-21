@@ -1221,8 +1221,8 @@ mod tests {
         // Then v[4] = 2.5 + 0.25 * (5.0 - 2.5) = 3.125.
         let out = wilder_smooth(&[1.0, 2.0, 3.0, 4.0, 5.0], 4);
         assert!(out[2].is_nan());
-        assert!((out[3] - 2.5).abs() < 1e-12);
-        assert!((out[4] - 3.125).abs() < 1e-12);
+        assert!((out[3] - 2.5).abs() < MIN_POSITION);
+        assert!((out[4] - 3.125).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -1236,9 +1236,9 @@ mod tests {
         // First fully-finite window of size 3 is [2,3,4] at index 4.
         let out = wilder_smooth(&[f64::NAN, f64::NAN, 2.0, 3.0, 4.0, 5.0], 3);
         assert!(out[3].is_nan());
-        assert!((out[4] - 3.0).abs() < 1e-12);
+        assert!((out[4] - 3.0).abs() < MIN_POSITION);
         // 3.0 + (1/3) * (5 - 3) = 3.6666...
-        assert!((out[5] - (3.0 + (5.0 - 3.0) / 3.0)).abs() < 1e-12);
+        assert!((out[5] - (3.0 + (5.0 - 3.0) / 3.0)).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -1473,8 +1473,8 @@ mod tests {
         let out = rolling_std(&[5.0, 5.0, 5.0, 5.0], 3);
         assert!(out[0].is_nan());
         assert!(out[1].is_nan());
-        assert!((out[2] - 0.0).abs() < 1e-12);
-        assert!((out[3] - 0.0).abs() < 1e-12);
+        assert!((out[2] - 0.0).abs() < MIN_POSITION);
+        assert!((out[3] - 0.0).abs() < MIN_POSITION);
     }
 
     #[test]

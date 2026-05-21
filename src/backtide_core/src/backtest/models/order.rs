@@ -123,24 +123,17 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SizerSlot {
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Order {
-    /// Unique identifier of the order.
     pub id: String,
-    /// The ticker symbol this order targets.
     pub symbol: String,
-    /// Signed quantity (positive = buy, negative = sell). Fractional values
-    /// are allowed only for crypto instruments. When a sizer is attached this
-    /// is ``0.0`` until the engine resolves it.
     pub quantity: f64,
-    /// The execution semantics.
     pub order_type: OrderType,
-    /// Primary price (limit / stop / trail amount).
     pub price: Option<f64>,
-    /// Secondary limit price for `*Limit` stop-style orders.
     #[serde(default)]
     pub limit_price: Option<f64>,
+
     /// Optional position sizer. The engine resolves it into a concrete
-    /// quantity at order-processing time using current equity converted to
-    /// the instrument quote currency and price.
+    /// quantity at order-processing time using current equity converted
+    /// to the instrument quote currency and price.
     #[serde(skip)]
     pub sizer: Option<SizerSlot>,
 }

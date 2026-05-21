@@ -30,6 +30,7 @@ use backtide_core::backtest::indicators::{
 };
 use backtide_core::backtest::models::portfolio::Portfolio;
 use backtide_core::backtest::models::state::State;
+use backtide_core::constants::MIN_POSITION;
 use backtide_core::data::models::bar::Bar;
 use backtide_core::data::models::currency::Currency;
 use backtide_core::data::models::instrument_type::InstrumentType;
@@ -222,7 +223,7 @@ fn run_strategy_loop(
                     *c += proceeds;
                 }
                 let new_pos = cur + o.quantity;
-                if new_pos.abs() < 1e-12 {
+                if new_pos.abs() < MIN_POSITION {
                     portfolio.positions.remove(&o.symbol);
                 } else {
                     portfolio.positions.insert(o.symbol.clone(), new_pos);

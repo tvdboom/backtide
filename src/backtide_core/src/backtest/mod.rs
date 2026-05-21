@@ -6,10 +6,10 @@ use pyo3::{Bound, PyResult};
 pub mod engine;
 pub mod fx;
 pub mod interface;
-pub mod models;
-mod utils;
 mod margin;
+pub mod models;
 mod orders;
+mod utils;
 
 /// Register the Python interface for `backtide.core.backtest`.
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
