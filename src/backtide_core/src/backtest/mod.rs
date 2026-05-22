@@ -9,7 +9,7 @@ pub mod interface;
 mod margin;
 pub mod models;
 mod orders;
-mod utils;
+pub mod utils;
 
 /// Register the Python interface for `backtide.core.backtest`.
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {

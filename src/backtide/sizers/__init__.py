@@ -5,7 +5,7 @@ Description: Position sizing functionalities for backtide.
 
 """
 
-from backtide.core.backtest import (
+from backtide.core.sizers import (
     EqualWeight,
     FixedFractional,
     FixedNotional,

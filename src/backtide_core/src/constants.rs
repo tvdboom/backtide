@@ -1,6 +1,7 @@
 //! Constants and types shared across the package.
 
 use crate::data::models::Currency;
+use pyo3::{Py, PyAny};
 use std::collections::HashMap;
 use std::time::Duration;
 // ────────────────────────────────────────────────────────────────────────────
@@ -16,8 +17,34 @@ pub type BarKey = (Symbol, String, String);
 /// Cash values in a portfolio.
 pub type Cash = HashMap<Currency, f64>;
 
+pub trait CashAmount {
+    fn amount(&self, ccy: &Currency) -> f64;
+}
+
+impl CashAmount for Cash {
+    fn amount(&self, ccy: &Currency) -> f64 {
+        *self.get(ccy).unwrap_or(&0.0)
+    }
+}
+
 /// Symbol positions in a portfolio.
 pub type Positions = HashMap<Symbol, f64>;
+
+pub trait PositionAmount {
+    fn amount(&self, symbol: &str) -> f64;
+}
+
+impl PositionAmount for Positions {
+    fn amount(&self, symbol: &str) -> f64 {
+        *self.get(symbol).unwrap_or(&0.0)
+    }
+}
+
+/// Pre-built per-symbol data cache (symbol → full dataset).
+pub type DataT = HashMap<String, Py<PyAny>>;
+
+/// Pre-built per-indicator cache (indicator → symbol → dataset).
+pub type IndicatorsT = HashMap<String, HashMap<String, Py<PyAny>>>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Constants

@@ -2,6 +2,7 @@
 
 use crate::backtest::fx::FxTable;
 use crate::backtest::models::ExperimentConfig;
+use crate::backtest::utils::is_negligible;
 use crate::constants::{Cash, Positions, Symbol, MIN_POSITION, SECS_PER_YEAR};
 use crate::data::models::{Bar, Currency};
 use std::collections::HashMap;
@@ -56,7 +57,7 @@ pub fn accrue_margin_costs(
             if *amt < 0.0 {
                 borrowed_base -= fx
                     .convert(*amt, &ccy.to_string(), &base_str, ts)
-                    .expect(format!("Unable to convert currency {ccy} to {base_ccy}").as_str());
+                    .unwrap_or_else(|| panic!("Unable to convert currency {ccy} to {base_ccy}"));
             }
         }
 
@@ -114,7 +115,7 @@ pub fn check_order_against_limits(
     if abs_qty <= 0.0 || !abs_qty.is_finite() || fill_px <= 0.0 || !fill_px.is_finite() {
         return Ok(qty);
     }
-    
+
     let order_notional_base =
         fx.convert(abs_qty * fill_px, order_ccy, base_ccy, ts).unwrap_or(abs_qty * fill_px);
 
@@ -154,7 +155,7 @@ pub fn check_order_against_limits(
     if pos_cap_pct > 0.0 && equity_base > 0.0 {
         let max_per_pos = equity_base * pos_cap_pct / 100.0;
         let allowed_abs_qty = max_qty_for_final_exposure(max_per_pos);
-        if allowed_abs_qty <= MIN_POSITION {
+        if is_negligible(allowed_abs_qty) {
             return Err((
                 LimitViolation::PositionSize,
                 format!(
@@ -175,7 +176,7 @@ pub fn check_order_against_limits(
         let other_gross_base = (gross_base - current_pos_base).max(0.0);
         let symbol_cap_base = max_gross - other_gross_base;
         let allowed_abs_qty = max_qty_for_final_exposure(symbol_cap_base);
-        if allowed_abs_qty <= MIN_POSITION {
+        if is_negligible(allowed_abs_qty) {
             return Err((
                 LimitViolation::Margin,
                 format!(
@@ -194,7 +195,7 @@ pub fn check_order_against_limits(
         ));
     }
 
-    if !max_abs_qty.is_finite() || max_abs_qty <= MIN_POSITION {
+    if !max_abs_qty.is_finite() || is_negligible(max_abs_qty) {
         return Err((
             LimitViolation::Margin,
             format!("no headroom under leverage / position-size limits for {symbol}"),
@@ -202,6 +203,30 @@ pub fn check_order_against_limits(
     }
 
     Ok(qty.signum() * max_abs_qty.min(abs_qty))
+}
+
+/// Create a key per type of warning.
+pub fn limit_warning_dedupe_key(symbol: &str, violation: LimitViolation, reason: &str) -> String {
+    let bucket = match violation {
+        LimitViolation::Margin if reason.contains("gross notional already at limit") => {
+            "margin:gross_notional_at_limit"
+        },
+        LimitViolation::Margin if reason.contains("equity is non-positive") => {
+            "margin:equity_non_positive"
+        },
+        LimitViolation::Margin if reason.contains("no headroom under leverage") => {
+            "margin:no_headroom"
+        },
+        LimitViolation::PositionSize if reason.contains("position already at limit") => {
+            "position_size:at_limit"
+        },
+        LimitViolation::PositionSize if reason.contains("no headroom under leverage") => {
+            "position_size:no_headroom"
+        },
+        _ => reason,
+    };
+
+    format!("{symbol}\0{bucket}")
 }
 
 /// Effective leverage cap given the `allow_margin`, `max_leverage` and
@@ -226,57 +251,27 @@ pub fn effective_leverage_cap(cfg: &ExperimentConfig) -> f64 {
     from_ml.min(from_im).max(1.0)
 }
 
-pub fn limit_warning_dedupe_key(symbol: &str, violation: LimitViolation, reason: &str) -> String {
-    let bucket = match violation {
-        LimitViolation::Margin if reason.contains("gross notional already at limit") => {
-            "margin:gross_notional_at_limit"
-        },
-        LimitViolation::Margin if reason.contains("equity is non-positive") => {
-            "margin:equity_non_positive"
-        },
-        LimitViolation::Margin
-            if reason.contains("no headroom under leverage / position-size limits") =>
-        {
-            "margin:no_headroom"
-        },
-        LimitViolation::PositionSize if reason.contains("position already at limit") => {
-            "position_size:at_limit"
-        },
-        LimitViolation::PositionSize
-            if reason.contains("no headroom under leverage / position-size limits") =>
-        {
-            "position_size:no_headroom"
-        },
-        _ => reason,
-    };
-    format!("{symbol}\0{bucket}")
-}
-
 /// Post-bar maintenance-margin check.
 ///
-/// Returns `Some(message)` when `equity / gross_notional < maintenance_margin/100`
-/// (i.e. the account is undercollateralised), `None` otherwise. The caller
-/// decides whether to force-liquidate, record a warning, or abort the run
-/// based on `cfg.exchange.raise_on_margin_limit`.
-pub fn check_maintenance_margin(
-    cfg: &ExperimentConfig,
-    equity_base: f64,
-    gross_base: f64,
-) -> Option<String> {
-    let mm = cfg.exchange.maintenance_margin;
-    if mm <= 0.0 || gross_base <= 0.0 {
+/// Returns `Some(message)` when the account is undercollateralized, `None`
+/// otherwise. The caller decides whether to force-liquidate, record a warning,
+/// or abort the run.
+pub fn check_maintenance_margin(margin: f64, equity_base: f64, gross_base: f64) -> Option<String> {
+    if margin <= 0.0 || gross_base <= 0.0 {
         return None;
     }
+
     // Negative equity is always a margin call.
     if equity_base <= 0.0 {
         return Some(format!(
             "margin call: equity {equity_base:.2} ≤ 0 with gross notional {gross_base:.2}"
         ));
     }
+
     let ratio = equity_base / gross_base;
-    if ratio < mm / 100.0 {
+    if ratio < margin / 100.0 {
         Some(format!(
-            "margin call: equity/notional ratio {:.2}% below maintenance_margin {mm:.2}%",
+            "margin call: equity/notional ratio {:.2}% below maintenance_margin {margin:.2}%",
             ratio * 100.0
         ))
     } else {

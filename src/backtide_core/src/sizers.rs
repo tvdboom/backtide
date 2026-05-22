@@ -526,6 +526,7 @@ mod tests {
     //! * that optional arguments it does not consume are silently ignored.
 
     use super::*;
+    use crate::constants::MIN_POSITION;
 
     /// Helper: assert that `result` is a `PyValueError` containing `needle`.
     ///

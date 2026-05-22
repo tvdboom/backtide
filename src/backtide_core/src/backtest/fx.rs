@@ -13,6 +13,11 @@
 //!   - Inverse rates for free (1 / rate).
 //!   - One-hop triangulation through the portfolio base currency.
 
+use crate::backtest::models::ConversionPeriod;
+use crate::constants::{Cash, CashAmount, MIN_POSITION};
+use crate::data::models::Currency;
+use chrono::{DateTime, Datelike, Utc};
+use itertools::Itertools;
 use std::collections::HashMap;
 
 /// In-memory FX table: `from -> to -> sorted (timestamp, rate)`.
@@ -99,6 +104,186 @@ impl FxTable {
     }
 }
 
+/// Try to debit `amount` of `ccy` from `cash`.
+///
+/// If `ccy` doesn't have enough, fall back to the base currency and then any
+/// other foreign bucket. Conversions are made at the FX rate observed at `ts`.
+/// Returns `false` if no combination of available cash covers the debit.
+pub fn try_debit(
+    cash: &mut Cash,
+    ccy: Currency,
+    amount: f64,
+    base: Currency,
+    fx: &FxTable,
+    ts: i64,
+) -> bool {
+    if amount <= 0.0 {
+        return true;
+    }
+
+    // 1. Pay directly out of `ccy`.
+    let avail = cash.amount(&ccy);
+    if avail >= amount {
+        *cash.entry(ccy).or_insert(0.0) -= amount;
+        return true;
+    }
+
+    // 2. Drain the existing `ccy` bucket first, remember the residual.
+    let mut remaining = amount - avail.max(0.0);
+
+    // 3. Cover the residual from the base currency at the current FX rate.
+    let base_avail = if ccy == base {
+        0.0
+    } else {
+        cash.amount(&base)
+    };
+
+    let needed_base = match fx.rate(&ccy.to_string(), &base.to_string(), ts) {
+        Some(r) if r > 0.0 => remaining * r,
+        _ => f64::INFINITY,
+    };
+
+    if needed_base.is_finite() && base_avail >= needed_base {
+        cash.remove(&ccy);
+        *cash.entry(base).or_insert(0.0) -= needed_base;
+        return true;
+    }
+
+    // 4. Drain other foreign buckets in deterministic order.
+    let buckets: Vec<(Currency, f64)> = cash
+        .iter()
+        .filter(|(c, v)| **c != ccy && **c != base && v.is_finite() && **v > 0.0)
+        .map(|(c, v)| (*c, *v))
+        .sorted_by(|a, b| a.0.to_string().cmp(&b.0.to_string()))
+        .collect();
+
+    // Tentatively zero `ccy` and reduce base.
+    let mut staged: Vec<(Currency, f64)> = Vec::new();
+    let staged_ccy_drain = avail.max(0.0);
+    let mut staged_base_drain = if base_avail > 0.0 {
+        base_avail
+    } else {
+        0.0
+    };
+
+    if needed_base.is_finite() {
+        staged_base_drain = staged_base_drain.min(needed_base);
+        let covered_in_ccy = if staged_base_drain > 0.0 {
+            match fx.rate(&base.to_string(), &ccy.to_string(), ts) {
+                Some(r) if r > 0.0 => staged_base_drain * r,
+                _ => 0.0,
+            }
+        } else {
+            0.0
+        };
+
+        remaining = (remaining - covered_in_ccy).max(0.0);
+    } else {
+        staged_base_drain = 0.0;
+    }
+
+    for (other_ccy, other_avail) in buckets {
+        if remaining <= 0.0 {
+            break;
+        }
+
+        let r = match fx.rate(&other_ccy.to_string(), &ccy.to_string(), ts) {
+            Some(r) if r > 0.0 => r,
+            _ => continue,
+        };
+
+        let other_in_ccy = other_avail * r;
+        if other_in_ccy >= remaining {
+            staged.push((other_ccy, remaining / r));
+            remaining = 0.0;
+        } else {
+            staged.push((other_ccy, other_avail));
+            remaining -= other_in_ccy;
+        }
+    }
+
+    if remaining > 0.0 {
+        return false;
+    }
+
+    // Commit drains.
+    if staged_ccy_drain > 0.0 {
+        *cash.entry(ccy).or_insert(0.0) -= staged_ccy_drain;
+    }
+
+    if staged_base_drain > 0.0 {
+        *cash.entry(base).or_insert(0.0) -= staged_base_drain;
+    }
+
+    for (c, v) in staged {
+        *cash.entry(c).or_insert(0.0) -= v;
+    }
+
+    // Remove buckets drained to zero so they don't linger in equity snapshots.
+    cash.retain(|_, v| v.abs() > MIN_POSITION);
+
+    true
+}
+
+/// Sweep every non-base currency bucket into the base currency
+///
+/// Conversion is done at the FX rate observed at `ts`. If `threshold` is
+/// `Some(t)`, only buckets whose value in base currency is `>= t` are swept,
+/// otherwise every foreign bucket with a positive (or negative) finite
+/// balance is converted.
+pub fn sweep_foreign_to_base(
+    cash: &mut Cash,
+    base: Currency,
+    fx: &FxTable,
+    ts: i64,
+    threshold: Option<f64>,
+) {
+    let foreign: Vec<Currency> = cash
+        .iter()
+        .filter(|(c, v)| **c != base && v.is_finite() && v.abs() > 0.0)
+        .map(|(c, _)| *c)
+        .collect();
+
+    for ccy in foreign {
+        let amount = match cash.get(&ccy) {
+            Some(v) if v.is_finite() && v.abs() > 0.0 => v,
+            _ => continue,
+        };
+
+        let in_base = match fx.convert(*amount, &ccy.to_string(), &base.to_string(), ts) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        if let Some(t) = threshold {
+            if in_base.abs() < t {
+                continue;
+            }
+        }
+
+        cash.remove(&ccy);
+        *cash.entry(base).or_insert(0.0) += in_base;
+    }
+}
+
+/// Return a coarse "bucket" identifier for `ts` under the given
+/// conversion period. Two timestamps falling into different buckets
+/// trigger an end-of-period sweep.
+pub fn period_bucket(ts: i64, period: ConversionPeriod) -> i64 {
+    let dt = DateTime::<Utc>::from_timestamp(ts, 0)
+        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap());
+
+    match period {
+        ConversionPeriod::Day => ts.div_euclid(86_400),
+        ConversionPeriod::Week => {
+            let iso = dt.iso_week(); // ISO week-year combined identifier.
+            (iso.year() as i64) * 100 + iso.week() as i64
+        },
+        ConversionPeriod::Month => (dt.year() as i64) * 12 + (dt.month0() as i64),
+        ConversionPeriod::Year => dt.year() as i64,
+    }
+}
+
 /// Nearest-known lookup: latest value at-or-before `ts` in a sorted series.
 /// If `ts` is earlier than every recorded sample the first (earliest) sample
 /// is returned instead. This lets the engine value portfolios on bars that
@@ -120,6 +305,7 @@ fn forward_fill(s: &[(i64, f64)], ts: i64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::MIN_POSITION;
 
     #[test]
     fn direct_and_inverse() {

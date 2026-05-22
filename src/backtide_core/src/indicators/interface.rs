@@ -1108,6 +1108,7 @@ indicator_pymethods!(WeightedMovingAverage);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::MIN_POSITION;
 
     fn bar(close: f64) -> Bar {
         Bar {

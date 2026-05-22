@@ -1,6 +1,6 @@
-use crate::backtest::models::{new_order_id, Order, OrderType, Portfolio};
+use crate::backtest::models::{Order, OrderId, OrderType, Portfolio};
 use crate::config::interface::Config;
-use crate::constants::Symbol;
+use crate::constants::{PositionAmount, Symbol, MIN_POSITION};
 use crate::data::models::Bar;
 use crate::errors::{EngineError, EngineResult};
 use crate::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
@@ -164,7 +164,7 @@ pub fn buy_with_sizer<S: Sizer>(
         return None;
     }
     Some(Order {
-        id: new_order_id(),
+        id: OrderId::new(),
         symbol: symbol.to_owned(),
         order_type: OrderType::Market,
         quantity: qty,
@@ -216,7 +216,7 @@ pub fn sell_order(symbol: &str, quantity: f64) -> Option<Order> {
         return None;
     }
     Some(Order {
-        id: new_order_id(),
+        id: OrderId::new(),
         symbol: symbol.to_owned(),
         order_type: OrderType::Market,
         quantity: -qty,
@@ -232,10 +232,10 @@ pub fn portfolio_cash(portfolio: &Portfolio) -> f64 {
 }
 
 /// Total portfolio equity: cash + positions marked to their latest close.
-pub fn portfolio_equity(portfolio: &Portfolio, bars: &[(String, Vec<Bar>)]) -> f64 {
+pub fn portfolio_equity(portfolio: &Portfolio, bars: &[(&str, &[Bar])]) -> f64 {
     let mut equity = portfolio_cash(portfolio);
     for (sym, b) in bars {
-        let qty = portfolio.positions.get(sym.as_str()).copied().unwrap_or(0.0);
+        let qty = portfolio.positions.amount(sym);
         if qty.abs() > MIN_POSITION {
             let last = b.last().map(|bar| bar.close).unwrap_or(0.0);
             equity += qty * last;
@@ -255,7 +255,7 @@ pub fn react_to_signal(
     portfolio: &Portfolio,
     target_notional: f64,
 ) -> Vec<Order> {
-    let cur = portfolio.positions.get(symbol).copied().unwrap_or(0.0);
+    let cur = portfolio.positions.amount(symbol);
     if signal_long && cur <= 0.0 {
         let cash = portfolio_cash(portfolio);
         let alloc = target_notional.min(cash);
@@ -327,24 +327,24 @@ pub fn window_return_std(prices: &[f64]) -> Option<f64> {
 /// Top-K rotation across symbols. Closes positions not in the top, then
 /// buys equal-weight into the top `k`.
 pub fn rotation_orders(
-    scores: &[(String, f64)],
+    scores: &[(&str, f64)],
     top_k: usize,
     portfolio: &Portfolio,
-    last_prices: &HashMap<String, f64>,
+    last_prices: &HashMap<&str, f64>,
 ) -> Vec<Order> {
-    let sorted: Vec<&(String, f64)> = scores
+    let sorted: Vec<&(&str, f64)> = scores
         .iter()
         .filter(|(_, s)| s.is_finite())
         .sorted_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal))
         .collect();
 
-    let target: HashSet<String> = sorted.iter().take(top_k).map(|(s, _)| s.clone()).collect();
+    let target: HashSet<&str> = sorted.iter().take(top_k).map(|(s, _)| *s).collect();
 
     let mut orders: Vec<Order> = Vec::new();
 
     // Close positions not in target.
     for (sym, qty) in &portfolio.positions {
-        if *qty > 0.0 && !target.contains(sym) {
+        if *qty > 0.0 && !target.contains(sym.as_str()) {
             if let Some(o) = sell_order(sym, *qty) {
                 orders.push(o);
             }
@@ -356,10 +356,11 @@ pub fn rotation_orders(
         let cash = portfolio_cash(portfolio);
         let n = target.len();
         for sym in &target {
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
             if cur > 0.0 {
                 continue;
             }
+
             if let Some(px) = last_prices.get(sym).copied() {
                 if let Some(o) = buy_equal_weight(sym, n, cash, px) {
                     orders.push(o);

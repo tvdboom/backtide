@@ -18,8 +18,9 @@
 //! Trailing variants share `trail_state`, keyed by `order.id`, holding
 //! `(running_high, running_low)` since the order was placed.
 
-use crate::backtest::models::{Order, OrderType};
-use crate::constants::{Positions, MIN_POSITION};
+use crate::backtest::models::{Order, OrderId, OrderType, Trade};
+use crate::backtest::utils::{is_negligible, is_significant};
+use crate::constants::{PositionAmount, Positions};
 use crate::data::models::Bar;
 use std::collections::HashMap;
 
@@ -51,7 +52,7 @@ pub fn resolve_trigger(
     order: &mut Order,
     bar: &Bar,
     positions: &Positions,
-    trail_state: &mut HashMap<String, (f64, f64)>,
+    trail_state: &mut HashMap<OrderId, (f64, f64)>,
     trade_on_close: bool,
 ) -> TriggerOutcome {
     match order.order_type {
@@ -69,9 +70,8 @@ pub fn resolve_trigger(
             limit_cap: None,
         },
         OrderType::SettlePosition => {
-            let cur = *positions.get(&order.symbol).unwrap_or(&0.0);
-
-            if cur.abs() < MIN_POSITION {
+            let cur = positions.amount(&order.symbol);
+            if is_negligible(cur) {
                 return TriggerOutcome::Cancel {
                     reason: "no position to settle".into(),
                 };
@@ -157,7 +157,7 @@ pub fn resolve_trigger(
             };
 
             // First-bar initialization: seed extremes from this bar.
-            let entry = trail_state.entry(order.id.clone()).or_insert_with(|| (bar.high, bar.low));
+            let entry = trail_state.entry(order.id).or_insert_with(|| (bar.high, bar.low));
             entry.0 = entry.0.max(bar.high);
             entry.1 = entry.1.min(bar.low);
 
@@ -210,6 +210,39 @@ pub fn apply_slippage(raw_px: f64, qty: f64, slippage: f64, limit_cap: Option<f6
         Some(cap) if qty < 0.0 => slipped.max(cap),
         _ => slipped,
     }
+}
+
+/// Close an open position and return the finalized [`Trade`].
+pub fn close_open_trade_sell(
+    open_trades: &mut HashMap<String, (i64, f64, f64)>,
+    symbol: &str,
+    ts: i64,
+    abs_qty: f64,
+    exit_px: f64,
+    commission: f64,
+) -> Option<Trade> {
+    let (owned_key, (entry_ts, mut q, entry_px)) = open_trades.remove_entry(symbol)?;
+
+    let used = abs_qty.min(q);
+    q -= used;
+
+    let trade_symbol = if is_significant(q) {
+        let sym = owned_key.clone();
+        open_trades.insert(owned_key, (entry_ts, q, entry_px));
+        sym
+    } else {
+        owned_key
+    };
+
+    Some(Trade {
+        symbol: trade_symbol,
+        quantity: used,
+        entry_ts,
+        exit_ts: ts,
+        entry_price: entry_px,
+        exit_price: exit_px,
+        pnl: (exit_px - entry_px) * used - commission,
+    })
 }
 
 /// Fill semantics for a Limit (or TakeProfit, identical execution-wise):

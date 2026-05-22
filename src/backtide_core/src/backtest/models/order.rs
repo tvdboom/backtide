@@ -4,15 +4,108 @@
 //! during a backtest.
 
 use crate::backtest::models::order_type::OrderType;
+use duckdb::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::PyFloat;
+use pyo3::types::{PyFloat, PyString};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Generate a fresh short order id.
-pub fn new_order_id() -> String {
-    Uuid::new_v4().simple().to_string()[..12].to_owned()
+// ────────────────────────────────────────────────────────────────────────────
+// OrderId
+// ────────────────────────────────────────────────────────────────────────────
+
+/// A lightweight, `Copy` order identifier backed by a UUID v4.
+///
+/// When formatted as a string it produces a 32-character lowercase hex
+/// representation (the "simple" UUID format), making it GUID-like while
+/// staying on the stack with no heap allocation.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OrderId(Uuid);
+
+impl OrderId {
+    /// Generate a fresh random order id.
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    /// The nil (all-zeros) id, used as a sentinel for "not yet assigned".
+    pub fn nil() -> Self {
+        Self(Uuid::nil())
+    }
+
+    /// Returns `true` when this is the nil sentinel.
+    pub fn is_nil(self) -> bool {
+        self.0.is_nil()
+    }
+}
+
+impl Default for OrderId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for OrderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.simple())
+    }
+}
+
+impl std::fmt::Debug for OrderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.simple())
+    }
+}
+
+impl Serialize for OrderId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for OrderId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Uuid::parse_str(&s).map(OrderId).map_err(serde::de::Error::custom)
+    }
+}
+
+// DuckDB: OrderId is stored/loaded as TEXT — just string ↔ parse.
+impl ToSql for OrderId {
+    fn to_sql(&self) -> duckdb::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.to_string()))
+    }
+}
+
+impl FromSql for OrderId {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let s = value.as_str()?;
+        Uuid::parse_str(s).map(OrderId).map_err(|e| FromSqlError::Other(Box::new(e)))
+    }
+}
+
+// PyO3 conversions so `get_all` / `set_all` work on the `id` field.
+
+impl<'py> IntoPyObject<'py> for OrderId {
+    type Target = PyString;
+    type Output = Bound<'py, PyString>;
+    type Error = std::convert::Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(PyString::new(py, &self.to_string()))
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for OrderId {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        let s: String = ob.extract()?;
+        Uuid::parse_str(&s)
+            .map(OrderId)
+            .map_err(|e| PyErr::new::<PyTypeError, _>(format!("invalid order id: {e}")))
+    }
 }
 
 /// Wrapper around a Python sizer object stored on an [`Order`].
@@ -123,7 +216,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SizerSlot {
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Order {
-    pub id: String,
+    pub id: OrderId,
     pub symbol: String,
     pub quantity: f64,
     pub order_type: OrderType,
@@ -176,8 +269,15 @@ impl Order {
             },
         };
 
+        let order_id = match id {
+            Some(s) if !s.is_empty() => Uuid::parse_str(&s)
+                .map(OrderId)
+                .map_err(|e| PyErr::new::<PyTypeError, _>(format!("invalid order id: {e}")))?,
+            _ => OrderId::new(),
+        };
+
         Ok(Self {
-            id: id.unwrap_or_else(new_order_id),
+            id: order_id,
             symbol: symbol.to_owned(),
             quantity: qty,
             order_type,
@@ -196,15 +296,30 @@ impl Order {
         match (self.price, self.limit_price) {
             (Some(p), Some(l)) => format!(
                 "Order(id={:?}, symbol={:?}, qty={}, type={}, price={}, limit={}{})",
-                self.id, self.symbol, self.quantity, self.order_type, p, l, sizer_str,
+                self.id.to_string(),
+                self.symbol,
+                self.quantity,
+                self.order_type,
+                p,
+                l,
+                sizer_str,
             ),
             (Some(p), None) => format!(
                 "Order(id={:?}, symbol={:?}, qty={}, type={}, price={}{})",
-                self.id, self.symbol, self.quantity, self.order_type, p, sizer_str,
+                self.id.to_string(),
+                self.symbol,
+                self.quantity,
+                self.order_type,
+                p,
+                sizer_str,
             ),
             _ => format!(
                 "Order(id={:?}, symbol={:?}, qty={}, type={}{})",
-                self.id, self.symbol, self.quantity, self.order_type, sizer_str,
+                self.id.to_string(),
+                self.symbol,
+                self.quantity,
+                self.order_type,
+                sizer_str,
             ),
         }
     }
@@ -229,7 +344,7 @@ impl Order {
                 self.order_type,
                 self.price,
                 self.limit_price,
-                Some(self.id.clone()),
+                Some(self.id.to_string()),
             ),
         ))
     }

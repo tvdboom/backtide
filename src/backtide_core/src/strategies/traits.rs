@@ -17,7 +17,7 @@ pub trait Strategy {
     /// Decide which orders to place on the current bar.
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         state: &State,
         indicators: &IndicatorView<'_>,

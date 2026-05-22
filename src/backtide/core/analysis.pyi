@@ -45,6 +45,7 @@ def compute_statistics(
     --------
     backtide.analysis:plot_returns
     backtide.analysis:plot_drawdown
+    backtide.analysis:plot_mae_mfe
 
     Examples
     --------

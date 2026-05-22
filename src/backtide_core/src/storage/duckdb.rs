@@ -1001,7 +1001,7 @@ impl Storage for DuckDb {
                             symbol: row.get(2)?,
                             order_type: ot
                                 .parse()
-                                .expect(format!("unknown order type: {ot}").as_str()),
+                                .unwrap_or_else(|_| panic!("unknown order type: {ot}")),
                             quantity: row.get(4)?,
                             price: row.get(5)?,
                             limit_price: row.get(6)?,
@@ -1010,7 +1010,7 @@ impl Storage for DuckDb {
                         timestamp: row.get(1)?,
                         status: status
                             .parse()
-                            .expect(format!("unknown order status: {status}").as_str()),
+                            .unwrap_or_else(|_| panic!("unknown order status: {status}")),
                         fill_price: row.get(8)?,
                         reason: row.get(9)?,
                         commission: row.get::<_, Option<f64>>(10)?.unwrap_or(0.0),
@@ -1166,7 +1166,7 @@ mod tests {
                 }],
                 orders: vec![OrderRecord {
                     order: Order {
-                        id: "order-1".to_owned(),
+                        id: OrderId::new(),
                         symbol: "AAPL".to_owned(),
                         order_type: OrderType::Market,
                         quantity: 1.0,

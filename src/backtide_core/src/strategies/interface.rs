@@ -2,7 +2,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyType;
 use std::collections::HashMap;
 
-use crate::backtest::models::{new_order_id, Order, OrderType, Portfolio, State};
+use crate::backtest::models::{Order, OrderId, OrderType, Portfolio, State};
+use crate::constants::PositionAmount;
 use crate::data::models::{Bar, InstrumentType};
 use crate::indicators::interface::*;
 use crate::indicators::utils::indicator_deterministic_name;
@@ -82,7 +83,11 @@ macro_rules! strategy_pymethods {
                 state: &State,
                 indicators: Option<Bound<'py, PyAny>>,
             ) -> PyResult<Vec<Order>> {
-                let bars = extract_strategy_data_from_python(data)?;
+                let bars_owned = extract_strategy_data_from_python(data)?;
+                let bars: Vec<(&str, &[Bar])> = bars_owned
+                    .iter()
+                    .map(|(s, b)| (s.as_str(), b.as_slice()))
+                    .collect();
 
                 let indicator_data = extract_indicator_data_from_python(indicators.as_ref())?;
                 let indicators = IndicatorView::new(&indicator_data, state.bar_index);
@@ -180,7 +185,7 @@ impl Strategy for AdaptiveRsi {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -218,7 +223,7 @@ impl Strategy for AdaptiveRsi {
             };
 
             let last = *c.last().unwrap_or(&0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
             if r < 30.0 && cur <= 0.0 {
                 if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
                 {
@@ -305,7 +310,7 @@ impl Strategy for AlphaRsiPro {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -335,7 +340,7 @@ impl Strategy for AlphaRsiPro {
             let shift = (80.0 * trend_bias).clamp(-20.0, 20.0);
             let oversold = (30.0 + shift).clamp(15.0, 50.0);
             let overbought = (70.0 + shift).clamp(50.0, 85.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
             if r < oversold && cur <= 0.0 {
                 if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
                 {
@@ -420,7 +425,7 @@ impl Strategy for BollingerMeanReversion {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -440,7 +445,7 @@ impl Strategy for BollingerMeanReversion {
                 continue;
             }
             let last = symbol_bars.last().map(|b| b.close).unwrap_or(0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
             if last < lower && cur <= 0.0 {
                 if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
                 {
@@ -517,7 +522,7 @@ impl Strategy for BuyAndHold {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         _indicators: &IndicatorView<'_>,
@@ -555,29 +560,35 @@ impl Strategy for BuyAndHold {
         let mut needs_entry: Vec<(&str, f64)> = Vec::new();
         let mut already_entered = 0usize;
         for (sym, symbol_bars) in bars {
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
             let pending = portfolio.orders.iter().any(|o| &o.symbol == sym && o.quantity > 0.0);
             if cur > 0.0 || pending {
                 already_entered += 1;
                 continue;
             }
+
             let px = match symbol_bars.last() {
                 Some(b) if b.close.is_finite() && b.close > 0.0 => b.close,
                 _ => continue,
             };
-            needs_entry.push((sym.as_str(), px));
+
+            needs_entry.push((sym, px));
         }
+
         if needs_entry.is_empty() {
             return Vec::new();
         }
+
         let n_remaining = bars.len().saturating_sub(already_entered).max(1);
         let cash = portfolio_cash(portfolio);
+
         let mut orders = Vec::new();
         for (sym, px) in needs_entry {
             if let Some(o) = buy_equal_weight(sym, n_remaining, cash, px) {
                 orders.push(o);
             }
         }
+
         orders
     }
 }
@@ -638,7 +649,7 @@ impl Strategy for DoubleTop {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         _indicators: &IndicatorView<'_>,
@@ -675,7 +686,7 @@ impl Strategy for DoubleTop {
             let level_match = resistance > 0.0 && (p1.1 - p2.1).abs() / resistance < 0.03;
 
             let last = *c.last().unwrap_or(&0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
 
             if level_match && last > resistance && cur <= 0.0 {
                 if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
@@ -766,7 +777,7 @@ impl Strategy for HybridAlphaRsi {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -814,7 +825,7 @@ impl Strategy for HybridAlphaRsi {
             let mean = recent.iter().sum::<f64>() / recent.len() as f64;
             let in_uptrend = last > mean;
 
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
             if r < entry_level && in_uptrend && cur <= 0.0 {
                 if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
                 {
@@ -910,7 +921,7 @@ impl Strategy for Macd {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -1013,7 +1024,7 @@ impl Strategy for Momentum {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -1133,7 +1144,7 @@ impl Strategy for MultiBollingerRotation {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         state: &State,
         indicators: &IndicatorView<'_>,
@@ -1141,9 +1152,11 @@ impl Strategy for MultiBollingerRotation {
         if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
+
         let bb_name =
             indicator_deterministic_name("BB", &[fmt_arg(self.period), fmt_arg(self.std_dev)]);
-        let scores: Vec<(String, f64)> = bars
+
+        let scores: Vec<(&str, f64)> = bars
             .iter()
             .map(|(s, symbol_bars)| {
                 let last = symbol_bars.last().map(|b| b.close).unwrap_or(0.0);
@@ -1155,13 +1168,15 @@ impl Strategy for MultiBollingerRotation {
                     Some(v) if v.len() >= 3 && v[0].is_finite() && v[2].is_finite() => last - v[0],
                     _ => f64::NAN,
                 };
-                (s.clone(), score)
+                (*s, score)
             })
             .collect();
-        let last_prices: HashMap<String, f64> = bars
+
+        let last_prices: HashMap<&str, f64> = bars
             .iter()
-            .map(|(s, symbol_bars)| (s.clone(), symbol_bars.last().map(|b| b.close).unwrap_or(0.0)))
+            .map(|(s, symbol_bars)| (*s, symbol_bars.last().map(|b| b.close).unwrap_or(0.0)))
             .collect();
+
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
     }
 
@@ -1233,7 +1248,7 @@ impl Strategy for RiskAverse {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -1263,7 +1278,7 @@ impl Strategy for RiskAverse {
             };
             let low_vol = atr.is_finite() && atr / last < 0.04;
 
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
             if low_vol && last >= high && cur <= 0.0 {
                 if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
                 {
@@ -1339,7 +1354,7 @@ impl Strategy for Roc {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         _indicators: &IndicatorView<'_>,
@@ -1438,7 +1453,7 @@ impl Strategy for RocRotation {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         state: &State,
         _indicators: &IndicatorView<'_>,
@@ -1446,13 +1461,13 @@ impl Strategy for RocRotation {
         if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
-        let period = self.period;
-        let scores: Vec<(String, f64)> = bars
+
+        let scores: Vec<(&str, f64)> = bars
             .iter()
             .map(|(s, symbol_bars)| {
                 let c: Vec<f64> = symbol_bars.iter().map(|b| b.close).collect();
-                let score = if c.len() > period {
-                    let prev = c[c.len() - 1 - period];
+                let score = if c.len() > self.period {
+                    let prev = c[c.len() - 1 - self.period];
                     if prev > 0.0 {
                         (*c.last().unwrap_or(&0.0) - prev) / prev * 100.0
                     } else {
@@ -1461,13 +1476,16 @@ impl Strategy for RocRotation {
                 } else {
                     f64::NAN
                 };
-                (s.clone(), score)
+
+                (*s, score)
             })
             .collect();
-        let last_prices: HashMap<String, f64> = bars
+
+        let last_prices: HashMap<&str, f64> = bars
             .iter()
-            .map(|(s, symbol_bars)| (s.clone(), symbol_bars.last().map(|b| b.close).unwrap_or(0.0)))
+            .map(|(s, symbol_bars)| (*s, symbol_bars.last().map(|b| b.close).unwrap_or(0.0)))
             .collect();
+
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
     }
 }
@@ -1546,7 +1564,7 @@ impl Strategy for Rsi {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -1568,7 +1586,7 @@ impl Strategy for Rsi {
             // BB returns `[upper, middle, lower]`.
             let (upper, lower) = (bb[0], bb[2]);
             let last = symbol_bars.last().map(|b| b.close).unwrap_or(0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
             // Dual confirmation: oversold RSI + price at/below lower band.
             if r < 30.0 && last <= lower && cur <= 0.0 {
                 let cash = portfolio_cash(portfolio);
@@ -1649,7 +1667,7 @@ impl Strategy for Rsrs {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         _indicators: &IndicatorView<'_>,
@@ -1755,7 +1773,7 @@ impl Strategy for RsrsRotation {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         state: &State,
         _indicators: &IndicatorView<'_>,
@@ -1763,14 +1781,14 @@ impl Strategy for RsrsRotation {
         if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
-        // Rank by the normalised regression slope of recent closes (RSRS proxy).
-        let period = self.period;
-        let scores: Vec<(String, f64)> = bars
+
+        // Rank by the normalized regression slope of recent closes (RSRS proxy).
+        let scores: Vec<(&str, f64)> = bars
             .iter()
             .map(|(s, symbol_bars)| {
                 let c: Vec<f64> = symbol_bars.iter().map(|b| b.close).collect();
-                let score = if c.len() >= period {
-                    let win = &c[c.len() - period..];
+                let score = if c.len() >= self.period {
+                    let win = &c[c.len() - self.period..];
                     match linreg_slope(win) {
                         Some((slope, mean_y)) if mean_y > 0.0 => slope / mean_y,
                         _ => f64::NAN,
@@ -1778,13 +1796,16 @@ impl Strategy for RsrsRotation {
                 } else {
                     f64::NAN
                 };
-                (s.clone(), score)
+
+                (*s, score)
             })
             .collect();
-        let last_prices: HashMap<String, f64> = bars
+
+        let last_prices: HashMap<&str, f64> = bars
             .iter()
-            .map(|(s, symbol_bars)| (s.clone(), symbol_bars.last().map(|b| b.close).unwrap_or(0.0)))
+            .map(|(s, symbol_bars)| (*s, symbol_bars.last().map(|b| b.close).unwrap_or(0.0)))
             .collect();
+
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
     }
 }
@@ -1853,7 +1874,7 @@ impl Strategy for SmaCrossover {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -1943,7 +1964,7 @@ impl Strategy for SmaNaive {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -2074,7 +2095,7 @@ impl Strategy for TripleRsiRotation {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         state: &State,
         indicators: &IndicatorView<'_>,
@@ -2082,10 +2103,12 @@ impl Strategy for TripleRsiRotation {
         if !state.bar_index.is_multiple_of(self.rebalance_interval as u64) {
             return Vec::new();
         }
+
         let short_name = indicator_deterministic_name("RSI", &[fmt_arg(self.short_period)]);
         let medium_name = indicator_deterministic_name("RSI", &[fmt_arg(self.medium_period)]);
         let long_name = indicator_deterministic_name("RSI", &[fmt_arg(self.long_period)]);
-        let scores: Vec<(String, f64)> = bars
+
+        let scores: Vec<(&str, f64)> = bars
             .iter()
             .map(|(s, _symbol_bars)| {
                 let r1 = indicators.value(&short_name, s);
@@ -2095,13 +2118,16 @@ impl Strategy for TripleRsiRotation {
                     (Some(a), Some(b), Some(c)) => (a + b + c) / 3.0,
                     _ => f64::NAN,
                 };
-                (s.clone(), score)
+
+                (*s, score)
             })
             .collect();
-        let last_prices: HashMap<String, f64> = bars
+
+        let last_prices: HashMap<&str, f64> = bars
             .iter()
-            .map(|(s, symbol_bars)| (s.clone(), symbol_bars.last().map(|b| b.close).unwrap_or(0.0)))
+            .map(|(s, symbol_bars)| (*s, symbol_bars.last().map(|b| b.close).unwrap_or(0.0)))
             .collect();
+
         rotation_orders(&scores, self.top_k, portfolio, &last_prices)
     }
 
@@ -2187,7 +2213,7 @@ impl Strategy for TurtleTrading {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         indicators: &IndicatorView<'_>,
@@ -2212,7 +2238,7 @@ impl Strategy for TurtleTrading {
                 c[c.len() - self.entry_period..].iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             let exit_low =
                 c[c.len() - self.exit_period..].iter().cloned().fold(f64::INFINITY, f64::min);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
             if last >= entry_high && cur <= 0.0 {
                 // ATR-based "N" sizing via the VolatilityScaled sizer —
                 // 1 % of equity per unit of ATR, capped by available cash.
@@ -2230,8 +2256,8 @@ impl Strategy for TurtleTrading {
                 let qty = target_qty.min(max_affordable);
                 if qty > 0.0 {
                     orders.push(Order {
-                        id: new_order_id(),
-                        symbol: sym.to_owned(),
+                        id: OrderId::new(),
+                        symbol: sym.to_string(),
                         order_type: OrderType::Market,
                         quantity: qty,
                         price: None,
@@ -2316,7 +2342,7 @@ impl Strategy for Vcp {
 
     fn evaluate_inner(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         _state: &State,
         _indicators: &IndicatorView<'_>,
@@ -2357,7 +2383,7 @@ impl Strategy for Vcp {
             }
 
             let last = *c.last().unwrap_or(&0.0);
-            let cur = portfolio.positions.get(sym).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(sym);
 
             if last > ceiling && cur <= 0.0 {
                 if let Some(o) = buy_equal_weight(sym, n as usize, portfolio_cash(portfolio), last)
@@ -2469,11 +2495,11 @@ impl BuiltinStrategy {
     /// Pure-Rust dispatch to the underlying [`Strategy::evaluate_inner`].
     pub fn evaluate(
         &self,
-        bars: &[(String, Vec<Bar>)],
+        bars: &[(&str, &[Bar])],
         portfolio: &Portfolio,
         state: &State,
         indicators: &IndicatorView<'_>,
-        it_map: &HashMap<String, InstrumentType>,
+        it_map: &HashMap<&str, InstrumentType>,
     ) -> Vec<Order> {
         macro_rules! delegate {
             ($($variant:ident),* $(,)?) => {
@@ -2508,7 +2534,7 @@ impl BuiltinStrategy {
 
         // Return rounded quantities for instruments that don't allow fractional shares.
         orders.retain_mut(|o| {
-            let it = it_map.get(&o.symbol).unwrap();
+            let it = it_map.get(o.symbol.as_str()).unwrap();
 
             if !it.allows_fractional_quantities() && o.quantity.fract() != 0. {
                 let whole_abs = o.quantity.abs().floor();

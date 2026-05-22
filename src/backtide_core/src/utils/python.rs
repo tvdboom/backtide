@@ -5,7 +5,7 @@ use crate::config::models::DataFrameLibrary;
 use crate::data::models::Bar;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Build a DataFrame from a Python dict, using the configured backend.
 pub fn dict_to_dataframe<'py>(
@@ -73,7 +73,7 @@ pub fn to_python<'py>(py: Python<'py>, data: &[Vec<f64>]) -> PyResult<Bound<'py,
 
     if data.len() == 1 {
         // Single series → 1-D
-        let arr = data.into_iter().next().unwrap();
+        let arr = data.iter().next().unwrap();
         match backend {
             DataFrameLibrary::Pandas => {
                 let pd = py.import("pandas")?;
@@ -103,7 +103,7 @@ pub fn to_python<'py>(py: Python<'py>, data: &[Vec<f64>]) -> PyResult<Bound<'py,
 }
 
 /// Load a Python object from a pickle file.
-pub fn load_pickle(py: Python<'_>, path: &PathBuf) -> PyResult<Py<PyAny>> {
+pub fn load_pickle(py: Python<'_>, path: &Path) -> PyResult<Py<PyAny>> {
     let builtins = py.import("builtins")?;
     let cloudpickle = py.import("cloudpickle")?;
 

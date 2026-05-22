@@ -24,22 +24,13 @@ use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
-use backtide_core::backtest::indicators::{
-    AverageTrueRange, BollingerBands, Indicator, MovingAverageConvergenceDivergence,
-    RelativeStrengthIndex, SimpleMovingAverage,
-};
-use backtide_core::backtest::models::portfolio::Portfolio;
-use backtide_core::backtest::models::state::State;
-use backtide_core::constants::MIN_POSITION;
-use backtide_core::data::models::bar::Bar;
-use backtide_core::data::models::currency::Currency;
-use backtide_core::data::models::instrument_type::InstrumentType;
-use backtide_core::strategies::interface::{
-    AdaptiveRsi, AlphaRsiPro, BollingerMeanReversion, BuiltinStrategy, BuyAndHold, DoubleTop,
-    HybridAlphaRsi, IndicatorView, Macd, Momentum, MultiBollingerRotation, RiskAverse, Roc,
-    RocRotation, Rsi, Rsrs, RsrsRotation, SmaCrossover, SmaNaive, TripleRsiRotation, TurtleTrading,
-    Vcp,
-};
+use backtide_core::backtest::models::{Portfolio, State};
+use backtide_core::constants::{PositionAmount, Symbol, MIN_POSITION};
+use backtide_core::data::models::{Bar, Currency, InstrumentType};
+use backtide_core::indicators::interface::*;
+use backtide_core::indicators::traits::Indicator;
+use backtide_core::strategies::interface::*;
+use backtide_core::strategies::utils::IndicatorView;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -170,19 +161,19 @@ fn starting_portfolio() -> Portfolio {
 /// elimination).
 fn run_strategy_loop(
     strategy: &BuiltinStrategy,
-    closes: &[f64],
+    bars: &[Bar],
     indicators: &HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>,
     total_bars: usize,
 ) -> usize {
     let mut portfolio = starting_portfolio();
     let mut total_orders = 0usize;
-    let mut instrument_types = HashMap::new();
-    instrument_types.insert("AAPL".to_owned(), InstrumentType::Stocks);
+    let mut instrument_types: HashMap<&str, InstrumentType> = HashMap::new();
+    instrument_types.insert("AAPL", InstrumentType::Stocks);
 
     for bar_idx in 0..total_bars {
-        let slice = &closes[..=bar_idx];
-        let closes_view: Vec<(String, &[f64])> = vec![("AAPL".to_owned(), slice)];
-        let ind_view = IndicatorView::new(indicators, bar_idx);
+        let slice = &bars[..=bar_idx];
+        let bars_view: Vec<(&str, &[Bar])> = vec![("AAPL", slice)];
+        let ind_view = IndicatorView::new(indicators, bar_idx as u64);
         let state = State {
             timestamp: 347_155_200 + (bar_idx as i64) * 86_400,
             bar_index: bar_idx as u64,
@@ -190,25 +181,19 @@ fn run_strategy_loop(
             is_warmup: false,
         };
 
-        let orders = strategy.evaluate(
-            &closes_view,
-            &ind_view,
-            &portfolio,
-            &state,
-            &instrument_types,
-            InstrumentType::Stocks,
-        );
+        let orders =
+            strategy.evaluate(&bars_view, &portfolio, &state, &ind_view, &instrument_types);
         total_orders += orders.len();
 
         // Naively apply market orders to portfolio so strategies see
         // positions on subsequent bars (keeps BuyAndHold & friends
         // from repeatedly ordering).
         for o in &orders {
-            let price = closes[bar_idx];
+            let price = bars[bar_idx].close;
             if price <= 0.0 {
                 continue;
             }
-            let cur = portfolio.positions.get(&o.symbol).copied().unwrap_or(0.0);
+            let cur = portfolio.positions.amount(&o.symbol);
             if o.quantity > 0.0 {
                 // Buy: deduct cash, add position.
                 let cost = o.quantity * price;
@@ -247,12 +232,11 @@ macro_rules! bench_strategy {
     ($fn_name:ident, $variant:ident, $ctor:expr) => {
         fn $fn_name(c: &mut Criterion) {
             let bars = generate_aapl_bars();
-            let closes: Vec<f64> = bars.iter().map(|b| b.close).collect();
             let indicators = precompute_indicators(&bars);
             let strategy = BuiltinStrategy::$variant($ctor);
 
             c.bench_function(concat!("backtest/", stringify!($variant)), |b| {
-                b.iter(|| run_strategy_loop(&strategy, &closes, &indicators, N_BARS));
+                b.iter(|| run_strategy_loop(&strategy, &bars, &indicators, N_BARS));
             });
         }
     };

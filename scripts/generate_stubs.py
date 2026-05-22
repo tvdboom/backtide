@@ -21,7 +21,10 @@ The stubs are written to:
     backtide/core/backtest.pyi
     backtide/core/config.pyi
     backtide/core/data.pyi
+    backtide/core/indicators.pyi
+    backtide/core/sizers.pyi
     backtide/core/storage.pyi
+    backtide/core/strategies.pyi
     backtide/core/utils.pyi
 
 """
@@ -45,7 +48,17 @@ ROOT = Path(__file__).resolve().parent.parent
 STUB_DIR = ROOT / "src" / "backtide" / "core"
 
 # Submodules to generate stubs for.
-SUBMODULES = ["analysis", "backtest", "config", "data", "storage", "utils"]
+SUBMODULES = [
+    "analysis",
+    "backtest",
+    "config",
+    "data",
+    "indicators",
+    "sizers",
+    "storage",
+    "strategies",
+    "utils",
+]
 
 # PyO3 built-in dunder methods we always skip (they have no useful stub).
 SKIP_MEMBERS = {
@@ -512,7 +525,7 @@ def generate_submodule_stub(submodule_name: str) -> str:
     functions: list[tuple[str, object]] = []
 
     for attr_name in sorted(dir(mod)):
-        if attr_name.startswith("_"):
+        if attr_name.startswith("__"):
             continue
         obj = getattr(mod, attr_name)
         if _is_pyclass(obj):
@@ -590,7 +603,7 @@ def generate_submodule_stub(submodule_name: str) -> str:
         except ImportError:
             continue
         for attr_name in sorted(dir(other_mod)):
-            if attr_name.startswith("_"):
+            if attr_name.startswith("__"):
                 continue
             obj = getattr(other_mod, attr_name)
             if (
@@ -615,6 +628,18 @@ def generate_submodule_stub(submodule_name: str) -> str:
     sizers_imports = [name for name in ("BaseSizer",) if re.search(rf"\b{name}\b", body_no_docs)]
     if sizers_imports:
         lines.append(f"from backtide.sizers import {', '.join(sizers_imports)}\n\n")
+
+    # ── Imports from `backtide.indicators` (Python-side) ────────────────
+    #
+    # `BaseIndicator` is the abstract base class that lives in the pure-Python
+    # `backtide.indicators` package — it isn't a pyclass in any core submodule,
+    # so the cross-module import logic above doesn't pick it up. Inject the
+    # import explicitly when the symbol appears in the body.
+    indicators_imports = [
+        name for name in ("BaseIndicator",) if re.search(rf"\b{name}\b", body_no_docs)
+    ]
+    if indicators_imports:
+        lines.append(f"from backtide.indicators import {', '.join(indicators_imports)}\n\n")
 
     lines.append(body)
     return "".join(lines).rstrip("\n") + "\n"

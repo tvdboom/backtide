@@ -5,7 +5,7 @@ Description: Strategy functionalities for backtide.
 
 """
 
-from backtide.core.backtest import (
+from backtide.core.strategies import (
     AdaptiveRsi,
     AlphaRsiPro,
     BollingerMeanReversion,

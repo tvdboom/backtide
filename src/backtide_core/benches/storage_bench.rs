@@ -22,11 +22,9 @@ use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
-use backtide_core::data::models::bar::Bar;
-use backtide_core::data::models::interval::Interval;
-use backtide_core::data::models::provider::Provider;
+use backtide_core::data::models::{Bar, Interval, Provider};
 use backtide_core::storage::duckdb::DuckDb;
-use backtide_core::storage::models::bar_series::BarSeries;
+use backtide_core::storage::models::BarSeries;
 use backtide_core::storage::traits::Storage;
 
 // ────────────────────────────────────────────────────────────────────────────

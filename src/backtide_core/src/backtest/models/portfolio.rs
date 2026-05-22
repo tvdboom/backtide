@@ -3,7 +3,6 @@ use crate::constants::{Cash, Positions};
 use crate::data::models::Currency;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// A snapshot of the portfolio's holdings at a point in time.
 ///

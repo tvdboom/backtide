@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::{Bound, PyResult};
 
 pub mod interface;
-mod traits;
+pub mod traits;
 pub mod utils;
 
 /// Register the Python interface for `backtide.core.indicators`.

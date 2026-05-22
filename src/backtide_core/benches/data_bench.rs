@@ -30,10 +30,8 @@ use std::time::{Duration, Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
-use backtide_core::data::models::instrument_type::InstrumentType;
-use backtide_core::data::models::interval::Interval;
-use backtide_core::data::providers::traits::DataProvider;
-use backtide_core::data::providers::yahoo::YahooFinance;
+use backtide_core::data::models::{InstrumentType, Interval};
+use backtide_core::data::providers::{DataProvider, YahooFinance};
 
 const LIVE_BENCH_ENV: &str = "BACKTIDE_LIVE_BENCH";
 

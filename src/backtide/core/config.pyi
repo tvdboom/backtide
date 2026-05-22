@@ -101,7 +101,8 @@ class DataConfig:
 
     dataframe_library : [DataFrameLibrary], default="pandas"
         Which library to use for tabular data exchanged with user code (e.g.,
-        storage query results, indicator and strategies inputs/outputs).
+        storage query results, indicator inputs/outputs). Choose from: "numpy",
+        "pandas", "polars".
 
     See Also
     --------
@@ -148,10 +149,10 @@ class DataConfig:
         """
 
 class DataFrameLibrary:
-    """DataFrame library used for returning tabular data.
+    """DataFrame library used by the engine's frontend.
 
-    Which library to use for tabular data exchanged with user code (e.g.,
-    storage query results, indicator inputs/outputs). Read more in the
+    Tabular data exchanged with user code (e.g., storage query results,
+    indicator and strategies inputs/outputs). Read more in the
     [user guide][configuration].
 
     Attributes
@@ -163,7 +164,6 @@ class DataFrameLibrary:
 
     class_name: str
 
-    Numpy: ClassVar[DataFrameLibrary]
     Pandas: ClassVar[DataFrameLibrary]
     Polars: ClassVar[DataFrameLibrary]
 
@@ -387,7 +387,7 @@ class GeneralConfig:
 class LogLevel:
     """Tracing logging level.
 
-    The minimum logging level that are displayed, i.e., if `info`,
+    The minimum logging level that are displayed, i.e., if `log_level="info"`,
     all `info`, `warn` and `error` messages are displayed.
 
     """
