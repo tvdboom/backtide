@@ -53,6 +53,10 @@ pub fn validate_qty(qty: f64, it: InstrumentType) -> Option<String> {
         return Some("quantity must be a finite number".to_owned());
     }
 
+    if qty == 0.0 {
+        return Some("quantity must be non-zero".to_owned());
+    }
+
     if !it.allows_fractional_quantities() && qty.fract() != 0. {
         return Some(format!("fractional quantities aren't allowed for instrument type {it}"));
     }

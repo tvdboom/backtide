@@ -205,30 +205,6 @@ pub fn check_order_against_limits(
     Ok(qty.signum() * max_abs_qty.min(abs_qty))
 }
 
-/// Create a key per type of warning.
-pub fn limit_warning_dedupe_key(symbol: &str, violation: LimitViolation, reason: &str) -> String {
-    let bucket = match violation {
-        LimitViolation::Margin if reason.contains("gross notional already at limit") => {
-            "margin:gross_notional_at_limit"
-        },
-        LimitViolation::Margin if reason.contains("equity is non-positive") => {
-            "margin:equity_non_positive"
-        },
-        LimitViolation::Margin if reason.contains("no headroom under leverage") => {
-            "margin:no_headroom"
-        },
-        LimitViolation::PositionSize if reason.contains("position already at limit") => {
-            "position_size:at_limit"
-        },
-        LimitViolation::PositionSize if reason.contains("no headroom under leverage") => {
-            "position_size:no_headroom"
-        },
-        _ => reason,
-    };
-
-    format!("{symbol}\0{bucket}")
-}
-
 /// Effective leverage cap given the `allow_margin`, `max_leverage` and
 /// `initial_margin` settings. When margin is disabled, the cap is 1.0
 /// (no borrowing). Otherwise `max_leverage` and `100/initial_margin`
@@ -276,5 +252,641 @@ pub fn check_maintenance_margin(margin: f64, equity_base: f64, gross_base: f64) 
         ))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backtest::models::ExchangeExpConfig;
+    use crate::data::models::Currency;
+
+    /// Helper to create a minimal ExperimentConfig with custom exchange settings.
+    fn cfg_with_exchange(exchange: ExchangeExpConfig) -> ExperimentConfig {
+        ExperimentConfig {
+            general: Default::default(),
+            data: Default::default(),
+            portfolio: Default::default(),
+            strategy: Default::default(),
+            indicators: Default::default(),
+            exchange,
+            engine: Default::default(),
+        }
+    }
+
+    fn default_cfg() -> ExperimentConfig {
+        cfg_with_exchange(ExchangeExpConfig::default())
+    }
+
+    // ── effective_leverage_cap ────────────────────────────────────────────
+
+    #[test]
+    fn leverage_cap_margin_disabled() {
+        let cfg = default_cfg();
+        assert!(!cfg.exchange.allow_margin);
+        assert_eq!(effective_leverage_cap(&cfg), 1.0);
+    }
+
+    #[test]
+    fn leverage_cap_margin_enabled_default() {
+        let exchange = ExchangeExpConfig {
+            allow_margin: true,
+            ..Default::default()
+        };
+        // default: max_leverage=2.0, initial_margin=50.0 → 100/50=2.0
+        // min(2.0, 2.0).max(1.0) = 2.0
+        let cfg = cfg_with_exchange(exchange);
+        assert_eq!(effective_leverage_cap(&cfg), 2.0);
+    }
+
+    #[test]
+    fn leverage_cap_initial_margin_more_restrictive() {
+        let exchange = ExchangeExpConfig {
+            allow_margin: true,
+            max_leverage: 10.0,
+            initial_margin: 50.0, // 100/50 = 2.0, more restrictive than 10x
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        assert_eq!(effective_leverage_cap(&cfg), 2.0);
+    }
+
+    #[test]
+    fn leverage_cap_max_leverage_more_restrictive() {
+        let exchange = ExchangeExpConfig {
+            allow_margin: true,
+            max_leverage: 3.0,
+            initial_margin: 10.0, // 100/10 = 10.0
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        assert_eq!(effective_leverage_cap(&cfg), 3.0);
+    }
+
+    #[test]
+    fn leverage_cap_zero_initial_margin_gives_infinity_from_im() {
+        let exchange = ExchangeExpConfig {
+            allow_margin: true,
+            max_leverage: 5.0,
+            initial_margin: 0.0,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        assert_eq!(effective_leverage_cap(&cfg), 5.0);
+    }
+
+    #[test]
+    fn leverage_cap_zero_max_leverage_gives_infinity_from_ml() {
+        let exchange = ExchangeExpConfig {
+            allow_margin: true,
+            max_leverage: 0.0,
+            initial_margin: 25.0, // 100/25 = 4.0
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        assert_eq!(effective_leverage_cap(&cfg), 4.0);
+    }
+
+    #[test]
+    fn leverage_cap_both_zero_gives_infinity() {
+        let exchange = ExchangeExpConfig {
+            allow_margin: true,
+            max_leverage: 0.0,
+            initial_margin: 0.0,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        assert!(effective_leverage_cap(&cfg).is_infinite());
+    }
+
+    #[test]
+    fn leverage_cap_never_below_one() {
+        let exchange = ExchangeExpConfig {
+            allow_margin: true,
+            max_leverage: 0.5,     // below 1
+            initial_margin: 200.0, // 100/200 = 0.5
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        assert_eq!(effective_leverage_cap(&cfg), 1.0);
+    }
+
+    // ── check_maintenance_margin ─────────────────────────────────────────
+
+    #[test]
+    fn maintenance_margin_zero_margin_always_ok() {
+        assert!(check_maintenance_margin(0.0, 1000.0, 5000.0).is_none());
+    }
+
+    #[test]
+    fn maintenance_margin_zero_gross_always_ok() {
+        assert!(check_maintenance_margin(25.0, 1000.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn maintenance_margin_negative_gross_always_ok() {
+        assert!(check_maintenance_margin(25.0, 1000.0, -100.0).is_none());
+    }
+
+    #[test]
+    fn maintenance_margin_negative_equity_margin_call() {
+        let msg = check_maintenance_margin(25.0, -100.0, 5000.0).unwrap();
+        assert!(msg.contains("margin call"));
+        assert!(msg.contains("≤ 0"));
+    }
+
+    #[test]
+    fn maintenance_margin_zero_equity_margin_call() {
+        let msg = check_maintenance_margin(25.0, 0.0, 5000.0).unwrap();
+        assert!(msg.contains("margin call"));
+    }
+
+    #[test]
+    fn maintenance_margin_below_threshold() {
+        // equity/gross = 1000/5000 = 20%, margin = 25% → margin call.
+        let msg = check_maintenance_margin(25.0, 1000.0, 5000.0).unwrap();
+        assert!(msg.contains("margin call"));
+        assert!(msg.contains("20.00%"));
+    }
+
+    #[test]
+    fn maintenance_margin_at_threshold_is_ok() {
+        // equity/gross = 2500/10000 = 25%, margin = 25% → no call (not strictly below).
+        assert!(check_maintenance_margin(25.0, 2500.0, 10000.0).is_none());
+    }
+
+    #[test]
+    fn maintenance_margin_above_threshold_is_ok() {
+        // equity/gross = 3000/10000 = 30%, margin = 25% → ok.
+        assert!(check_maintenance_margin(25.0, 3000.0, 10000.0).is_none());
+    }
+
+    #[test]
+    fn maintenance_margin_barely_below() {
+        // equity/gross = 2499/10000 = 24.99%, margin = 25% → margin call.
+        assert!(check_maintenance_margin(25.0, 2499.0, 10000.0).is_some());
+    }
+
+    // ── check_order_against_limits ───────────────────────────────────────
+
+    #[test]
+    fn limits_zero_qty_passes_through() {
+        let cfg = default_cfg();
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 0.0, 100.0, "USD", "USD", 10000.0, 0.0, 0.0, 0.0, &fx, 0,
+        );
+        assert_eq!(result.unwrap(), 0.0);
+    }
+
+    #[test]
+    fn limits_nan_qty_passes_through() {
+        let cfg = default_cfg();
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg,
+            "AAPL",
+            f64::NAN,
+            100.0,
+            "USD",
+            "USD",
+            10000.0,
+            0.0,
+            0.0,
+            0.0,
+            &fx,
+            0,
+        );
+        assert!(result.unwrap().is_nan());
+    }
+
+    #[test]
+    fn limits_zero_fill_price_passes_through() {
+        let cfg = default_cfg();
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 10.0, 0.0, "USD", "USD", 10000.0, 0.0, 0.0, 0.0, &fx, 0,
+        );
+        assert_eq!(result.unwrap(), 10.0);
+    }
+
+    #[test]
+    fn limits_position_size_cap_default_100_pct() {
+        // Default max_position_size=100 → cap = equity * 100% = 10000
+        // Buying 10 shares at $100 = $1000 notional, well under cap.
+        let cfg = default_cfg();
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 10.0, 100.0, "USD", "USD", 10000.0, 0.0, 0.0, 0.0, &fx, 0,
+        );
+        assert_eq!(result.unwrap(), 10.0);
+    }
+
+    #[test]
+    fn limits_position_size_shrinks_order() {
+        // max_position_size=10 → cap = 10000 * 10% = 1000.
+        // Order: 20 shares at $100 = $2000. Shrunk to 10 shares.
+        let exchange = ExchangeExpConfig {
+            max_position_size: 10,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 20.0, 100.0, "USD", "USD", 10000.0, 0.0, 0.0, 0.0, &fx, 0,
+        );
+        assert_eq!(result.unwrap(), 10.0);
+    }
+
+    #[test]
+    fn limits_position_size_rejects_when_at_cap() {
+        // max_position_size=10 → cap = 10000 * 10% = 1000.
+        // Current position already at 1000. New order rejected.
+        let exchange = ExchangeExpConfig {
+            max_position_size: 10,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 5.0, 100.0, "USD", "USD", 10000.0, 0.0, 10.0, 1000.0, &fx, 0,
+        );
+        assert!(result.is_err());
+        let (violation, _reason) = result.unwrap_err();
+        assert_eq!(violation, LimitViolation::PositionSize);
+    }
+
+    #[test]
+    fn limits_leverage_cap_rejects_when_exhausted() {
+        // allow_margin=true, max_leverage=2.0. equity=10000, max_gross=20000.
+        // Current gross=20000, new order → rejected.
+        let exchange = ExchangeExpConfig {
+            allow_margin: true,
+            max_leverage: 2.0,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 10.0, 100.0, "USD", "USD", 10000.0, 20000.0, 0.0, 0.0, &fx, 0,
+        );
+        assert!(result.is_err());
+        let (violation, _) = result.unwrap_err();
+        assert_eq!(violation, LimitViolation::Margin);
+    }
+
+    #[test]
+    fn limits_leverage_cap_shrinks_order() {
+        // allow_margin=true, max_leverage=2.0. equity=10000, max_gross=20000.
+        // Current gross=15000, order 100 shares at $100 = $10000.
+        // Only 5000 headroom → shrunk to 50 shares.
+        let exchange = ExchangeExpConfig {
+            allow_margin: true,
+            max_leverage: 2.0,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 100.0, 100.0, "USD", "USD", 10000.0, 15000.0, 0.0, 0.0, &fx, 0,
+        );
+        assert_eq!(result.unwrap(), 50.0);
+    }
+
+    #[test]
+    fn limits_no_margin_cap_at_1x() {
+        // allow_margin=false → cap = 1.0. equity=10000, max_gross=10000.
+        // Order: 200 shares at $100 = $20000 → shrunk to 100 shares.
+        let cfg = default_cfg();
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 200.0, 100.0, "USD", "USD", 10000.0, 0.0, 0.0, 0.0, &fx, 0,
+        );
+        assert_eq!(result.unwrap(), 100.0);
+    }
+
+    #[test]
+    fn limits_negative_equity_rejects() {
+        let cfg = default_cfg();
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 10.0, 100.0, "USD", "USD", -100.0, 0.0, 0.0, 0.0, &fx, 0,
+        );
+        assert!(result.is_err());
+        let (violation, reason) = result.unwrap_err();
+        assert_eq!(violation, LimitViolation::Margin);
+        assert!(reason.contains("non-positive"));
+    }
+
+    #[test]
+    fn limits_sell_order_preserves_sign() {
+        let cfg = default_cfg();
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", -10.0, 100.0, "USD", "USD", 10000.0, 0.0, 0.0, 0.0, &fx, 0,
+        );
+        let qty = result.unwrap();
+        assert!(qty < 0.0);
+        assert_eq!(qty.abs(), 10.0);
+    }
+
+    #[test]
+    fn limits_opposite_side_order_reduces_position() {
+        // Current long 50 shares. Selling 30 → allowed even at cap.
+        let exchange = ExchangeExpConfig {
+            max_position_size: 10, // cap = 10000 * 10% = 1000
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let fx = FxTable::new("USD");
+        let result = check_order_against_limits(
+            &cfg, "AAPL", -30.0, 100.0, "USD", "USD", 10000.0, 5000.0, 50.0, 5000.0, &fx, 0,
+        );
+        // Reducing position: allowed in full (abs_qty=30 <= current_abs_qty=50)
+        assert_eq!(result.unwrap(), -30.0);
+    }
+
+    #[test]
+    fn limits_fx_conversion() {
+        // Order in EUR, base is USD. EUR/USD = 1.10.
+        let exchange = ExchangeExpConfig {
+            max_position_size: 10, // cap = 10000 * 10% = 1000 USD
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+        // 10 shares at €100 = €1000 = $1100. Cap $1000 → shrunk.
+        let result = check_order_against_limits(
+            &cfg, "AAPL", 10.0, 100.0, "EUR", "USD", 10000.0, 0.0, 0.0, 0.0, &fx, 0,
+        );
+        let qty = result.unwrap();
+        // $1000 / $110-per-share = ~9.09 shares
+        assert!(qty < 10.0);
+        assert!(qty > 9.0);
+    }
+
+    // ── accrue_margin_costs ──────────────────────────────────────────────
+
+    #[test]
+    fn accrue_no_costs_when_rates_zero() {
+        let cfg = default_cfg(); // margin_interest=0, borrow_rate=0
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 10000.0);
+        let positions: Positions = HashMap::new();
+        let aligned: HashMap<Symbol, Vec<Option<Bar>>> = HashMap::new();
+        let quote_ccy: HashMap<&str, &str> = HashMap::new();
+        let fx = FxTable::new("USD");
+
+        accrue_margin_costs(
+            &cfg,
+            &mut cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::USD,
+            &fx,
+            0,
+            86400,
+        );
+        assert_eq!(*cash.get(&Currency::USD).unwrap(), 10000.0);
+    }
+
+    #[test]
+    fn accrue_no_costs_when_bar_seconds_zero() {
+        let exchange = ExchangeExpConfig {
+            margin_interest: 5.0,
+            borrow_rate: 3.0,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, -5000.0);
+        let positions: Positions = HashMap::new();
+        let aligned: HashMap<Symbol, Vec<Option<Bar>>> = HashMap::new();
+        let quote_ccy: HashMap<&str, &str> = HashMap::new();
+        let fx = FxTable::new("USD");
+
+        accrue_margin_costs(
+            &cfg,
+            &mut cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::USD,
+            &fx,
+            0,
+            0,
+        );
+        assert_eq!(*cash.get(&Currency::USD).unwrap(), -5000.0);
+    }
+
+    #[test]
+    fn accrue_margin_interest_on_borrowed_cash() {
+        let exchange = ExchangeExpConfig {
+            margin_interest: 10.0, // 10% annual
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, -10000.0); // borrowed 10000
+        let positions: Positions = HashMap::new();
+        let aligned: HashMap<Symbol, Vec<Option<Bar>>> = HashMap::new();
+        let quote_ccy: HashMap<&str, &str> = HashMap::new();
+        let fx = FxTable::new("USD");
+        let bar_seconds = 86400; // 1 day
+
+        accrue_margin_costs(
+            &cfg,
+            &mut cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::USD,
+            &fx,
+            0,
+            bar_seconds,
+        );
+
+        let expected_cost = 10000.0 * 10.0 / 100.0 * (86400.0 / SECS_PER_YEAR);
+        let cash_after = *cash.get(&Currency::USD).unwrap();
+        // Cash should be more negative by the cost amount
+        assert!((cash_after - (-10000.0 - expected_cost)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn accrue_borrow_cost_on_short_positions() {
+        let exchange = ExchangeExpConfig {
+            borrow_rate: 5.0, // 5% annual
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 10000.0);
+
+        let mut positions: Positions = HashMap::new();
+        positions.insert("AAPL".to_owned(), -100.0); // Short 100 shares
+
+        let test_bar = Bar {
+            open_ts: 0,
+            close_ts: 86400,
+            open_ts_exchange: 0,
+            open: 150.0,
+            high: 155.0,
+            low: 148.0,
+            close: 152.0,
+            adj_close: 152.0,
+            volume: 1000.0,
+            n_trades: None,
+        };
+        let mut aligned: HashMap<Symbol, Vec<Option<Bar>>> = HashMap::new();
+        aligned.insert("AAPL".to_owned(), vec![Some(test_bar)]);
+
+        let mut quote_ccy: HashMap<&str, &str> = HashMap::new();
+        quote_ccy.insert("AAPL", "USD");
+
+        let fx = FxTable::new("USD");
+        let bar_seconds = 86400;
+
+        accrue_margin_costs(
+            &cfg,
+            &mut cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::USD,
+            &fx,
+            0,
+            bar_seconds,
+        );
+
+        // Short value = 100 * 152 = 15200
+        let expected_cost = 15200.0 * 5.0 / 100.0 * (86400.0 / SECS_PER_YEAR);
+        let cash_after = *cash.get(&Currency::USD).unwrap();
+        assert!((cash_after - (10000.0 - expected_cost)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn accrue_positive_cash_no_margin_interest() {
+        let exchange = ExchangeExpConfig {
+            margin_interest: 10.0,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 10000.0); // positive cash
+        let positions: Positions = HashMap::new();
+        let aligned: HashMap<Symbol, Vec<Option<Bar>>> = HashMap::new();
+        let quote_ccy: HashMap<&str, &str> = HashMap::new();
+        let fx = FxTable::new("USD");
+
+        accrue_margin_costs(
+            &cfg,
+            &mut cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::USD,
+            &fx,
+            0,
+            86400,
+        );
+        // No borrowed cash → no interest charged
+        assert_eq!(*cash.get(&Currency::USD).unwrap(), 10000.0);
+    }
+
+    #[test]
+    fn accrue_long_positions_no_borrow_cost() {
+        let exchange = ExchangeExpConfig {
+            borrow_rate: 5.0,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 10000.0);
+
+        let mut positions: Positions = HashMap::new();
+        positions.insert("AAPL".to_owned(), 100.0); // Long, not short
+
+        let test_bar = Bar {
+            open_ts: 0,
+            close_ts: 86400,
+            open_ts_exchange: 0,
+            open: 150.0,
+            high: 155.0,
+            low: 148.0,
+            close: 152.0,
+            adj_close: 152.0,
+            volume: 1000.0,
+            n_trades: None,
+        };
+        let mut aligned: HashMap<Symbol, Vec<Option<Bar>>> = HashMap::new();
+        aligned.insert("AAPL".to_owned(), vec![Some(test_bar)]);
+
+        let mut quote_ccy: HashMap<&str, &str> = HashMap::new();
+        quote_ccy.insert("AAPL", "USD");
+        let fx = FxTable::new("USD");
+
+        accrue_margin_costs(
+            &cfg,
+            &mut cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::USD,
+            &fx,
+            0,
+            86400,
+        );
+        assert_eq!(*cash.get(&Currency::USD).unwrap(), 10000.0);
+    }
+
+    #[test]
+    fn accrue_negative_bar_seconds_returns_early() {
+        let exchange = ExchangeExpConfig {
+            margin_interest: 10.0,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, -5000.0);
+        let positions: Positions = HashMap::new();
+        let aligned: HashMap<Symbol, Vec<Option<Bar>>> = HashMap::new();
+        let quote_ccy: HashMap<&str, &str> = HashMap::new();
+        let fx = FxTable::new("USD");
+
+        accrue_margin_costs(
+            &cfg,
+            &mut cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::USD,
+            &fx,
+            0,
+            -100,
+        );
+        assert_eq!(*cash.get(&Currency::USD).unwrap(), -5000.0);
+    }
+
+    // ── LimitViolation enum ──────────────────────────────────────────────
+
+    #[test]
+    fn limit_violation_debug_and_eq() {
+        assert_eq!(LimitViolation::Margin, LimitViolation::Margin);
+        assert_eq!(LimitViolation::PositionSize, LimitViolation::PositionSize);
+        assert_ne!(LimitViolation::Margin, LimitViolation::PositionSize);
+        // Debug trait
+        let s = format!("{:?}", LimitViolation::Margin);
+        assert_eq!(s, "Margin");
     }
 }

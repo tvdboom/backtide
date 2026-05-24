@@ -318,24 +318,27 @@ class TestOrder:
 
     def test_explicit_id_is_kept(self):
         """An explicit id is preserved (used by Cancel)."""
-        o = Order(symbol="AAPL", order_type="market", quantity=1, id="abc123")
-        assert o.id == "abc123"
+        uid = "a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8"
+        o = Order(symbol="AAPL", order_type="market", quantity=1, id=uid)
+        assert o.id == uid
 
     def test_cancel_order_can_have_empty_symbol(self):
         """Cancel only needs the target id, not a symbol."""
+        uid = "00112233445566778899aabbccddeeff"
         cancel = Order(
             symbol="",
             order_type="cancel",
             quantity=0,
-            id="target_id",
+            id=uid,
         )
         assert cancel.order_type == OrderType.Cancel
-        assert cancel.id == "target_id"
+        assert cancel.id == uid
 
     def test_repr_contains_id(self):
         """Order repr always includes the id field."""
-        o = Order(symbol="AAPL", order_type="market", quantity=1, id="xyz")
-        assert "xyz" in repr(o)
+        uid = "aabbccdd11223344aabbccdd11223344"
+        o = Order(symbol="AAPL", order_type="market", quantity=1, id=uid)
+        assert uid in repr(o)
 
 
 class TestOrderType:

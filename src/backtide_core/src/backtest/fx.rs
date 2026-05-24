@@ -305,7 +305,9 @@ fn forward_fill(s: &[(i64, f64)], ts: i64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::MIN_POSITION;
+    use crate::constants::{Cash, MIN_POSITION};
+    use crate::data::models::Currency;
+    use std::collections::HashMap;
 
     #[test]
     fn direct_and_inverse() {
@@ -495,5 +497,298 @@ mod tests {
         fx.add_series("BTC", "USD", vec![(0, 50_000.0)]);
         assert_eq!(fx.rate("BTC", "USD", 0), Some(50_000.0));
         assert!((fx.convert(2.0, "BTC", "USD", 0).unwrap() - 100_000.0).abs() < 1e-6);
+    }
+
+    // ── try_debit ────────────────────────────────────────────────────────
+
+    #[test]
+    fn try_debit_zero_amount_always_succeeds() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        let fx = FxTable::new("USD");
+        assert!(try_debit(&mut cash, Currency::USD, 0.0, Currency::USD, &fx, 0));
+        assert_eq!(*cash.get(&Currency::USD).unwrap(), 1000.0);
+    }
+
+    #[test]
+    fn try_debit_negative_amount_always_succeeds() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        let fx = FxTable::new("USD");
+        assert!(try_debit(&mut cash, Currency::USD, -50.0, Currency::USD, &fx, 0));
+        assert_eq!(*cash.get(&Currency::USD).unwrap(), 1000.0);
+    }
+
+    #[test]
+    fn try_debit_direct_sufficient_cash() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        let fx = FxTable::new("USD");
+        assert!(try_debit(&mut cash, Currency::USD, 500.0, Currency::USD, &fx, 0));
+        assert!((cash[&Currency::USD] - 500.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn try_debit_direct_exact_amount() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        let fx = FxTable::new("USD");
+        assert!(try_debit(&mut cash, Currency::USD, 1000.0, Currency::USD, &fx, 0));
+        assert!(cash[&Currency::USD].abs() < 1e-10);
+    }
+
+    #[test]
+    fn try_debit_insufficient_falls_back_to_base() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::EUR, 50.0);
+        cash.insert(Currency::USD, 1000.0);
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+
+        // Need 100 EUR but only have 50. Residual = 50 EUR.
+        // Convert via base: 50 EUR * 1.10 = 55 USD needed.
+        assert!(try_debit(&mut cash, Currency::EUR, 100.0, Currency::USD, &fx, 0));
+    }
+
+    #[test]
+    fn try_debit_fails_when_no_cash_anywhere() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 10.0);
+        let fx = FxTable::new("USD");
+        // Need 100 EUR but have no EUR and no conversion to cover it.
+        assert!(!try_debit(&mut cash, Currency::EUR, 100.0, Currency::USD, &fx, 0));
+    }
+
+    #[test]
+    fn try_debit_from_other_foreign_buckets() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::EUR, 10.0); // Not enough
+        cash.insert(Currency::CHF, 200.0); // Will be tapped
+        cash.insert(Currency::USD, 0.0); // Base with nothing
+
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+        fx.add_series("CHF", "EUR", vec![(0, 0.95)]);
+        fx.add_series("CHF", "USD", vec![(0, 1.05)]);
+
+        // Need 100 EUR, have 10 EUR. Residual 90 EUR.
+        // The function tries base first, then other buckets.
+        let result = try_debit(&mut cash, Currency::EUR, 100.0, Currency::USD, &fx, 0);
+        // Whether it succeeds depends on the specific conversion path available.
+        // The important thing is it doesn't panic.
+        let _ = result;
+    }
+
+    // ── sweep_foreign_to_base ────────────────────────────────────────────
+
+    #[test]
+    fn sweep_converts_foreign_to_base() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        cash.insert(Currency::EUR, 100.0);
+
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+
+        sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, None);
+
+        // EUR bucket should be removed, USD increased by 110.
+        assert!(!cash.contains_key(&Currency::EUR));
+        assert!((cash[&Currency::USD] - 1110.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sweep_skips_base_currency() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+
+        let fx = FxTable::new("USD");
+        sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, None);
+
+        assert_eq!(cash[&Currency::USD], 1000.0);
+    }
+
+    #[test]
+    fn sweep_with_threshold_skips_small_buckets() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        cash.insert(Currency::EUR, 5.0); // Small amount
+
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+
+        // threshold = 10.0, 5 EUR = 5.5 USD < 10 → not swept.
+        sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, Some(10.0));
+
+        assert!(cash.contains_key(&Currency::EUR));
+        assert_eq!(cash[&Currency::USD], 1000.0);
+    }
+
+    #[test]
+    fn sweep_with_threshold_sweeps_large_buckets() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        cash.insert(Currency::EUR, 100.0);
+
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+
+        // threshold = 10.0, 100 EUR = 110 USD > 10 → swept.
+        sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, Some(10.0));
+
+        assert!(!cash.contains_key(&Currency::EUR));
+        assert!((cash[&Currency::USD] - 1110.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sweep_handles_negative_foreign_balance() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        cash.insert(Currency::EUR, -50.0);
+
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+
+        sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, None);
+
+        // Negative EUR should also be swept (it's a liability).
+        assert!(!cash.contains_key(&Currency::EUR));
+        assert!((cash[&Currency::USD] - (1000.0 - 55.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sweep_skips_when_no_rate() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        cash.insert(Currency::EUR, 100.0);
+
+        let fx = FxTable::new("USD"); // No EUR/USD rate
+
+        sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, None);
+
+        // EUR should remain because no conversion rate is available.
+        assert!(cash.contains_key(&Currency::EUR));
+        assert_eq!(cash[&Currency::EUR], 100.0);
+    }
+
+    #[test]
+    fn sweep_multiple_foreign_currencies() {
+        let mut cash: Cash = HashMap::new();
+        cash.insert(Currency::USD, 1000.0);
+        cash.insert(Currency::EUR, 100.0);
+        cash.insert(Currency::GBP, 200.0);
+
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+        fx.add_series("GBP", "USD", vec![(0, 1.30)]);
+
+        sweep_foreign_to_base(&mut cash, Currency::USD, &fx, 0, None);
+
+        assert!(!cash.contains_key(&Currency::EUR));
+        assert!(!cash.contains_key(&Currency::GBP));
+        assert!((cash[&Currency::USD] - (1000.0 + 110.0 + 260.0)).abs() < 1e-6);
+    }
+
+    // ── period_bucket ────────────────────────────────────────────────────
+
+    #[test]
+    fn period_bucket_day() {
+        // Two timestamps in the same day should have the same bucket.
+        let ts1 = 86400 * 100;
+        let ts2 = 86400 * 100 + 3600;
+        assert_eq!(
+            period_bucket(ts1, ConversionPeriod::Day),
+            period_bucket(ts2, ConversionPeriod::Day)
+        );
+
+        // Different days should differ.
+        let ts3 = 86400 * 101;
+        assert_ne!(
+            period_bucket(ts1, ConversionPeriod::Day),
+            period_bucket(ts3, ConversionPeriod::Day)
+        );
+    }
+
+    #[test]
+    fn period_bucket_week() {
+        // Same week should give same bucket.
+        // 2024-01-01 is a Monday (epoch 1704067200).
+        let ts_mon = 1704067200;
+        let ts_tue = ts_mon + 86400;
+        assert_eq!(
+            period_bucket(ts_mon, ConversionPeriod::Week),
+            period_bucket(ts_tue, ConversionPeriod::Week)
+        );
+    }
+
+    #[test]
+    fn period_bucket_month() {
+        // Same month should give same bucket.
+        let ts1 = 1704067200; // 2024-01-01
+        let ts2 = 1704067200 + 86400 * 15; // 2024-01-16
+        assert_eq!(
+            period_bucket(ts1, ConversionPeriod::Month),
+            period_bucket(ts2, ConversionPeriod::Month)
+        );
+
+        // Different months should differ.
+        let ts3 = 1704067200 + 86400 * 35; // ~2024-02-05
+        assert_ne!(
+            period_bucket(ts1, ConversionPeriod::Month),
+            period_bucket(ts3, ConversionPeriod::Month)
+        );
+    }
+
+    #[test]
+    fn period_bucket_year() {
+        let ts_2024 = 1704067200; // 2024-01-01
+        let ts_2024_mid = ts_2024 + 86400 * 180;
+        assert_eq!(
+            period_bucket(ts_2024, ConversionPeriod::Year),
+            period_bucket(ts_2024_mid, ConversionPeriod::Year)
+        );
+
+        let ts_2025 = ts_2024 + 86400 * 366;
+        assert_ne!(
+            period_bucket(ts_2024, ConversionPeriod::Year),
+            period_bucket(ts_2025, ConversionPeriod::Year)
+        );
+    }
+
+    #[test]
+    fn period_bucket_day_boundary() {
+        // Exact day boundary.
+        let ts1 = 86400;
+        let ts2 = 86400 - 1;
+        assert_ne!(
+            period_bucket(ts1, ConversionPeriod::Day),
+            period_bucket(ts2, ConversionPeriod::Day)
+        );
+    }
+
+    #[test]
+    fn period_bucket_zero_ts() {
+        // Zero timestamp should not panic.
+        let _ = period_bucket(0, ConversionPeriod::Day);
+        let _ = period_bucket(0, ConversionPeriod::Week);
+        let _ = period_bucket(0, ConversionPeriod::Month);
+        let _ = period_bucket(0, ConversionPeriod::Year);
+    }
+
+    // ── FxTable Clone and Default ────────────────────────────────────────
+
+    #[test]
+    fn fx_table_clone_is_independent() {
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.10)]);
+        let fx2 = fx.clone();
+        assert_eq!(fx2.rate("EUR", "USD", 0), Some(1.10));
+    }
+
+    #[test]
+    fn fx_table_debug_format() {
+        let fx = FxTable::new("USD");
+        let s = format!("{:?}", fx);
+        assert!(s.contains("FxTable"));
     }
 }

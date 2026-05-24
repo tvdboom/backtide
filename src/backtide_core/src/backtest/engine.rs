@@ -55,12 +55,12 @@ impl Engine {
             warnings.push(format!("Failed to create experiment dir: {e}"));
         }
 
-        let _ = tracing::info_span!(
+        let _log_span = tracing::info_span!(
             EXPERIMENT_SPAN,
             experiment_id = %experiment_id,
             { LOG_PATH_FIELD } = %exp_dir.join("logs.txt").display(),
-        )
-        .enter();
+        );
+        let _log_guard = _log_span.enter();
 
         info!("Starting experiment id={} name={:?}", experiment_id, config.general.name);
         info!(
@@ -104,7 +104,10 @@ impl Engine {
         let benchmark = config.strategy.benchmark.as_deref().unwrap_or("").trim().to_owned();
         let benchmark_from_strat = config.strategy.strategies.iter().any(|s| s == &benchmark);
 
-        if !benchmark_from_strat && !symbols.iter().any(|s| s == &benchmark) {
+        if !benchmark.is_empty()
+            && !benchmark_from_strat
+            && !symbols.iter().any(|s| s == &benchmark)
+        {
             info!("Folding benchmark symbol {benchmark:?} into symbol list");
             symbols.push(benchmark.clone());
         }
@@ -773,7 +776,6 @@ fn run_one_strategy(
 
     // Open trade tracker per symbol: (entry_ts, qty_remaining, entry_price)
     let mut open_trades: HashMap<String, (i64, f64, f64)> = HashMap::new();
-    let mut margin_limit_warnings: HashSet<String> = HashSet::new();
 
     let mut peak_equity = cfg.portfolio.initial_cash as f64;
 
@@ -1073,13 +1075,7 @@ fn run_one_strategy(
 
                 Ok(())
             }) {
-                // Avoid spam warnings.
-                let warning_key = limit_warning_dedupe_key(&order.symbol, violation, &reason);
-                if margin_limit_warnings.insert(warning_key) {
-                    warn!(strategy=%name, order_id=%order.id, "{reason}");
-                } else {
-                    debug!(strategy=%name, order_id=%order.id, "suppressed repeated limit rejection: {reason}");
-                }
+                warn!(strategy=%name, order_id=%order.id, "{reason}");
 
                 // Position-size rejections are just warnings. Only margin/leverage violations
                 // are gated by `raise_on_margin_limit`.
@@ -1336,11 +1332,8 @@ fn run_one_strategy(
             };
 
             let new_orders: Result<Vec<Order>, PyErr> = if let Some(b) = &builtin {
-                let bars_view: Vec<(&str, &[Bar])> = symbols
-                    .iter()
-                    .zip(bars_full.iter())
-                    .map(|(&s, (_, v))| (s, &v[..=bar_index]))
-                    .collect();
+                let bars_view: Vec<(&str, &[Bar])> =
+                    bars_full.iter().map(|(s, v)| (*s, &v[..=bar_index])).collect();
 
                 let inds = IndicatorView::new(indicators, bar_index as u64);
                 let orders = b.evaluate(&bars_view, &portfolio, &state, &inds, &it_map);
@@ -1430,17 +1423,34 @@ fn run_one_strategy(
                                 }
                             });
 
-                            // Call sizer.calculate(equity, price, stop_distance, atr).
-                            let resolved = Python::attach(|py| -> PyResult<f64> {
-                                sizer_slot
-                                    .0
-                                    .bind(py)
-                                    .call_method1(
-                                        "calculate",
-                                        (eq, sym_price, stop_distance, Option::<f64>::None),
-                                    )?
-                                    .extract()
-                            });
+                            let resolved = match &sizer_slot {
+                                SizerSlot::Builtin(builtin) => {
+                                    // Resolve entirely in Rust — no GIL needed.
+                                    builtin
+                                        .calculate(eq, sym_price, stop_distance, None)
+                                        .map_err(|e| {
+                                            warn!(strategy=%name, order_id=%o.id, "Builtin sizer failed: {e}");
+                                            e
+                                        })
+                                },
+                                SizerSlot::Custom(py_sizer) => {
+                                    // Fall back to calling Python's calculate().
+                                    Python::attach(|py| -> PyResult<f64> {
+                                        py_sizer
+                                            .bind(py)
+                                            .call_method1(
+                                                "calculate",
+                                                (eq, sym_price, stop_distance, Option::<f64>::None),
+                                            )?
+                                            .extract()
+                                    })
+                                    .map_err(|e| {
+                                        let msg = e.to_string();
+                                        warn!(strategy=%name, order_id=%o.id, "Custom sizer failed: {msg}");
+                                        msg
+                                    })
+                                },
+                            };
 
                             match resolved {
                                 Ok(qty) => o.quantity = qty,

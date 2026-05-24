@@ -1,9 +1,5 @@
-//! Order data model.
-//!
-//! Represents a single order submitted to the simulated exchange
-//! during a backtest.
-
 use crate::backtest::models::order_type::OrderType;
+use crate::sizers::*;
 use duckdb::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -108,23 +104,109 @@ impl<'a, 'py> FromPyObject<'a, 'py> for OrderId {
     }
 }
 
-/// Wrapper around a Python sizer object stored on an [`Order`].
+/// A built-in sizer variant that can be resolved entirely in Rust
+/// without crossing the Python boundary.
+#[derive(Clone, Debug)]
+pub enum BuiltinSizer {
+    EqualWeight(EqualWeight),
+    FixedFractional(FixedFractional),
+    FixedNotional(FixedNotional),
+    FixedQuantity(FixedQuantity),
+    KellyCriterion(KellyCriterion),
+    RiskBased(RiskBased),
+    VolatilityScaled(VolatilityScaled),
+}
+
+impl BuiltinSizer {
+    /// Run the sizing calculation entirely in Rust.
+    pub fn calculate(
+        &self,
+        equity: f64,
+        price: f64,
+        stop_distance: Option<f64>,
+        atr: Option<f64>,
+    ) -> Result<f64, String> {
+        macro_rules! delegate {
+            ($($variant:ident),* $(,)?) => {
+                match self {
+                    $(Self::$variant(s) => Sizer::calculate(s, equity, price, stop_distance, atr),)*
+                }
+            };
+        }
+
+        delegate!(
+            EqualWeight,
+            FixedFractional,
+            FixedNotional,
+            FixedQuantity,
+            KellyCriterion,
+            RiskBased,
+            VolatilityScaled,
+        )
+        .map_err(|e| Python::attach(|py| e.value(py).to_string()))
+    }
+
+    /// Try to extract a built-in sizer from a Python object.
+    ///
+    /// Returns `Some(BuiltinSizer)` if the object is one of the known
+    /// Rust-backed sizer types, `None` otherwise (i.e. custom Python sizer).
+    pub fn try_from_py(py: Python<'_>, obj: &Bound<'_, PyAny>) -> Option<Self> {
+        let _ = py;
+
+        macro_rules! try_dispatch {
+            ($($variant:ident),* $(,)?) => {
+                $(
+                    if let Ok(cell) = obj.cast::<$variant>() {
+                        return Some(Self::$variant(cell.borrow().clone()));
+                    }
+                )*
+            };
+        }
+
+        try_dispatch!(
+            EqualWeight,
+            FixedFractional,
+            FixedNotional,
+            FixedQuantity,
+            KellyCriterion,
+            RiskBased,
+            VolatilityScaled,
+        );
+
+        None
+    }
+}
+
+/// Sizer slot stored on an [`Order`], either a built-in Rust sizer or a
+/// custom Python object.
 ///
-/// Implements the standard derives by delegating: `Clone` clones the
-/// reference-counted `Py<PyAny>`, `Debug` prints a placeholder, and
-/// `Serialize`/`Deserialize` skip the field (sizers are transient,
-/// once the engine resolves them the slot is cleared).
-pub struct SizerSlot(pub Py<PyAny>);
+/// Built-in sizers are resolved entirely in Rust without acquiring the GIL.
+/// Custom sizers fall back to calling `calculate()` through PyO3.
+///
+/// `Serialize`/`Deserialize` skip the field (sizers are transient — once
+/// the engine resolves them, the slot is cleared).
+pub enum SizerSlot {
+    /// One of the seven built-in sizer types, resolved in pure Rust.
+    Builtin(BuiltinSizer),
+    /// A user-supplied Python sizer with a `calculate()` method.
+    Custom(Py<PyAny>),
+}
 
 impl Clone for SizerSlot {
     fn clone(&self) -> Self {
-        Python::attach(|py| SizerSlot(self.0.clone_ref(py)))
+        match self {
+            Self::Builtin(b) => Self::Builtin(b.clone()),
+            Self::Custom(obj) => Python::attach(|py| Self::Custom(obj.clone_ref(py))),
+        }
     }
 }
 
 impl std::fmt::Debug for SizerSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<sizer>")
+        match self {
+            Self::Builtin(b) => write!(f, "<builtin sizer: {b:?}>"),
+            Self::Custom(_) => write!(f, "<custom sizer>"),
+        }
     }
 }
 
@@ -152,14 +234,26 @@ impl<'py> IntoPyObject<'py> for SizerSlot {
     type Output = Bound<'py, PyAny>;
     type Error = PyErr;
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        Ok(self.0.into_bound(py))
+        match self {
+            Self::Custom(obj) => Ok(obj.into_bound(py)),
+            Self::Builtin(_) => {
+                // Built-in sizers round-trip as None on the Python side;
+                // by the time Python sees the order, the quantity is already
+                // resolved.
+                Ok(py.None().into_bound(py))
+            },
+        }
     }
 }
 
 impl<'a, 'py> FromPyObject<'a, 'py> for SizerSlot {
     type Error = PyErr;
     fn extract(ob: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        Ok(SizerSlot(ob.as_any().clone().unbind()))
+        // Try to recognise a built-in sizer first.
+        if let Some(builtin) = BuiltinSizer::try_from_py(ob.py(), ob.as_any()) {
+            return Ok(SizerSlot::Builtin(builtin));
+        }
+        Ok(SizerSlot::Custom(ob.as_any().clone().unbind()))
     }
 }
 
@@ -259,8 +353,10 @@ impl Order {
             Some(q) => {
                 if let Ok(f) = q.extract::<f64>() {
                     (f, None)
+                } else if let Some(builtin) = BuiltinSizer::try_from_py(_py, &q) {
+                    (0.0, Some(SizerSlot::Builtin(builtin)))
                 } else if q.hasattr("calculate")? {
-                    (0.0, Some(SizerSlot(q.unbind())))
+                    (0.0, Some(SizerSlot::Custom(q.unbind())))
                 } else {
                     return Err(PyErr::new::<PyTypeError, _>(
                         "quantity must be an int, float, or a Sizer with a calculate() method",

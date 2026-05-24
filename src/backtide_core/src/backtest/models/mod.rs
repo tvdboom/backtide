@@ -18,7 +18,7 @@ pub use empty_bar_policy::EmptyBarPolicy;
 pub use experiment_config::*;
 pub use experiment_result::*;
 pub use experiment_status::ExperimentStatus;
-pub use order::{Order, OrderId};
+pub use order::{BuiltinSizer, Order, OrderId, SizerSlot};
 pub use order_status::OrderStatus;
 pub use order_type::OrderType;
 pub use portfolio::Portfolio;

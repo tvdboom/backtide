@@ -8,6 +8,7 @@ Description: Backtest results page.
 from __future__ import annotations
 
 from datetime import datetime as dt
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -867,6 +868,7 @@ def _render_full_analysis(row: pd.Series):
         it = symbol_to_it.get(o.order.symbol)
 
         qty = cast(float, o.order.quantity)  # Sizers have been converted to a numerical quantity
+        abs_qty = abs(qty) if math.isfinite(qty) else None
         side = "Buy" if qty > 0 else ("Sell" if qty < 0 else "—")
         px = o.fill_price if o.fill_price is not None else o.order.price
 
@@ -874,7 +876,14 @@ def _render_full_analysis(row: pd.Series):
         # (matches what the engine actually debited / credited).
         quote_ccy = symbol_to_ccy.get(o.order.symbol, run.base_currency)
 
-        total = (px * abs(qty)) if px is not None else None
+        total = (px * abs_qty) if (px is not None and abs_qty is not None) else None
+
+        if abs_qty is None:
+            qty = "—"
+        elif it == InstrumentType.Crypto:
+            qty = abs_qty
+        else:
+            qty = int(abs_qty)
 
         rows.append(
             {
@@ -882,11 +891,11 @@ def _render_full_analysis(row: pd.Series):
                 "Symbol": o.order.symbol,
                 "Type": str(o.order.order_type),
                 "Side": side,
-                "Qty": abs(qty) if it == InstrumentType.Crypto else int(abs(qty)),
+                "Qty": qty,
                 "Price": _format_price(total, currency=quote_ccy) if total is not None else "—",
                 "PnL": _format_price(o.pnl, currency=quote_ccy) if o.pnl is not None else "—",
                 "Commission": _format_price(o.commission or 0.0, currency=quote_ccy),
-                "Status": o.status,
+                "Status": str(o.status),
             }
         )
 
@@ -923,8 +932,24 @@ def _render_full_analysis(row: pd.Series):
             return ""
         return f"color: {RED};" if "-" in s else f"color: {GREEN};"
 
+    def _color_status(val: str | None) -> str:
+        if not val:
+            return ""
+
+        s = str(val).strip().lower()
+        if "fill" in s:
+            return f"color: {GREEN}; font-weight: 600;"
+        if "reject" in s or "cancel" in s:
+            return f"color: {RED}; font-weight: 600;"
+        if "pending" in s:
+            return f"color: {YELLOW}; font-weight: 600;"
+
+        return ""
+
     st.dataframe(
-        df.style.map(_color_side, subset=["Side"]).map(_color_pnl, subset=["PnL"]),
+        df.style.map(_color_side, subset=["Side"])
+        .map(_color_pnl, subset=["PnL"])
+        .map(_color_status, subset=["Status"]),
         width="stretch",
         column_order=["", *df.columns[:-1]],
         column_config=column_config,

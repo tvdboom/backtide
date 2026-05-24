@@ -2532,14 +2532,23 @@ impl BuiltinStrategy {
             Vcp,
         );
 
-        // Return rounded quantities for instruments that don't allow fractional shares.
+        // Filter out invalid orders and round quantities for instruments that
+        // don't allow fractional shares.
         orders.retain_mut(|o| {
+            if matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition) {
+                return true;
+            }
+
+            if !o.quantity.is_finite() || o.quantity == 0.0 {
+                return false;
+            }
+
             let it = it_map.get(o.symbol.as_str()).unwrap();
 
             if !it.allows_fractional_quantities() && o.quantity.fract() != 0. {
                 let whole_abs = o.quantity.abs().floor();
                 if whole_abs <= 0.0 {
-                    return false; // Exclude orders with qty=0
+                    return false; // Exclude orders with qty < 1
                 }
 
                 o.quantity = whole_abs.copysign(o.quantity);

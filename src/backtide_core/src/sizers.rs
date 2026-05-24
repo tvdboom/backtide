@@ -1,3 +1,4 @@
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -126,16 +127,20 @@ impl Sizer for EqualWeight {
         _stop_distance: Option<f64>,
         _atr: Option<f64>,
     ) -> PyResult<f64> {
+        if !equity.is_finite() || !price.is_finite() {
+            return Err(value_error("equity and price must be finite"));
+        }
+
         if equity <= 0.0 || price <= 0.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "equity and price must be positive",
-            ));
+            return Err(value_error("equity and price must be positive"));
         }
+
         if self.n_positions == 0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("n_positions must be > 0"));
+            return Err(value_error("n_positions must be > 0"));
         }
+
         let allocation_per_position = equity / (self.n_positions as f64);
-        Ok(allocation_per_position / price)
+        Ok(finite_qty_or_zero(allocation_per_position / price))
     }
 }
 
@@ -185,17 +190,23 @@ impl Sizer for FixedFractional {
         _stop_distance: Option<f64>,
         _atr: Option<f64>,
     ) -> PyResult<f64> {
+        if !equity.is_finite() || !price.is_finite() {
+            return Err(value_error("equity and price must be finite"));
+        }
+        let fraction = self.fraction;
+        if !fraction.is_finite() {
+            return Err(value_error("fraction must be finite"));
+        }
+
         if equity <= 0.0 || price <= 0.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "equity and price must be positive",
-            ));
+            return Err(value_error("equity and price must be positive"));
         }
-        if self.fraction <= 0.0 || self.fraction > 1.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "fraction must be between 0 and 1",
-            ));
+
+        if fraction <= 0.0 || fraction > 1.0 {
+            return Err(value_error("fraction must be between 0 and 1"));
         }
-        Ok((equity * self.fraction) / price)
+
+        Ok(finite_qty_or_zero((equity * fraction) / price))
     }
 }
 
@@ -244,10 +255,19 @@ impl Sizer for FixedNotional {
         _stop_distance: Option<f64>,
         _atr: Option<f64>,
     ) -> PyResult<f64> {
-        if price <= 0.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("price must be positive"));
+        if !price.is_finite() {
+            return Err(value_error("price must be finite"));
         }
-        Ok(self.amount / price)
+        let amount = self.amount;
+        if !amount.is_finite() {
+            return Err(value_error("amount must be finite"));
+        }
+
+        if price <= 0.0 {
+            return Err(value_error("price must be positive"));
+        }
+
+        Ok(finite_qty_or_zero(amount / price))
     }
 }
 
@@ -296,6 +316,9 @@ impl Sizer for FixedQuantity {
         _stop_distance: Option<f64>,
         _atr: Option<f64>,
     ) -> PyResult<f64> {
+        if !self.quantity.is_finite() {
+            return Err(value_error("quantity must be finite"));
+        }
         Ok(self.quantity)
     }
 }
@@ -367,24 +390,39 @@ impl Sizer for KellyCriterion {
         _stop_distance: Option<f64>,
         _atr: Option<f64>,
     ) -> PyResult<f64> {
+        if !equity.is_finite() || !price.is_finite() {
+            return Err(value_error("equity and price must be finite"));
+        }
+        let win_rate = self.win_rate;
+        let avg_win = self.avg_win;
+        let avg_loss = self.avg_loss;
+        let fraction = self.fraction;
+        if !win_rate.is_finite()
+            || !avg_win.is_finite()
+            || !avg_loss.is_finite()
+            || !fraction.is_finite()
+        {
+            return Err(value_error("kelly parameters must be finite"));
+        }
+
         if equity <= 0.0 || price <= 0.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "equity and price must be positive",
-            ));
+            return Err(value_error("equity and price must be positive"));
         }
-        if self.win_rate < 0.0 || self.win_rate > 1.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("win_rate must be 0-1"));
+
+        if !(0.0..=1.0).contains(&win_rate) {
+            return Err(value_error("win_rate must be 0-1"));
         }
-        if self.avg_win <= 0.0 || self.avg_loss <= 0.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "avg_win and avg_loss must be positive",
-            ));
+
+        if avg_win <= 0.0 || avg_loss <= 0.0 {
+            return Err(value_error("avg_win and avg_loss must be positive"));
         }
-        let win_loss_ratio = self.avg_win / self.avg_loss;
-        let kelly_pct = self.win_rate - ((1.0 - self.win_rate) / win_loss_ratio);
+
+        let win_loss_ratio = avg_win / avg_loss;
+        let kelly_pct = win_rate - ((1.0 - win_rate) / win_loss_ratio);
         let kelly_pct = kelly_pct.max(0.0);
-        let allocation = equity * kelly_pct * self.fraction;
-        Ok(allocation / price)
+        let allocation = equity * kelly_pct * fraction;
+
+        Ok(finite_qty_or_zero(allocation / price))
     }
 }
 
@@ -435,18 +473,29 @@ impl Sizer for RiskBased {
         stop_distance: Option<f64>,
         _atr: Option<f64>,
     ) -> PyResult<f64> {
+        if !equity.is_finite() {
+            return Err(value_error("equity must be finite"));
+        }
+        let risk_pct = self.risk_pct;
+        if !risk_pct.is_finite() {
+            return Err(value_error("risk_pct must be finite"));
+        }
+
         if equity <= 0.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("equity must be positive"));
+            return Err(value_error("equity must be positive"));
         }
-        let stop_dist = stop_distance.ok_or_else(|| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>("RiskBased requires stop_distance")
-        })?;
+
+        let stop_dist =
+            stop_distance.ok_or_else(|| value_error("RiskBased requires stop_distance"))?;
+
+        if !stop_dist.is_finite() {
+            return Err(value_error("stop_distance must be finite"));
+        }
         if stop_dist <= 0.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "stop_distance must be positive",
-            ));
+            return Err(value_error("stop_distance must be positive"));
         }
-        Ok((equity * self.risk_pct) / stop_dist)
+
+        Ok(finite_qty_or_zero((equity * risk_pct) / stop_dist))
     }
 }
 
@@ -497,34 +546,53 @@ impl Sizer for VolatilityScaled {
         _stop_distance: Option<f64>,
         atr: Option<f64>,
     ) -> PyResult<f64> {
+        if !equity.is_finite() {
+            return Err(value_error("equity must be finite"));
+        }
+        let risk_pct = self.risk_pct;
+        if !risk_pct.is_finite() {
+            return Err(value_error("risk_pct must be finite"));
+        }
+
         if equity <= 0.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("equity must be positive"));
+            return Err(value_error("equity must be positive"));
         }
-        let atr_val = atr.ok_or_else(|| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>("VolatilityScaled requires atr")
-        })?;
+
+        let atr_val = atr.ok_or_else(|| value_error("VolatilityScaled requires atr"))?;
+        if !atr_val.is_finite() {
+            return Err(value_error("atr must be finite"));
+        }
+
         if atr_val <= 0.0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("atr must be positive"));
+            return Err(value_error("atr must be positive"));
         }
-        Ok((equity * self.risk_pct) / atr_val)
+
+        Ok(finite_qty_or_zero((equity * risk_pct) / atr_val))
     }
 }
 
 sizer_pymethods!(VolatilityScaled);
 
+// ────────────────────────────────────────────────────────────────────────────
+// Utility functions
+// ────────────────────────────────────────────────────────────────────────────
+
+#[inline]
+fn value_error(msg: &str) -> PyErr {
+    PyValueError::new_err(msg.to_owned())
+}
+
+#[inline]
+fn finite_qty_or_zero(v: f64) -> f64 {
+    if v.is_finite() {
+        v
+    } else {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    //! Tests for every built-in sizer.
-    //!
-    //! These exercise the [`Sizer`] trait implementations directly (the
-    //! Python-facing `calculate()` method is a one-line delegator to the
-    //! same trait, so covering the trait is sufficient). For each sizer we
-    //! check:
-    //!
-    //! * a happy-path numeric result against the documented formula,
-    //! * validation errors for the inputs the sizer rejects, and
-    //! * that optional arguments it does not consume are silently ignored.
-
     use super::*;
     use crate::constants::MIN_POSITION;
 
@@ -535,10 +603,7 @@ mod tests {
     fn assert_value_error<T: std::fmt::Debug>(result: PyResult<T>, needle: &str) {
         let err = result.expect_err("expected PyValueError");
         Python::attach(|py| {
-            assert!(
-                err.is_instance_of::<pyo3::exceptions::PyValueError>(py),
-                "expected ValueError, got {err:?}",
-            );
+            assert!(err.is_instance_of::<PyValueError>(py), "expected ValueError, got {err:?}",);
             let msg = err.value(py).to_string();
             assert!(msg.contains(needle), "expected message to contain {needle:?}, got {msg:?}");
         });
@@ -626,6 +691,22 @@ mod tests {
         assert_value_error(sizer.calculate(10_000.0, -5.0, None, None), "price");
     }
 
+    #[test]
+    fn fixed_notional_rejects_non_finite_amount_or_price() {
+        assert_value_error(
+            FixedNotional::new(f64::NAN).calculate(10_000.0, 10.0, None, None),
+            "amount",
+        );
+        assert_value_error(
+            FixedNotional::new(f64::INFINITY).calculate(10_000.0, 10.0, None, None),
+            "amount",
+        );
+        assert_value_error(
+            FixedNotional::new(500.0).calculate(10_000.0, f64::NAN, None, None),
+            "price must be finite",
+        );
+    }
+
     // ── FixedQuantity ────────────────────────────────────────────────────
 
     #[test]
@@ -634,6 +715,18 @@ mod tests {
         let sizer = FixedQuantity::new(3.5);
         assert_eq!(sizer.calculate(0.0, 0.0, None, None).unwrap(), 3.5);
         assert_eq!(sizer.calculate(1.0e9, 1.0e-9, Some(0.01), Some(0.02)).unwrap(), 3.5);
+    }
+
+    #[test]
+    fn fixed_quantity_rejects_non_finite_quantity() {
+        assert_value_error(
+            FixedQuantity::new(f64::NAN).calculate(1.0, 1.0, None, None),
+            "quantity",
+        );
+        assert_value_error(
+            FixedQuantity::new(f64::INFINITY).calculate(1.0, 1.0, None, None),
+            "quantity",
+        );
     }
 
     // ── KellyCriterion ───────────────────────────────────────────────────
@@ -674,6 +767,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn kelly_criterion_rejects_non_finite_parameters() {
+        assert_value_error(
+            KellyCriterion::new(f64::NAN, 1.0, 1.0, 0.25).calculate(1_000.0, 10.0, None, None),
+            "kelly parameters",
+        );
+        assert_value_error(
+            KellyCriterion::new(0.5, 1.0, 1.0, f64::NAN).calculate(1_000.0, 10.0, None, None),
+            "kelly parameters",
+        );
+        assert_value_error(
+            KellyCriterion::new(0.5, f64::INFINITY, 1.0, 0.25).calculate(1_000.0, 10.0, None, None),
+            "kelly parameters",
+        );
+    }
+
     // ── RiskBased ────────────────────────────────────────────────────────
 
     #[test]
@@ -691,6 +800,22 @@ mod tests {
         assert_value_error(sizer.calculate(10_000.0, 100.0, Some(0.0), None), "stop_distance");
     }
 
+    #[test]
+    fn risk_based_rejects_non_finite_inputs() {
+        assert_value_error(
+            RiskBased::new(f64::NAN).calculate(10_000.0, 100.0, Some(2.0), None),
+            "risk_pct must be finite",
+        );
+        assert_value_error(
+            RiskBased::new(0.01).calculate(f64::NAN, 100.0, Some(2.0), None),
+            "equity must be finite",
+        );
+        assert_value_error(
+            RiskBased::new(0.01).calculate(10_000.0, 100.0, Some(f64::NAN), None),
+            "stop_distance must be finite",
+        );
+    }
+
     // ── VolatilityScaled ─────────────────────────────────────────────────
 
     #[test]
@@ -706,6 +831,22 @@ mod tests {
         let sizer = VolatilityScaled::new(0.02);
         assert_value_error(sizer.calculate(10_000.0, 100.0, None, None), "atr");
         assert_value_error(sizer.calculate(10_000.0, 100.0, None, Some(-1.0)), "atr");
+    }
+
+    #[test]
+    fn volatility_scaled_rejects_non_finite_inputs() {
+        assert_value_error(
+            VolatilityScaled::new(f64::NAN).calculate(10_000.0, 100.0, None, Some(4.0)),
+            "risk_pct must be finite",
+        );
+        assert_value_error(
+            VolatilityScaled::new(0.02).calculate(f64::NAN, 100.0, None, Some(4.0)),
+            "equity must be finite",
+        );
+        assert_value_error(
+            VolatilityScaled::new(0.02).calculate(10_000.0, 100.0, None, Some(f64::NAN)),
+            "atr must be finite",
+        );
     }
 
     // ── __repr__ outputs ─────────────────────────────────────────────────
@@ -809,5 +950,35 @@ mod tests {
         let sizer = EqualWeight::new(1);
         let qty = sizer.calculate(5_000.0, 50.0, None, None).unwrap();
         assert!((qty - 100.0).abs() < MIN_POSITION);
+    }
+
+    #[test]
+    fn equal_weight_rejects_non_finite_equity_or_price() {
+        let sizer = EqualWeight::new(2);
+        assert_value_error(
+            sizer.calculate(f64::NAN, 10.0, None, None),
+            "equity and price must be finite",
+        );
+        assert_value_error(
+            sizer.calculate(1000.0, f64::NAN, None, None),
+            "equity and price must be finite",
+        );
+    }
+
+    #[test]
+    fn fixed_fractional_rejects_non_finite_inputs() {
+        assert_value_error(
+            FixedFractional::new(f64::NAN).calculate(1_000.0, 10.0, None, None),
+            "fraction",
+        );
+        let sizer = FixedFractional::new(0.1);
+        assert_value_error(
+            sizer.calculate(f64::NAN, 10.0, None, None),
+            "equity and price must be finite",
+        );
+        assert_value_error(
+            sizer.calculate(1_000.0, f64::NAN, None, None),
+            "equity and price must be finite",
+        );
     }
 }
