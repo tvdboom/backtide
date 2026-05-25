@@ -132,6 +132,10 @@ impl Engine {
 
         // Check that the starting positions are valid
         for (symbol, qty) in &config.portfolio.starting_positions {
+            if is_negligible(*qty) {
+                continue;
+            }
+
             if let Some(it) = symbol_it_map.get(symbol) {
                 if let Some(reason) = validate_qty(*qty, *it) {
                     return Err(EngineError::Experiment(format!(
@@ -760,7 +764,11 @@ fn run_one_strategy(
     let mut positions: Positions = if is_benchmark_run {
         Positions::new()
     } else {
-        cfg.portfolio.starting_positions.clone()
+        cfg.portfolio
+            .starting_positions
+            .iter()
+            .filter_map(|(sym, qty)| is_significant(*qty).then_some((sym.clone(), *qty)))
+            .collect()
     };
 
     let mut open_orders: Vec<Order> = Vec::new();
@@ -1096,17 +1104,12 @@ fn run_one_strategy(
                 continue;
             }
 
-            let mut filled_qty = 0.;
+            let mut filled_qty = *qty;
             let mut fill_pnl: Option<f64> = None;
 
             if *qty > 0.0 {
                 // BUY: try paying in `order_ccy` first, else convert from base.
                 if !try_debit(&mut cash, order_ccy, notional + commission, base_ccy, fx, ts) {
-                    // Auto-shrink the order rather than reject it.
-                    // Compute available funds in `order_ccy` by summing every
-                    // cash bucket converted to `order_ccy` at the current
-                    // bar's FX rate (forward-filled). Buckets whose currency
-                    // can't be converted at `ts` are ignored.
                     let avail: f64 = cash
                         .iter()
                         .filter(|(_, v)| v.is_finite() && **v > 0.0)

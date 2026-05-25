@@ -26,6 +26,7 @@ from backtide.core.backtest import (
     IndicatorExpConfig,
     Order,
     OrderRecord,
+    OrderStatus,
     OrderType,
     Portfolio,
     PortfolioExpConfig,
