@@ -2882,6 +2882,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../backtest/orderstatus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OrderStatus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../backtest/ordertype/" class="md-nav__link">
         
   
@@ -5444,7 +5472,7 @@
 <h1 id="basestrategy">BaseStrategy</h1>
 <hr />
 <p><a href="" id="BaseStrategy"></a></p>
-<div class='sign'><em>class</em> backtide.strategies.base.<strong style='color:#008AB8'>BaseStrategy</strong>()<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/strategies/base.py#L21>[source]</a></span></div>
+<div class='sign'><em>class</em> backtide.strategies.base.<strong style='color:#008AB8'>BaseStrategy</strong>()<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/strategies/base.py#L20>[source]</a></span></div>
 <p>Abstract base class for all strategies.</p>
 <p>Subclass it to create a custom strategy.</p>
 <p><br></p>
@@ -5474,14 +5502,14 @@
 </table>
 <p><br></p>
 <p><a href="" id="basestrategy-evaluate"></a></p>
-<div class='sign'><em>method</em> backtide.strategies.base<strong style='color:#008AB8'>evaluate</strong>(data, portfolio, state, indicators)<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/strategies/base.py#L71>[source]</a></span></div>
+<div class='sign'><em>method</em> <strong style='color:#008AB8'>evaluate</strong>(data, portfolio, state, indicators)<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/strategies/base.py#L70>[source]</a></span></div>
 <p>Evaluate the strategy and return orders.</p>
 <table class="table_params">
 <tr>
 <td class="td_title"><strong>Parameters</strong></td>
 <td class="td_params">
 <p><a href="" id="evaluate-data"></a>
-<strong>data : dict[str, np.array | pd.DataFrame | pl.DataFrame]</strong><br><div class='param' markdown>
+<strong>data : dict[str, pd.DataFrame | pl.DataFrame]</strong><br><div class='param' markdown>
 Keys are the experiment's symbols and values are the historical
 OHLCV data available up to the current bar.</p>
 <p></div><a href="" id="evaluate-portfolio"></a>
@@ -5491,7 +5519,7 @@ Current portfolio holdings (cash, positions and open orders).</p>
 <strong>state : <a class="autorefs autorefs-internal" href="../../backtest/state/#state">State</a></strong><br><div class='param' markdown>
 Current simulation state.</p>
 <p></div><a href="" id="evaluate-indicators"></a>
-<strong>indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None</strong><br><div class='param' markdown>
+<strong>indicators : dict[str, dict[str, pd.DataFrame | pl.DataFrame]] | None</strong><br><div class='param' markdown>
 The first keys are the indicator names. The second keys are the
 experiment's symbols. The values are the pre-computed indicator
 values. <code>None</code> if no indicators were selected.</p>
@@ -5509,7 +5537,7 @@ Orders to place this tick.
 </table>
 <p><br><br></p>
 <p><a href="" id="basestrategy-log"></a></p>
-<div class='sign'><em>method</em> backtide.strategies.base<strong style='color:#008AB8'>log</strong>(message, level="info")<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/strategies/base.py#L43>[source]</a></span></div>
+<div class='sign'><em>method</em> <strong style='color:#008AB8'>log</strong>(message, level="info")<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/strategies/base.py#L42>[source]</a></span></div>
 <p>Write a message to the experiment log.</p>
 <p>Messages appear in the live log viewer while the experiment
 runs and are persisted to the experiment's <code>logs.txt</code> file.</p>

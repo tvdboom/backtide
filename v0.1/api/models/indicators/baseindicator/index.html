@@ -2882,6 +2882,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../backtest/orderstatus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OrderStatus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../backtest/ordertype/" class="md-nav__link">
         
   
@@ -5444,7 +5472,7 @@
 <h1 id="baseindicator">BaseIndicator</h1>
 <hr />
 <p><a href="" id="BaseIndicator"></a></p>
-<div class='sign'><em>class</em> backtide.indicators.base.<strong style='color:#008AB8'>BaseIndicator</strong>()<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/indicators/base.py#L19>[source]</a></span></div>
+<div class='sign'><em>class</em> backtide.indicators.base.<strong style='color:#008AB8'>BaseIndicator</strong>()<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/indicators/base.py#L18>[source]</a></span></div>
 <p>Abstract base class for all indicators.</p>
 <p>Subclass it to create a custom indicator.</p>
 <p><br></p>
@@ -5468,14 +5496,14 @@
 </table>
 <p><br></p>
 <p><a href="" id="baseindicator-compute"></a></p>
-<div class='sign'><em>method</em> backtide.indicators.base<strong style='color:#008AB8'>compute</strong>(data)<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/indicators/base.py#L41>[source]</a></span></div>
+<div class='sign'><em>method</em> <strong style='color:#008AB8'>compute</strong>(data)<span style='float:right'><a href=https://github.com/tvdboom/backtide/blob/master/backtide/indicators/base.py#L40>[source]</a></span></div>
 <p>Compute the indicator values.</p>
 <table class="table_params">
 <tr>
 <td class="td_title"><strong>Parameters</strong></td>
 <td class="td_params">
 <p><a href="" id="compute-data"></a>
-<strong>data : np.array | pd.DataFrame | pl.DataFrame</strong><br><div class='param' markdown>
+<strong>data : pd.DataFrame | pl.DataFrame</strong><br><div class='param' markdown>
 Historical OHLCV data. The type depends on the <a class="autorefs autorefs-internal" title="DataConfig" href="../../config/dataconfig/#dataconfig"><code>dataframe_library</code></a>
 configuration.</p>
 </div>
@@ -5484,7 +5512,7 @@ configuration.</p>
 <tr>
 <td class="td_title"><strong>Returns</strong></td>
 <td class="td_params">
-<p><strong>np.ndarray | pd.Series | pd.DataFrame | pl.Series | pl.DataFrame</strong><br><div class='param' markdown>
+<p><strong>pd.Series | pd.DataFrame | pl.Series | pl.DataFrame</strong><br><div class='param' markdown>
 Single series for one-output indicators, or 2d for multi-output
 indicators (e.g., Bollinger Bands).
 </div></p>

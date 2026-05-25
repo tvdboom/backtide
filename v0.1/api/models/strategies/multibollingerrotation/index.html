@@ -2882,6 +2882,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../backtest/orderstatus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OrderStatus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../backtest/ordertype/" class="md-nav__link">
         
   
@@ -5476,13 +5504,17 @@ Whether this is a multi-asset strategy.</p>
 <td>Short explanation of what the strategy does.</td>
 </tr>
 <tr>
+<td><a class="autorefs autorefs-internal" title="Methods" href="#multibollingerrotation-evaluate">evaluate</a></td>
+<td>Evaluate the strategy and return orders.</td>
+</tr>
+<tr>
 <td><a class="autorefs autorefs-internal" title="Methods" href="#multibollingerrotation-required_indicators">required_indicators</a></td>
-<td>Indicators that must be computed up-front for this</td>
+<td>Indicators that must be computed up-front for this strategy.</td>
 </tr>
 </table>
 <p><br></p>
 <p><a href="" id="multibollingerrotation-description"></a></p>
-<div class='sign'><em>method</em> backtide.strategies<strong style='color:#008AB8'>description</strong>()</div>
+<div class='sign'><em>method</em> <strong style='color:#008AB8'>description</strong>()</div>
 <p>Short explanation of what the strategy does.</p>
 <table class="table_params">
 <tr>
@@ -5495,19 +5527,52 @@ The description.
 </tr>
 </table>
 <p><br><br></p>
+<p><a href="" id="multibollingerrotation-evaluate"></a></p>
+<div class='sign'><em>method</em> <strong style='color:#008AB8'>evaluate</strong>(data, portfolio, state, indicators=None)</div>
+<p>Evaluate the strategy and return orders.</p>
+<table class="table_params">
+<tr>
+<td class="td_title"><strong>Parameters</strong></td>
+<td class="td_params">
+<p><a href="" id="evaluate-data"></a>
+<strong>data : dict[str, np.array | pd.DataFrame | pl.DataFrame]</strong><br><div class='param' markdown>
+Keys are the experiment's symbols and values are the historical
+OHLCV data available up to the current bar.</p>
+<p></div><a href="" id="evaluate-portfolio"></a>
+<strong>portfolio : <a class="autorefs autorefs-internal" href="../../backtest/portfolio/#portfolio">Portfolio</a></strong><br><div class='param' markdown>
+Current portfolio holdings (cash, positions and open orders).</p>
+<p></div><a href="" id="evaluate-state"></a>
+<strong>state : <a class="autorefs autorefs-internal" href="../../backtest/state/#state">State</a></strong><br><div class='param' markdown>
+Current simulation state.</p>
+<p></div><a href="" id="evaluate-indicators"></a>
+<strong>indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None</strong><br><div class='param' markdown>
+The first keys are the indicator names. The second keys are the
+experiment's symbols. The values are the pre-computed indicator
+values. <code>None</code> if no indicators were selected.</p>
+</div>
+</td>
+</tr>
+<tr>
+<td class="td_title"><strong>Returns</strong></td>
+<td class="td_params">
+<p><strong>list[<a class="autorefs autorefs-internal" href="../../backtest/order/#order">Order</a>]</strong><br><div class='param' markdown>
+Orders to place this tick.
+</div></p>
+</td>
+</tr>
+</table>
+<p><br><br></p>
 <p><a href="" id="multibollingerrotation-required_indicators"></a></p>
-<div class='sign'><em>method</em> backtide.strategies<strong style='color:#008AB8'>required_indicators</strong>()</div>
-<p>Indicators that must be computed up-front for this</p>
-<p>strategy.</p>
-<p>Returns a list of indicator instances, already
-parameterised with this strategy's current settings,
-that the engine will auto-include before the simulation
-starts.</p>
+<div class='sign'><em>method</em> <strong style='color:#008AB8'>required_indicators</strong>()</div>
+<p>Indicators that must be computed up-front for this strategy.</p>
+<p>Returns a list of indicator instances, already parameterized
+with this strategy's current settings, that the engine will
+auto-include before the backtest starts.</p>
 <table class="table_params">
 <tr>
 <td class="td_title"><strong>Returns</strong></td>
 <td class="td_params">
-<p><strong>list</strong><br><div class='param' markdown>
+<p><strong>list[<a class="autorefs autorefs-internal" href="../../indicators/baseindicator/#baseindicator">BaseIndicator</a>]</strong><br><div class='param' markdown>
 The required indicator instances.
 </div></p>
 </td>

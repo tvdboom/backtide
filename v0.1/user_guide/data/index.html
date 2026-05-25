@@ -3058,6 +3058,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/models/backtest/orderstatus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OrderStatus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/models/backtest/ordertype/" class="md-nav__link">
         
   
@@ -5813,8 +5841,8 @@ a flat, deduplicated list of <a class="autorefs autorefs-internal" href="../../a
 <span class="linenos" data-linenos=" 9 "></span><span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">profiles</span><span class="p">:</span>
 <span class="linenos" data-linenos="10 "></span><span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">symbol</span><span class="p">,</span> <span class="n">p</span><span class="o">.</span><span class="n">earliest_ts</span><span class="p">,</span> <span class="n">p</span><span class="o">.</span><span class="n">latest_ts</span><span class="p">)</span>
 <span class="linenos" data-linenos="11 "></span>
-<span class="linenos" data-linenos="12 "></span><span class="go">AAPL {1d: 345479400, 1h: 1716059212} {1h: 1779127610, 1d: 1779044810}</span>
-<span class="linenos" data-linenos="13 "></span><span class="go">MSFT {1h: 1716059212, 1d: 511108200} {1h: 1779127609, 1d: 1779044809}</span>
+<span class="linenos" data-linenos="12 "></span><span class="go">AAPL {1d: 345479400, 1h: 1716659215} {1h: 1779476401, 1d: 1779393601}</span>
+<span class="linenos" data-linenos="13 "></span><span class="go">MSFT {1h: 1716659215, 1d: 511108200} {1h: 1779476400, 1d: 1779393600}</span>
 </code></pre></div>
 <h3 id="downloading-bars">Downloading bars</h3>
 <p>Pass the resolved profiles to <a class="autorefs autorefs-internal" href="../../api/data/download_bars/#download_bars"><code>download_bars</code></a>. It checks what is
@@ -5828,7 +5856,7 @@ bulk transaction.</p>
 <span class="linenos" data-linenos="5 "></span>
 <span class="linenos" data-linenos="6 "></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">n_succeeded</span><span class="p">,</span> <span class="s2">&quot;succeeded,&quot;</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">n_failed</span><span class="p">,</span> <span class="s2">&quot;failed&quot;</span><span class="p">)</span>
 <span class="linenos" data-linenos="7 "></span>
-<span class="linenos" data-linenos="8 "></span><span class="go">2 succeeded, 0 failed</span>
+<span class="linenos" data-linenos="8 "></span><span class="go">0 succeeded, 0 failed</span>
 </code></pre></div>
 <p>By default, the full provider history is downloaded. You can restrict the window
 with Unix-timestamp boundaries:</p>

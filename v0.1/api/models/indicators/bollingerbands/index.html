@@ -2882,6 +2882,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../backtest/orderstatus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OrderStatus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../backtest/ordertype/" class="md-nav__link">
         
   
@@ -5484,14 +5512,14 @@ Human-readable indicator name.</p>
 </table>
 <p><br></p>
 <p><a href="" id="bollingerbands-compute"></a></p>
-<div class='sign'><em>method</em> backtide.indicators<strong style='color:#008AB8'>compute</strong>(data)</div>
+<div class='sign'><em>method</em> <strong style='color:#008AB8'>compute</strong>(data)</div>
 <p>Compute the indicator on a dataset.</p>
 <table class="table_params">
 <tr>
 <td class="td_title"><strong>Parameters</strong></td>
 <td class="td_params">
 <p><a href="" id="compute-data"></a>
-<strong>data : np.ndarray | pd.DataFrame | pl.DataFrame</strong><br><div class='param' markdown>
+<strong>data : pd.DataFrame | pl.DataFrame</strong><br><div class='param' markdown>
 Historical OHLCV data.</p>
 </div>
 </td>
@@ -5499,7 +5527,7 @@ Historical OHLCV data.</p>
 <tr>
 <td class="td_title"><strong>Returns</strong></td>
 <td class="td_params">
-<p><strong>np.ndarray | pd.Series | pl.Series |  pd.DataFrame | pl.DataFrame</strong><br><div class='param' markdown>
+<p><strong>pd.Series | pl.Series |  pd.DataFrame | pl.DataFrame</strong><br><div class='param' markdown>
 The computed values. For multi-output indicators (e.g., upper
 and lower bounds), return a 2d structure.
 </div></p>
@@ -5508,7 +5536,7 @@ and lower bounds), return a 2d structure.
 </table>
 <p><br><br></p>
 <p><a href="" id="bollingerbands-description"></a></p>
-<div class='sign'><em>method</em> backtide.indicators<strong style='color:#008AB8'>description</strong>()</div>
+<div class='sign'><em>method</em> <strong style='color:#008AB8'>description</strong>()</div>
 <p>Short explanation of what the indicator measures.</p>
 <table class="table_params">
 <tr>

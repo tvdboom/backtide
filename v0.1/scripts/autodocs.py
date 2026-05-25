@@ -273,12 +273,10 @@ class AutoDocs:
             url = ""
 
         anchor = f"[](){{#{self._parent_anchor}{self.name}}}\n"
-        if obj == "command":
+        if obj in ("command", "method"):
             module = ""
-        elif obj != "method":
-            module = self.module + "."
         else:
-            module = self.module
+            module = self.module + "."
         obj = f"<em>{obj}</em>"
         name = f"<strong style='color:#008AB8'>{self.name}</strong>"
         if url:

@@ -2894,6 +2894,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../orderstatus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OrderStatus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ordertype/" class="md-nav__link">
         
   
@@ -5379,11 +5407,9 @@ UTC timestamp when the run finished (in Unix seconds).</p>
 <p></div><a href="" id="experimentresult-status"></a>
 <strong>status : <a class="autorefs autorefs-internal" href="../experimentstatus/#experimentstatus">ExperimentStatus</a></strong><br><div class='param' markdown>
 The status with which the experiment ended. Possible values are:</p>
-<ul>
-<li><code>Success</code>: Every strategy succeeded.</li>
-<li><code>Partial</code>: At least one strategy failed, but not all.</li>
-<li><code>Error</code>: All strategies failed or the experiment could not run.</li>
-</ul>
+<p><strong>success:</strong> Every strategy succeeded.
+<strong>partial:</strong> At least one strategy failed, but not all.
+<strong>error:</strong> All strategies failed or the experiment could not run.</p>
 <p></div><a href="" id="experimentresult-strategies"></a>
 <strong>strategies : list[<a class="autorefs autorefs-internal" href="../runresult/#runresult">RunResult</a>]</strong><br><div class='param' markdown>
 One result entry per evaluated strategy.</p>

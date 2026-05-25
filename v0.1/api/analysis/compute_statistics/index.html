@@ -2940,6 +2940,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../models/backtest/orderstatus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OrderStatus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../models/backtest/ordertype/" class="md-nav__link">
         
   
@@ -5451,7 +5479,7 @@ for daily data).</p>
 <tr>
 <td class="td_title"><strong>Returns</strong></td>
 <td class="td_params">
-<p><strong>np.ndarray | pd.DataFrame | pl.DataFrame</strong><br><div class='param' markdown>
+<p><strong>pd.DataFrame | pl.DataFrame</strong><br><div class='param' markdown>
 Dataset with one row per symbol and columns for each metric.</p>
 </div>
 </td>
@@ -5462,6 +5490,7 @@ Dataset with one row per symbol and columns for each metric.</p>
 <p class="admonition-title">See Also</p>
 <p><a class="autorefs autorefs-internal" href="../plot_returns/#plot_returns">plot_returns</a><br>    <div style='margin: -1em 0 0 1.2em'>Create a returns distribution histogram.</div></p>
 <p><a class="autorefs autorefs-internal" href="../plot_drawdown/#plot_drawdown">plot_drawdown</a><br>    <div style='margin: -1em 0 0 1.2em'>Create a drawdown chart.</div></p>
+<p><a class="autorefs autorefs-internal" href="../plot_mae_mfe/#plot_mae_mfe">plot_mae_mfe</a><br>    <div style='margin: -1em 0 0 1.2em'>Plot Maximum Adverse Excursion vs Maximum Favourable Excursion per trade.</div></p>
 </div>
 <p><br></p>
 <h2 id="example">Example</h2>
@@ -5473,8 +5502,8 @@ Dataset with one row per symbol and columns for each metric.</p>
 <span class="linenos" data-linenos=" 6 "></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
 <span class="linenos" data-linenos=" 7 "></span>
 <span class="linenos" data-linenos=" 8 "></span><span class="go">  symbol    sharpe      cagr  ...  ann_volatility   sortino  total_bars</span>
-<span class="linenos" data-linenos=" 9 "></span><span class="go">0   AAPL  0.626295  0.193239  ...        0.437598  0.861484       11448</span>
-<span class="linenos" data-linenos="10 "></span><span class="go">1   MSFT  0.832453  0.247162  ...        0.331784  1.164619       10122</span>
+<span class="linenos" data-linenos=" 9 "></span><span class="go">0   AAPL  0.626975  0.193578  ...        0.437527  0.862337       11452</span>
+<span class="linenos" data-linenos="10 "></span><span class="go">1   MSFT  0.831927  0.246911  ...        0.331730  1.163854       10126</span>
 <span class="linenos" data-linenos="11 "></span>
 <span class="linenos" data-linenos="12 "></span><span class="go">[2 rows x 8 columns]</span>
 </code></pre></div>

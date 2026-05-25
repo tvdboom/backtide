@@ -16,7 +16,7 @@
         <link rel="prev" href="../order/">
       
       
-        <link rel="next" href="../ordertype/">
+        <link rel="next" href="../orderstatus/">
       
       
         
@@ -2894,6 +2894,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../orderstatus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OrderStatus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ordertype/" class="md-nav__link">
         
   
@@ -5368,8 +5396,8 @@ The original order.</p>
 <strong>timestamp : int</strong><br><div class='param' markdown>
 The bar timestamp at which the order was processed (in Unix seconds).</p>
 <p></div><a href="" id="orderrecord-status"></a>
-<strong>status : str</strong><br><div class='param' markdown>
-One of: "filled", "canceled", "rejected" or "pending".</p>
+<strong>status : <a class="autorefs autorefs-internal" href="../orderstatus/#orderstatus">OrderStatus</a></strong><br><div class='param' markdown>
+One of: <code>filled</code>, <code>canceled</code>, <code>rejected</code> or <code>pending</code>.</p>
 <p></div><a href="" id="orderrecord-fill_price"></a>
 <strong>fill_price : float | None</strong><br><div class='param' markdown>
 Average fill price. <code>None</code> if not filled.</p>
@@ -5452,13 +5480,13 @@ cancellations and rejections.</p>
         
         
           
-          <a href="../ordertype/" class="md-footer__link md-footer__link--next" aria-label="Next: OrderType">
+          <a href="../orderstatus/" class="md-footer__link md-footer__link--next" aria-label="Next: OrderStatus">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                OrderType
+                OrderStatus
               </div>
             </div>
             <div class="md-footer__button md-icon">
