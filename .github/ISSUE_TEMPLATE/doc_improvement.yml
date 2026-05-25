@@ -9,7 +9,7 @@ body:
       options:
       - label: I've read the [contribution guidelines](https://tvdboom.github.io/backtide/latest/contributing/).
         required: true
-      - label: There are no open or closed issues that are related to my suggestion.
+      - label: There are no [open or closed issues](https://github.com/tvdboom/backtide/issues) that are related to my suggestion.
   - type: textarea
     attributes:
       label: Description

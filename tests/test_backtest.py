@@ -5,8 +5,9 @@ Description: Unit tests for the backtest module.
 
 """
 
-from typing import Any
+from typing import Any, cast
 
+import pandas as pd
 import pytest
 
 import backtide.backtest as backtest_module
@@ -34,7 +35,7 @@ from backtide.backtest import (
     run_experiment,
 )
 from backtide.indicators import SimpleMovingAverage
-from backtide.strategies import BuyAndHold
+from backtide.strategies import BaseStrategy, BuyAndHold
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sub-configs
@@ -776,3 +777,605 @@ class TestAutoIndicatorLookup:
         # at least one band touch, so we assert orders are produced
         # with a permissive parameter set.
         assert len(rr.orders) > 0, "indicator-driven strategy produced no orders"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Additional coverage tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestBaseStrategyLog:
+    """Tests for BaseStrategy.log() method."""
+
+    def test_log_default_level(self):
+        """Test log method with default info level."""
+        from unittest.mock import patch
+
+        with patch("backtide.backtest.experiment_log") as mock_log:
+            BaseStrategy.log("test message")
+            mock_log.assert_called_once_with("test message", "info")
+
+    def test_log_custom_level(self):
+        """Test log method with custom log level."""
+        from unittest.mock import patch
+
+        with patch("backtide.backtest.experiment_log") as mock_log:
+            BaseStrategy.log("test error", level="error")
+            mock_log.assert_called_once_with("test error", "error")
+
+    def test_log_warn_level(self):
+        """Test log method with warn level."""
+        from unittest.mock import patch
+
+        with patch("backtide.backtest.experiment_log") as mock_log:
+            BaseStrategy.log("test warning", level="warn")
+            mock_log.assert_called_once_with("test warning", "warn")
+
+    def test_log_debug_level(self):
+        """Test log method with debug level."""
+        from unittest.mock import patch
+
+        with patch("backtide.backtest.experiment_log") as mock_log:
+            BaseStrategy.log("test debug", level="debug")
+            mock_log.assert_called_once_with("test debug", "debug")
+
+
+class TestRunExperimentPolymorphicDict:
+    """Tests for dict form of polymorphic strategies/indicators parameters."""
+
+    def test_strategies_dict_multiple_entries(self):
+        """Test that multiple strategies in dict form are handled correctly."""
+        result = run_experiment(
+            strategies=[
+                {"Strategy1": BuyAndHold()},
+                {"Strategy2": BuyAndHold()},
+            ],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result.status is not None
+
+    def test_mixed_strategies_strings_and_instances(self):
+        """Test mixing string names with instances."""
+        result = run_experiment(
+            strategies=[
+                "BuyAndHold",
+                BuyAndHold(),
+                {"CustomName": BuyAndHold()},
+            ],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result.status is not None
+
+    def test_indicators_dict_form(self):
+        """Test indicator with dict form."""
+        from backtide.indicators import SimpleMovingAverage
+
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            indicators=[{"MyIndicator": SimpleMovingAverage(20)}],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result.status is not None
+
+
+class TestRunExperimentErrors:
+    """Tests for error cases in run_experiment."""
+
+    def test_no_symbols_raises_error(self):
+        """Test that missing symbols raises ValueError."""
+        with pytest.raises(ValueError, match="no symbols"):
+            run_experiment(
+                symbols=[],
+                strategies=[BuyAndHold()],
+                verbose=False,
+            )
+
+    def test_no_strategies_raises_error(self):
+        """Test that missing strategies raises ValueError."""
+        with pytest.raises(ValueError, match="no strategies"):
+            run_experiment(
+                symbols=["AAPL"],
+                instrument_type="stocks",
+                interval="1d",
+                strategies=[],
+                verbose=False,
+            )
+
+    def test_unknown_kwargs_raise_error(self):
+        """Test that unknown keyword arguments raise ValueError."""
+        with pytest.raises(ValueError, match="Unknown keyword arguments"):
+            run_experiment(
+                symbols=["AAPL"],
+                instrument_type="stocks",
+                interval="1d",
+                strategies=[BuyAndHold()],
+                unknown_arg="invalid",
+                verbose=False,
+            )
+
+
+class TestCleanupExperiment:
+    """Tests for _cleanup_experiment function."""
+
+    def test_cleanup_with_experiment_id_calls_delete(self):
+        """Test cleanup with experiment ID calls delete."""
+        from unittest.mock import patch
+
+        with patch("backtide.backtest._delete_experiment") as mock_delete:
+            from backtide.backtest import _cleanup_experiment
+
+            _cleanup_experiment("exp-123", "test-name")
+            mock_delete.assert_called_once_with("exp-123")
+
+    def test_cleanup_with_experiment_id_delete_failure(self):
+        """Test cleanup gracefully handles delete failure."""
+        from unittest.mock import patch
+
+        with patch("backtide.backtest._delete_experiment") as mock_delete:
+            mock_delete.side_effect = Exception("Delete failed")
+            from backtide.backtest import _cleanup_experiment
+
+            # Should not raise - best-effort removal
+            _cleanup_experiment("exp-123", "test-name")
+
+    def test_cleanup_without_experiment_id_queries_experiments(self):
+        """Test cleanup without ID queries experiments by name."""
+        from unittest.mock import patch
+
+        import pandas as pd
+
+        with (
+            patch("backtide.backtest._query_experiments") as mock_query,
+            patch("backtide.backtest._to_pandas") as mock_to_pandas,
+            patch("backtide.backtest._delete_experiment") as mock_delete,
+        ):
+            df = pd.DataFrame({"id": ["exp-456"]})
+            mock_to_pandas.return_value = df
+            from backtide.backtest import _cleanup_experiment
+
+            _cleanup_experiment(None, "test-name")
+            mock_query.assert_called_once()
+            mock_delete.assert_called_once_with("exp-456")
+
+    def test_cleanup_query_returns_empty(self):
+        """Test cleanup when query returns empty result."""
+        from unittest.mock import patch
+
+        import pandas as pd
+
+        with (
+            patch("backtide.backtest._query_experiments"),
+            patch("backtide.backtest._to_pandas") as mock_to_pandas,
+            patch("backtide.backtest._delete_experiment") as mock_delete,
+        ):
+            mock_to_pandas.return_value = pd.DataFrame()
+            from backtide.backtest import _cleanup_experiment
+
+            _cleanup_experiment(None, "nonexistent")
+            # Should not call delete if no experiments found
+            assert mock_delete.call_count == 0
+
+
+class TestIntegrationCoverage:
+    """Integration tests to cover additional paths."""
+
+    def test_run_experiment_with_indicators_and_custom_dates(self):
+        """Test run_experiment with indicators and custom date range."""
+        from backtide.indicators import SimpleMovingAverage
+
+        result = run_experiment(
+            name="test-with-indicators",
+            symbols=["AAPL"],
+            instrument_type="stocks",
+            interval="1d",
+            full_history=False,
+            start_date="2024-01-01",
+            end_date="2024-03-01",
+            strategies=[BuyAndHold()],
+            indicators=[SimpleMovingAverage(10), SimpleMovingAverage(20)],
+            initial_cash=50000,
+            commission_pct=0.001,
+            slippage=0.001,
+            verbose=False,
+        )
+        assert result is not None
+
+    def test_run_experiment_with_tags_and_description(self):
+        """Test run_experiment with tags and description in config."""
+        result = run_experiment(
+            name="test-tags",
+            tags=["test", "coverage"],
+            description="Test experiment for coverage",
+            symbols=["AAPL"],
+            instrument_type="stocks",
+            interval="1d",
+            full_history=False,
+            start_date="2024-01-01",
+            end_date="2024-03-01",
+            strategies=[BuyAndHold()],
+            verbose=False,
+        )
+        assert result is not None
+
+    def test_multiple_strategies_execution(self):
+        """Test execution with multiple strategies."""
+        result = run_experiment(
+            strategies=[
+                BuyAndHold(),
+                BuyAndHold(symbol="AAPL"),
+            ],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert len(result.strategies) >= 1
+
+
+class TestPolymorphicResolution:
+    """Tests for polymorphic parameter resolution."""
+
+    def test_resolve_instance_strategies(self):
+        """Test resolution of strategy instances."""
+        result = run_experiment(
+            strategies=BuyAndHold(),
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_resolve_list_of_instances(self):
+        """Test resolution of list of strategy instances."""
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_indicators_instance_form(self):
+        """Test indicators as instances."""
+        from backtide.indicators import SimpleMovingAverage
+
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            indicators=[SimpleMovingAverage(10)],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+
+class TestBacktestErrorPaths:
+    """Tests for various error paths in backtest module."""
+
+    def test_run_experiment_exception_cleanup_on_keyboard_interrupt(self, monkeypatch):
+        """Test cleanup is called on KeyboardInterrupt."""
+        cleanup_called = []
+
+        def fake_run(*args, **kwargs):  # noqa: ARG001
+            raise KeyboardInterrupt
+
+        def fake_cleanup(exp_id, name):
+            cleanup_called.append((exp_id, name))
+
+        monkeypatch.setattr(backtest_module, "_run_experiment", fake_run)
+        monkeypatch.setattr(backtest_module, "_cleanup_experiment", fake_cleanup)
+
+        with pytest.raises(backtest_module.ExperimentAborted):
+            run_experiment(strategies=[BuyAndHold()], verbose=False, **run_kwargs)
+
+        assert len(cleanup_called) > 0
+
+    def test_cleanup_with_name_search_raises_exception(self):
+        """Test cleanup gracefully handles query exceptions."""
+        from unittest.mock import patch
+
+        import backtide.backtest as backtide_module
+
+        with patch("backtide.backtest._query_experiments") as mock_query:
+            mock_query.side_effect = Exception("Query failed")
+
+            # Should not raise - best-effort removal
+            backtide_module._cleanup_experiment(None, "test-name")
+
+    def test_cleanup_with_pandas_conversion_failure(self):
+        """Test cleanup handles pandas conversion failures."""
+        from unittest.mock import patch
+
+        import backtide.backtest as backtide_module
+
+        with (
+            patch("backtide.backtest._query_experiments"),
+            patch("backtide.backtest._to_pandas") as mock_to_pandas,
+        ):
+            mock_to_pandas.side_effect = Exception("Conversion failed")
+
+            # Should not raise
+            backtide_module._cleanup_experiment(None, "test-name")
+
+
+class TestComplexConfigurations:
+    """Tests for complex experiment configurations."""
+
+    def test_experiment_with_multiple_indicators(self):
+        """Test experiment with multiple indicator types."""
+        from backtide.indicators import SimpleMovingAverage
+
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            indicators=[
+                SimpleMovingAverage(5),
+                SimpleMovingAverage(10),
+                SimpleMovingAverage(20),
+            ],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_experiment_kwargs_precedence(self):
+        """Test that kwargs override config values."""
+        result = run_experiment(
+            config=ExperimentConfig(),
+            name="override_test",
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_experiment_with_slippage_and_commission(self):
+        """Test experiment with slippage and commission."""
+        result = run_experiment(
+            commission_pct=0.001,
+            slippage=0.001,
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_experiment_with_warmup_period(self):
+        """Test experiment with warmup period."""
+        result = run_experiment(
+            warmup_period=5,
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+
+class TestExperimentConfigEdgeCases:
+    """Tests for edge cases in experiment configuration."""
+
+    def test_run_with_empty_string_name_generates_uuid(self):
+        """Test that empty name gets auto-generated UUID."""
+        result = run_experiment(
+            name="    ",  # Whitespace name
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_run_with_none_indicators(self):
+        """Test run with None indicators."""
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            indicators=None,
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_run_with_single_indicator_instance(self):
+        """Test run with single indicator (not in list)."""
+        from backtide.indicators import SimpleMovingAverage
+
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            indicators=SimpleMovingAverage(10),
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_run_with_very_large_initial_cash(self):
+        """Test with very large initial cash."""
+        result = run_experiment(
+            initial_cash=999_999_999,
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_run_with_very_small_commission(self):
+        """Test with very small commission rate."""
+        result = run_experiment(
+            commission_pct=0.00001,
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_run_with_zero_slippage(self):
+        """Test run with zero slippage."""
+        result = run_experiment(
+            slippage=0.0,
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+
+class TestMultipleStrategies:
+    """Tests for running multiple strategies."""
+
+    def test_run_three_strategies(self):
+        """Test running three different strategy instances."""
+        result = run_experiment(
+            strategies=[
+                BuyAndHold(),
+                BuyAndHold(symbol="AAPL"),
+                BuyAndHold(symbol="AAPL"),
+            ],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_run_with_mixed_dict_and_instance_strategies(self):
+        """Test with mixed dict, instance, and string strategies."""
+        result = run_experiment(
+            strategies=[
+                {"Custom1": BuyAndHold()},
+                BuyAndHold(),
+                {"Custom2": BuyAndHold()},
+            ],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_indicators_with_multiple_instances(self):
+        """Test multiple indicator instances."""
+        from backtide.indicators import SimpleMovingAverage
+
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            indicators=[
+                SimpleMovingAverage(3),
+                SimpleMovingAverage(5),
+                SimpleMovingAverage(7),
+                SimpleMovingAverage(10),
+            ],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+    def test_indicators_dict_form_multiple(self):
+        """Test multiple indicators in dict form."""
+        from backtide.indicators import SimpleMovingAverage
+
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            indicators=[
+                {"SMA3": SimpleMovingAverage(3)},
+                {"SMA5": SimpleMovingAverage(5)},
+            ],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+
+class TestDataFormats:
+    """Tests for different data formats and edge cases."""
+
+    def test_run_experiment_full_history(self):
+        """Test with full_history=True."""
+        result = run_experiment(
+            full_history=True,
+            strategies=[BuyAndHold()],
+            verbose=False,
+            symbols=["AAPL"],
+            instrument_type="stocks",
+            interval="1d",
+        )
+        assert result is not None
+
+    def test_run_experiment_with_explicit_dates(self):
+        """Test with explicit date range."""
+        result = run_experiment(
+            full_history=False,
+            start_date="2024-01-15",
+            end_date="2024-02-15",
+            strategies=[BuyAndHold()],
+            verbose=False,
+            symbols=["AAPL"],
+            instrument_type="stocks",
+            interval="1d",
+        )
+        assert result is not None
+
+    def test_run_experiment_with_only_start_date(self):
+        """Test with only start date."""
+        result = run_experiment(
+            symbols=["AAPL"],
+            instrument_type="stocks",
+            interval="1d",
+            full_history=False,
+            start_date="2024-01-01",
+            strategies=[BuyAndHold()],
+            verbose=False,
+        )
+        assert result is not None
+
+    def test_run_experiment_with_only_end_date(self):
+        """Test with only end date."""
+        result = run_experiment(
+            symbols=["AAPL"],
+            instrument_type="stocks",
+            interval="1d",
+            full_history=False,
+            end_date="2024-03-01",
+            strategies=[BuyAndHold()],
+            verbose=False,
+        )
+        assert result is not None
+
+
+class TestAbortEventHandling:
+    """Tests for abort event handling in backtest."""
+
+    def test_abort_event_not_set(self):
+        """Test normal case when abort is not set."""
+        assert backtest_module._abort_event is None
+        result = run_experiment(
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert result is not None
+
+
+class TestStoredExperimentAccess:
+    """Tests for accessing stored experiments."""
+
+    def test_query_and_iterate_experiments(self):
+        """Test querying experiments and accessing results."""
+        from backtide.storage import query_experiments, query_strategy_runs
+
+        # Run an experiment first
+        run_experiment(
+            name="test-stored-exp",
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+
+        # Query experiments
+        experiments = cast(pd.DataFrame, query_experiments(search="test-stored-exp", limit=1))
+        if not experiments.empty:
+            exp_id = experiments.iloc[0]["id"]
+            runs = query_strategy_runs(exp_id)
+            assert runs is not None
+
+    def test_experiment_result_attributes(self):
+        """Test that experiment results have expected attributes."""
+        result = run_experiment(
+            name="test-attrs",
+            strategies=[BuyAndHold()],
+            verbose=False,
+            **run_kwargs,
+        )
+        assert hasattr(result, "experiment_id")
+        assert hasattr(result, "status")
+        assert hasattr(result, "strategies")

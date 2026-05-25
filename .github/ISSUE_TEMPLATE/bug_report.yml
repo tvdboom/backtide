@@ -9,7 +9,7 @@ body:
       options:
       - label: I've read the [contribution guidelines](https://tvdboom.github.io/backtide/latest/contributing/).
         required: true
-      - label: The [documentation](https://tvdboom.github.io/backtide) does not mention anything about my problem.
+      - label: The [documentation](https://tvdboom.github.io/backtide/latest/) does not mention anything about my problem.
       - label: There are no [open or closed issues](https://github.com/tvdboom/backtide/issues) that are related to my problem.
   - type: textarea
     validations:
@@ -23,21 +23,24 @@ body:
     attributes:
       label: Steps to reproduce
       description: >
-        Please add a [minimal code example](https://scikit-learn.org/dev/developers/minimal_reproducer.html)
+        Please provide a [minimal reproducible example](https://en.wikipedia.org/wiki/Minimal_reproducible_example)
         that can reproduce the error when running it. Be as succinct as possible,
-        **do not depend on external data files**: instead you can generate synthetic
-        data using `numpy.random`, [sklearn.datasets.make_regression](https://scikit-learn.org/stable/modules/generated/sklearn.datasets.make_regression.html),
-        [sklearn.datasets.make_classification](https://scikit-learn.org/stable/modules/generated/sklearn.datasets.make_classification.html)
-        or a few lines of Python code. Example:
+        **do not depend on external data files**: instead use simple market data or
+        fetch real data from the supported providers (Yahoo Finance, Binance, etc.).
+        Example:
 
         ```python
-        from backtide import backtideClassifier
-        from sklearn.datasets import load_breast_cancer
+        from backtide.backtest import run_experiment, ExperimentConfig, GeneralExpConfig, DataExpConfig, StrategyExpConfig
+        from backtide.strategies import BuyAndHold
 
-        X, y = load_breast_cancer(return_X_y=True, as_frame=True)
+        config = ExperimentConfig(
+            general=GeneralExpConfig(name="Test", description="Minimal example"),
+            data=DataExpConfig(symbols=["AAPL"]),
+            portfolio=PortfolioExpConfig(initial_cash=10000),
+            strategies=[StrategyExpConfig(name="BuyAndHold")],
+        )
 
-        backtide = backtideClassifier(X, y, random_state=1)
-        backtide.run("OLS", errors="raise")
+        result = run_experiment(config)
         ```
 
         If the code is too long, feel free to put it in a public gist and link it
@@ -50,7 +53,7 @@ body:
         some effort on your side but it really helps the maintainers quickly reproduce
         the problem and analyze its cause.
       placeholder: |
-        ```
+        ```python
         Sample code to reproduce the problem.
         ```
   - type: textarea
@@ -59,8 +62,8 @@ body:
     attributes:
       label: Expected behaviour
       description: Describe what you'd expect to happen.
-      placeholder: >
-        Example: No error is thrown.
+      placeholder: |
+        Example: The backtest should complete successfully and return results with trades and PnL.
   - type: textarea
     validations:
       required: true
@@ -69,31 +72,29 @@ body:
       description: >
         Paste or describe the results you observe instead of the expected results.
         If you observe an error, please paste the error message including the
-        **full traceback** of the exception. For instance the code above raises the
-        following exception:
+        **full traceback** of the exception. For example:
 
-        ```python-traceback
-        ---------------------------------------------------------------------------
-        TypeError                                 Traceback (most recent call last)
-        <ipython-input-1-a674e682c281> in <module>
-              6 backtide = backtideClassifier(X, y, random_state=1)
-        ----> 7 backtide.run("OLS", errors="raise")
-
-        ValueError: The OrdinaryLeastSquares model is not available for multilabel classification tasks!
         ```
-      placeholder: >
+        Traceback (most recent call last):
+          File "script.py", line 10, in <module>
+            result = run_experiment(config)
+          File "backtide/backtest.py", line 73, in run_experiment
+            ...
+        ValueError: Invalid strategy configuration
+        ```
+      placeholder: |
         Please paste or specifically describe the actual output or traceback.
   - type: textarea
     validations:
       required: true
     attributes:
-      label: Python and package versions
+      label: Environment
       render: Shell
       description: |
-        Please run the following and paste the output below.
+        Please provide your Python version and backtide version. You can get this information by running:
 
         ```python
-        import backtide; backtide.show_versions()
+        import backtide; print(backtide.__version__); import platform; print(f"Python {platform.python_version()}")
         ```
   - type: markdown
     attributes:

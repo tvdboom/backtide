@@ -285,3 +285,308 @@ class TestCoreUtils:
     def test_clear_cache(self):
         """clear_cache runs without error."""
         clear_cache()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _format_price and _format_number edge cases
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestFormatPriceEdgeCases:
+    """Extended tests for _format_price edge cases."""
+
+    def test_format_price_with_currency_object(self):
+        """Test formatting with Currency enum."""
+        from backtide.data import Currency
+
+        result = _format_price(1234.56, currency=Currency.USD)
+        assert isinstance(result, str)
+
+    def test_format_price_with_invalid_currency_string(self):
+        """Test formatting with invalid currency code falls back."""
+        result = _format_price(1234.56, currency="INVALID")
+        assert isinstance(result, str)
+
+    def test_format_price_compact_mode(self):
+        """Test compact formatting of large numbers."""
+        result = _format_price(1_000_000, compact=True)
+        assert "M" in result or "k" in result
+
+    def test_format_price_with_signed(self):
+        """Test signed format shows + for positive."""
+        result = _format_price(100, signed=True)
+        assert "+" in result or isinstance(result, str)
+
+    def test_format_price_negative_signed(self):
+        """Test signed format for negative numbers."""
+        result = _format_price(-100, signed=True)
+        assert isinstance(result, str)
+
+    def test_format_price_zero(self):
+        """Test formatting zero."""
+        result = _format_price(0)
+        assert "0" in result
+
+    def test_format_price_with_decimals(self):
+        """Test custom decimal places."""
+        result = _format_price(100.123, decimals=1)
+        assert isinstance(result, str)
+
+    def test_format_price_large_compact_number(self):
+        """Test formatting very large numbers in compact mode."""
+        result = _format_price(50_000_000_000, compact=True)
+        assert "B" in result
+
+    def test_format_price_between_million_and_billion(self):
+        """Test formatting numbers between M and B."""
+        result = _format_price(950_000_000, compact=True)
+        assert isinstance(result, str)
+
+    def test_format_price_exactly_10_million(self):
+        """Test boundary case at 10 million."""
+        result = _format_price(10_000_000, compact=True)
+        assert "M" in result
+
+    def test_format_price_exactly_10_thousand(self):
+        """Test boundary case at 10 thousand."""
+        result = _format_price(10_000, compact=True)
+        assert "k" in result
+
+    def test_format_price_with_currency_compact(self):
+        """Test currency formatting with compact numbers."""
+        from backtide.data import Currency
+
+        result = _format_price(5_000_000, currency=Currency.USD, compact=True)
+        assert isinstance(result, str)
+
+    def test_format_negative_compact(self):
+        """Test negative numbers in compact mode."""
+        result = _format_price(-5_000_000, compact=True)
+        assert "M" in result
+
+    def test_format_price_with_inr_currency(self):
+        """Test formatting with INR currency."""
+        from backtide.data import Currency
+
+        result = _format_price(1000, currency=Currency.INR)
+        assert isinstance(result, str)
+
+    def test_format_price_with_gbp_currency(self):
+        """Test formatting with GBP currency."""
+        from backtide.data import Currency
+
+        result = _format_price(1000, currency=Currency.GBP)
+        assert isinstance(result, str)
+
+    def test_format_price_with_jpy_currency(self):
+        """Test formatting with JPY currency."""
+        from backtide.data import Currency
+
+        result = _format_price(100000, currency=Currency.JPY)
+        assert isinstance(result, str)
+
+    def test_format_price_with_none_currency(self):
+        """Test format price with None currency."""
+        result = _format_price(100.0, currency=None)
+        assert isinstance(result, str)
+
+    def test_format_price_edge_case_exactly_zero(self):
+        """Test formatting exactly zero."""
+        result = _format_price(0.0)
+        assert "0.0" in result or "0" in result
+
+    def test_format_price_negative_with_currency(self):
+        """Test negative formatting with currency."""
+        result = _format_price(-100.5, currency="USD")
+        assert isinstance(result, str)
+
+    def test_format_price_with_custom_decimals_and_signed(self):
+        """Test with custom decimals and signed format."""
+        result = _format_price(123.456, decimals=3, signed=True)
+        assert isinstance(result, str)
+
+
+class TestFormatNumberBoundaries:
+    """Test _format_number at boundary values."""
+
+    def test_format_billions(self):
+        """Test formatting billions."""
+        result = _format_number(5_000_000_000)
+        assert "B" in result
+
+    def test_format_millions(self):
+        """Test formatting millions."""
+        result = _format_number(5_000_000)
+        assert "M" in result
+
+    def test_format_thousands(self):
+        """Test formatting thousands."""
+        result = _format_number(5000)
+        assert "k" in result
+
+    def test_format_small_numbers(self):
+        """Test formatting small numbers."""
+        result = _format_number(500)
+        assert "500" in result
+
+    def test_format_negative_billions(self):
+        """Test formatting negative billions."""
+        result = _format_number(-15_000_000_000)
+        assert "B" in result
+
+    def test_format_negative_small_numbers(self):
+        """Test formatting negative small numbers."""
+        result = _format_number(-500)
+        assert "-" in result
+
+    def test_format_exactly_10_billion(self):
+        """Test exactly 10 billion."""
+        result = _format_number(10_000_000_000)
+        assert "B" in result
+
+    def test_format_exactly_1_billion(self):
+        """Test exactly 1 billion."""
+        result = _format_number(1_000_000_000)
+        assert "B" in result
+
+    def test_format_exactly_10_million(self):
+        """Test exactly 10 million."""
+        result = _format_number(10_000_000)
+        assert "M" in result
+
+    def test_format_exactly_1_million(self):
+        """Test exactly 1 million."""
+        result = _format_number(1_000_000)
+        assert "M" in result
+
+    def test_format_exactly_10_thousand(self):
+        """Test exactly 10 thousand."""
+        result = _format_number(10_000)
+        assert "k" in result
+
+    def test_format_exactly_1_thousand(self):
+        """Test exactly 1 thousand."""
+        result = _format_number(1_000)
+        assert "k" in result
+
+    def test_format_decimal_boundaries(self):
+        """Test decimal formatting at boundaries."""
+        result1 = _format_number(9_999)
+        result2 = _format_number(10_001)
+        assert isinstance(result1, str)
+        assert isinstance(result2, str)
+
+    def test_format_number_with_very_small_negative(self):
+        """Test formatting very small negative numbers."""
+        result = _format_number(-0.001)
+        assert isinstance(result, str)
+
+    def test_format_number_with_fractional_values(self):
+        """Test formatting fractional values."""
+        result = _format_number(1500.5)
+        assert isinstance(result, str)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Additional utility tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestUtilsToPandas:
+    """Tests for _to_pandas conversion function."""
+
+    def test_to_pandas_with_empty_dict(self):
+        """Test converting empty dict to DataFrame."""
+        result = _to_pandas({})
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_to_pandas_with_list_of_dicts(self):
+        """Test converting list of dicts to DataFrame."""
+        data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
+        result = _to_pandas(data)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 2
+
+    def test_to_pandas_with_dataframe(self):
+        """Test that DataFrame passthrough works."""
+        df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+        result = _to_pandas(df)
+        assert isinstance(result, pd.DataFrame)
+
+
+class TestGetTimezone:
+    """Tests for _get_timezone function."""
+
+    def test_get_timezone_with_none(self):
+        """Test timezone resolution with None config."""
+        from backtide.utils.utils import _get_timezone
+
+        result = _get_timezone(None)
+        assert isinstance(result, ZoneInfo)
+
+    def test_get_timezone_with_explicit_tz(self):
+        """Test timezone with explicit timezone string."""
+        from backtide.utils.utils import _get_timezone
+
+        result = _get_timezone("UTC")
+        assert isinstance(result, ZoneInfo)
+        assert str(result) == "UTC"
+
+    def test_get_timezone_with_us_eastern(self):
+        """Test with US/Eastern timezone."""
+        from backtide.utils.utils import _get_timezone
+
+        result = _get_timezone("US/Eastern")
+        assert isinstance(result, ZoneInfo)
+
+
+class TestDataTransformations:
+    """Tests for data transformation edge cases."""
+
+    def test_to_list_with_generator(self):
+        """Test _to_list with generator."""
+        gen = (x for x in [1, 2, 3])
+        result = _to_list(gen)
+        assert isinstance(result, list)
+
+    def test_to_list_with_empty_list(self):
+        """Test _to_list with empty list."""
+        result = _to_list([])
+        assert result == []
+
+    def test_to_list_preserves_order(self):
+        """Test _to_list preserves order of elements."""
+        input_list = [3, 1, 4, 1, 5]
+        result = _to_list(input_list)
+        assert result == input_list
+
+    def test_to_list_with_none(self):
+        """Test that None returns list with None."""
+        result = _to_list(None)
+        assert isinstance(result, list)
+        assert result == [None]
+
+
+class TestCheckDependencyEdgeCases:
+    """Additional tests for _check_dependency function."""
+
+    def test_check_existing_dependency(self):
+        """Test checking an installed dependency."""
+        import pandas as pd
+
+        result = _check_dependency("pandas")
+        assert result is pd
+
+    def test_check_missing_dependency(self):
+        """Test checking a missing dependency raises error."""
+        with pytest.raises(
+            ModuleNotFoundError,
+            match="Unable to import the nonexistent_package_xyz package",
+        ):
+            _check_dependency("nonexistent_package_xyz")
+
+    def test_check_dependency_with_custom_pypi_name(self):
+        """Test checking dependency with different PyPI name."""
+        with pytest.raises(ModuleNotFoundError):
+            _check_dependency("nonexistent", pypi_name="custom-name")

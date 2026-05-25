@@ -66,8 +66,21 @@ jobs:
           os: [ubuntu-latest, macos-latest, windows-latest]
       steps:
         - uses: actions/checkout@v6
-        - name: Build wheels
+        - name: Build wheels (Linux/macOS)
+          if: ${{ matrix.os != 'windows-latest' }}
           uses: PyO3/maturin-action@v1
+          with:
+            command: build
+            args: --release --out dist --find-interpreter
+            manylinux: "2_28"
+        - name: Build wheels (Windows)
+          if: ${{ matrix.os == 'windows-latest' }}
+          uses: PyO3/maturin-action@v1
+          env:
+            # Reduce peak memory pressure in libduckdb-sys C++ compilation and
+            # enable standard C++ exception unwinding for MSVC.
+            CARGO_BUILD_JOBS: "1"
+            CXXFLAGS: "/EHsc"
           with:
             command: build
             args: --release --out dist --find-interpreter
