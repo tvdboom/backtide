@@ -16,7 +16,7 @@ from backtide.analysis.utils import GREEN, RED, REFERENCE_LINE, _plot, _resolve_
 from backtide.config import get_config
 from backtide.core.data import Interval
 from backtide.storage import query_bars
-from backtide.utils.utils import _format_price, _moment_to_strftime
+from backtide.utils.utils import _format_price, _moment_to_strftime, _to_pandas
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -144,7 +144,7 @@ def plot_mae_mfe(
             continue
 
         if t.symbol not in cache:
-            cache[t.symbol] = query_bars(symbol=t.symbol, interval=interval)
+            cache[t.symbol] = _to_pandas(query_bars(symbol=t.symbol, interval=interval))
         df = cache[t.symbol]
 
         # Pick up first available interval

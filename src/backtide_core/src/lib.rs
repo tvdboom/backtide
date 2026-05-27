@@ -19,7 +19,7 @@ use pyo3::prelude::*;
 // build), we must boot the interpreter ourselves once before any test runs.
 // `ctor` executes this at binary-load time, before every test thread starts.
 #[cfg(test)]
-#[ctor::ctor]
+#[ctor::ctor(unsafe)]
 fn init_python_for_tests() {
     Python::initialize();
 }

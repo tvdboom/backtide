@@ -141,8 +141,8 @@ def run_experiment(
 
     def resolve_polymorphic_param(values: Any) -> tuple[list[str], dict[str, Any]]:
         """Resolve the list of stored strategies/indicators."""
-        elements = []
-        overrides = {}
+        elements: list[str] = []
+        overrides: dict[str, Any] = {}
         for elem in _to_list(values):
             if isinstance(elem, str):
                 elements.append(elem)

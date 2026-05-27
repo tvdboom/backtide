@@ -5,8 +5,11 @@ Description: Home dashboard page.
 
 """
 
+from __future__ import annotations
+
 from collections import defaultdict
 from datetime import datetime as dt
+from typing import TYPE_CHECKING, TypedDict
 
 import pandas as pd
 import streamlit as st
@@ -21,6 +24,18 @@ from backtide.ui.utils import (
     _query_bars_summary,
 )
 from backtide.utils.utils import _get_timezone, _moment_to_strftime, _to_pandas
+
+if TYPE_CHECKING:
+    from backtide.core.data import InstrumentType
+
+    class WidgetData(TypedDict):
+        symbol: str
+        name: str
+        instrument_type: InstrumentType
+        price: float
+        change_pct: float
+        quote: str
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config
@@ -372,7 +387,7 @@ if not summary.empty:
     # The widgets show the latest data
     bars = _load_daily_bars(recent_symbols := latest["symbol"].tolist())
 
-    widgets = []
+    widgets: list[WidgetData] = []
     for sym in recent_symbols:
         if inst := all_instruments.get(sym):
             sym_bars = bars[bars["symbol"] == sym].sort_values("open_ts", ascending=False)

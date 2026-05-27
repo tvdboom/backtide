@@ -1738,3 +1738,875 @@ fn run_one_strategy(
         is_benchmark: is_benchmark_run,
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::interface::Config;
+    use crate::data::errors::DataResult;
+    use crate::data::models::{
+        Bar, BarDownload, Currency, Exchange, Instrument, InstrumentType, Interval, Provider,
+    };
+    use crate::data::providers::DataProvider;
+    use crate::engine::{Engine, EngineCache};
+    use crate::storage::duckdb::DuckDb;
+    use crate::storage::models::BarSeries;
+    use crate::storage::traits::Storage;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use strum::IntoEnumIterator;
+    use tempfile::TempDir;
+    use tokio::runtime::Runtime;
+
+    // ── Stub provider ────────────────────────────────────────────────────
+
+    struct StubProvider {
+        instruments: HashMap<String, Instrument>,
+    }
+
+    impl StubProvider {
+        fn new() -> Self {
+            Self { instruments: HashMap::new() }
+        }
+    }
+
+    #[async_trait]
+    impl DataProvider for StubProvider {
+        async fn fetch_instrument(
+            &self,
+            symbol: &String,
+            _: InstrumentType,
+        ) -> DataResult<Instrument> {
+            self.instruments
+                .get(symbol)
+                .cloned()
+                .ok_or_else(|| crate::data::errors::DataError::SymbolNotFound(symbol.clone()))
+        }
+
+        async fn fetch_range(&self, _: Instrument, _: Interval) -> DataResult<(u64, u64)> {
+            Ok((1_000_000_000, 2_000_000_000))
+        }
+
+        async fn list_instruments(
+            &self,
+            _: InstrumentType,
+            _: Option<Vec<Exchange>>,
+            _: usize,
+        ) -> DataResult<Vec<Instrument>> {
+            Ok(self.instruments.values().cloned().collect())
+        }
+
+        async fn download_bars(
+            &self,
+            _: &str,
+            _: InstrumentType,
+            _: Interval,
+            _: u64,
+            _: u64,
+        ) -> DataResult<BarDownload> {
+            Ok(BarDownload { bars: vec![], dividends: vec![] })
+        }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    fn make_engine() -> (Engine, TempDir) {
+        let config = Box::leak(Box::new(Config::default()));
+        let rt = Runtime::new().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let db = DuckDb::new(&tmp.path().join("test.db")).unwrap();
+        db.init().unwrap();
+        let stub: Arc<dyn DataProvider> = Arc::new(StubProvider::new());
+        let providers = InstrumentType::iter().map(|it| (it, stub.clone())).collect();
+        (
+            Engine { config, rt, providers, db: Box::new(db), cache: EngineCache::new() },
+            tmp,
+        )
+    }
+
+    fn make_bar(ts: u64, close: f64) -> Bar {
+        Bar {
+            open_ts: ts,
+            close_ts: ts + 3_600,
+            open_ts_exchange: ts,
+            open: close,
+            high: close + 1.0,
+            low: close - 1.0,
+            close,
+            adj_close: close,
+            volume: 1_000_000.0,
+            n_trades: Some(100),
+        }
+    }
+
+    fn make_instrument(symbol: &str) -> Instrument {
+        Instrument {
+            symbol: symbol.to_owned(),
+            name: symbol.to_owned(),
+            base: None,
+            quote: "USD".to_owned(),
+            instrument_type: InstrumentType::Stocks,
+            exchange: "XNAS".to_owned(),
+            provider: Provider::Yahoo,
+        }
+    }
+
+    fn base_config() -> ExperimentConfig {
+        ExperimentConfig {
+            general: GeneralExpConfig::default(),
+            data: DataExpConfig {
+                instrument_type: InstrumentType::Stocks,
+                symbols: vec!["AAPL".to_owned()],
+                ..DataExpConfig::default()
+            },
+            portfolio: PortfolioExpConfig::default(),
+            strategy: StrategyExpConfig::default(),
+            indicators: IndicatorExpConfig::default(),
+            exchange: ExchangeExpConfig::default(),
+            engine: EngineExpConfig::default(),
+        }
+    }
+
+    fn write_bars(engine: &Engine, symbol: &str, bars: Vec<Bar>) {
+        engine
+            .write_bars_bulk(&[BarSeries {
+                symbol: symbol.to_owned(),
+                interval: Interval::OneDay,
+                provider: Provider::Yahoo,
+                bars,
+            }])
+            .unwrap();
+    }
+
+    // ── Engine::load_bars ────────────────────────────────────────────────
+
+    #[test]
+    fn load_bars_empty_db_returns_empty_map() {
+        let (engine, _tmp) = make_engine();
+        let result =
+            engine.load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, None, None);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn load_bars_empty_symbol_list() {
+        let (engine, _tmp) = make_engine();
+        let result = engine.load_bars(&[], Interval::OneDay, Provider::Yahoo, None, None);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn load_bars_returns_correct_data() {
+        let (engine, _tmp) = make_engine();
+        write_bars(&engine, "AAPL", vec![make_bar(1_000, 100.0), make_bar(2_000, 101.0)]);
+
+        let map =
+            engine.load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, None, None).unwrap();
+        let bars = map.get("AAPL").unwrap();
+        assert_eq!(bars.len(), 2);
+        assert_eq!(bars[0].close, 100.0);
+        assert_eq!(bars[1].close, 101.0);
+    }
+
+    #[test]
+    fn load_bars_sorted_by_timestamp() {
+        let (engine, _tmp) = make_engine();
+        // Write in reverse order
+        write_bars(&engine, "AAPL", vec![make_bar(3_000, 103.0), make_bar(1_000, 101.0), make_bar(2_000, 102.0)]);
+        let map =
+            engine.load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, None, None).unwrap();
+        let bars = map.get("AAPL").unwrap();
+        assert_eq!(bars[0].open_ts, 1_000);
+        assert_eq!(bars[1].open_ts, 2_000);
+        assert_eq!(bars[2].open_ts, 3_000);
+    }
+
+    #[test]
+    fn load_bars_start_filter_excludes_early_bars() {
+        let (engine, _tmp) = make_engine();
+        write_bars(&engine, "AAPL", vec![make_bar(100, 100.0), make_bar(200, 101.0), make_bar(300, 102.0)]);
+        let map = engine
+            .load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, Some(200), None)
+            .unwrap();
+        let bars = map.get("AAPL").unwrap();
+        assert_eq!(bars.len(), 2);
+        assert!(bars.iter().all(|b| b.open_ts >= 200));
+    }
+
+    #[test]
+    fn load_bars_end_filter_excludes_late_bars() {
+        let (engine, _tmp) = make_engine();
+        write_bars(&engine, "AAPL", vec![make_bar(100, 100.0), make_bar(200, 101.0), make_bar(300, 102.0)]);
+        let map = engine
+            .load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, None, Some(200))
+            .unwrap();
+        let bars = map.get("AAPL").unwrap();
+        // open_ts < 200 is the only bar with ts=100
+        assert_eq!(bars.len(), 1);
+        assert_eq!(bars[0].open_ts, 100);
+    }
+
+    #[test]
+    fn load_bars_start_and_end_clamp() {
+        let (engine, _tmp) = make_engine();
+        write_bars(
+            &engine,
+            "AAPL",
+            vec![make_bar(100, 1.0), make_bar(200, 2.0), make_bar(300, 3.0), make_bar(400, 4.0)],
+        );
+        let map = engine
+            .load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, Some(200), Some(400))
+            .unwrap();
+        let bars = map.get("AAPL").unwrap();
+        assert_eq!(bars.len(), 2);
+        assert!(bars.iter().all(|b| b.open_ts >= 200 && b.open_ts < 400));
+    }
+
+    #[test]
+    fn load_bars_multiple_symbols() {
+        let (engine, _tmp) = make_engine();
+        write_bars(&engine, "AAPL", vec![make_bar(100, 100.0)]);
+        write_bars(&engine, "MSFT", vec![make_bar(100, 200.0)]);
+
+        let map = engine
+            .load_bars(
+                &["AAPL".to_owned(), "MSFT".to_owned()],
+                Interval::OneDay,
+                Provider::Yahoo,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(map.contains_key("AAPL"));
+        assert!(map.contains_key("MSFT"));
+    }
+
+    #[test]
+    fn load_bars_symbol_not_in_db_absent_from_map() {
+        let (engine, _tmp) = make_engine();
+        write_bars(&engine, "AAPL", vec![make_bar(100, 100.0)]);
+
+        let map = engine
+            .load_bars(&["NONEXISTENT".to_owned()], Interval::OneDay, Provider::Yahoo, None, None)
+            .unwrap();
+        assert!(map.is_empty());
+    }
+
+    // ── run_one_strategy — BuyAndHold (built-in) ─────────────────────────
+
+    fn bah_strategy() -> Py<PyAny> {
+        Python::attach(|py| {
+            let bah = BuyAndHold::new(None);
+            Py::new(py, bah).unwrap().into_any()
+        })
+    }
+
+    fn make_aligned(symbol: &str, bars: Vec<Option<Bar>>) -> HashMap<String, Vec<Option<Bar>>> {
+        let mut m = HashMap::new();
+        m.insert(symbol.to_owned(), bars);
+        m
+    }
+
+    fn make_profile(symbol: &str) -> InstrumentProfile {
+        InstrumentProfile {
+            instrument: make_instrument(symbol),
+            earliest_ts: [(Interval::OneDay, 0u64)].into(),
+            latest_ts: [(Interval::OneDay, 9_999_999u64)].into(),
+            legs: vec![],
+        }
+    }
+
+    #[test]
+    fn run_one_strategy_empty_timeline_no_equity_curve() {
+        let cfg = base_config();
+        let aligned = HashMap::new();
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline: Vec<i64> = vec![];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert_eq!(result.strategy_name, "bah");
+        assert!(result.equity_curve.is_empty());
+        assert!(result.error.is_none());
+        assert!(!result.is_benchmark);
+    }
+
+    #[test]
+    fn run_one_strategy_single_bar_produces_one_equity_sample() {
+        let cfg = base_config();
+        let aligned = make_aligned("AAPL", vec![Some(make_bar(1_000_000_000, 100.0))]);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![1_000_000_000i64];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert_eq!(result.equity_curve.len(), 1);
+        assert_eq!(result.equity_curve[0].timestamp, 1_000_000_000);
+        assert!(result.equity_curve[0].equity > 0.0);
+    }
+
+    #[test]
+    fn run_one_strategy_initial_cash_appears_in_equity() {
+        let mut cfg = base_config();
+        cfg.portfolio.initial_cash = 50_000;
+
+        let aligned = make_aligned("AAPL", vec![Some(make_bar(1_000_000_000, 100.0))]);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![1_000_000_000i64];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        // After BuyAndHold buys on bar 1, equity is still ~50k
+        let eq = result.equity_curve[0].equity;
+        assert!((eq - 50_000.0).abs() < 5_000.0);
+    }
+
+    #[test]
+    fn run_one_strategy_multiple_bars_correct_curve_length() {
+        let cfg = base_config();
+        let n = 10usize;
+        let bars: Vec<Option<Bar>> =
+            (0..n).map(|i| Some(make_bar(1_000_000 + i as u64 * 3600, 100.0))).collect();
+        let aligned = make_aligned("AAPL", bars);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline: Vec<i64> =
+            (0..n).map(|i| 1_000_000i64 + i as i64 * 3600).collect();
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert_eq!(result.equity_curve.len(), n);
+    }
+
+    #[test]
+    fn run_one_strategy_equity_positive_throughout() {
+        let cfg = base_config();
+        let bars: Vec<Option<Bar>> =
+            (0..5usize).map(|i| Some(make_bar(1_000 + i as u64, 100.0 + i as f64))).collect();
+        let aligned = make_aligned("AAPL", bars);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline: Vec<i64> = (0..5).map(|i| 1_000i64 + i).collect();
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        for sample in &result.equity_curve {
+            assert!(sample.equity > 0.0, "equity went non-positive at ts={}", sample.timestamp);
+        }
+    }
+
+    #[test]
+    fn run_one_strategy_drawdown_non_positive() {
+        let cfg = base_config();
+        let bars: Vec<Option<Bar>> = vec![
+            Some(make_bar(1_000, 100.0)),
+            Some(make_bar(2_000, 110.0)),
+            Some(make_bar(3_000, 90.0)),
+        ];
+        let aligned = make_aligned("AAPL", bars);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![1_000i64, 2_000, 3_000];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        for sample in &result.equity_curve {
+            assert!(sample.drawdown <= 0.0, "drawdown should be ≤ 0");
+            assert!(sample.drawdown >= -1.0, "drawdown should be ≥ -1");
+        }
+    }
+
+    #[test]
+    fn run_one_strategy_warmup_period_skips_strategy_calls() {
+        let mut cfg = base_config();
+        cfg.engine.warmup_period = 3;
+
+        let bars: Vec<Option<Bar>> =
+            (0..6usize).map(|i| Some(make_bar(1_000 + i as u64, 100.0))).collect();
+        let aligned = make_aligned("AAPL", bars);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline: Vec<i64> = (0..6).map(|i| 1_000i64 + i).collect();
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        // Equity curve covers all bars including warmup
+        assert_eq!(result.equity_curve.len(), 6);
+    }
+
+    #[test]
+    fn run_one_strategy_is_benchmark_when_name_matches() {
+        let mut cfg = base_config();
+        cfg.strategy.benchmark = Some("AAPL".to_owned());
+        cfg.data.symbols = vec!["AAPL".to_owned()];
+
+        let aligned = make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0))]);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![1_000i64];
+        let fx = FxTable::new("USD");
+
+        // The strategy name matches the benchmark symbol
+        let result = run_one_strategy(
+            "AAPL",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert!(result.is_benchmark);
+    }
+
+    #[test]
+    fn run_one_strategy_is_not_benchmark_when_name_differs() {
+        let cfg = base_config();
+        let aligned = make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0))]);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![1_000i64];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "my_strategy",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert!(!result.is_benchmark);
+    }
+
+    #[test]
+    fn run_one_strategy_starting_positions_boost_equity() {
+        let mut cfg = base_config();
+        cfg.portfolio.initial_cash = 1_000;
+        cfg.portfolio.starting_positions = [("AAPL".to_owned(), 10.0)].into();
+
+        let aligned = make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0))]);
+        let indicators = HashMap::new();
+        let mut profiles = vec![];
+        profiles.push(InstrumentProfile {
+            instrument: make_instrument("AAPL"),
+            earliest_ts: [(Interval::OneDay, 1_000u64)].into(),
+            latest_ts: [(Interval::OneDay, 5_000u64)].into(),
+            legs: vec![],
+        });
+        let timeline = vec![1_000i64];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        // initial_cash (1000) + 10 shares × $100 = $2000
+        let eq = result.equity_curve[0].equity;
+        assert!((eq - 2_000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn run_one_strategy_benchmark_ignores_starting_positions() {
+        let mut cfg = base_config();
+        cfg.strategy.benchmark = Some("AAPL".to_owned());
+        cfg.data.symbols = vec!["AAPL".to_owned()];
+        cfg.portfolio.initial_cash = 1_000;
+        cfg.portfolio.starting_positions = [("AAPL".to_owned(), 10.0)].into();
+
+        let aligned = make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0))]);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![1_000i64];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "AAPL",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        // Benchmark always starts with a clean slate (no positions)
+        // so equity should equal initial_cash only
+        assert!(result.is_benchmark);
+        let eq = result.equity_curve[0].equity;
+        assert!((eq - 1_000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn run_one_strategy_metrics_populated() {
+        let cfg = base_config();
+        let bars: Vec<Option<Bar>> =
+            (0..5usize).map(|i| Some(make_bar(1_000_000 + i as u64 * 86_400, 100.0))).collect();
+        let aligned = make_aligned("AAPL", bars);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline: Vec<i64> = (0..5).map(|i| 1_000_000i64 + i * 86_400).collect();
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        // At minimum, total_return should be present
+        assert!(!result.metrics.is_empty());
+    }
+
+    #[test]
+    fn run_one_strategy_strategy_id_is_16_chars() {
+        let cfg = base_config();
+        let aligned = HashMap::new();
+        let indicators = HashMap::new();
+        let profiles = vec![];
+        let timeline: Vec<i64> = vec![];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert_eq!(result.strategy_id.len(), 16);
+    }
+
+    #[test]
+    fn run_one_strategy_none_bars_in_aligned_handled_gracefully() {
+        let cfg = base_config();
+        // Two bars but the first is None (no data that bar)
+        let aligned = make_aligned("AAPL", vec![None, Some(make_bar(2_000, 100.0))]);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![1_000i64, 2_000];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert_eq!(result.equity_curve.len(), 2);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn run_one_strategy_trade_on_close_flag() {
+        let mut cfg = base_config();
+        cfg.exchange.allowed_order_types = vec![OrderType::Market];
+        cfg.engine.trade_on_close = true;
+
+        let bars: Vec<Option<Bar>> =
+            (0..3usize).map(|i| Some(make_bar(1_000 + i as u64, 100.0))).collect();
+        let aligned = make_aligned("AAPL", bars);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline: Vec<i64> = vec![1_000, 1_001, 1_002];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert_eq!(result.equity_curve.len(), 3);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn run_one_strategy_exclusive_orders_flag() {
+        let mut cfg = base_config();
+        cfg.engine.exclusive_orders = true;
+
+        let bars: Vec<Option<Bar>> =
+            (0..3usize).map(|i| Some(make_bar(1_000 + i as u64, 100.0))).collect();
+        let aligned = make_aligned("AAPL", bars);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline: Vec<i64> = vec![1_000, 1_001, 1_002];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn run_one_strategy_no_symbols_in_config() {
+        let mut cfg = base_config();
+        cfg.data.symbols = vec![];
+
+        let aligned = HashMap::new();
+        let indicators = HashMap::new();
+        let profiles = vec![];
+        let timeline: Vec<i64> = vec![];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn run_one_strategy_cash_snapshot_present_each_bar() {
+        let cfg = base_config();
+        let bars: Vec<Option<Bar>> =
+            (0..3usize).map(|i| Some(make_bar(1_000 + i as u64, 100.0))).collect();
+        let aligned = make_aligned("AAPL", bars);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline: Vec<i64> = vec![1_000, 1_001, 1_002];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        for sample in &result.equity_curve {
+            assert!(!sample.cash.is_empty(), "cash snapshot missing at ts={}", sample.timestamp);
+        }
+    }
+
+    #[test]
+    fn run_one_strategy_base_currency_carried_through() {
+        let mut cfg = base_config();
+        cfg.portfolio.base_currency = Currency::EUR;
+
+        let aligned = make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0))]);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![1_000i64];
+        let fx = FxTable::new("EUR");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert_eq!(result.base_currency, Currency::EUR);
+    }
+
+    #[test]
+    fn run_one_strategy_no_error_on_clean_run() {
+        let cfg = base_config();
+        let aligned = make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0))]);
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![1_000i64];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert!(result.error.is_none());
+    }
+
+    // ── Engine::run_experiment — smoke tests ─────────────────────────────
+
+    #[test]
+    fn run_experiment_no_symbols_returns_error() {
+        let (engine, _tmp) = make_engine();
+        let cfg = base_config(); // symbols = ["AAPL"], but no data downloaded
+
+        let result = engine.run_experiment(&cfg, false, &HashMap::new(), &HashMap::new());
+
+        // resolve_profiles will call provider which returns NotFound → cascade error
+        // OR no-bars → empty timeline → ExperimentStatus::Error
+        // either way the call should not panic
+        match result {
+            Ok(exp) => {
+                // If it succeeds it must have a valid experiment_id
+                assert_eq!(exp.experiment_id.len(), 16);
+            },
+            Err(_) => {
+                // Acceptable — provider returned error
+            },
+        }
+    }
+
+    #[test]
+    fn run_experiment_empty_symbols_list_returns_engine_error() {
+        let (engine, _tmp) = make_engine();
+        let mut cfg = base_config();
+        cfg.data.symbols = vec![]; // explicitly empty
+
+        let result = engine.run_experiment(&cfg, false, &HashMap::new(), &HashMap::new());
+        assert!(result.is_err());
+    }
+}

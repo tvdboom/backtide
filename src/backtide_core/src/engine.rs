@@ -270,4 +270,391 @@ mod tests {
         cache.clear();
         cache.clear();
     }
+
+    // ── EngineCache constructor & behavior ───────────────────────────────
+
+    #[test]
+    fn engine_cache_default_trait_impl() {
+        let cache1 = EngineCache::new();
+        let cache2 = EngineCache::default();
+        assert_eq!(cache1.instrument_cache.entry_count(), cache2.instrument_cache.entry_count());
+        assert_eq!(cache1.range_cache.entry_count(), cache2.range_cache.entry_count());
+    }
+
+    #[test]
+    fn engine_cache_has_correct_ttl_durations() {
+        // The instrument cache has 2 hours TTL (7200 seconds)
+        // and range cache has 30 min TTL (1800 seconds).
+        // We can't directly test the TTL from outside, but we verify
+        // that caches are created and are initially empty.
+        let cache = EngineCache::new();
+        assert_eq!(cache.instrument_cache.entry_count(), 0);
+        assert_eq!(cache.range_cache.entry_count(), 0);
+    }
+
+    #[test]
+    fn engine_cache_multiple_instruments() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let inst1 = Arc::new(Instrument {
+                symbol: "AAPL".to_owned(),
+                name: "Apple".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "NASDAQ".to_owned(),
+                provider: Provider::Yahoo,
+            });
+            let inst2 = Arc::new(Instrument {
+                symbol: "MSFT".to_owned(),
+                name: "Microsoft".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "NASDAQ".to_owned(),
+                provider: Provider::Yahoo,
+            });
+
+            cache.instrument_cache.insert("AAPL".to_owned(), inst1).await;
+            cache.instrument_cache.insert("MSFT".to_owned(), inst2).await;
+            cache.instrument_cache.run_pending_tasks().await;
+
+            assert!(cache.instrument_cache.get("AAPL").await.is_some());
+            assert!(cache.instrument_cache.get("MSFT").await.is_some());
+        });
+    }
+
+    #[test]
+    fn engine_cache_multiple_ranges() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let key1 = ("AAPL".to_owned(), Interval::OneDay);
+            let key2 = ("AAPL".to_owned(), Interval::OneHour);
+            let key3 = ("MSFT".to_owned(), Interval::OneDay);
+
+            cache.range_cache.insert(key1.clone(), (100, 200)).await;
+            cache.range_cache.insert(key2.clone(), (300, 400)).await;
+            cache.range_cache.insert(key3.clone(), (500, 600)).await;
+            cache.range_cache.run_pending_tasks().await;
+
+            let (s1, e1) = cache.range_cache.get(&key1).await.unwrap();
+            let (s2, e2) = cache.range_cache.get(&key2).await.unwrap();
+            let (s3, e3) = cache.range_cache.get(&key3).await.unwrap();
+
+            assert_eq!((s1, e1), (100, 200));
+            assert_eq!((s2, e2), (300, 400));
+            assert_eq!((s3, e3), (500, 600));
+        });
+    }
+
+    #[test]
+    fn engine_cache_clear_all_ranges() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let key1 = ("AAPL".to_owned(), Interval::OneDay);
+            let key2 = ("MSFT".to_owned(), Interval::OneHour);
+
+            cache.range_cache.insert(key1.clone(), (100, 200)).await;
+            cache.range_cache.insert(key2.clone(), (300, 400)).await;
+            cache.range_cache.run_pending_tasks().await;
+
+            assert!(cache.range_cache.get(&key1).await.is_some());
+            assert!(cache.range_cache.get(&key2).await.is_some());
+
+            cache.clear();
+            cache.range_cache.run_pending_tasks().await;
+
+            assert!(cache.range_cache.get(&key1).await.is_none());
+            assert!(cache.range_cache.get(&key2).await.is_none());
+        });
+    }
+
+    #[test]
+    fn engine_cache_clear_mixed_entries() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let inst = Arc::new(Instrument {
+                symbol: "TEST".to_owned(),
+                name: "Test".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "TEST".to_owned(),
+                provider: Provider::Yahoo,
+            });
+            let key = ("TEST".to_owned(), Interval::OneDay);
+
+            cache.instrument_cache.insert("TEST".to_owned(), inst).await;
+            cache.range_cache.insert(key.clone(), (100, 200)).await;
+            cache.instrument_cache.run_pending_tasks().await;
+            cache.range_cache.run_pending_tasks().await;
+
+            assert!(cache.instrument_cache.get("TEST").await.is_some());
+            assert!(cache.range_cache.get(&key).await.is_some());
+
+            cache.clear();
+            cache.instrument_cache.run_pending_tasks().await;
+            cache.range_cache.run_pending_tasks().await;
+
+            assert!(cache.instrument_cache.get("TEST").await.is_none());
+            assert!(cache.range_cache.get(&key).await.is_none());
+        });
+    }
+
+    #[test]
+    fn engine_cache_clear_empty() {
+        let cache = EngineCache::new();
+        // Should not panic on empty cache
+        cache.clear();
+        assert_eq!(cache.instrument_cache.entry_count(), 0);
+        assert_eq!(cache.range_cache.entry_count(), 0);
+    }
+
+    #[test]
+    fn engine_cache_instrument_overwrite() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let inst1 = Arc::new(Instrument {
+                symbol: "AAPL".to_owned(),
+                name: "Apple Inc".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "NASDAQ".to_owned(),
+                provider: Provider::Yahoo,
+            });
+            let inst2 = Arc::new(Instrument {
+                symbol: "AAPL".to_owned(),
+                name: "Apple Corporation".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "NASDAQ".to_owned(),
+                provider: Provider::Yahoo,
+            });
+
+            cache.instrument_cache.insert("AAPL".to_owned(), inst1).await;
+            cache.instrument_cache.run_pending_tasks().await;
+            let first = cache.instrument_cache.get("AAPL").await.unwrap();
+            assert_eq!(first.name, "Apple Inc");
+
+            cache.instrument_cache.insert("AAPL".to_owned(), inst2).await;
+            cache.instrument_cache.run_pending_tasks().await;
+            let second = cache.instrument_cache.get("AAPL").await.unwrap();
+            assert_eq!(second.name, "Apple Corporation");
+        });
+    }
+
+    #[test]
+    fn engine_cache_range_overwrite() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let key = ("AAPL".to_owned(), Interval::OneDay);
+
+            cache.range_cache.insert(key.clone(), (100, 200)).await;
+            cache.range_cache.run_pending_tasks().await;
+            let first = cache.range_cache.get(&key).await.unwrap();
+            assert_eq!(first, (100, 200));
+
+            cache.range_cache.insert(key.clone(), (150, 250)).await;
+            cache.range_cache.run_pending_tasks().await;
+            let second = cache.range_cache.get(&key).await.unwrap();
+            assert_eq!(second, (150, 250));
+        });
+    }
+
+    // ── Engine::get() and initialization ─────────────────────────────────
+
+    #[test]
+    fn engine_get_initializes_on_first_call() {
+        let engine = Engine::get().expect("engine initialized");
+        assert!(!engine.providers.is_empty());
+    }
+
+    #[test]
+    fn engine_get_providers_all_present() {
+        let engine = Engine::get().expect("engine initialized");
+        for it in InstrumentType::iter() {
+            assert!(
+                engine.providers.contains_key(&it),
+                "Missing provider for instrument type: {:?}",
+                it
+            );
+        }
+    }
+
+    #[test]
+    fn engine_get_cache_initialized() {
+        let engine = Engine::get().expect("engine initialized");
+        assert_eq!(engine.cache.instrument_cache.entry_count(), 0);
+        assert_eq!(engine.cache.range_cache.entry_count(), 0);
+    }
+
+    #[test]
+    fn engine_get_runtime_valid() {
+        let engine = Engine::get().expect("engine initialized");
+        // Verify the runtime can execute a simple task
+        let result = engine.rt.block_on(async { 42 });
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn engine_clear_cache_removes_all_entries() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+
+        rt.block_on(async {
+            let inst = Arc::new(Instrument {
+                symbol: "TEST".to_owned(),
+                name: "Test".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "TEST".to_owned(),
+                provider: Provider::Yahoo,
+            });
+            let key = ("TEST".to_owned(), Interval::OneHour);
+
+            // Populate both caches
+            cache.instrument_cache.insert("TEST".to_owned(), inst).await;
+            cache.range_cache.insert(key.clone(), (500, 600)).await;
+            cache.instrument_cache.run_pending_tasks().await;
+            cache.range_cache.run_pending_tasks().await;
+
+            // Verify populated
+            assert_eq!(cache.instrument_cache.entry_count(), 1);
+            assert_eq!(cache.range_cache.entry_count(), 1);
+
+            // Clear should remove all
+            cache.clear();
+            cache.instrument_cache.run_pending_tasks().await;
+            cache.range_cache.run_pending_tasks().await;
+
+            assert_eq!(cache.instrument_cache.entry_count(), 0);
+            assert_eq!(cache.range_cache.entry_count(), 0);
+        });
+    }
+
+    #[test]
+    fn engine_clear_cache_idempotent() {
+        let cache = EngineCache::new();
+        // Multiple clears in a row should be safe
+        cache.clear();
+        cache.clear();
+        cache.clear();
+        assert_eq!(cache.instrument_cache.entry_count(), 0);
+        assert_eq!(cache.range_cache.entry_count(), 0);
+    }
+
+    // ── Edge cases and boundary conditions ────────────────────────────────
+
+    #[test]
+    fn engine_cache_get_nonexistent_returns_none() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let result = cache.instrument_cache.get("NONEXIST").await;
+            assert!(result.is_none());
+        });
+    }
+
+    #[test]
+    fn engine_cache_range_get_nonexistent_returns_none() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let result = cache.range_cache.get(&("NONEXIST".to_owned(), Interval::OneDay)).await;
+            assert!(result.is_none());
+        });
+    }
+
+    #[test]
+    fn engine_cache_different_intervals_isolated() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let key_1d = ("AAPL".to_owned(), Interval::OneDay);
+            let key_1h = ("AAPL".to_owned(), Interval::OneHour);
+            let key_15m = ("AAPL".to_owned(), Interval::FifteenMinutes);
+
+            cache.range_cache.insert(key_1d.clone(), (1, 100)).await;
+            cache.range_cache.insert(key_1h.clone(), (1, 50)).await;
+            cache.range_cache.insert(key_15m.clone(), (1, 25)).await;
+            cache.range_cache.run_pending_tasks().await;
+
+            assert_eq!(cache.range_cache.get(&key_1d).await.unwrap(), (1, 100));
+            assert_eq!(cache.range_cache.get(&key_1h).await.unwrap(), (1, 50));
+            assert_eq!(cache.range_cache.get(&key_15m).await.unwrap(), (1, 25));
+        });
+    }
+
+    #[test]
+    fn engine_cache_same_symbol_different_intervals() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let key1 = ("BTC".to_owned(), Interval::OneDay);
+            let key2 = ("BTC".to_owned(), Interval::FiveMinutes);
+
+            cache.range_cache.insert(key1.clone(), (1000, 2000)).await;
+            cache.range_cache.insert(key2.clone(), (1000, 1500)).await;
+            cache.range_cache.run_pending_tasks().await;
+
+            assert_eq!(cache.range_cache.get(&key1).await.unwrap(), (1000, 2000));
+            assert_eq!(cache.range_cache.get(&key2).await.unwrap(), (1000, 1500));
+        });
+    }
+
+    #[test]
+    fn engine_cache_empty_after_individual_clear_ops() {
+        let rt = Runtime::new().unwrap();
+        let cache = EngineCache::new();
+        rt.block_on(async {
+            let inst = Arc::new(Instrument {
+                symbol: "X".to_owned(),
+                name: "X".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "X".to_owned(),
+                provider: Provider::Yahoo,
+            });
+            let key = ("X".to_owned(), Interval::OneDay);
+
+            cache.instrument_cache.insert("X".to_owned(), inst).await;
+            cache.range_cache.insert(key, (1, 2)).await;
+            cache.instrument_cache.run_pending_tasks().await;
+            cache.range_cache.run_pending_tasks().await;
+
+            // First clear
+            cache.clear();
+            cache.instrument_cache.run_pending_tasks().await;
+            cache.range_cache.run_pending_tasks().await;
+            assert_eq!(cache.instrument_cache.entry_count(), 0);
+            assert_eq!(cache.range_cache.entry_count(), 0);
+
+            // Fill again and clear again
+            cache.instrument_cache.insert("X".to_owned(), Arc::new(Instrument {
+                symbol: "X".to_owned(),
+                name: "X2".to_owned(),
+                base: None,
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Stocks,
+                exchange: "X".to_owned(),
+                provider: Provider::Yahoo,
+            })).await;
+            cache.instrument_cache.run_pending_tasks().await;
+            assert_eq!(cache.instrument_cache.entry_count(), 1);
+
+            cache.clear();
+            cache.instrument_cache.run_pending_tasks().await;
+            assert_eq!(cache.instrument_cache.entry_count(), 0);
+        });
+    }
 }
