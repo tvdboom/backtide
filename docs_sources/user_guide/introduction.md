@@ -63,7 +63,7 @@ popular alternatives.
 | **Built-in position sizers** | 7 (Rust)                         | 1                     | 1                | ❌               | ❌              |
 | **Multi-asset support**      | ✅                                | ✅                     | ✅                | ✅               | ✅              |
 | **Currency conversion**      | Automatic FX table               | Manual                | ❌                | ❌               | ❌              |
-| **Interactive UI**           | Streamlit app                    | ❌                     | ❌                | ❌               | ❌              |
+| **Interactive UI**           | Packaged Vue app                 | ❌                     | ❌                | ❌               | ❌              |
 | **Data download**            | Yahoo, Binance, Kraken, Coinbase | Manual                | Quandl bundle    | Manual          | Manual         |
 | **Local storage**            | DuckDB                           | ❌                     | HDF5 bundle      | ❌               | ❌              |
 | **Analysis plots**           | 20+ built-in                     | Manual via matplotlib | Via pyfolio      | Built-in        | Built-in       |
@@ -85,8 +85,8 @@ to you: data download, storage, indicators, position sizing, result analysis,
 plotting. Backtide ships all of these out of the box so you can go from an
 idea to a result without gluing together five different libraries.
 
-**Interactive application.** The built-in Streamlit app lets you configure
-experiments, run strategies and inspect results visually — no code required.
+**Interactive application.** The packaged Vue app lets you configure experiments,
+run strategies, inspect results, and paper trade visually — no code required.
 When you do need code, the same API powers the app and your scripts, so
 there is zero translation overhead.
 

@@ -10,7 +10,7 @@
 //! |-------------|------------------------------------------------------|
 //! | `[general]` | Portfolio-wide settings                              |
 //! | `[data]`    | Data fetching and storage settings                   |
-//! | `[display]` | UI / Streamlit app                                   |
+//! | `[display]` | Local web application                                |
 //! | `[plots]`   | Plot appearance settings                             |
 
 use crate::config::errors::{ConfigError, ConfigResult};
@@ -443,7 +443,7 @@ impl DataConfig {
 ///     If `None`, no images are loaded.
 ///
 /// address : str | None, default=None
-///     The address where the streamlit server will listen for client and browser
+///     The address where the local web server will listen for client and browser
 ///     connections. Use this if you want to bind the server to a specific
 ///     address. If set, the server will only be available from this address,
 ///     and not from any aliases (like localhost).

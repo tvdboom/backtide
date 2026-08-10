@@ -58,13 +58,14 @@ There are three ways to use backtide:
 
 **Via the application**
 
-Backtide ships with an interactive [Streamlit](https://streamlit.io/) application. Launch it from
+Backtide ships with an interactive Vue application bundled into the Python wheel. Launch it from
 the terminal with:
 
     backtide launch
 
 The app provides a graphical interface for configuring experiments, visualizing
-results and managing stored data. Read more in the [user guide][application].
+results, managing stored data, and running live paper-trading sessions. No Node.js
+installation is required. Read more in the [user guide][application].
 
 <br>
 

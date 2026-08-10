@@ -42,6 +42,7 @@ serde_with = "3.20.0"
 strum = { version = "0.28.0", features = ["derive"] }
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["fs", "macros", "rt-multi-thread", "time"] }
+tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"] }
 toml = "1.1.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
@@ -64,6 +65,10 @@ harness = false
 
 [[bench]]
 name = "backtest_bench"
+harness = false
+
+[[bench]]
+name = "live_bench"
 harness = false
 
 [lints.clippy]

@@ -360,6 +360,10 @@ pub fn query_dividends(
 /// experiment_id : str
 ///     The experiment id (as stored in the `experiments` table).
 ///
+/// include_equity_curve : bool, default=True
+///     Include each strategy's per-bar equity history. Set this to `False` when only metrics,
+///     trades, and orders are needed to reduce database work and memory use.
+///
 /// Returns
 /// -------
 /// list[[RunResult]]
@@ -381,9 +385,12 @@ pub fn query_dividends(
 ///     print(runs)
 /// ```
 #[pyfunction]
-#[pyo3(signature = (experiment_id: "str") -> "list[RunResult]")]
-pub fn query_strategy_runs(experiment_id: &str) -> PyResult<Vec<RunResult>> {
-    Ok(Engine::get()?.db.query_strategy_runs(experiment_id)?)
+#[pyo3(signature = (experiment_id: "str", *, include_equity_curve: "bool"=true) -> "list[RunResult]")]
+pub fn query_strategy_runs(
+    experiment_id: &str,
+    include_equity_curve: bool,
+) -> PyResult<Vec<RunResult>> {
+    Ok(Engine::get()?.db.query_strategy_runs(experiment_id, include_equity_curve)?)
 }
 
 /// Return stored experiments, optionally filtered by id and/or a search string.

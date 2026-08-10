@@ -350,24 +350,24 @@ pub fn compute_statistics<'py>(
 
     let symbol_data: Vec<SymbolData> = symbols
         .into_iter()
-        .filter_map(|sym| {
-            let mask = symbols_col.call_method1("__eq__", (&sym,)).ok()?;
-            let subset = df.call_method1("__getitem__", (mask,)).ok()?;
-            let sorted = subset.call_method1("sort_values", ("dt",)).ok()?;
+        .map(|sym| -> PyResult<SymbolData> {
+            let mask = symbols_col.call_method1("__eq__", (&sym,))?;
+            let subset = df.call_method1("__getitem__", (mask,))?;
+            let sorted = subset.call_method1("sort_values", ("dt",))?;
 
-            let price_series = sorted.getattr("__getitem__").ok()?.call1((price_col,)).ok()?;
-            let prices: Vec<f64> = price_series.call_method0("to_list").ok()?.extract().ok()?;
+            let price_series = sorted.getattr("__getitem__")?.call1((price_col,))?;
+            let prices: Vec<f64> = price_series.call_method0("to_list")?.extract()?;
 
-            let ts_series = sorted.getattr("__getitem__").ok()?.call1(("open_ts",)).ok()?;
-            let timestamps: Vec<f64> = ts_series.call_method0("to_list").ok()?.extract().ok()?;
+            let ts_series = sorted.getattr("__getitem__")?.call1(("open_ts",))?;
+            let timestamps: Vec<f64> = ts_series.call_method0("to_list")?.extract()?;
 
-            Some(SymbolData {
+            Ok(SymbolData {
                 symbol: sym,
                 prices,
                 timestamps,
             })
         })
-        .collect();
+        .collect::<PyResult<Vec<_>>>()?;
 
     // Sort results by symbol for deterministic output.
     let mut results: Vec<SymbolStats> = symbol_data

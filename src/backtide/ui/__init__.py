@@ -1,6 +1,8 @@
 """Backtide.
 
 Author: Mavs
-Description: Module for the UI application.
+Description: Local web application package.
 
 """
+
+from backtide.ui.server import create_server, launch

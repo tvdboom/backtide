@@ -119,6 +119,7 @@ nav:
         - Application: user_guide/application.md
         - Data: user_guide/data.md
         - Experiment: user_guide/experiment.md
+        - Live and paper trading: user_guide/live_trading.md
         - Strategies: user_guide/strategies.md
         - Indicators: user_guide/indicators.md
         - Sizers: user_guide/sizers.md
@@ -162,6 +163,9 @@ nav:
             - plot_vwap: api/analysis/plot_vwap.md
         - backtest:
             - run_experiment: api/backtest/run_experiment.md
+        - live:
+            - collect_market_updates: api/live/collect_market_updates.md
+            - provider_live_support: api/live/provider_live_support.md
         - storage:
             - delete_symbols: api/storage/delete_symbols.md
             - query_bars: api/storage/query_bars.md
@@ -229,6 +233,14 @@ nav:
                 - StochasticOscillator: api/models/indicators/stochasticoscillator.md
                 - VolumeWeightedAveragePrice: api/models/indicators/volumeweightedaverageprice.md
                 - WeightedMovingAverage: api/models/indicators/weightedmovingaverage.md
+            - live:
+                - LiveMarketFeed: api/models/live/livemarketfeed.md
+                - MarketUpdate: api/models/live/marketupdate.md
+                - PaperFill: api/models/live/paperfill.md
+                - PaperTradingConfig: api/models/live/papertradingconfig.md
+                - PaperTradingSession: api/models/live/papertradingsession.md
+                - PaperTradingSnapshot: api/models/live/papertradingsnapshot.md
+                - PaperTradingUpdate: api/models/live/papertradingupdate.md
             - sizers:
                 - BaseSizer: api/models/sizers/basesizer.md
                 - EqualWeight: api/models/sizers/equalweight.md

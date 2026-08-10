@@ -77,7 +77,14 @@ pub trait Storage: Send + Sync {
     ) -> StorageResult<Vec<StoredExperiment>>;
 
     /// Load every persisted [`RunResult`] for a given experiment.
-    fn query_strategy_runs(&self, experiment_id: &str) -> StorageResult<Vec<RunResult>>;
+    ///
+    /// Set `include_equity_curve` to `false` for metadata and tabular result views that do not
+    /// consume the potentially large per-bar equity history.
+    fn query_strategy_runs(
+        &self,
+        experiment_id: &str,
+        include_equity_curve: bool,
+    ) -> StorageResult<Vec<RunResult>>;
 
     /// Delete a single experiment and all its child rows.
     fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64>;

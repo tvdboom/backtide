@@ -1,68 +1,101 @@
 # Application
 --------------
 
-Backtide ships with a full-featured web application built on
-[Streamlit](https://streamlit.io/). The app provides a graphical interface
-for every step of the backtesting workflow — from downloading market data
-to configuring experiments and analyzing results — without writing a single
-line of Python.
+Backtide includes a modern Vue web application for the complete research workflow:
+download market data, manage reusable strategies and indicators, configure backtests,
+inspect interactive Plotly results, analyze stored series, and run live paper-trading
+sessions. The app and API run locally on your machine.
+
+The production frontend is bundled into every Python wheel. Installing Backtide does
+not install or require Node.js, npm, or pnpm; those tools are used only by contributors
+who rebuild the frontend source.
 
 <br>
 
 ## Launching the app
 
-The fastest way to start the application is through the CLI:
+Start the application from the command line:
 
-```
+```console
 backtide launch
 ```
 
-This starts a local Streamlit server (by default on `http://localhost:8501`)
-and opens the app in your browser. You can customize the address and port
-with flags or through the [configuration][configuration]:
+This starts Backtide's local HTTP and JSON API server at `http://localhost:8501`
+and opens the application in the default browser. Customize the listener through
+the [configuration][configuration] or command-line options:
 
-```
-# Bind to a specific address and port
+```console
 backtide launch --address 0.0.0.0 --port 9000
 ```
 
-You can also launch the app programmatically:
+You can also launch it programmatically:
 
 ```python
-from backtide.cli import main
-main(["launch"])
+from backtide.ui import launch
+
+launch(address="localhost", port=8501)
 ```
 
-<br>
-
-## Pages
-
-The sidebar gives access to the following pages:
-
-| Page            | Purpose                                                                                                                                                       |
-|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Experiment**  | Configure and run a backtest: select symbols, set date ranges, define strategies, pick indicators, and tune exchange & engine parameters.                     |
-| **Indicators**  | Create, edit and manage indicators. Add built-in technical indicators (SMA, EMA, RSI, MACD, Bollinger Bands, …) or write your own custom indicator in Python. |
-| **Strategies**  | Create, edit and manage strategies. Add built-in strategies or write your own in Python.                                                     |
-| **Results**     | Review the output of completed backtests.                                                                                                                     |
-| **Download**    | Fetch OHLCV bars from supported data providers and persist them to the local database.                                                                        |
-| **Storage**     | Inspect and manage the local database: view stored series, date ranges, row counts and delete data you no longer need.                                        |
-| **Analysis**    | Explore stored market data.                                                                                                                                   |
+Binding to `0.0.0.0` makes the local app reachable from other devices on the same
+network. Use a firewall and a trusted network when exposing the listener because
+the app can start jobs and modify the configured local Backtide store.
 
 <br>
 
-## Advantages
+## Sections
 
-* **No code required** — The entire backtesting pipeline is accessible
-  through the UI, making it ideal for beginners or for quickly prototyping
-  ideas.
-* **Live editing** — Custom strategies and indicators can be written and
-  tested directly in the browser using the built-in code editor.
-* **Interactive charts** — All plots are rendered with Plotly and are fully
-  interactive.
-* **Configuration driven** — Every experiment setting exposed in the UI maps
-  to a field in [ExperimentConfig], so you can also pre-fill the app by importing
-  a config file from disk.
+| Section | Purpose |
+|---|---|
+| **Home** | Review recent experiments, stored datasets, and shortcuts into the main workflows. |
+| **Experiment** | Configure market data, portfolio state, strategies, indicators, execution assumptions, risk controls, and engine behavior. |
+| **Strategies** | Search, create, inspect, and remove built-in or custom Python strategies. |
+| **Indicators** | Search, create, inspect, and remove built-in or custom Python indicators. |
+| **Results** | Compare completed strategy runs and inspect metrics, equity, cash, drawdown, trades, orders, configuration, and logs. |
+| **Paper trading** | Run a strategy against live provider WebSocket candles with local simulated fills. See [Live and paper trading]. |
+| **Download** | Resolve instruments and download OHLCV bars into the local database. |
+| **Storage** | Search stored series, inspect coverage, open a series in analysis, or delete selected data. |
+| **Analysis** | Build interactive price, returns, correlation, seasonality, volatility, volume, dividend, and other supported plots. |
+
+Searchable selectors are keyboard accessible and remain usable on smaller screens.
+Long-running downloads and experiments run in background jobs, so the interface can
+show progress and accept cancellation without blocking navigation.
+
+<br>
+
+## How the frontend talks to Backtide
+
+The Vue single-page application uses same-origin JSON endpoints exposed by the local
+Python service. That service validates browser input and calls the public Python API;
+CPU-heavy backtests, paper fills, strategies, indicators, provider clients, and DuckDB
+operations continue to run in the Rust core.
+
+```text
+Vue application -> local JSON API -> Python facade -> Rust/PyO3 engine
+                                              |-> DuckDB storage
+                                              `-> provider REST/WebSockets
+```
+
+Plotly figures are created by the existing Python analysis functions and serialized
+to the browser, so the web app and Python API use the same calculations. The browser
+does not read the database directly and does not contain a second implementation of
+trading logic.
+
+<br>
+
+## Frontend development
+
+Package users can skip this section. Contributors changing `frontend/` install its
+development dependencies, run unit tests, and rebuild the committed production bundle:
+
+```console
+just frontend-sync
+just frontend-test
+just frontend-build
+```
+
+The build output is written to `src/backtide/ui/static/` and must be committed with
+the source change. `just launch` always serves that production bundle through the
+same backend used by an installed wheel.
 
 <br>
 
@@ -71,6 +104,6 @@ The sidebar gives access to the following pages:
 ![Home](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/home.png)
 ![Experiment](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/experiment.png)
 ![Results](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/results.png)
-![Trades](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/trades.png)
-![Stats](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/stats.png)
+![Paper trading](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/live.png)
+![Storage](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/storage.png)
 ![Analysis](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/analysis.png)

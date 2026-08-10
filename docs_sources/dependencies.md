@@ -29,8 +29,6 @@ And operating systems:
 * **[pandas](https://pandas.pydata.org/)** (>=2.3.3)
 * **[plotly](https://plotly.com/python/)** (>=6.7.0)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
-* **[streamlit](https://streamlit.io/)** (>=1.56.0)
-* **[streamlit-code-editor](https://github.com/bouzidanas/streamlit-code-editor)** (>=0.1.22)
 * **[tzlocal](https://github.com/regebro/tzlocal)** (>=5.0)
 
 
@@ -79,6 +77,12 @@ required for any of its functionalities. These libraries are only necessary to
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
 * **[regex](https://github.com/mrabarnett/mrab-regex)** (>=2026.2.28)
 
+**Frontend**
+
+The released wheel contains a prebuilt web application, so package users do not
+need these tools. Contributors rebuilding `frontend/` use Node.js with pnpm,
+Vue, Vite, Vitest, Plotly.js, Lucide, and Inter.
+
 <br><br>
 
 
@@ -106,6 +110,7 @@ required for any of its functionalities. These libraries are only necessary to
 * **[strum](https://crates.io/crates/strum)** (0.28.0)
 * **[thiserror](https://crates.io/crates/thiserror)** (2.0.18)
 * **[tokio](https://crates.io/crates/tokio)** (1.52.1)
+* **[tokio-tungstenite](https://crates.io/crates/tokio-tungstenite)** (0.28.0)
 * **[toml](https://crates.io/crates/toml)** (1.1.2)
 * **[tracing](https://crates.io/crates/tracing)** (0.1.44)
 * **[tracing-subscriber](https://crates.io/crates/tracing-subscriber)** (0.3.23)

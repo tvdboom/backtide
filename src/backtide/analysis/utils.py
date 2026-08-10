@@ -268,7 +268,7 @@ def _plot(
         "font_size": cfg.plots.label_fontsize,
         "grouptitlefont_size": cfg.plots.label_fontsize,
         "grouptitlefont_color": "rgb(0, 0, 0)",
-        "bgcolor": "rgba(255, 255, 255, 0.2)",
+        "bgcolor": "rgba(0, 0, 0, 0)",
     }
 
     if isinstance(legend, str):

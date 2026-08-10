@@ -265,6 +265,6 @@ pub fn download_bars(
 ) -> PyResult<DownloadResult> {
     let engine = Engine::get()?;
 
-    // Release the GIL so HTTP workers and Streamlit's websocket can run.
+    // Release the GIL so HTTP workers and browser clients can continue running.
     Ok(py.detach(|| engine.download_bars(&profiles, start, end, verbose))?)
 }

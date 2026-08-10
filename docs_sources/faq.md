@@ -48,7 +48,7 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
 
 ??? faq "How do I show the symbol logos in the application?"
     Backtide fetches symbol logos from [logokit]. Create an API key and add it to
-    the [configuration]. The logos will appear automatically in the Streamlit app.
+    the [configuration]. The logos will appear automatically in the web application.
 
 ??? faq "Can I use multiple providers for the same instrument type?"
     Not within a single configuration. Each instrument type maps to exactly one
@@ -56,13 +56,16 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     type, you can run separate sessions with different configuration files.
 
 ??? faq "Does Backtide support live / paper trading?"
-    Not yet. Backtide is currently focused on historical backtesting. Live
-    and paper trading are on the roadmap but not yet implemented.
+    Yes. Backtide can consume public Binance, Coinbase, and Kraken candle
+    WebSockets and run strategies through its local paper-trading engine. It never
+    submits real broker orders. Yahoo Finance has no official market-data WebSocket,
+    so it remains available for historical downloads but not live sessions. See
+    the [live and paper trading guide](user_guide/live_trading.md).
 
 ??? faq "How do I launch the interactive UI?"
     Run `backtide launch` from the command line. This starts a local
-    [Streamlit](https://streamlit.io/) server where you can download data,
-    configure experiments, run backtests and analyze results — all from
+    local Python server with a bundled Vue frontend where you can download data,
+    configure experiments, run backtests, paper trade, and analyze results — all from
     your browser. You can customize the address and port with the `--address`
     and `--port` flags.
 

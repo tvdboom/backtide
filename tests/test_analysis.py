@@ -231,11 +231,13 @@ class TestPlotHelper:
         """Position legend using a string shorthand."""
         fig = _plot(go.Figure(), legend="lower left", display=None)
         assert fig.layout.showlegend is True
+        assert fig.layout.legend.bgcolor == "rgba(0, 0, 0, 0)"
 
     def test_dict_legend(self):
         """Configure legend using a dict."""
-        fig = _plot(go.Figure(), legend={"x": 0.5}, display=None)
+        fig = _plot(go.Figure(), legend={"x": 0.5, "bgcolor": "red"}, display=None)
         assert fig.layout.showlegend is True
+        assert fig.layout.legend.bgcolor == "red"
 
     def test_no_legend(self):
         """Hide legend when legend=None."""
@@ -556,6 +558,11 @@ class TestComputeStatistics:
         """Accept a custom price column."""
         result = cast(pd.DataFrame, compute_statistics(daily_bars, price_col="close"))
         assert len(result) == 1
+
+    def test_missing_price_col_raises(self, daily_bars):
+        """Surface dataframe extraction errors instead of dropping symbols."""
+        with pytest.raises(KeyError, match="missing_price"):
+            compute_statistics(daily_bars, price_col="missing_price")
 
     def test_max_drawdown_non_positive(self, daily_bars):
         """Max drawdown should be <= 0."""

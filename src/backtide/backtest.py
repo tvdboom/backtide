@@ -42,7 +42,7 @@ from backtide.core.storage import delete_experiment as _delete_experiment
 from backtide.core.storage import query_experiments as _query_experiments
 from backtide.utils.utils import _to_list, _to_pandas
 
-# Threading event used to signal an abort from external code (e.g., Streamlit UI).
+# Threading event used to signal an abort from external code (for example, the web UI).
 _abort_event: threading.Event | None = None
 
 
@@ -116,7 +116,9 @@ def run_experiment(
         * A `dict[str, instance]` mapping explicit names to instances.
 
         Keyword arguments take precedence over the corresponding fields in the
-        `config` object.
+        `config` object. When a sub-config object and one of its flat fields are
+        both supplied, the flat field wins and the remaining values come from
+        the sub-config object.
 
     Returns
     -------
@@ -159,91 +161,98 @@ def run_experiment(
     kwargs = kwargs.copy()
     cfg = config or ExperimentConfig()
 
-    # Retrieve a config parameter from the arguments
-    get = lambda k, s: (
-        kwargs.pop(k, getattr(kwargs.get(s), k, None)) or getattr(getattr(cfg, s), k)
-    )
+    def get(key: str, section: str) -> Any:
+        """Resolve one config field, giving explicit flat kwargs precedence."""
+        # `indicators` is both a section name and its sole field name. A typed
+        # section object must be unwrapped; every other explicit value is the
+        # flat field override and may intentionally be falsy or `None`.
+        if key in kwargs and not (key == section and isinstance(kwargs[key], IndicatorExpConfig)):
+            return kwargs.pop(key)
+
+        section_config = kwargs.get(section)
+        if section_config is not None:
+            return getattr(section_config, key)
+
+        return getattr(getattr(cfg, section), key)
 
     strategies, strategy_overrides = resolve_polymorphic_param(get("strategies", "strategy"))
     indicators, indicator_overrides = resolve_polymorphic_param(get("indicators", "indicators"))
 
+    general = GeneralExpConfig(
+        name=get("name", "general").strip() or str(uuid.uuid4())[:8],
+        icon=get("icon", "general"),
+        tags=get("tags", "general"),
+        description=get("description", "general"),
+    )
+    kwargs.pop("general", None)
+
+    data = DataExpConfig(
+        instrument_type=get("instrument_type", "data"),
+        symbols=get("symbols", "data"),
+        full_history=get("full_history", "data"),
+        start_date=get("start_date", "data"),
+        end_date=get("end_date", "data"),
+        interval=get("interval", "data"),
+    )
+    kwargs.pop("data", None)
+
+    portfolio = PortfolioExpConfig(
+        initial_cash=get("initial_cash", "portfolio"),
+        base_currency=get("base_currency", "portfolio"),
+        starting_positions=get("starting_positions", "portfolio"),
+    )
+    kwargs.pop("portfolio", None)
+
+    strategy = StrategyExpConfig(
+        benchmark=get("benchmark", "strategy"),
+        strategies=strategies,
+    )
+    kwargs.pop("strategy", None)
+
+    indicators_config = IndicatorExpConfig(indicators=indicators)
+    kwargs.pop("indicators", None)
+
+    exchange = ExchangeExpConfig(
+        commission_type=get("commission_type", "exchange"),
+        commission_pct=get("commission_pct", "exchange"),
+        commission_fixed=get("commission_fixed", "exchange"),
+        slippage=get("slippage", "exchange"),
+        allowed_order_types=get("allowed_order_types", "exchange"),
+        partial_fills=get("partial_fills", "exchange"),
+        allow_margin=get("allow_margin", "exchange"),
+        max_leverage=get("max_leverage", "exchange"),
+        initial_margin=get("initial_margin", "exchange"),
+        maintenance_margin=get("maintenance_margin", "exchange"),
+        margin_interest=get("margin_interest", "exchange"),
+        raise_on_margin_limit=get("raise_on_margin_limit", "exchange"),
+        allow_short_selling=get("allow_short_selling", "exchange"),
+        borrow_rate=get("borrow_rate", "exchange"),
+        raise_on_short_violation=get("raise_on_short_violation", "exchange"),
+        max_position_size=get("max_position_size", "exchange"),
+        conversion_mode=get("conversion_mode", "exchange"),
+        conversion_threshold=get("conversion_threshold", "exchange"),
+        conversion_period=get("conversion_period", "exchange"),
+        conversion_interval=get("conversion_interval", "exchange"),
+    )
+    kwargs.pop("exchange", None)
+
+    engine = EngineExpConfig(
+        warmup_period=get("warmup_period", "engine"),
+        trade_on_close=get("trade_on_close", "engine"),
+        risk_free_rate=get("risk_free_rate", "engine"),
+        exclusive_orders=get("exclusive_orders", "engine"),
+        empty_bar_policy=get("empty_bar_policy", "engine"),
+    )
+    kwargs.pop("engine", None)
+
     cfg = ExperimentConfig(
-        general=kwargs.pop(
-            "general",
-            GeneralExpConfig(
-                name=get("name", "general").strip() or str(uuid.uuid4())[:8],
-                icon=get("icon", "general"),
-                tags=get("tags", "general"),
-                description=get("description", "general"),
-            ),
-        ),
-        data=kwargs.pop(
-            "data",
-            DataExpConfig(
-                instrument_type=get("instrument_type", "data"),
-                symbols=get("symbols", "data"),
-                full_history=get("full_history", "data"),
-                start_date=get("start_date", "data"),
-                end_date=get("end_date", "data"),
-                interval=get("interval", "data"),
-            ),
-        ),
-        portfolio=kwargs.pop(
-            "portfolio",
-            PortfolioExpConfig(
-                initial_cash=get("initial_cash", "portfolio"),
-                base_currency=get("base_currency", "portfolio"),
-                starting_positions=get("starting_positions", "portfolio"),
-            ),
-        ),
-        strategy=kwargs.pop(
-            "strategy",
-            StrategyExpConfig(
-                benchmark=get("benchmark", "strategy"),
-                strategies=strategies,
-            ),
-        ),
-        indicators=kwargs.pop(
-            "indicators",
-            IndicatorExpConfig(
-                indicators=indicators,
-            ),
-        ),
-        exchange=kwargs.pop(
-            "exchange",
-            ExchangeExpConfig(
-                commission_type=get("commission_type", "exchange"),
-                commission_pct=get("commission_pct", "exchange"),
-                commission_fixed=get("commission_fixed", "exchange"),
-                slippage=get("slippage", "exchange"),
-                allowed_order_types=get("allowed_order_types", "exchange"),
-                partial_fills=get("partial_fills", "exchange"),
-                allow_margin=get("allow_margin", "exchange"),
-                max_leverage=get("max_leverage", "exchange"),
-                initial_margin=get("initial_margin", "exchange"),
-                maintenance_margin=get("maintenance_margin", "exchange"),
-                margin_interest=get("margin_interest", "exchange"),
-                raise_on_margin_limit=get("raise_on_margin_limit", "exchange"),
-                allow_short_selling=get("allow_short_selling", "exchange"),
-                borrow_rate=get("borrow_rate", "exchange"),
-                raise_on_short_violation=get("raise_on_short_violation", "exchange"),
-                max_position_size=get("max_position_size", "exchange"),
-                conversion_mode=get("conversion_mode", "exchange"),
-                conversion_threshold=get("conversion_threshold", "exchange"),
-                conversion_period=get("conversion_period", "exchange"),
-                conversion_interval=get("conversion_interval", "exchange"),
-            ),
-        ),
-        engine=kwargs.pop(
-            "engine",
-            EngineExpConfig(
-                warmup_period=get("warmup_period", "engine"),
-                trade_on_close=get("trade_on_close", "engine"),
-                risk_free_rate=get("risk_free_rate", "engine"),
-                exclusive_orders=get("exclusive_orders", "engine"),
-                empty_bar_policy=get("empty_bar_policy", "engine"),
-            ),
-        ),
+        general=general,
+        data=data,
+        portfolio=portfolio,
+        strategy=strategy,
+        indicators=indicators_config,
+        exchange=exchange,
+        engine=engine,
     )
 
     if kwargs:

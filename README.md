@@ -3,7 +3,7 @@
 	<img src="https://github.com/tvdboom/backtide/blob/master/images/logo transparent.png?raw=true" alt="backtide" title="backtide" height="300" width="300"/>
 </p>
 
-## A refreshingly simple trading backtester for beginner retail investors
+## A refreshingly simple backtesting and paper-trading platform for retail investors
 </div>
 
 <br>
@@ -26,10 +26,10 @@
 </tr>
 <tr>
 <td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/results.png?raw=true" alt="Results" width="100%"/></td>
-<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/stats.png?raw=true" alt="Stats" width="100%"/></td>
+<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/live.png?raw=true" alt="Paper trading" width="100%"/></td>
 </tr>
 <tr>
-<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/trades.png?raw=true" alt="Trades" width="100%"/></td>
+<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/storage.png?raw=true" alt="Storage" width="100%"/></td>
 <td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/analysis.png?raw=true" alt="Analysis" width="100%"/></td>
 </tr>
 </table>
@@ -41,9 +41,10 @@
 
 Backtide is an open-source backtesting platform for Python, built for retail
 investors who want to test trading ideas without drowning in complexity. A
-Rust-powered core keeps simulations fast, while sensible defaults let you go
-from raw multi-exchange data to validated strategies in just a few lines of
-code. Every setting can still be fine-tuned when needed, but you never have to.
+Rust-powered core keeps simulations and paper execution fast, while sensible
+defaults let you go from raw multi-exchange data to validated strategies in just
+a few lines of code. Run the same strategy objects against historical bars or
+public exchange WebSockets, without connecting a brokerage account.
 
 <br>
 
@@ -56,8 +57,25 @@ code. Every setting can still be fine-tuned when needed, but you never have to.
 - **Multi-exchange** — Stocks, ETFs, forex and crypto from Yahoo, Binance, Kraken and more.
 - **Batteries included** — Built-in strategies and technical indicators out of the box.
 - **Rich analytics** — 20+ plots cover PnL, returns, drawdown and more.
-- **Interactive UI** — Professional UI to configure, run and analyze experiments visually.
+- **Live paper trading** — Apply strategies to Binance, Coinbase, or Kraken WebSocket candles with local simulated fills.
+- **Interactive UI** — A packaged Vue app configures, runs, and analyzes backtests and paper sessions visually.
+- **Simple installation** — Python wheels include the Rust extension and production frontend; users do not need Rust or Node.js.
 - **Open source** — MIT-licensed, community-driven and free forever.
+
+<br>
+
+Installation
+------------
+
+Install the wheel and launch the local application:
+
+```console
+pip install backtide
+backtide launch
+```
+
+That single Python installation includes the compiled backend and web frontend.
+Node.js and pnpm are needed only by contributors rebuilding `frontend/`.
 
 <br>
 

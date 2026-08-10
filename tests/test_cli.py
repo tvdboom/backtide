@@ -101,34 +101,34 @@ class TestDownload:
 class TestLaunch:
     """Tests for the 'launch' CLI command."""
 
-    @patch("backtide.cli.run")
+    @patch("backtide.ui.launch")
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
     def test_launch_default(self, _mock_logging, mock_cfg, mock_run, runner):  # noqa: PT019
-        """Launch with defaults calls run()."""
+        """Launch with defaults calls the bundled web server."""
         mock_cfg.return_value = MagicMock(
             general=MagicMock(log_level="warn"),
             display=MagicMock(port=8501, address=None),
         )
         result = runner.invoke(launch)
         assert result.exit_code == 0
+        assert result.output.encode("cp1252") == b"Launching app...\n"
         mock_run.assert_called_once()
 
-    @patch("backtide.cli.run")
+    @patch("backtide.ui.launch")
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
     def test_launch_custom_port(self, _mock_logging, mock_cfg, mock_run, runner):  # noqa: PT019
-        """Launch with -P flag sets custom port."""
+        """Launch with -p sets a custom port."""
         mock_cfg.return_value = MagicMock(
             general=MagicMock(log_level="warn"),
             display=MagicMock(port=8501, address=None),
         )
         result = runner.invoke(launch, ["-p", "9000"])
         assert result.exit_code == 0
-        call_kwargs = mock_run.call_args
-        assert call_kwargs[1]["flag_options"]["server.port"] == "9000"
+        assert mock_run.call_args.kwargs["port"] == 9000
 
-    @patch("backtide.cli.run")
+    @patch("backtide.ui.launch")
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
     def test_launch_custom_address(self, _mock_logging, mock_cfg, mock_run, runner):  # noqa: PT019
@@ -139,9 +139,9 @@ class TestLaunch:
         )
         result = runner.invoke(launch, ["-a", "0.0.0.0"])
         assert result.exit_code == 0
-        assert mock_run.call_args[1]["flag_options"]["server.address"] == "0.0.0.0"
+        assert mock_run.call_args.kwargs["address"] == "0.0.0.0"
 
-    @patch("backtide.cli.run")
+    @patch("backtide.ui.launch")
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
     def test_launch_custom_log_level(self, mock_logging, mock_cfg, _mock_run, runner):  # noqa: PT019

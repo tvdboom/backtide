@@ -118,7 +118,7 @@ Important caveats:
 
 ## Downloading bulk data
 
-The Streamlit UI handles data downloading for a small number of symbols, but you
+The web application handles data downloading for a small number of symbols, but you
 can drive the entire workflow from Python for larger workloads. The key concept is
 the two-step pipeline: **resolve**, then **download**.
 

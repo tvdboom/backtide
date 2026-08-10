@@ -184,3 +184,7 @@ class TestQueryStrategyRuns:
     def test_unknown_id_returns_empty_list(self):
         """Querying a missing experiment id returns ``[]``."""
         assert query_strategy_runs("__missing__") == []
+
+    def test_equity_history_can_be_skipped(self):
+        """Callers can request lightweight results without per-bar equity history."""
+        assert query_strategy_runs("__missing__", include_equity_curve=False) == []

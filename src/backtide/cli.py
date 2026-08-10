@@ -9,7 +9,6 @@ import json
 from pathlib import Path
 
 import click
-from streamlit.web.bootstrap import run
 import yaml
 
 from backtide.backtest import ExperimentAborted, ExperimentConfig, ExperimentStatus
@@ -138,17 +137,17 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
     result = download_bars(profiles, start=start, end=end, verbose=verbose)
 
     for warn in result.warnings:
-        click.echo(f"   ⚠️  {warn}", err=True)
+        click.echo(f"WARNING: {warn}", err=True)
 
     if result.n_failed and result.n_succeeded:
         click.echo(
-            f"✅  Done ({result.n_succeeded}/{result.n_succeeded + result.n_failed} "
+            f"Done ({result.n_succeeded}/{result.n_succeeded + result.n_failed} "
             f"instruments downloaded).",
         )
     elif result.n_failed:
-        click.echo(f"❌  All {result.n_failed} downloads failed.", err=True)
+        click.echo(f"ERROR: All {result.n_failed} downloads failed.", err=True)
     else:
-        click.echo("✅  Done.")
+        click.echo("Done.")
 
 
 @main.command()
@@ -174,9 +173,9 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
 def launch(address: str, port: str, log_level: str):
     """Launch the Backtide UI in a local web browser.
 
-    Starts the Streamlit-based graphical interface, which lets you browse stored
-    experiments, inspect equity curves, trade logs, and performance metrics without
-    writing any code.
+    Starts the bundled graphical interface, which lets you browse stored
+    experiments, inspect equity curves, trade logs, performance metrics and
+    paper-trading sessions without writing any code.
 
     Read more in the [user guide][application].
 
@@ -215,16 +214,13 @@ def launch(address: str, port: str, log_level: str):
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
 
-    click.echo("🚀  Launching app...")
+    click.echo("Launching app...")
 
-    run(
-        main_script_path=str(Path(__file__).resolve().parent / "ui" / "app.py"),
-        is_hello=False,
-        args=[],
-        flag_options={
-            "server.port": port or cfg.display.port,
-            "server.address": address or cfg.display.address,
-        },
+    from backtide.ui import launch as launch_ui
+
+    launch_ui(
+        address=address or cfg.display.address or "localhost",
+        port=int(port or cfg.display.port),
     )
 
 
@@ -297,29 +293,29 @@ def run_experiment(config: Path, log_level: str, *, verbose: bool):
             f"Unsupported config extension {suffix!r}. Use .toml, .yaml/.yml or .json."
         )
 
-    click.echo(f"🚀  Running experiment from {config.name}...")
+    click.echo(f"Running experiment from {config.name}...")
 
     try:
         result = run_backtest(exp_cfg, verbose=verbose)
     except (KeyboardInterrupt, ExperimentAborted):
-        click.echo("\n⛔  Experiment aborted. Nothing was stored.", err=True)
+        click.echo("\nExperiment aborted. Nothing was stored.", err=True)
         raise SystemExit(130) from None
 
     n = len(result.strategies)
     if result.status == ExperimentStatus.Success and not result.warnings:
         click.echo(
-            f"✅  Done — experiment {result.experiment_id} completed "
+            f"Done - experiment {result.experiment_id} completed "
             f"({n} strateg{'y' if n == 1 else 'ies'})."
         )
     elif result.status == ExperimentStatus.Success:
         click.echo(
-            f"⚠️  Experiment {result.experiment_id} completed with "
+            f"WARNING: Experiment {result.experiment_id} completed with "
             f"{len(result.warnings)} warning(s):"
         )
         for w in result.warnings:
             click.echo(f"   - {w}")
     else:
-        click.echo(f"❌  Experiment {result.experiment_id} failed.", err=True)
+        click.echo(f"ERROR: Experiment {result.experiment_id} failed.", err=True)
         for w in result.warnings:
             click.echo(f"   - {w}", err=True)
         raise SystemExit(1)

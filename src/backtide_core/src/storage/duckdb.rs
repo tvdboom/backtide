@@ -68,18 +68,6 @@ impl DuckDb {
             },
         }
     }
-
-    fn rollback_on_error<T, F>(&self, f: F) -> StorageResult<T>
-    where
-        F: FnOnce(&Connection) -> StorageResult<T>,
-    {
-        let conn = self.conn.lock().unwrap();
-        let result = f(&conn);
-        if result.is_err() {
-            let _ = conn.execute_batch("ROLLBACK");
-        }
-        result
-    }
 }
 
 impl Storage for DuckDb {
@@ -500,9 +488,8 @@ impl Storage for DuckDb {
             return Ok(());
         }
 
-        // Phase 1: Bulk-delete existing rows for the incoming pairs.
-        {
-            let conn = self.conn.lock().unwrap();
+        // Replace existing rows atomically so an appender failure restores them.
+        self.run_transaction(|conn| {
             let pairs: Vec<String> = instruments
                 .iter()
                 .map(|i| format!("('{}', '{}')", i.symbol.replace('\'', "''"), i.provider))
@@ -512,10 +499,7 @@ impl Storage for DuckDb {
                 "DELETE FROM instruments WHERE (symbol, provider) IN ({})",
                 pairs.join(", "),
             ))?;
-        }
 
-        // Phase 2: bulk-insert via the Appender.
-        self.rollback_on_error(|conn| {
             let mut appender = conn.appender("instruments")?;
             for inst in instruments {
                 appender.append_row(params![
@@ -530,9 +514,7 @@ impl Storage for DuckDb {
             }
             appender.flush()?;
             Ok(())
-        })?;
-
-        Ok(())
+        })
     }
 
     /// Store multiple series of OHLC data in one bulk operation.
@@ -543,7 +525,8 @@ impl Storage for DuckDb {
             return Ok(());
         }
 
-        // Phase 1: Delete all overlapping ranges in a single transaction.
+        // Delete and replace every overlapping range in one transaction. If
+        // appending any row fails, rollback restores all previously stored bars.
         self.run_transaction(|conn| {
             for s in &non_empty {
                 let iv = s.interval.to_string();
@@ -557,11 +540,7 @@ impl Storage for DuckDb {
                     params![&s.symbol, iv, prov, min_ts as i64, max_ts as i64],
                 )?;
             }
-            Ok(())
-        })?;
 
-        // Phase 2: Bulk-insert every row via the Appender (one flush).
-        self.rollback_on_error(|conn| {
             let mut appender = conn.appender("bars")?;
             for s in &non_empty {
                 let iv = s.interval.to_string();
@@ -586,9 +565,7 @@ impl Storage for DuckDb {
             }
             appender.flush()?;
             Ok(())
-        })?;
-
-        Ok(())
+        })
     }
 
     /// Store multiple series of dividend events in one bulk operation.
@@ -600,7 +577,8 @@ impl Storage for DuckDb {
             return Ok(());
         }
 
-        // Phase 1: Delete overlapping ranges.
+        // Delete and replace dividends atomically. Deduplicate by
+        // (symbol, provider, ex_date), keeping the last occurrence.
         self.run_transaction(|conn| {
             for s in &non_empty {
                 let prov = s.provider.to_string();
@@ -613,12 +591,7 @@ impl Storage for DuckDb {
                     params![&s.symbol, prov, min_ts as i64, max_ts as i64],
                 )?;
             }
-            Ok(())
-        })?;
 
-        // Phase 2: Bulk-insert every row via the Appender.
-        // Deduplicate by (symbol, provider, ex_date), keeping the last occurrence.
-        self.rollback_on_error(|conn| {
             let mut appender = conn.appender("dividends")?;
             for s in &non_empty {
                 let prov = s.provider.to_string();
@@ -636,9 +609,7 @@ impl Storage for DuckDb {
             }
             appender.flush()?;
             Ok(())
-        })?;
-
-        Ok(())
+        })
     }
 
     /// Delete bars (and orphaned dividends/instruments) for one or more series.
@@ -724,7 +695,8 @@ impl Storage for DuckDb {
             exchange: config.exchange.clone(),
             engine: config.engine.clone(),
         };
-        let cfg_toml = toml::to_string_pretty(&inner).unwrap_or_default();
+        let cfg_toml = toml::to_string_pretty(&inner)
+            .map_err(|e| StorageError::Serialization(format!("experiment configuration: {e}")))?;
         let tags_str = result.tags.join(",");
 
         // ── Phase 1: parent rows + idempotent cleanup of child rows ─────
@@ -747,7 +719,12 @@ impl Storage for DuckDb {
             )?;
 
             for strat in &result.strategies {
-                let metrics_str = serde_json::to_string(&strat.metrics).unwrap_or_default();
+                let metrics_str = serde_json::to_string(&strat.metrics).map_err(|e| {
+                    StorageError::Serialization(format!(
+                        "metrics for strategy run {}: {e}",
+                        strat.strategy_id
+                    ))
+                })?;
                 conn.execute(
                     "INSERT OR REPLACE INTO experiment_strategies
                      (id, experiment_id, strategy_id, strategy_name, metrics, base_currency, error, is_benchmark)
@@ -780,22 +757,18 @@ impl Storage for DuckDb {
                 }
             }
 
-            Ok(())
-        })?;
-
-        // ── Phase 2: bulk-append child rows via the DuckDB Appender ─────
-        //
-        // The Appender batches rows into the column store in one shot —
-        // orders of magnitude faster than per-row `INSERT` for the equity
-        // curve / orders / trades, which can run into the tens-of-thousands
-        // of rows on a long backtest.
-        if result.strategies.iter().any(|s| !s.equity_curve.is_empty()) {
-            self.rollback_on_error(|conn| {
+            // Append all child rows before committing the parent transaction.
+            // An appender failure therefore restores the previous complete run.
+            if result.strategies.iter().any(|s| !s.equity_curve.is_empty()) {
                 let mut appender = conn.appender("experiment_equity")?;
                 for strat in &result.strategies {
                     for s in &strat.equity_curve {
-                        let cash_json =
-                            serde_json::to_string(&s.cash).unwrap_or_else(|_| "{}".into());
+                        let cash_json = serde_json::to_string(&s.cash).map_err(|e| {
+                            StorageError::Serialization(format!(
+                                "cash for strategy run {} at {}: {e}",
+                                strat.strategy_id, s.timestamp
+                            ))
+                        })?;
                         appender.append_row(params![
                             strat.strategy_id,
                             s.timestamp,
@@ -806,12 +779,9 @@ impl Storage for DuckDb {
                     }
                 }
                 appender.flush()?;
-                Ok(())
-            })?;
-        }
+            }
 
-        if result.strategies.iter().any(|s| !s.orders.is_empty()) {
-            self.rollback_on_error(|conn| {
+            if result.strategies.iter().any(|s| !s.orders.is_empty()) {
                 let mut appender = conn.appender("experiment_orders")?;
                 for strat in &result.strategies {
                     for o in &strat.orders {
@@ -833,12 +803,9 @@ impl Storage for DuckDb {
                     }
                 }
                 appender.flush()?;
-                Ok(())
-            })?;
-        }
+            }
 
-        if result.strategies.iter().any(|s| !s.trades.is_empty()) {
-            self.rollback_on_error(|conn| {
+            if result.strategies.iter().any(|s| !s.trades.is_empty()) {
                 let mut appender = conn.appender("experiment_trades")?;
                 for strat in &result.strategies {
                     for t in &strat.trades {
@@ -855,11 +822,10 @@ impl Storage for DuckDb {
                     }
                 }
                 appender.flush()?;
-                Ok(())
-            })?;
-        }
+            }
 
-        Ok(())
+            Ok(())
+        })
     }
 
     fn query_experiments(
@@ -933,7 +899,11 @@ impl Storage for DuckDb {
         Ok(rows)
     }
 
-    fn query_strategy_runs(&self, experiment_id: &str) -> StorageResult<Vec<RunResult>> {
+    fn query_strategy_runs(
+        &self,
+        experiment_id: &str,
+        include_equity_curve: bool,
+    ) -> StorageResult<Vec<RunResult>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
@@ -951,7 +921,7 @@ impl Storage for DuckDb {
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
-                    row.get::<_, bool>(6).unwrap_or(false),
+                    row.get::<_, bool>(6)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -959,65 +929,147 @@ impl Storage for DuckDb {
         let mut out = Vec::with_capacity(strats.len());
         for (run_id, strategy_id, name, metrics_str, base_ccy_str, error, is_benchmark) in strats {
             let metrics: HashMap<String, f64> =
-                serde_json::from_str(&metrics_str).unwrap_or_default();
-            let base_currency =
-                base_ccy_str.as_deref().and_then(|s| s.parse().ok()).unwrap_or_default();
+                serde_json::from_str(&metrics_str).map_err(|e| {
+                    StorageError::CorruptData(format!("metrics for strategy run {run_id}: {e}"))
+                })?;
+            let base_ccy_str = base_ccy_str.ok_or_else(|| {
+                StorageError::CorruptData(format!(
+                    "missing base currency for strategy run {run_id}"
+                ))
+            })?;
+            let base_currency: Currency = base_ccy_str.parse().map_err(|e| {
+                StorageError::CorruptData(format!("base currency for strategy run {run_id}: {e}"))
+            })?;
 
-            let mut eq_stmt = conn.prepare(
-                "SELECT ts, equity, CAST(cash AS VARCHAR), drawdown FROM experiment_equity
-                 WHERE run_id = ? ORDER BY ts",
-            )?;
-            let equity_curve = eq_stmt
-                .query_map(params![run_id], |row| {
-                    let cash_raw: String = row.get(2)?;
-                    // Backward compatible: old rows might contain a scalar,
-                    // newer rows store a JSON object keyed by currency code.
-                    let cash = if cash_raw.trim_start().starts_with('{') {
-                        serde_json::from_str::<Cash>(&cash_raw).unwrap_or_default()
-                    } else {
-                        let v = cash_raw.parse::<f64>().unwrap_or(0.0);
-                        HashMap::from([(base_currency, v)])
-                    };
-                    Ok(EquitySample {
-                        timestamp: row.get(0)?,
-                        equity: row.get(1)?,
-                        cash,
-                        drawdown: row.get(3)?,
+            let equity_curve = if include_equity_curve {
+                let mut eq_stmt = conn.prepare(
+                    "SELECT ts, equity, CAST(cash AS VARCHAR), drawdown FROM experiment_equity
+                     WHERE run_id = ? ORDER BY ts",
+                )?;
+                let equity_rows = eq_stmt
+                    .query_map(params![run_id], |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, f64>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, f64>(3)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                equity_rows
+                    .into_iter()
+                    .map(|(timestamp, equity, cash_raw, drawdown)| {
+                        // Backward compatible: old rows might contain a scalar,
+                        // newer rows store a JSON object keyed by currency code.
+                        let cash = if cash_raw.trim_start().starts_with('{') {
+                            serde_json::from_str::<Cash>(&cash_raw).map_err(|e| {
+                                StorageError::CorruptData(format!(
+                                    "cash for strategy run {run_id} at {timestamp}: {e}"
+                                ))
+                            })?
+                        } else {
+                            let value = cash_raw.parse::<f64>().map_err(|e| {
+                                StorageError::CorruptData(format!(
+                                    "cash for strategy run {run_id} at {timestamp}: {e}"
+                                ))
+                            })?;
+                            HashMap::from([(base_currency, value)])
+                        };
+                        Ok(EquitySample {
+                            timestamp,
+                            equity,
+                            cash,
+                            drawdown,
+                        })
                     })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<StorageResult<Vec<_>>>()?
+            } else {
+                Vec::new()
+            };
 
             let mut o_stmt = conn.prepare(
                 "SELECT order_id, ts, symbol, order_type, quantity, price, limit_price, status, fill_price, reason, commission, pnl
                  FROM experiment_orders WHERE run_id = ? ORDER BY ts",
             )?;
-            let orders = o_stmt
+            type StoredOrderRow = (
+                OrderId,
+                i64,
+                String,
+                String,
+                f64,
+                Option<f64>,
+                Option<f64>,
+                String,
+                Option<f64>,
+                String,
+                f64,
+                Option<f64>,
+            );
+            let order_rows: Vec<StoredOrderRow> = o_stmt
                 .query_map(params![run_id], |row| {
-                    let ot: String = row.get(3)?;
-                    let status: String = row.get(7)?;
-                    Ok(OrderRecord {
-                        order: Order {
-                            id: row.get(0)?,
-                            symbol: row.get(2)?,
-                            order_type: ot
-                                .parse()
-                                .unwrap_or_else(|_| panic!("unknown order type: {ot}")),
-                            quantity: row.get(4)?,
-                            price: row.get(5)?,
-                            limit_price: row.get(6)?,
-                            sizer: None,
-                        },
-                        timestamp: row.get(1)?,
-                        status: status
-                            .parse()
-                            .unwrap_or_else(|_| panic!("unknown order status: {status}")),
-                        fill_price: row.get(8)?,
-                        reason: row.get(9)?,
-                        commission: row.get::<_, Option<f64>>(10)?.unwrap_or(0.0),
-                        pnl: row.get(11)?,
-                    })
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                    ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
+            let orders = order_rows
+                .into_iter()
+                .map(
+                    |(
+                        id,
+                        timestamp,
+                        symbol,
+                        order_type,
+                        quantity,
+                        price,
+                        limit_price,
+                        status,
+                        fill_price,
+                        reason,
+                        commission,
+                        pnl,
+                    )| {
+                        let parsed_order_type: OrderType = order_type.parse().map_err(|e| {
+                            StorageError::CorruptData(format!(
+                                "order type {order_type:?} for strategy run {run_id}: {e}"
+                            ))
+                        })?;
+                        let parsed_status: OrderStatus = status.parse().map_err(|e| {
+                            StorageError::CorruptData(format!(
+                                "order status {status:?} for strategy run {run_id}: {e}"
+                            ))
+                        })?;
+                        Ok(OrderRecord {
+                            order: Order {
+                                id,
+                                symbol,
+                                order_type: parsed_order_type,
+                                quantity,
+                                price,
+                                limit_price,
+                                sizer: None,
+                            },
+                            timestamp,
+                            status: parsed_status,
+                            fill_price,
+                            reason,
+                            commission,
+                            pnl,
+                        })
+                    },
+                )
+                .collect::<StorageResult<Vec<_>>>()?;
 
             let mut t_stmt = conn.prepare(
                 "SELECT symbol, quantity, entry_ts, exit_ts, entry_price, exit_price, pnl
@@ -1221,10 +1273,25 @@ mod tests {
         assert_eq!(experiments.len(), 1);
         assert_eq!(experiments[0].id, result.experiment_id);
 
-        let runs = db.query_strategy_runs(&result.experiment_id).unwrap();
+        let runs = db.query_strategy_runs(&result.experiment_id, true).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].strategy_name, "CustomSma");
         assert_eq!(runs[0].equity_curve.len(), 1);
+        assert_eq!(runs[0].orders.len(), 1);
+        assert_eq!(runs[0].trades.len(), 1);
+    }
+
+    #[test]
+    fn test_query_strategy_runs_can_skip_equity_curve() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let runs = db.query_strategy_runs(&result.experiment_id, false).unwrap();
+
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].equity_curve.is_empty());
         assert_eq!(runs[0].orders.len(), 1);
         assert_eq!(runs[0].trades.len(), 1);
     }
@@ -1243,9 +1310,119 @@ mod tests {
         db.write_experiment(&cfg, &result).unwrap();
         db.write_experiment(&cfg, &result).unwrap();
 
-        let runs = db.query_strategy_runs(&result.experiment_id).unwrap();
+        let runs = db.query_strategy_runs(&result.experiment_id, true).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].orders.len(), 1);
+    }
+
+    // ── experiment failure handling ───────────────────────────────────────
+
+    #[test]
+    fn test_write_experiment_failure_rolls_back_parent_and_children() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let mut original = sample_experiment_result();
+        original.name = "Original".to_owned();
+        db.write_experiment(&cfg, &original).unwrap();
+
+        let mut replacement = original.clone();
+        replacement.name = "Replacement".to_owned();
+        let duplicate_order = replacement.strategies[0].orders[0].clone();
+        replacement.strategies[0].orders.push(duplicate_order);
+
+        assert!(db.write_experiment(&cfg, &replacement).is_err());
+
+        let experiments = db
+            .query_experiments(Some(std::slice::from_ref(&original.experiment_id)), None, None)
+            .unwrap();
+        assert_eq!(experiments[0].name, "Original");
+        let runs = db.query_strategy_runs(&original.experiment_id, true).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].equity_curve.len(), 1);
+        assert_eq!(runs[0].orders.len(), 1);
+        assert_eq!(runs[0].trades.len(), 1);
+    }
+
+    #[test]
+    fn test_query_strategy_runs_rejects_corrupt_order_enums_without_poisoning_storage() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        let run_id = &result.strategies[0].strategy_id;
+        db.write_experiment(&cfg, &result).unwrap();
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE experiment_orders SET order_type = 'unknown' WHERE run_id = ?",
+                params![run_id],
+            )
+            .unwrap();
+        }
+        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        assert!(error.to_string().contains("order type"));
+
+        // The failed decode returned normally, so the storage mutex remains usable.
+        assert_eq!(db.query_experiments(None, None, None).unwrap().len(), 1);
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE experiment_orders SET order_type = 'market', status = 'unknown' WHERE run_id = ?",
+                params![run_id],
+            )
+            .unwrap();
+        }
+        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        assert!(error.to_string().contains("order status"));
+        assert_eq!(db.query_experiments(None, None, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_query_strategy_runs_rejects_corrupt_metrics_currency_and_cash() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        let run_id = &result.strategies[0].strategy_id;
+        db.write_experiment(&cfg, &result).unwrap();
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE experiment_strategies SET metrics = '{' WHERE id = ?",
+                params![run_id],
+            )
+            .unwrap();
+        }
+        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        assert!(error.to_string().contains("metrics"));
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE experiment_strategies SET metrics = '{}', base_currency = 'invalid' WHERE id = ?",
+                params![run_id],
+            )
+            .unwrap();
+        }
+        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        assert!(error.to_string().contains("base currency"));
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE experiment_strategies SET base_currency = 'USD' WHERE id = ?",
+                params![run_id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE experiment_equity SET cash = 'invalid' WHERE run_id = ?",
+                params![run_id],
+            )
+            .unwrap();
+        }
+        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        assert!(error.to_string().contains("cash"));
     }
 
     // ── write_bars_bulk / query_bars ──────────────────────────────────────
@@ -1397,6 +1574,32 @@ mod tests {
         assert_eq!(rows[0].bar.close, 999.0);
     }
 
+    #[test]
+    fn test_write_bars_failure_rolls_back_deleted_rows() {
+        let (_dir, db) = make_db();
+        db.write_bars_bulk(&[BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![sample_bar(1_000_000)],
+        }])
+        .unwrap();
+
+        let mut duplicate = sample_bar(1_000_000);
+        duplicate.close = 999.0;
+        let replacement = BarSeries {
+            symbol: "AAPL".to_owned(),
+            interval: Interval::OneDay,
+            provider: Provider::Yahoo,
+            bars: vec![duplicate, duplicate],
+        };
+
+        assert!(db.write_bars_bulk(&[replacement]).is_err());
+        let rows = db.query_bars(Some(&["AAPL"]), None, None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].bar.close, 105.0);
+    }
+
     // ── query_bar_ranges ─────────────────────────────────────────────────
 
     #[test]
@@ -1488,6 +1691,20 @@ mod tests {
     }
 
     #[test]
+    fn test_write_instruments_failure_rolls_back_deleted_rows() {
+        let (_dir, db) = make_db();
+        db.write_instruments(&[sample_instrument("AAPL")]).unwrap();
+
+        let mut replacement = sample_instrument("AAPL");
+        replacement.name = "Replacement".to_owned();
+        assert!(db.write_instruments(&[replacement.clone(), replacement]).is_err());
+
+        let instruments = db.query_instruments(None, None, None, None).unwrap();
+        assert_eq!(instruments.len(), 1);
+        assert_eq!(instruments[0].name, "AAPL Inc.");
+    }
+
+    #[test]
     fn test_query_instruments_filter_by_type() {
         let (_dir, db) = make_db();
         let mut crypto = sample_instrument("BTC-USD");
@@ -1564,6 +1781,44 @@ mod tests {
         db.write_dividends_bulk(&series).unwrap();
         let rows = db.query_dividends(None, None, None).unwrap();
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_write_dividends_failure_rolls_back_deleted_rows() {
+        let (_dir, db) = make_db();
+        db.write_dividends_bulk(&[DividendSeries {
+            symbol: "AAPL".to_owned(),
+            provider: Provider::Yahoo,
+            dividends: vec![Dividend {
+                ex_date: 1_000_000,
+                amount: 0.82,
+            }],
+        }])
+        .unwrap();
+
+        let duplicate_series = vec![
+            DividendSeries {
+                symbol: "AAPL".to_owned(),
+                provider: Provider::Yahoo,
+                dividends: vec![Dividend {
+                    ex_date: 1_000_000,
+                    amount: 1.0,
+                }],
+            },
+            DividendSeries {
+                symbol: "AAPL".to_owned(),
+                provider: Provider::Yahoo,
+                dividends: vec![Dividend {
+                    ex_date: 1_000_000,
+                    amount: 2.0,
+                }],
+            },
+        ];
+        assert!(db.write_dividends_bulk(&duplicate_series).is_err());
+
+        let rows = db.query_dividends(Some(&["AAPL"]), None, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].dividend.amount, 0.82);
     }
 
     #[test]
@@ -1901,7 +2156,7 @@ mod tests {
                 .len(),
             1
         );
-        assert_eq!(db.query_strategy_runs(&result.experiment_id).unwrap().len(), 1);
+        assert_eq!(db.query_strategy_runs(&result.experiment_id, true).unwrap().len(), 1);
 
         let removed = db.delete_experiment(&result.experiment_id).unwrap();
         assert_eq!(removed, 1);
@@ -1911,7 +2166,7 @@ mod tests {
             .query_experiments(Some(std::slice::from_ref(&result.experiment_id)), None, None)
             .unwrap()
             .is_empty());
-        assert!(db.query_strategy_runs(&result.experiment_id).unwrap().is_empty());
+        assert!(db.query_strategy_runs(&result.experiment_id, true).unwrap().is_empty());
     }
 
     // ── query_strategy_runs scalar-cash backward compat ─────────────────
@@ -1919,7 +2174,7 @@ mod tests {
     #[test]
     fn test_query_strategy_runs_empty_for_missing_experiment() {
         let (_dir, db) = make_db();
-        let runs = db.query_strategy_runs("none").unwrap();
+        let runs = db.query_strategy_runs("none", true).unwrap();
         assert!(runs.is_empty());
     }
 
@@ -1932,7 +2187,7 @@ mod tests {
         result.strategies[0].error = Some("strategy crashed".to_owned());
         db.write_experiment(&cfg, &result).unwrap();
 
-        let runs = db.query_strategy_runs(&result.experiment_id).unwrap();
+        let runs = db.query_strategy_runs(&result.experiment_id, true).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].error.as_deref(), Some("strategy crashed"));
     }
@@ -1945,7 +2200,7 @@ mod tests {
         result.strategies[0].is_benchmark = true;
         db.write_experiment(&cfg, &result).unwrap();
 
-        let runs = db.query_strategy_runs(&result.experiment_id).unwrap();
+        let runs = db.query_strategy_runs(&result.experiment_id, true).unwrap();
         assert_eq!(runs.len(), 1);
         assert!(runs[0].is_benchmark);
     }

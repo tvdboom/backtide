@@ -8,15 +8,17 @@ Description: Utility functions to work with strategies.
 import ast
 from collections.abc import Sequence
 import inspect
+import logging
 from pathlib import Path
 from typing import Any
 
 import cloudpickle
-import streamlit as st
 
 from backtide.config import Config
 from backtide.indicators import BaseIndicator, _indicator_deterministic_name
 from backtide.strategies.base import BaseStrategy
+
+logger = logging.getLogger(__name__)
 
 
 def _build_custom_strategy(code: str) -> BaseStrategy:
@@ -108,7 +110,7 @@ def _is_builtin_strategy(strat: Any) -> bool:
     return getattr(type(strat), "__module__", "").startswith("backtide.")
 
 
-def _load_stored_strategies(cfg: Config) -> dict[str, BaseStrategy]:
+def _load_stored_strategies(cfg: Config) -> dict[str, Any]:
     """Load and return the strategy objects from storage."""
     path = Path(cfg.data.storage_path) / "strategies"
 
@@ -118,7 +120,7 @@ def _load_stored_strategies(cfg: Config) -> dict[str, BaseStrategy]:
             with f.open("rb") as fh:
                 strategies[f.stem] = cloudpickle.load(fh)
         except Exception as ex:  # noqa: BLE001
-            st.error(f"Failed to load strategy **{f.stem}**. Exception: {ex}")
+            logger.warning("Failed to load strategy %s: %s", f.stem, ex)
 
     return strategies
 

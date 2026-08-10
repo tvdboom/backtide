@@ -7,15 +7,17 @@ Description: Utility functions to work with indicators.
 
 import ast
 import inspect
+import logging
 from pathlib import Path
 from typing import Any
 
 import cloudpickle
-import streamlit as st
 
 from backtide.config import Config
 from backtide.indicators import BaseIndicator
 from backtide.utils.utils import _make_dummy_bars
+
+logger = logging.getLogger(__name__)
 
 
 def _build_custom_indicator(code: str) -> BaseIndicator:
@@ -91,7 +93,7 @@ def _is_builtin_indicator(ind: Any) -> bool:
     return getattr(type(ind), "__module__", "").startswith("backtide.")
 
 
-def _load_stored_indicators(cfg: Config) -> dict[str, BaseIndicator]:
+def _load_stored_indicators(cfg: Config) -> dict[str, Any]:
     """Load and return the indicator objects from storage."""
     path = Path(cfg.data.storage_path) / "indicators"
 
@@ -101,14 +103,15 @@ def _load_stored_indicators(cfg: Config) -> dict[str, BaseIndicator]:
             with f.open("rb") as fh:
                 indicators[f.stem] = cloudpickle.load(fh)
         except Exception as ex:  # noqa: BLE001
-            st.error(f"Failed to load indicator **{f.stem}**. Exception: {ex}")
+            logger.warning("Failed to load indicator %s: %s", f.stem, ex)
 
     return indicators
 
 
-def _save_indicator(ind: BaseIndicator, name: str, cfg: Config):
+def _save_indicator(ind: Any, name: str, cfg: Config):
     """Pickle an indicator instance to disk."""
     path = Path(cfg.data.storage_path) / "indicators"
+    path.mkdir(parents=True, exist_ok=True)
 
     with (path / f"{name}.pkl").open("wb") as f:
         cloudpickle.dump(ind, f)

@@ -27,8 +27,6 @@ dependencies = [
     "cloudpickle>=3.1.2",
     "numpy>=2.0.0",
     "plotly>=6.7.0",
-    "streamlit>=1.56.0",
-    "streamlit_code_editor>=0.1.22",
     "pandas>=2.3.3",
     "pyyaml>=6.0.3",
     "tzlocal>=5.0",
@@ -96,7 +94,9 @@ python-source = "src"
 module-name = "backtide.core"
 manifest-path = "src/backtide_core/Cargo.toml"
 include = [
-    { path = "tests/**", format = ["sdist"] },
+    { path = "tests/**/*", format = ["sdist"] },
+    { path = "frontend/**/*", format = ["sdist"] },
+    { path = "src/backtide/ui/static/**/*", format = ["sdist", "wheel"] },
 ]
 
 [tool.ruff]
@@ -159,7 +159,6 @@ force-sort-within-sections = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Unused imports
-"app.py" = ["E501"]  # Line too long
 "backtest.py" = ["F401"]  # Unused imports
 "config.py" = ["F401"]  # Unused imports
 "data.py" = ["F401"]  # Unused imports
@@ -176,17 +175,6 @@ force-sort-within-sections = true
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
-
-[tool.coverage.run]
-omit = [
-    "*/ui/app.py",  # Streamlit entry point (navigation wiring only)
-    "*/ui/analysis.py",  # Streamlit page script (tested via AppTest)
-    "*/ui/download.py",  # Streamlit page script (tested via AppTest)
-    "*/ui/indicators.py",  # Streamlit page script (tested via AppTest)
-    "*/ui/results.py",  # Streamlit page script (tested via AppTest)
-    "*/ui/storage.py",  # Streamlit page script (tested via AppTest)
-    "*/ui/strategies.py",  # Streamlit page script (tested via AppTest)
-]
 
 [tool.coverage.report]
 exclude_also = [

@@ -59,7 +59,7 @@ delete_symbols(provider="yahoo")  # norun
 
 ## Storage in the UI
 
-The **Storage** page in the Streamlit application provides a visual overview
+The **Storage** page in the web application provides a visual overview
 of all stored series. From there you can inspect date ranges, row counts and
 sparklines, select series for analysis, or delete them in bulk.
 

@@ -9,13 +9,13 @@ use crate::constants::Symbol;
 use crate::data::models::Provider;
 use crate::data::models::{Instrument, InstrumentType, Interval};
 use crate::data::providers::{Binance, Coinbase, DataProvider, Kraken, YahooFinance};
-use crate::errors::EngineResult;
+use crate::errors::{EngineError, EngineResult};
 use crate::storage::duckdb::DuckDb;
 use crate::storage::traits::Storage;
 use crate::utils::interface::init_logging_with_level;
 use moka::future::Cache;
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use strum::IntoEnumIterator;
 use tokio::runtime::Runtime;
@@ -23,6 +23,9 @@ use tracing::{debug, info};
 
 /// Process-wide configuration singleton.
 static ENGINE: OnceLock<Engine> = OnceLock::new();
+
+/// Serialize only the first engine initialization attempt.
+static ENGINE_INIT: Mutex<()> = Mutex::new(());
 
 /// Cache storage for the engine.
 pub struct EngineCache {
@@ -82,14 +85,25 @@ impl Engine {
     /// Initializes the singleton on first call; subsequent calls are free.
     /// Returns an error if config loading or any provider handshake fails.
     pub fn get() -> EngineResult<&'static Self> {
-        // Replace block with get_or_try_init when it becomes stable
-        if let Some(cfg) = ENGINE.get() {
-            Ok(cfg)
-        } else {
-            let _ = ENGINE.set(Self::init()?);
-            info!("Engine initialized.");
-            Ok(ENGINE.get().unwrap())
+        if let Some(engine) = ENGINE.get() {
+            return Ok(engine);
         }
+
+        let _guard = ENGINE_INIT.lock().map_err(|_| {
+            EngineError::Initialization("initialization lock is poisoned".to_owned())
+        })?;
+        if let Some(engine) = ENGINE.get() {
+            return Ok(engine);
+        }
+
+        let engine = Self::init()?;
+        ENGINE.set(engine).map_err(|_| {
+            EngineError::Initialization("singleton was initialized concurrently".to_owned())
+        })?;
+        info!("Engine initialized.");
+        ENGINE.get().ok_or_else(|| {
+            EngineError::Initialization("singleton is unavailable after initialization".to_owned())
+        })
     }
 
     /// Invalidate all cache in the engine.
@@ -640,15 +654,21 @@ mod tests {
             assert_eq!(cache.range_cache.entry_count(), 0);
 
             // Fill again and clear again
-            cache.instrument_cache.insert("X".to_owned(), Arc::new(Instrument {
-                symbol: "X".to_owned(),
-                name: "X2".to_owned(),
-                base: None,
-                quote: "USD".to_owned(),
-                instrument_type: InstrumentType::Stocks,
-                exchange: "X".to_owned(),
-                provider: Provider::Yahoo,
-            })).await;
+            cache
+                .instrument_cache
+                .insert(
+                    "X".to_owned(),
+                    Arc::new(Instrument {
+                        symbol: "X".to_owned(),
+                        name: "X2".to_owned(),
+                        base: None,
+                        quote: "USD".to_owned(),
+                        instrument_type: InstrumentType::Stocks,
+                        exchange: "X".to_owned(),
+                        provider: Provider::Yahoo,
+                    }),
+                )
+                .await;
             cache.instrument_cache.run_pending_tasks().await;
             assert_eq!(cache.instrument_cache.entry_count(), 1);
 

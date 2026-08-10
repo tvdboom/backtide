@@ -1694,7 +1694,7 @@ fn run_one_strategy(
     // ── Liquidate remaining positions to compute final PnL ──────────────────
 
     if let Some(last_idx) = total_bars.checked_sub(1) {
-        for (sym, qty) in positions.clone() {
+        for (sym, qty) in positions {
             if is_negligible(qty) {
                 continue;
             }
@@ -1739,7 +1739,6 @@ fn run_one_strategy(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1768,7 +1767,9 @@ mod tests {
 
     impl StubProvider {
         fn new() -> Self {
-            Self { instruments: HashMap::new() }
+            Self {
+                instruments: HashMap::new(),
+            }
         }
     }
 
@@ -1806,7 +1807,10 @@ mod tests {
             _: u64,
             _: u64,
         ) -> DataResult<BarDownload> {
-            Ok(BarDownload { bars: vec![], dividends: vec![] })
+            Ok(BarDownload {
+                bars: vec![],
+                dividends: vec![],
+            })
         }
     }
 
@@ -1821,7 +1825,13 @@ mod tests {
         let stub: Arc<dyn DataProvider> = Arc::new(StubProvider::new());
         let providers = InstrumentType::iter().map(|it| (it, stub.clone())).collect();
         (
-            Engine { config, rt, providers, db: Box::new(db), cache: EngineCache::new() },
+            Engine {
+                config,
+                rt,
+                providers,
+                db: Box::new(db),
+                cache: EngineCache::new(),
+            },
             tmp,
         )
     }
@@ -1904,8 +1914,9 @@ mod tests {
         let (engine, _tmp) = make_engine();
         write_bars(&engine, "AAPL", vec![make_bar(1_000, 100.0), make_bar(2_000, 101.0)]);
 
-        let map =
-            engine.load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, None, None).unwrap();
+        let map = engine
+            .load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, None, None)
+            .unwrap();
         let bars = map.get("AAPL").unwrap();
         assert_eq!(bars.len(), 2);
         assert_eq!(bars[0].close, 100.0);
@@ -1916,9 +1927,14 @@ mod tests {
     fn load_bars_sorted_by_timestamp() {
         let (engine, _tmp) = make_engine();
         // Write in reverse order
-        write_bars(&engine, "AAPL", vec![make_bar(3_000, 103.0), make_bar(1_000, 101.0), make_bar(2_000, 102.0)]);
-        let map =
-            engine.load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, None, None).unwrap();
+        write_bars(
+            &engine,
+            "AAPL",
+            vec![make_bar(3_000, 103.0), make_bar(1_000, 101.0), make_bar(2_000, 102.0)],
+        );
+        let map = engine
+            .load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, None, None)
+            .unwrap();
         let bars = map.get("AAPL").unwrap();
         assert_eq!(bars[0].open_ts, 1_000);
         assert_eq!(bars[1].open_ts, 2_000);
@@ -1928,7 +1944,11 @@ mod tests {
     #[test]
     fn load_bars_start_filter_excludes_early_bars() {
         let (engine, _tmp) = make_engine();
-        write_bars(&engine, "AAPL", vec![make_bar(100, 100.0), make_bar(200, 101.0), make_bar(300, 102.0)]);
+        write_bars(
+            &engine,
+            "AAPL",
+            vec![make_bar(100, 100.0), make_bar(200, 101.0), make_bar(300, 102.0)],
+        );
         let map = engine
             .load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, Some(200), None)
             .unwrap();
@@ -1940,7 +1960,11 @@ mod tests {
     #[test]
     fn load_bars_end_filter_excludes_late_bars() {
         let (engine, _tmp) = make_engine();
-        write_bars(&engine, "AAPL", vec![make_bar(100, 100.0), make_bar(200, 101.0), make_bar(300, 102.0)]);
+        write_bars(
+            &engine,
+            "AAPL",
+            vec![make_bar(100, 100.0), make_bar(200, 101.0), make_bar(300, 102.0)],
+        );
         let map = engine
             .load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, None, Some(200))
             .unwrap();
@@ -1959,7 +1983,13 @@ mod tests {
             vec![make_bar(100, 1.0), make_bar(200, 2.0), make_bar(300, 3.0), make_bar(400, 4.0)],
         );
         let map = engine
-            .load_bars(&["AAPL".to_owned()], Interval::OneDay, Provider::Yahoo, Some(200), Some(400))
+            .load_bars(
+                &["AAPL".to_owned()],
+                Interval::OneDay,
+                Provider::Yahoo,
+                Some(200),
+                Some(400),
+            )
             .unwrap();
         let bars = map.get("AAPL").unwrap();
         assert_eq!(bars.len(), 2);
@@ -2110,8 +2140,7 @@ mod tests {
         let aligned = make_aligned("AAPL", bars);
         let indicators = HashMap::new();
         let profiles = vec![make_profile("AAPL")];
-        let timeline: Vec<i64> =
-            (0..n).map(|i| 1_000_000i64 + i as i64 * 3600).collect();
+        let timeline: Vec<i64> = (0..n).map(|i| 1_000_000i64 + i as i64 * 3600).collect();
         let fx = FxTable::new("USD");
 
         let result = run_one_strategy(
@@ -2278,13 +2307,12 @@ mod tests {
 
         let aligned = make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0))]);
         let indicators = HashMap::new();
-        let mut profiles = vec![];
-        profiles.push(InstrumentProfile {
+        let profiles = vec![InstrumentProfile {
             instrument: make_instrument("AAPL"),
             earliest_ts: [(Interval::OneDay, 1_000u64)].into(),
             latest_ts: [(Interval::OneDay, 5_000u64)].into(),
             legs: vec![],
-        });
+        }];
         let timeline = vec![1_000i64];
         let fx = FxTable::new("USD");
 

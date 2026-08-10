@@ -8,7 +8,7 @@ pub mod fx;
 pub mod interface;
 mod margin;
 pub mod models;
-mod orders;
+pub(crate) mod orders;
 pub mod utils;
 
 /// Register the Python interface for `backtide.core.backtest`.

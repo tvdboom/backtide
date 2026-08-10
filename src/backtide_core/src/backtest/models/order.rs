@@ -77,8 +77,18 @@ impl ToSql for OrderId {
 impl FromSql for OrderId {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         let s = value.as_str()?;
-        Uuid::parse_str(s).map(OrderId).map_err(|e| FromSqlError::Other(Box::new(e)))
+        parse_stored_order_id(s).map_err(|error| FromSqlError::Other(Box::new(error)))
     }
+}
+
+fn parse_stored_order_id(value: &str) -> Result<OrderId, uuid::Error> {
+    if value.len() == 12 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        let mut normalized = String::with_capacity(32);
+        normalized.push_str(value);
+        normalized.push_str("00000000000000000000");
+        return Uuid::parse_str(&normalized).map(OrderId);
+    }
+    Uuid::parse_str(value).map(OrderId)
 }
 
 // PyO3 conversions so `get_all` / `set_all` work on the `id` field.
@@ -443,5 +453,31 @@ impl Order {
                 Some(self.id.to_string()),
             ),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_stored_order_id;
+
+    #[test]
+    fn parses_current_stored_order_id() {
+        let value = "d3c2bf141cd9498caaf8072da0103790";
+
+        let parsed = parse_stored_order_id(value).expect("valid UUID");
+
+        assert_eq!(parsed.to_string(), value);
+    }
+
+    #[test]
+    fn expands_legacy_stored_order_id() {
+        let parsed = parse_stored_order_id("d3c2bf141cd9").expect("valid legacy ID");
+
+        assert_eq!(parsed.to_string(), "d3c2bf141cd900000000000000000000");
+    }
+
+    #[test]
+    fn rejects_invalid_stored_order_id() {
+        assert!(parse_stored_order_id("not-an-order").is_err());
     }
 }

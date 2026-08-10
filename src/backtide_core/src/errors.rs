@@ -26,6 +26,10 @@ pub enum EngineError {
     #[error("{0}")]
     Experiment(String),
 
+    /// Process-wide engine initialization could not be coordinated.
+    #[error("Engine initialization failed: {0}")]
+    Initialization(String),
+
     /// A filesystem or I/O operation failed.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

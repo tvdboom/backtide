@@ -233,7 +233,7 @@ class DisplayConfig:
         If `None`, no images are loaded.
 
     address : str | None, default=None
-        The address where the streamlit server will listen for client and browser
+        The address where the local web server will listen for client and browser
         connections. Use this if you want to bind the server to a specific
         address. If set, the server will only be available from this address,
         and not from any aliases (like localhost).

@@ -9,9 +9,9 @@ related to this package. The most frequent terms are described hereunder.
 [](){#nom-application}
 <strong id="application">application</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
-The interactive web application built on [Streamlit] that ships with Backtide. It
+The local Vue web application that ships with Backtide. It
 provides a graphical interface for downloading data, configuring experiments,
-running strategies and analyzing results, without writing any Python code. Launch
+running strategies, paper trading, and analyzing results without writing Python. Launch
 it with [`backtide launch`][launch]. Read more in the [user guide][application].
 </div>
 

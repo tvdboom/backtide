@@ -618,6 +618,69 @@ class TestRunExperimentKwargs:
 
         assert ex.value.cfg.general.name == "my-exp"
 
+    def test_flat_falsy_kwargs_override_config(self, monkeypatch):
+        """Explicit falsy flat kwargs are not replaced by config defaults."""
+        captured = {}
+
+        def _fake_run_experiment(cfg, _verbose, _strategy_overrides, _indicator_overrides):
+            captured["config"] = cfg
+            return object()
+
+        monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
+
+        cfg = ExperimentConfig(
+            data=DataExpConfig(symbols=["AAPL"], full_history=True),
+            strategy=StrategyExpConfig(strategies=["BuyAndHold"]),
+            exchange=ExchangeExpConfig(partial_fills=True, allow_margin=True),
+            engine=EngineExpConfig(trade_on_close=True, risk_free_rate=0.05),
+        )
+        run_experiment(
+            cfg,
+            full_history=False,
+            partial_fills=False,
+            allow_margin=False,
+            trade_on_close=False,
+            risk_free_rate=0.0,
+            verbose=False,
+        )
+
+        resolved = captured["config"]
+        assert resolved.data.full_history is False
+        assert resolved.exchange.partial_fills is False
+        assert resolved.exchange.allow_margin is False
+        assert resolved.engine.trade_on_close is False
+        assert resolved.engine.risk_free_rate == 0.0
+
+    def test_flat_kwargs_override_section_objects(self, monkeypatch):
+        """Flat fields take precedence while preserving other section fields."""
+        captured = {}
+
+        def _fake_run_experiment(cfg, _verbose, _strategy_overrides, _indicator_overrides):
+            captured["config"] = cfg
+            return object()
+
+        monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
+
+        run_experiment(
+            data=DataExpConfig(symbols=["AAPL"], interval="1d", full_history=True),
+            interval="1h",
+            full_history=False,
+            strategy=StrategyExpConfig(benchmark="SPY", strategies=["BuyAndHold"]),
+            benchmark=None,
+            engine=EngineExpConfig(warmup_period=10, trade_on_close=True),
+            trade_on_close=False,
+            verbose=False,
+        )
+
+        resolved = captured["config"]
+        assert resolved.data.symbols == ["AAPL"]
+        assert str(resolved.data.interval) == "1h"
+        assert resolved.data.full_history is False
+        assert resolved.strategy.benchmark is None
+        assert resolved.strategy.strategies == ["BuyAndHold"]
+        assert resolved.engine.warmup_period == 10
+        assert resolved.engine.trade_on_close is False
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # run_experiment polymorphic strategies / indicators

@@ -5,7 +5,6 @@ Description: Shared fixtures for the test suite.
 
 """
 
-import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -85,23 +84,3 @@ def sample_profile(sample_instrument):
         latest_ts={Interval("1d"): 2_000_000},
         legs=[],
     )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Streamlit test helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def _app():
-    """Provide a working directory so the app finds its assets."""
-    original = os.getcwd()
-    root = original
-    while not os.path.isdir(os.path.join(root, "images")):
-        parent = os.path.dirname(root)
-        if parent == root:
-            break
-        root = parent
-    os.chdir(root)
-    yield
-    os.chdir(original)

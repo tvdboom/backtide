@@ -4,7 +4,7 @@
 
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
-version := shell("uv run python -c \"import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])\"")
+version := shell("uv run --no-sync python -c \"import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])\"")
 
 # List available recipes
 [private]
@@ -59,7 +59,21 @@ docs:
     $env:PYTHONPATH="."; uv run mkdocs serve
 
 launch:
-    uv run backtide launch
+    # Launch the installed development build without an implicit maturin rebuild.
+    # Run `just build` explicitly after changing Rust code.
+    uv run --no-sync backtide launch
+
+# Install frontend development dependencies (not required by package users)
+frontend-sync:
+    pnpm --dir frontend install --frozen-lockfile
+
+# Run frontend unit tests
+frontend-test:
+    pnpm --dir frontend test
+
+# Rebuild the production SPA bundled into Python wheels
+frontend-build:
+    pnpm --dir frontend build
 
 publish:
     git --no-pager status

@@ -207,7 +207,7 @@ impl Exchange {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown exchange: {s}")))
     }
 
-    /// Make the class pickable (required by streamlit).
+    /// Support Python pickle serialization.
     pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
         let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))

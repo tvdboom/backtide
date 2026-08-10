@@ -62,6 +62,11 @@ backtide/                           # Repository root
 ├── backtide.config.toml            # Default runtime configuration file
 ├── .pre-commit-config.yaml         # Pre-commit hook definitions
 │
+├── frontend/                       # Vue 3 + Vite source and Vitest tests
+│   ├── src/                        # Components, pages, styles, and API client
+│   ├── package.json                # Frontend development scripts
+│   └── pnpm-lock.yaml              # Locked frontend dependencies
+│
 ├── src/                            # Python package + Rust crate live under src/
 │   ├── backtide/                   # Python package (public API)
 │   │   ├── __init__.py
@@ -69,23 +74,19 @@ backtide/                           # Repository root
 │   │   ├── cli.py                  # Click CLI entry point (backtide launch / download)
 │   │   ├── config.py               # Configuration re-exports
 │   │   ├── data.py                 # Data re-exports
+│   │   ├── live.py                 # Live market data and paper-trading re-exports
 │   │   ├── storage.py              # Storage re-exports
 │   │   ├── core.*.pyd / .so        # Compiled Rust extension (built by maturin)
 │   │   ├── core/                   # Type stubs (.pyi) for the compiled extension
 │   │   ├── analysis/               # Plotting & statistics functions
 │   │   ├── indicators/             # Technical indicators (Python wrappers + base class)
 │   │   ├── strategies/             # Trading strategies (Python wrappers + base class)
-│   │   ├── ui/                     # Streamlit interactive UI
-│   │   │   ├── app.py              # Main Streamlit application (navigation)
-│   │   │   ├── analysis.py         # Analysis page
-│   │   │   ├── download.py         # Download page
-│   │   │   ├── experiment.py       # Experiment page
-│   │   │   ├── home.py             # Home dashboard page
-│   │   │   ├── indicators.py       # Indicators page
-│   │   │   ├── results.py          # Results page
-│   │   │   ├── storage.py          # Storage page
-│   │   │   ├── strategies.py       # Strategies page
-│   │   │   └── utils.py            # UI helpers
+│   │   ├── ui/                     # Local HTTP/JSON service for the Vue app
+│   │   │   ├── app.py              # Compatibility entry point
+│   │   │   ├── server.py           # Static and JSON HTTP server
+│   │   │   ├── services.py         # Data/backtest/analysis service facade
+│   │   │   ├── live.py             # Background paper-session coordinator
+│   │   │   └── static/             # Generated production frontend bundle
 │   │   └── utils/                  # Python utility modules
 │   │       ├── constants.py
 │   │       ├── enum.py
@@ -104,12 +105,14 @@ backtide/                           # Repository root
 │       │   ├── backtest/           # Backtest models, indicators & strategies
 │       │   ├── config/             # Configuration models & parsing
 │       │   ├── data/               # Data layer: models & providers (Yahoo, Binance, Kraken, Coinbase)
+│       │   ├── live/               # WebSocket feeds and deterministic paper engine
 │       │   ├── storage/            # Storage layer: DuckDB backend & Storage trait
 │       │   └── utils/              # Utility functions & HTTP helpers
 │       └── benches/                # Criterion.rs benchmarks
 │           ├── storage_bench.rs    # DuckDB storage throughput / latency benchmarks
 │           ├── data_bench.rs       # Live API download latency benchmarks
-│           └── backtest_bench.rs   # Core strategy runtime benchmarks
+│           ├── backtest_bench.rs   # Core strategy runtime benchmarks
+│           └── live_bench.rs       # Paper-engine throughput benchmarks
 │
 ├── tests/                          # Python unit tests (pytest)
 │   ├── __init__.py
@@ -119,6 +122,7 @@ backtide/                           # Repository root
 │   ├── test_cli.py
 │   ├── test_config.py
 │   ├── test_data.py
+│   ├── test_live.py
 │   ├── test_sizing.py
 │   ├── test_storage.py
 │   ├── test_ui.py
@@ -154,9 +158,9 @@ backtide/                           # Repository root
 | Storage        | **DuckDB** (embedded OLAP database)                                          |
 | Python API     | Re-export wrappers around the compiled `backtide.core` module                |
 | CLI            | [Click](https://click.palletsprojects.com)                                   |
-| UI             | [Streamlit](https://streamlit.io)                                            |
+| UI             | [Vue](https://vuejs.org/) + [Vite](https://vite.dev/) served by the local Python API |
 | Docs           | [MkDocs Material](https://squidfunk.github.io/mkdocs-material/)             |
-| Testing        | [pytest](https://docs.pytest.org) (Python) · `cargo test` (Rust)            |
+| Testing        | [pytest](https://docs.pytest.org) (Python) · `cargo test` (Rust) · [Vitest](https://vitest.dev/) (frontend) |
 | Linting        | [Ruff](https://docs.astral.sh/ruff/) (Python) · `cargo clippy` / `cargo fmt` (Rust) |
 | Benchmarking   | [Criterion.rs](https://github.com/bheisler/criterion.rs)                    |
 | Task runner    | [tox](https://tox.wiki) with the [tox-uv](https://github.com/tox-dev/tox-uv) plugin · [just](https://just.systems) for local recipes |

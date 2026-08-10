@@ -22,6 +22,7 @@ The stubs are written to:
     backtide/core/config.pyi
     backtide/core/data.pyi
     backtide/core/indicators.pyi
+    backtide/core/live.pyi
     backtide/core/sizers.pyi
     backtide/core/storage.pyi
     backtide/core/strategies.pyi
@@ -54,6 +55,7 @@ SUBMODULES = [
     "config",
     "data",
     "indicators",
+    "live",
     "sizers",
     "storage",
     "strategies",

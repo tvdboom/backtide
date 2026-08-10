@@ -1,7 +1,7 @@
 //! Experiment configuration data model.
 //!
 //! A complete specification for a single backtest experiment, split into
-//! logical sections that mirror the tabs on the Streamlit experiment page.
+//! logical sections that mirror the controls on the web application's experiment page.
 
 use crate::backtest::models::*;
 use crate::constants::{Positions, Symbol};
@@ -214,6 +214,7 @@ impl DataExpConfig {
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PortfolioExpConfig {
     pub initial_cash: u64,
     pub base_currency: Currency,
@@ -296,6 +297,7 @@ impl PortfolioExpConfig {
 /// - backtide.backtest:PortfolioExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct StrategyExpConfig {
     pub benchmark: Option<String>,
     pub strategies: Vec<String>,
@@ -355,6 +357,7 @@ impl StrategyExpConfig {
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct IndicatorExpConfig {
     #[serde(default)]
     pub indicators: Vec<String>,
@@ -470,6 +473,7 @@ impl IndicatorExpConfig {
 /// - backtide.backtest:PortfolioExpConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ExchangeExpConfig {
     pub commission_type: CommissionType,
     pub commission_pct: f64,
@@ -642,6 +646,7 @@ impl ExchangeExpConfig {
 /// - backtide.backtest:ExperimentConfig
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EngineExpConfig {
     pub warmup_period: u32,
     pub trade_on_close: bool,
@@ -800,6 +805,23 @@ impl ExperimentConfig {
             exchange: self.exchange.clone(),
             engine: self.engine.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExperimentConfigInner;
+
+    #[test]
+    fn deserializes_legacy_sections_with_current_defaults() {
+        let text = "[exchange]\ncommission_pct = 0.25\n\n[engine]\nwarmup_period = 12\n";
+
+        let parsed: ExperimentConfigInner = toml::from_str(text).expect("legacy configuration");
+
+        assert_eq!(parsed.exchange.commission_pct, 0.25);
+        assert!(!parsed.exchange.raise_on_short_violation);
+        assert_eq!(parsed.engine.warmup_period, 12);
+        assert_eq!(parsed.engine.empty_bar_policy, Default::default());
     }
 }
 

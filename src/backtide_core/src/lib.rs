@@ -6,6 +6,7 @@ pub mod data;
 pub mod engine;
 pub mod errors;
 pub mod indicators;
+pub mod live;
 pub mod sizers;
 pub mod storage;
 pub mod strategies;
@@ -44,6 +45,7 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     config::register(m)?;
     data::register(m)?;
     indicators::register(m)?;
+    live::register(m)?;
     sizers::register(m)?;
     storage::register(m)?;
     strategies::register(m)?;
