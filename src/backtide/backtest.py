@@ -24,6 +24,7 @@ from backtide.core.backtest import (
     ExperimentStatus,
     GeneralExpConfig,
     IndicatorExpConfig,
+    MetricExpConfig,
     Order,
     OrderRecord,
     OrderStatus,
@@ -107,7 +108,7 @@ def run_experiment(
         * Flat keyword arguments matching any field of the sub-configs
           (e.g., `name`, `symbols`, `interval`, `initial_cash`).
 
-        The `strategies` and `indicators` keyword arguments additionally accept,
+        The `strategies`, `indicators`, and `metrics` keyword arguments additionally accept,
         beyond a list of stored names, any of:
 
         * A single string (name of a stored strategy / indicator).
@@ -166,7 +167,8 @@ def run_experiment(
         # `indicators` is both a section name and its sole field name. A typed
         # section object must be unwrapped; every other explicit value is the
         # flat field override and may intentionally be falsy or `None`.
-        if key in kwargs and not (key == section and isinstance(kwargs[key], IndicatorExpConfig)):
+        section_types = (IndicatorExpConfig, MetricExpConfig)
+        if key in kwargs and not (key == section and isinstance(kwargs[key], section_types)):
             return kwargs.pop(key)
 
         section_config = kwargs.get(section)
@@ -177,6 +179,7 @@ def run_experiment(
 
     strategies, strategy_overrides = resolve_polymorphic_param(get("strategies", "strategy"))
     indicators, indicator_overrides = resolve_polymorphic_param(get("indicators", "indicators"))
+    metrics, metric_overrides = resolve_polymorphic_param(get("metrics", "metrics"))
 
     general = GeneralExpConfig(
         name=get("name", "general").strip() or str(uuid.uuid4())[:8],
@@ -211,6 +214,12 @@ def run_experiment(
 
     indicators_config = IndicatorExpConfig(indicators=indicators)
     kwargs.pop("indicators", None)
+
+    metrics_config = MetricExpConfig(
+        metrics=metrics,
+        main_metric=get("main_metric", "metrics"),
+    )
+    kwargs.pop("metrics", None)
 
     exchange = ExchangeExpConfig(
         commission_type=get("commission_type", "exchange"),
@@ -251,6 +260,7 @@ def run_experiment(
         portfolio=portfolio,
         strategy=strategy,
         indicators=indicators_config,
+        metrics=metrics_config,
         exchange=exchange,
         engine=engine,
     )
@@ -265,7 +275,13 @@ def run_experiment(
         raise ValueError("Experiment configuration has no strategies.")
 
     try:
-        result = _run_experiment(cfg, verbose, strategy_overrides, indicator_overrides)
+        result = _run_experiment(
+            cfg,
+            verbose,
+            strategy_overrides,
+            indicator_overrides,
+            metric_overrides,
+        )
     except KeyboardInterrupt:
         _cleanup_experiment(None, cfg.general.name)
         raise ExperimentAborted("Experiment aborted by user.") from None

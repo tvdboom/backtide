@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AnalysisPage from './analysis-page.vue'
 
 const { api, post } = vi.hoisted(() => ({
@@ -31,6 +31,7 @@ describe('analysis page', () => {
 
     expect(wrapper.find('.chart-title .badge').exists()).toBe(false)
     expect(wrapper.get('.chart-title').text()).not.toContain('1 series')
+    expect(wrapper.text()).not.toContain('Run analysis')
   })
 
   it('preselects requested download symbols without conversion legs', async () => {
@@ -45,6 +46,50 @@ describe('analysis page', () => {
 
     expect(post).toHaveBeenCalledWith('/api/analysis', expect.objectContaining({
       symbols: ['AAPL']
+    }))
+  })
+
+  afterEach(() => vi.useRealTimers())
+
+  it('uses the interval requested by a storage row', async () => {
+    api.mockResolvedValue([
+      { symbol: 'AAPL', interval: '1d', provider: 'yahoo', name: 'Apple Inc.' },
+      { symbol: 'AAPL', interval: '15m', provider: 'yahoo', name: 'Apple Inc.' }
+    ])
+    sessionStorage.setItem('backtide:analysis-symbols', JSON.stringify(['AAPL']))
+    sessionStorage.setItem('backtide:analysis-interval', '15m')
+
+    mount(AnalysisPage, { props: { bootstrap: {} } })
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith('/api/analysis', expect.objectContaining({
+      symbols: ['AAPL'], interval: '15m'
+    }))
+    expect(sessionStorage.getItem('backtide:analysis-interval')).toBeNull()
+  })
+
+  it('refreshes automatically when interval or price changes', async () => {
+    vi.useFakeTimers()
+    api.mockResolvedValue([
+      { symbol: 'AAPL', interval: '1d', provider: 'yahoo', name: 'Apple Inc.' },
+      { symbol: 'AAPL', interval: '15m', provider: 'yahoo', name: 'Apple Inc.' }
+    ])
+    const wrapper = mount(AnalysisPage, { props: { bootstrap: {} } })
+    await flushPromises()
+    post.mockClear()
+
+    await wrapper.findAll('select')[0].setValue('15m')
+    await vi.runAllTimersAsync()
+    await flushPromises()
+    expect(post).toHaveBeenLastCalledWith('/api/analysis', expect.objectContaining({
+      interval: '15m'
+    }))
+
+    await wrapper.findAll('select')[1].setValue('open')
+    await vi.runAllTimersAsync()
+    await flushPromises()
+    expect(post).toHaveBeenLastCalledWith('/api/analysis', expect.objectContaining({
+      interval: '15m', price_col: 'open'
     }))
   })
 })

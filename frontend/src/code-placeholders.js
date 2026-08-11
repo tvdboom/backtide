@@ -75,3 +75,35 @@ class MyIndicator(BaseIndicator):
 
 MyIndicator()`
 }
+
+export function metricCodePlaceholder(dataframeClass = 'pd.DataFrame') {
+  return `from backtide.metrics import BaseMetric
+
+
+class MyMetric(BaseMetric):
+    def compute(self, equity_curve, trades):
+        """Compute the metric value.
+
+        Parameters
+        ----------
+        equity_curve : ${dataframeClass}
+            Historical equity, return, and drawdown values.
+
+        trades : ${dataframeClass}
+            Completed trades and their profit and loss.
+
+        Returns
+        -------
+        float
+            The metric value.
+
+        """
+        # Write your logic here
+
+
+
+        return result
+
+
+MyMetric()`
+}

@@ -17,7 +17,7 @@ const bootstrap = {
     instrument_types: ['Stocks', 'ETF', 'Forex', 'Crypto'],
     intervals: ['1d', '1w']
   },
-  display: { logokit_api_key: 'test token' }
+  display: { logokit_api_key: 'test token', date_format: 'DD-MM-YYYY' }
 }
 
 const plan = {
@@ -87,7 +87,7 @@ describe('download page', () => {
     expect(selectors[1].props('plainOptions')).toBe(true)
 
     await selectors[0].get('input').trigger('focus')
-    await selectors[0].get('.search-menu button').trigger('mousedown')
+    await selectors[0].get('.search-menu button').trigger('click')
     await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
 
@@ -109,9 +109,10 @@ describe('download page', () => {
     )
     const interval = wrapper.get('.download-interval-row').text()
     expect(interval).toContain('Provider availability')
+    expect(interval).toContain('6 years 224 days')
     expect(interval).toContain('Download range')
-    expect(interval).toContain('2020-01-01')
-    expect(interval).toContain('2026-08-10')
+    expect(interval).toContain('01-01-2020')
+    expect(interval).toContain('10-08-2026')
     expect(wrapper.get('.download-row-value').text()).toContain('1,650bars')
   })
 
@@ -121,7 +122,7 @@ describe('download page', () => {
 
     const symbolSelect = wrapper.findAllComponents(SearchSelect)[0]
     await symbolSelect.get('input').trigger('focus')
-    await symbolSelect.get('.search-menu button').trigger('mousedown')
+    await symbolSelect.get('.search-menu button').trigger('click')
     await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
 
@@ -144,9 +145,14 @@ describe('download page', () => {
     const wrapper = mount(DownloadPage, { props: { bootstrap } })
     await flushPromises()
 
+    await wrapper.get('.wide-control').findAll('button')[1].trigger('click')
+    await flushPromises()
     const symbolSelect = wrapper.findAllComponents(SearchSelect)[0]
     await symbolSelect.get('input').trigger('focus')
-    await symbolSelect.get('.search-menu button').trigger('mousedown')
+    await symbolSelect.get('.search-menu button').trigger('click')
+    const intervalSelect = wrapper.findAllComponents(SearchSelect)[1]
+    await intervalSelect.get('input').trigger('focus')
+    await intervalSelect.get('.search-menu button').trigger('click')
     await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
 
@@ -162,6 +168,9 @@ describe('download page', () => {
     expect(wrapper.get('.job-card').text()).toContain('Download complete')
     expect(wrapper.get('.job-card').text()).toContain('2 series downloaded and stored locally.')
     expect(wrapper.find('.job-card .spinner').exists()).toBe(false)
+    expect(wrapper.get('.wide-control button.active').text()).toContain('ETF')
+    expect(symbolSelect.props('modelValue')).toEqual([])
+    expect(intervalSelect.props('modelValue')).toEqual(['1d'])
 
     await wrapper.get('.job-card button').trigger('click')
     expect(wrapper.emitted('navigate')).toEqual([['analysis']])
@@ -187,6 +196,21 @@ describe('download page', () => {
       source: 'catalog',
       limit: 1500
     })
+  })
+
+  it('loads a logo for a selected custom symbol outside the current catalog', async () => {
+    const wrapper = mount(DownloadPage, { props: { bootstrap } })
+    await flushPromises()
+
+    const input = wrapper.get('#download-symbols')
+    await input.setValue('AVIANRO')
+    await input.trigger('keydown.enter')
+
+    expect(wrapper.get('.tag').text()).toContain('AVIANRO')
+    expect(wrapper.get('.selected-symbol-logo img').attributes('src')).toBe(
+      'https://assets.parqet.com/logos/symbol/AVIANRO?format=png&size=64'
+    )
+    expect(wrapper.get('.logo-attribution').text()).toContain('Parqet')
   })
 
   it('surfaces symbol catalog failures in the form', async () => {

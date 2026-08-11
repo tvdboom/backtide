@@ -14,13 +14,14 @@ describe('ChartPanel', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('draws a figure that already exists when the component mounts', async () => {
-    const figure = { data: [{ x: [1], y: [2] }], layout: { title: 'Returns' } }
+    const figure = { data: [{ x: [1], y: [2] }], layout: { title: 'Returns', width: 900 } }
 
     const wrapper = mount(ChartPanel, { props: { figure } })
     await vi.waitFor(() => expect(plotly.react).toHaveBeenCalledOnce())
 
     expect(plotly.react.mock.calls[0][1]).toEqual(figure.data)
     expect(plotly.react.mock.calls[0][2].legend.bgcolor).toBe('rgba(0, 0, 0, 0)')
+    expect(plotly.react.mock.calls[0][2].width).toBeUndefined()
     wrapper.unmount()
   })
 

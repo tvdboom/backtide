@@ -269,6 +269,7 @@ mod tests {
             portfolio: Default::default(),
             strategy: Default::default(),
             indicators: Default::default(),
+            metrics: Default::default(),
             exchange,
             engine: Default::default(),
         }

@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import {
   cloneApiState,
+  configuredPlotlyDateTimeFormat,
   consumeExperimentDraft,
   experimentOptionValue,
   flattenFills,
+  formatConfiguredDate,
+  formatConfiguredDateTime,
+  formatConfiguredTime,
+  formatDaySpan,
+  formatIntervalLabel,
   formatResultMetric,
   instrumentLogoUrl,
   paperEquitySeries,
   resolvePage,
+  selectedInstrumentLogoUrl,
   symbolsForAnalysis
 } from './state'
 
@@ -88,5 +95,47 @@ describe('result and route state', () => {
       'https://img.logokit.com/ticker/EURUSD%3ACUR?token=token'
     )
     expect(instrumentLogoUrl('AAPL', 'Stocks', '')).toBe('')
+  })
+
+  it('uses lowercase m for minute intervals', () => {
+    expect(formatIntervalLabel('FifteenMinutes')).toBe('15m')
+    expect(formatIntervalLabel('15M')).toBe('15m')
+    expect(formatIntervalLabel('15 M')).toBe('15m')
+  })
+
+  it('formats long day spans as years and remaining days', () => {
+    expect(formatDaySpan(9000)).toBe('24 years 240 days')
+    expect(formatDaySpan(364)).toBe('364 days')
+    expect(formatDaySpan(365)).toBe('1 year')
+    expect(formatDaySpan(366)).toBe('1 year 1 day')
+  })
+
+  it('formats dates from the backend display configuration with an ISO fallback', () => {
+    expect(formatConfiguredDate('2026-08-11', { date_format: 'DD-MM-YYYY' })).toBe('11-08-2026')
+    expect(formatConfiguredDate('2026-08-11', { date_format: 'MM/DD/YYYY' })).toBe('08/11/2026')
+    expect(formatConfiguredDate('2026-08-11', {})).toBe('2026-08-11')
+    expect(formatConfiguredDate('2026-08-11', { date_format: 'invalid' })).toBe('2026-08-11')
+  })
+
+  it('formats timestamps with the configured time pattern and timezone', () => {
+    const timestamp = Date.UTC(2026, 7, 11, 19, 5, 7) / 1000
+    const display = {
+      date_format: 'DD-MM-YYYY',
+      datetime_format: 'DD-MM-YYYY HH:MM',
+      timezone: 'UTC'
+    }
+
+    expect(formatConfiguredDateTime(timestamp, display)).toBe('11-08-2026 19:05')
+    expect(formatConfiguredTime(timestamp, { time_format: 'hh:mm a', timezone: 'UTC' })).toBe('07:05 pm')
+    expect(configuredPlotlyDateTimeFormat(display)).toBe('%d-%m-%Y %H:%M')
+  })
+
+  it('builds directly loadable selected-symbol logo URLs', () => {
+    expect(selectedInstrumentLogoUrl('ABN.AS', 'Stocks')).toBe(
+      'https://assets.parqet.com/logos/symbol/ABN.AS?format=png&size=64'
+    )
+    expect(selectedInstrumentLogoUrl('BTC-USD', 'Crypto')).toBe(
+      'https://assets.parqet.com/logos/crypto/BTC?format=png&size=64'
+    )
   })
 })

@@ -15,20 +15,19 @@
       <p>{{ loadError }}</p>
       <button class="secondary" type="button" @click="load">Try again</button>
     </section>
-    <section v-else-if="!catalog.saved.length" class="panel empty-state large"><Library :size="30" /><h3>No saved {{ title.toLowerCase() }}</h3><p>Add a built-in preset or write a custom implementation.</p></section>
+    <section v-else-if="!allItems.length" class="panel empty-state large"><Library :size="30" /><h3>{{ isMetric ? `No ${title.toLowerCase()}` : `No saved ${title.toLowerCase()}` }}</h3><p>{{ isMetric ? 'Write a custom implementation to get started.' : 'Add a built-in preset or write a custom implementation.' }}</p></section>
     <section v-else-if="!filtered.length" class="panel empty-state large"><Search :size="30" /><h3>No matching {{ title.toLowerCase() }}</h3><p>Try changing your search or filter.</p></section>
     <section v-else class="library-grid">
       <article v-for="item in filtered" :key="item.name" class="library-card">
-        <div class="library-card-top"><div class="metric-icon"><component :is="isStrategy ? Bot : Shapes" :size="20" /></div><span class="badge">{{ item.builtin ? 'Built-in' : 'Custom' }}</span><button class="icon-button" :aria-label="`Edit ${item.name}`" @click="openEdit(item)"><Pencil :size="16" /></button><button class="icon-button danger" :aria-label="`Delete ${item.name}`" @click="pendingDelete = item.name"><Trash2 :size="16" /></button></div>
-        <h3>{{ item.name }}</h3><span class="code-name">{{ item.type }}</span><p>{{ item.description }}</p>
-        <details v-if="item.source"><summary>Source code</summary><PythonEditor :model-value="item.source" readonly class="source-preview" /></details>
+        <div class="library-card-top"><div class="metric-icon"><LibraryAssetIcon :kind="assetKind" :builtin="item.builtin" /></div><span class="badge">{{ item.builtin ? 'Built-in' : 'Custom' }}</span><button v-if="!isMetric || !item.builtin" class="icon-button" :aria-label="`Edit ${item.name}`" @click="openEdit(item)"><Pencil :size="16" /></button><button v-if="!isMetric || !item.builtin" class="icon-button danger" :aria-label="`Delete ${item.name}`" @click="pendingDelete = item.name"><Trash2 :size="16" /></button></div>
+        <h3>{{ item.name }}</h3><span v-if="!isMetric" class="code-name">{{ item.type }}</span><p>{{ item.description }}</p>
       </article>
     </section>
 
     <div v-if="editor" class="modal-layer" @mousedown.self="closeEditor">
       <form class="modal panel library-editor" @submit.prevent="save">
         <div class="panel-header"><div><span class="eyebrow">{{ isEditing ? 'Saved reusable asset' : 'New reusable asset' }}</span><h3>{{ isEditing ? 'Edit' : 'Add' }} {{ singular }}</h3></div><button type="button" class="icon-button" aria-label="Close" @click="closeEditor"><X /></button></div>
-        <div class="segmented library-editor-mode"><button type="button" :class="{ active: editor === 'builtin' }" @click="selectEditor('builtin')">Built-in</button><button type="button" :class="{ active: editor === 'custom' }" @click="selectEditor('custom')">Custom Python</button></div>
+        <div v-if="!isMetric" class="segmented library-editor-mode"><button type="button" :class="{ active: editor === 'builtin' }" @click="selectEditor('builtin')">Built-in</button><button type="button" :class="{ active: editor === 'custom' }" @click="selectEditor('custom')">Custom Python</button></div>
         <div class="form-grid two library-editor-fields">
           <label v-if="editor === 'builtin'">Name<input v-model="draft.name" required maxlength="80" /></label>
           <div v-else class="custom-source-row wide">
@@ -64,24 +63,27 @@
 </template>
 
 <script setup>
-import { Bot, Info, Library, Pencil, Plus, Save, Search, Shapes, Trash2, TriangleAlert, Upload, X } from 'lucide-vue-next'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { Info, Library, Pencil, Plus, Save, Search, Trash2, TriangleAlert, Upload, X } from 'lucide-vue-next'
+import { computed, onActivated, onMounted, reactive, ref, watch } from 'vue'
 import { api, post, put, remove } from '../api'
-import { indicatorCodePlaceholder, strategyCodePlaceholder } from '../code-placeholders'
+import { indicatorCodePlaceholder, metricCodePlaceholder, strategyCodePlaceholder } from '../code-placeholders'
 import ConfirmationModal from '../components/confirmation-modal.vue'
+import LibraryAssetIcon from '../components/library-asset-icon.vue'
 import PythonEditor from '../components/python-editor.vue'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['toast'])
 const isStrategy = location.hash.slice(1) === 'strategies'
-const title = isStrategy ? 'Strategies' : 'Indicators'
-const singular = isStrategy ? 'Strategy' : 'Indicator'
-const endpoint = isStrategy ? '/api/strategies' : '/api/indicators'
-const initialCatalog = isStrategy ? props.bootstrap.strategies : props.bootstrap.indicators
+const isMetric = location.hash.slice(1) === 'metrics'
+const title = isStrategy ? 'Strategies' : isMetric ? 'Metrics' : 'Indicators'
+const singular = isStrategy ? 'Strategy' : isMetric ? 'Metric' : 'Indicator'
+const endpoint = isStrategy ? '/api/strategies' : isMetric ? '/api/metrics' : '/api/indicators'
+const initialCatalog = isStrategy ? props.bootstrap.strategies : isMetric ? props.bootstrap.metrics : props.bootstrap.indicators
+const assetKind = isStrategy ? 'strategy' : isMetric ? 'metric' : 'indicator'
 const dataframeClass = props.bootstrap.display?.dataframe_class || 'pd.DataFrame'
 const customCodePlaceholder = isStrategy
   ? strategyCodePlaceholder(dataframeClass)
-  : indicatorCodePlaceholder(dataframeClass)
+  : isMetric ? metricCodePlaceholder(dataframeClass) : indicatorCodePlaceholder(dataframeClass)
 const catalog = reactive({ builtin: [], saved: [] })
 const search = ref('')
 const filter = ref('all')
@@ -93,8 +95,10 @@ const saving = ref(false)
 const deleting = ref(false)
 const pendingDelete = ref('')
 const draft = reactive({ name: '', type: '', code: '', params: {} })
+let activatedOnce = false
 const isEditing = computed(() => Boolean(editingName.value))
-const filtered = computed(() => catalog.saved.filter(item => filter.value === 'all' || (filter.value === 'builtin') === item.builtin).filter(item => `${item.name} ${item.type} ${item.description}`.toLowerCase().includes(search.value.toLowerCase())))
+const allItems = computed(() => isMetric ? [...catalog.builtin, ...catalog.saved] : catalog.saved)
+const filtered = computed(() => allItems.value.filter(item => filter.value === 'all' || (filter.value === 'builtin') === item.builtin).filter(item => `${item.name} ${item.type} ${item.description}`.toLowerCase().includes(search.value.toLowerCase())))
 const selectedBuiltin = computed(() => catalog.builtin.find(item => item.type === draft.type))
 
 function assignCatalog(value) {
@@ -137,8 +141,8 @@ function openAdd() {
   draft.type = catalog.builtin[0]?.type || ''
   draft.code = ''
   draft.params = {}
-  editor.value = 'builtin'
-  resetParameters()
+  editor.value = isMetric ? 'custom' : 'builtin'
+  if (!isMetric) resetParameters()
 }
 function openEdit(item) {
   editingName.value = item.name
@@ -196,6 +200,10 @@ watch(editor, value => {
 })
 onMounted(() => {
   if (initialCatalog) assignCatalog(initialCatalog)
-  else load()
+  load()
+})
+onActivated(() => {
+  if (activatedOnce) load()
+  activatedOnce = true
 })
 </script>

@@ -55,6 +55,7 @@ pub fn experiment_log(message: &str, level: LogLevel) {
         verbose: "bool" = true,
         strategy_overrides: "dict[str, Any] | None" = None,
         indicator_overrides: "dict[str, Any] | None" = None,
+        metric_overrides: "dict[str, Any] | None" = None,
     )
 )]
 pub fn run_experiment(
@@ -63,6 +64,7 @@ pub fn run_experiment(
     verbose: bool,
     strategy_overrides: Option<HashMap<String, Py<PyAny>>>,
     indicator_overrides: Option<HashMap<String, Py<PyAny>>>,
+    metric_overrides: Option<HashMap<String, Py<PyAny>>>,
 ) -> PyResult<ExperimentResult> {
     // Always start with a clean abort flag.
     ABORT_REQUESTED.store(false, Ordering::Relaxed);
@@ -71,7 +73,8 @@ pub fn run_experiment(
     let engine = Engine::get()?;
     let strat = strategy_overrides.unwrap_or_default();
     let ind = indicator_overrides.unwrap_or_default();
+    let metrics = metric_overrides.unwrap_or_default();
 
     // Release the GIL so rayon workers can acquire it.
-    Ok(py.detach(|| engine.run_experiment(&cfg, verbose, &strat, &ind))?)
+    Ok(py.detach(|| engine.run_experiment(&cfg, verbose, &strat, &ind, &metrics))?)
 }

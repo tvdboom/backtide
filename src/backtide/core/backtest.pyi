@@ -14,6 +14,7 @@ __all__ = [
     "ExperimentStatus",
     "GeneralExpConfig",
     "IndicatorExpConfig",
+    "MetricExpConfig",
     "Order",
     "OrderRecord",
     "OrderStatus",
@@ -659,6 +660,9 @@ class ExperimentConfig:
     indicators : [IndicatorExpConfig]
         Indicators to use in this experiment.
 
+    metrics : [MetricExpConfig]
+        Metrics to compute and the main result metric.
+
     exchange : [ExchangeExpConfig]
         Commission, slippage, order execution, margin and short-selling.
 
@@ -669,6 +673,7 @@ class ExperimentConfig:
     --------
     - backtide.backtest:DataExpConfig
     - backtide.backtest:GeneralExpConfig
+    - backtide.backtest:MetricExpConfig
     - backtide.backtest:StrategyExpConfig
 
     """
@@ -678,6 +683,7 @@ class ExperimentConfig:
     exchange: ExchangeExpConfig
     general: GeneralExpConfig
     indicators: IndicatorExpConfig
+    metrics: MetricExpConfig
     portfolio: PortfolioExpConfig
     strategy: StrategyExpConfig
 
@@ -1012,6 +1018,52 @@ class IndicatorExpConfig:
             Self as dict.
 
         """
+
+class MetricExpConfig:
+    """Metric settings for an experiment.
+
+    Attributes
+    ----------
+    metrics : list[str]
+        Built-in metric keys or names of stored custom metrics to compute.
+
+    main_metric : str, default="sharpe"
+        Metric used to rank strategies and summarize the experiment.
+
+    See Also
+    --------
+    - backtide.metrics:BaseMetric
+    - backtide.backtest:ExperimentConfig
+
+    """
+
+    main_metric: str
+    metrics: list[str]
+
+    def __eq__(self, value, /):
+        ...
+    def __ge__(self, value, /):
+        ...
+    def __getstate__(self, /):
+        ...
+    def __gt__(self, value, /):
+        ...
+    def __init__(self, /, *args, **kwargs):
+        ...
+    def __le__(self, value, /):
+        ...
+    def __lt__(self, value, /):
+        ...
+    def __ne__(self, value, /):
+        ...
+    def __new__(cls, *args, **kwargs):
+        ...
+    def __repr__(self, /):
+        ...
+    def __str__(self, /):
+        ...
+    def to_dict(self):
+        """Convert to a dictionary."""
 
 class Order:
     """A trading order submitted during the simulation.
@@ -1723,7 +1775,13 @@ def experiment_log(message, level=...):
 def request_abort():
     """Signal the Rust engine to abort the current experiment."""
 
-def run_experiment(config, verbose=True, strategy_overrides=None, indicator_overrides=None):
+def run_experiment(
+    config,
+    verbose=True,
+    strategy_overrides=None,
+    indicator_overrides=None,
+    metric_overrides=None,
+):
     """Low-level entry point that runs an already-built experiment
     configuration.
 

@@ -14,6 +14,7 @@ from pathlib import Path
 import sys
 import threading
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -444,7 +445,20 @@ class TestServiceCommands:
         """Result details avoid loading and returning per-bar equity history."""
         experiment = tmp_path / "experiments" / "exp-1"
         experiment.mkdir(parents=True)
-        (experiment / "config.toml").write_text("[general]\nname='test'", encoding="utf-8")
+        (experiment / "config.toml").write_text(
+            """[general]
+name = "test"
+
+[data]
+symbols = ["AAPL", "MSFT"]
+instrument_type = "stocks"
+interval = "OneDay"
+full_history = false
+start_date = "2024-01-01"
+end_date = "2024-03-01"
+""",
+            encoding="utf-8",
+        )
         captured = {}
         run = SimpleNamespace(
             strategy_id="run-1",
@@ -489,6 +503,155 @@ class TestServiceCommands:
         assert captured == {"experiment_id": "exp-1", "include_equity_curve": False}
         assert "equity_curve" not in result["runs"][0]
         assert result["runs"][0]["metrics"] == {"return": 0.1}
+        assert result["config_metadata"] == {
+            "symbols": 2,
+            "instrument_type": "stocks",
+            "interval": "OneDay",
+            "full_history": False,
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+        }
+
+    def test_experiment_detail_distinguishes_empty_and_missing_logs(
+        self, monkeypatch, tmp_path: Path
+    ):
+        """An empty saved log remains a real artifact while a missing log is null."""
+        experiment = tmp_path / "experiments" / "exp-1"
+        experiment.mkdir(parents=True)
+        (experiment / "logs.txt").write_text("", encoding="utf-8")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.config",
+            SimpleNamespace(
+                get_config=lambda: SimpleNamespace(
+                    data=SimpleNamespace(storage_path=str(tmp_path))
+                )
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.storage",
+            SimpleNamespace(
+                query_experiments=lambda _experiment_id: [
+                    {"id": "exp-1", "name": "Test", "status": "Success"}
+                ],
+                query_strategy_runs=lambda _experiment_id, **_kwargs: [],
+            ),
+        )
+
+        services = BacktideServices()
+        detail = services.experiment("exp-1")
+        assert detail["logs"] == ""
+        assert detail["logs_truncated"] is False
+
+        (experiment / "logs.txt").unlink()
+        detail = services.experiment("exp-1")
+        assert detail["logs"] is None
+        assert detail["logs_truncated"] is False
+
+    def test_experiment_detail_bounds_large_logs(self, monkeypatch, tmp_path: Path):
+        """Experiment details return only the bounded tail of a large log file."""
+        experiment = tmp_path / "experiments" / "exp-1"
+        experiment.mkdir(parents=True)
+        (experiment / "logs.txt").write_text(
+            "\n".join(f"log line {index}" for index in range(2_000)),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.config",
+            SimpleNamespace(
+                get_config=lambda: SimpleNamespace(
+                    data=SimpleNamespace(storage_path=str(tmp_path))
+                )
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.storage",
+            SimpleNamespace(
+                query_experiments=lambda _experiment_id: [
+                    {"id": "exp-1", "name": "Test", "status": "Success"}
+                ],
+                query_strategy_runs=lambda _experiment_id, **_kwargs: [],
+            ),
+        )
+
+        detail = BacktideServices().experiment("exp-1")
+
+        assert detail["logs_truncated"] is True
+        assert len(detail["logs"].splitlines()) == 1_000
+        assert detail["logs"].startswith("log line 1000")
+        assert detail["logs"].endswith("log line 1999")
+
+    def test_experiment_summaries_include_lightweight_strategy_metrics(self, monkeypatch):
+        """Result cards include per-strategy metrics without loading equity curves."""
+        captured = []
+        run = SimpleNamespace(
+            strategy_id="run-1",
+            strategy_name="Momentum",
+            base_currency="USD",
+            is_benchmark=False,
+            metrics={"sharpe_ratio": 1.4, "total_return": 0.12},
+            error=None,
+        )
+
+        def query_strategy_runs(experiment_id, *, include_equity_curve=True):
+            captured.append((experiment_id, include_equity_curve))
+            return [run]
+
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.storage",
+            SimpleNamespace(
+                query_experiments=lambda **_kwargs: [
+                    {"id": "exp-1", "name": "Momentum study", "icon": "🎯"}
+                ],
+                query_strategy_runs=query_strategy_runs,
+            ),
+        )
+
+        result = BacktideServices().experiments()
+
+        assert captured == [("exp-1", False)]
+        assert result[0]["runs"] == [
+            {
+                "strategy_id": "run-1",
+                "strategy_name": "Momentum",
+                "base_currency": "USD",
+                "is_benchmark": False,
+                "metrics": {"sharpe_ratio": 1.4, "total_return": 0.12},
+                "error": None,
+            }
+        ]
+
+    def test_required_indicator_catalog_exposes_auto_injected_metadata(self, monkeypatch):
+        """Saved strategies describe indicators that the engine injects automatically."""
+
+        class Indicator:
+            @staticmethod
+            def description():
+                return "Smooths prices over a fixed lookback."
+
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.strategies.utils",
+            SimpleNamespace(
+                _resolve_auto_indicators=lambda _strategies: [("SMA 20", Indicator(), "built-in")]
+            ),
+        )
+
+        result = BacktideServices._required_indicator_catalog(SimpleNamespace())
+
+        assert result == [
+            {
+                "name": "SMA 20",
+                "type": "Indicator",
+                "description": "Smooths prices over a fixed lookback.",
+            }
+        ]
 
     def test_result_plot_dispatches_to_existing_analysis(self, monkeypatch, tmp_path: Path):
         """Result plot requests use the public Plotly analysis function."""
@@ -498,7 +661,7 @@ class TestServiceCommands:
         experiment.mkdir(parents=True)
         (experiment / "config.toml").write_text("[general]\nname='test'", encoding="utf-8")
         run = SimpleNamespace(strategy_id="run-1")
-        captured = {"queries": 0, "plots": []}
+        captured: dict[str, Any] = {"queries": 0, "plots": []}
 
         class Figure:
             def to_json(self):

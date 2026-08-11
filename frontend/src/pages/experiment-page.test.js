@@ -9,7 +9,7 @@ vi.mock('../api', () => ({ post, query }))
 
 const bootstrap = {
   defaults: {
-    general: { name: '', tags: [], description: '' },
+    general: { name: '', icon: '', tags: [], description: '' },
     data: {
       instrument_type: 'stocks', symbols: [], interval: 'OneDay', full_history: true,
       start_date: null, end_date: null
@@ -17,6 +17,7 @@ const bootstrap = {
     portfolio: { initial_cash: 10000, base_currency: 'USD', starting_positions: {} },
     strategy: { strategies: [], benchmark: null },
     indicators: { indicators: [] },
+    metrics: { metrics: ['total_return', 'sharpe'], main_metric: 'sharpe' },
     exchange: {
       commission_type: 'Percentage', commission_pct: 0.1, commission_fixed: 0,
       slippage: 0.05, partial_fills: false, allowed_order_types: ['Market'],
@@ -46,7 +47,14 @@ const bootstrap = {
   },
   display: { logokit_api_key: '' },
   strategies: { saved: [] },
-  indicators: { saved: [] }
+  indicators: { saved: [] },
+  metrics: {
+    builtin: [
+      { key: 'total_return', name: 'Total return', description: 'Net return.', builtin: true, percentage: true },
+      { key: 'sharpe', name: 'Sharpe ratio', description: 'Risk adjusted.', builtin: true, percentage: false }
+    ],
+    saved: []
+  }
 }
 
 describe('experiment page', () => {
@@ -64,6 +72,24 @@ describe('experiment page', () => {
 
     expect(wrapper.get('#experiment-name').attributes('placeholder')).toBe('Enter a name...')
     expect(wrapper.get('textarea').attributes('placeholder')).toBe('Add a description...')
+    expect(wrapper.get('#experiment-icon').findAll('option').length).toBeGreaterThan(5)
+  })
+
+  it('labels selected metrics as built-in or custom without implementation details', async () => {
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.defaults.metrics.metrics.push('MyMetric')
+    pageBootstrap.metrics.saved.push({
+      key: 'MyMetric', name: 'My metric', description: 'A custom result.', builtin: false
+    })
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[4].trigger('click')
+
+    const details = wrapper.get('[aria-label="Selected metric details"]')
+    expect(details.text()).toContain('Built-in')
+    expect(details.text()).toContain('Custom')
+    expect(details.text()).not.toContain('Rust built-in')
+    expect(details.text()).not.toContain('Custom Python')
   })
 
   it('shows serialized defaults with friendly labels and loads the legacy catalog size', async () => {
@@ -82,11 +108,11 @@ describe('experiment page', () => {
     expect(wrapper.get('select').element.value).toBe('OneDay')
     expect(wrapper.get('select').find('option:checked').text()).toBe('1d')
 
-    await wrapper.findAll('.tabs button')[4].trigger('click')
+    await wrapper.findAll('.tabs button')[5].trigger('click')
     expect(wrapper.get('select').element.value).toBe('Percentage')
     expect(wrapper.get('select').find('option:checked').text()).toBe('Percentage (%)')
 
-    await wrapper.findAll('.tabs button')[6].trigger('click')
+    await wrapper.findAll('.tabs button')[7].trigger('click')
     expect(wrapper.get('select').element.value).toBe('ForwardFill')
     expect(wrapper.get('select').find('option:checked').text()).toBe('Forward Fill')
   })
@@ -116,6 +142,24 @@ describe('experiment page', () => {
       source: 'catalog',
       limit: 1500
     })
+  })
+
+  it('loads a logo for a selected custom symbol outside the current catalog', async () => {
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.display.logokit_api_key = 'test token'
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[1].trigger('click')
+
+    const input = wrapper.get('#experiment-symbols')
+    await input.setValue('AVIANRO')
+    await input.trigger('keydown.enter')
+
+    expect(wrapper.get('.tag').text()).toContain('AVIANRO')
+    expect(wrapper.get('.selected-symbol-logo img').attributes('src')).toBe(
+      'https://assets.parqet.com/logos/symbol/AVIANRO?format=png&size=64'
+    )
+    expect(wrapper.get('.logo-attribution').text()).toContain('Parqet')
   })
 
   it('uses a valid initial cash default', async () => {
@@ -158,11 +202,203 @@ describe('experiment page', () => {
     expect(wrapper.get('#experiment-base-currency').text()).toContain('EUR')
   })
 
+  it('builds starting positions from the selected market symbols', async () => {
+    query.mockResolvedValue([
+      { symbol: 'AAPL', name: 'Apple Inc.', instrument_type: 'stocks' },
+      { symbol: 'MSFT', name: 'Microsoft Corporation', instrument_type: 'stocks' }
+    ])
+    const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[1].trigger('click')
+    await wrapper.get('#experiment-symbols').trigger('focus')
+    await wrapper.findAll('.search-menu button')[0].trigger('click')
+
+    await wrapper.findAll('.tabs button')[2].trigger('click')
+    expect(wrapper.get('.portfolio-basics').exists()).toBe(true)
+    expect(wrapper.text()).toContain('begin entirely in cash')
+    await wrapper.get('.starting-positions-heading button').trigger('click')
+
+    expect(wrapper.find('.position-row .tag').exists()).toBe(false)
+    expect(wrapper.get('.instrument-select-trigger').text()).toContain('AAPL')
+    expect(wrapper.get('.instrument-select-trigger').text()).not.toContain('Apple Inc.')
+    await wrapper.get('.instrument-select-trigger').trigger('click')
+    expect(wrapper.get('.instrument-select-menu').text()).toContain('Apple Inc.')
+    expect(wrapper.find('textarea').exists()).toBe(false)
+  })
+
+  it('does not submit the experiment when Enter is pressed in the name', async () => {
+    const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[0].trigger('click')
+
+    const name = wrapper.get('#experiment-name')
+    await name.setValue('Keyboard-safe study')
+    await name.trigger('keydown.enter')
+    await flushPromises()
+
+    expect(wrapper.get('.tabs button.active').text()).toContain('General')
+    expect(wrapper.find('.form-alert').exists()).toBe(false)
+    expect(wrapper.emitted('toast')).toBeUndefined()
+  })
+
+  it('uses icons for strategies and a searchable single benchmark selector', async () => {
+    query.mockResolvedValue([
+      { symbol: 'AAPL', name: 'Apple Inc.', instrument_type: 'stocks' }
+    ])
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.strategies.saved = [{
+      name: 'Momentum',
+      type: 'Macd',
+      description: 'Follows persistent price trends.',
+      builtin: true,
+      required_indicators: [{ name: 'SMA 20', description: 'A moving price average.' }]
+    }]
+    pageBootstrap.indicators.saved = [{
+      name: 'RSI', type: 'CustomRsi', description: 'Measures relative price strength.', builtin: false
+    }]
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[1].trigger('click')
+    await wrapper.get('#experiment-symbols').trigger('focus')
+    await wrapper.get('.search-menu button').trigger('click')
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+
+    await wrapper.get('#experiment-strategies').trigger('focus')
+    const strategyOption = wrapper.get('.search-menu button')
+    expect(strategyOption.get('.search-option-logo svg').exists()).toBe(true)
+    expect(strategyOption.get('strong').text()).toBe('Momentum')
+    expect(strategyOption.get('small').text()).toBe('MACD')
+    await strategyOption.trigger('click')
+    const strategyInsight = wrapper.get('[aria-label="Selected strategy details"]')
+    expect(strategyInsight.text()).toContain('Follows persistent price trends.')
+    expect(strategyInsight.text()).toContain('SMA 20')
+    expect(strategyInsight.text()).toContain('Injected indicators')
+    expect(strategyInsight.text()).not.toContain('Built-in')
+    expect(strategyInsight.get('.metric-icon svg').exists()).toBe(true)
+
+    await wrapper.get('input[aria-label="Experiment indicators"]').trigger('focus')
+    const indicatorOption = wrapper.get('.search-menu button')
+    expect(indicatorOption.get('strong').text()).toBe('RSI')
+    expect(indicatorOption.get('small').text()).toBe('Custom')
+    await indicatorOption.trigger('click')
+    const indicatorInsight = wrapper.get('[aria-label="Selected indicator details"]')
+    expect(indicatorInsight.text()).toContain('Measures relative price strength.')
+    expect(indicatorInsight.get('.metric-icon svg').exists()).toBe(true)
+
+    const benchmarkInput = wrapper.get('input[aria-label="Experiment benchmark"]')
+    const benchmarkControl = benchmarkInput.element.closest('.benchmark-select')
+    expect(wrapper.text()).toContain('Compare strategy performance against one stock or ETF')
+    await benchmarkInput.trigger('focus')
+    const benchmarkMenu = wrapper.findAll('.search-menu').at(-1)
+    expect(benchmarkMenu.text()).toContain('AAPL')
+    await benchmarkMenu.get('button').trigger('click')
+    await wrapper.get('.section-copy h3').trigger('click')
+    expect(benchmarkInput.element.value).toBe('AAPL')
+    expect(benchmarkControl.querySelector('.tag')).toBeNull()
+
+    await benchmarkInput.trigger('focus')
+    await benchmarkInput.setValue('SPY')
+    await benchmarkInput.trigger('keydown.enter')
+    await wrapper.vm.$nextTick()
+    expect(benchmarkInput.element.value).toBe('SPY')
+    expect(benchmarkControl.querySelector('.tag')).toBeNull()
+    expect(benchmarkControl.querySelector('.search-menu')).toBeNull()
+    expect(wrapper.text()).not.toContain('managed in their dedicated library pages')
+  })
+
+  it('omits injected-indicator chrome when a strategy has no injected indicators', async () => {
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.strategies.saved = [{
+      name: 'Buy and hold', type: 'BuyAndHold', description: 'Hold one asset.',
+      builtin: true, required_indicators: []
+    }]
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+    await wrapper.get('#experiment-strategies').trigger('focus')
+    await wrapper.get('.search-menu button').trigger('click')
+
+    expect(wrapper.find('.required-indicators').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('does not require')
+    expect(wrapper.text()).not.toContain('Built-in')
+  })
+
+  it('describes order types without decorative initials or logos', async () => {
+    const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[5].trigger('click')
+    expect(wrapper.get('.tag').text()).toContain('Market')
+    expect(wrapper.get('.tag').text()).not.toContain('best available market price')
+    expect(wrapper.find('.tag-copy').exists()).toBe(false)
+    await wrapper.get('#experiment-order-types').trigger('focus')
+
+    const option = wrapper.get('.search-menu button')
+    expect(option.text()).toContain('Limit')
+    expect(option.text()).toContain('chosen price or better')
+    expect(option.find('.search-option-logo').exists()).toBe(false)
+  })
+
+  it('shows only the commission inputs used by the selected commission model', async () => {
+    const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[5].trigger('click')
+
+    expect(wrapper.text()).toContain('Commission (%)')
+    expect(wrapper.text()).not.toContain('Fixed commission')
+
+    await wrapper.get('#experiment-commission-type').setValue('Fixed')
+    expect(wrapper.text()).not.toContain('Commission (%)')
+    expect(wrapper.text()).toContain('Fixed commission')
+
+    await wrapper.get('#experiment-commission-type').setValue('PercentagePlusFixed')
+    expect(wrapper.text()).toContain('Commission (%)')
+    expect(wrapper.text()).toContain('Fixed commission')
+  })
+
+  it('resets a queued experiment while preserving its selected asset class', async () => {
+    query.mockResolvedValue([
+      { symbol: 'AAPL', name: 'Apple Inc.', instrument_type: 'etf' }
+    ])
+    post.mockResolvedValue({ id: 'experiment-1' })
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.strategies.saved = [{
+      name: 'Momentum', type: 'Macd', builtin: true, description: 'Follow trends.',
+      required_indicators: []
+    }]
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+
+    await wrapper.get('#experiment-name').setValue('Persistent draft')
+    await wrapper.findAll('.tabs button')[1].trigger('click')
+    await wrapper.get('.wide-control').findAll('button')[1].trigger('click')
+    await flushPromises()
+    await wrapper.get('#experiment-symbols').trigger('focus')
+    await wrapper.get('.search-menu button').trigger('click')
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+    await wrapper.get('#experiment-strategies').trigger('focus')
+    await wrapper.get('.search-menu button').trigger('click')
+
+    await wrapper.get('button[type="submit"]').trigger('submit')
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith('/api/experiments', expect.objectContaining({
+      general: expect.objectContaining({ name: 'Persistent draft' }),
+      data: expect.objectContaining({ instrument_type: 'etf', symbols: ['AAPL'] })
+    }))
+    expect(wrapper.emitted('navigate')).toEqual([['results']])
+    expect(wrapper.get('.tabs button.active').text()).toContain('General')
+    expect(wrapper.get('#experiment-name').element.value).toBe('')
+
+    await wrapper.findAll('.tabs button')[1].trigger('click')
+    expect(wrapper.get('.wide-control button.active').text()).toContain('ETF')
+    expect(wrapper.find('.tag').exists()).toBe(false)
+  })
+
   it('opens the failing tab, shows the error, and focuses its widget', async () => {
     const wrapper = mount(ExperimentPage, { attachTo: document.body, props: { bootstrap } })
     await flushPromises()
     await wrapper.get('#experiment-name').setValue('Validation study')
-    await wrapper.findAll('.tabs button')[6].trigger('click')
+    await wrapper.findAll('.tabs button')[7].trigger('click')
 
     await wrapper.get('button[type="submit"]').trigger('submit')
     await flushPromises()
@@ -170,11 +406,43 @@ describe('experiment page', () => {
     expect(wrapper.get('.tabs button.active').text()).toContain('Market data')
     expect(wrapper.get('.form-alert').text()).toContain('Select at least one market symbol.')
     expect(document.activeElement?.id).toBe('experiment-symbols')
-    expect(wrapper.emitted('toast')[0]).toEqual([
-      'Select at least one market symbol.',
-      'error'
-    ])
+    expect(wrapper.emitted('toast')).toBeUndefined()
     wrapper.unmount()
+  })
+
+  it('clears a validation warning as soon as the issue is corrected', async () => {
+    query.mockResolvedValue([
+      { symbol: 'AAPL', name: 'Apple Inc.', instrument_type: 'stocks' }
+    ])
+    const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[0].trigger('click')
+    await wrapper.get('#experiment-name').setValue('Correctable study')
+    await wrapper.get('button[type="submit"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('.form-alert').text()).toContain('Select at least one market symbol.')
+    await wrapper.get('#experiment-symbols').trigger('focus')
+    await wrapper.get('.search-menu button').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.form-alert').exists()).toBe(false)
+    expect(wrapper.emitted('toast')).toBeUndefined()
+  })
+
+  it('automatically dismisses an inline validation warning', async () => {
+    vi.useFakeTimers()
+    try {
+      const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+      await wrapper.get('button[type="submit"]').trigger('submit')
+      expect(wrapper.find('.form-alert').exists()).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(4500)
+      expect(wrapper.find('.form-alert').exists()).toBe(false)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('surfaces catalog failures on the market-data tab', async () => {
@@ -187,9 +455,6 @@ describe('experiment page', () => {
     expect(wrapper.get('.form-alert').text()).toContain(
       'Could not load the symbol catalog. Provider unavailable.'
     )
-    expect(wrapper.emitted('toast')[0]).toEqual([
-      'Could not load the symbol catalog. Provider unavailable.',
-      'error'
-    ])
+    expect(wrapper.emitted('toast')).toBeUndefined()
   })
 })

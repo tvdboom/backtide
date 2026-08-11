@@ -122,6 +122,7 @@ nav:
         - Live and paper trading: user_guide/live_trading.md
         - Strategies: user_guide/strategies.md
         - Indicators: user_guide/indicators.md
+        - Metrics: user_guide/metrics.md
         - Sizers: user_guide/sizers.md
         - Plots: user_guide/plots.md
         - Storage: user_guide/storage.md
@@ -189,6 +190,7 @@ nav:
                 - ExperimentStatus: api/models/backtest/experimentstatus.md
                 - GeneralExpConfig: api/models/backtest/generalexpconfig.md
                 - IndicatorExpConfig: api/models/backtest/indicatorexpconfig.md
+                - MetricExpConfig: api/models/backtest/metricexpconfig.md
                 - Order: api/models/backtest/order.md
                 - OrderRecord: api/models/backtest/orderrecord.md
                 - OrderStatus: api/models/backtest/orderstatus.md
@@ -233,6 +235,9 @@ nav:
                 - StochasticOscillator: api/models/indicators/stochasticoscillator.md
                 - VolumeWeightedAveragePrice: api/models/indicators/volumeweightedaverageprice.md
                 - WeightedMovingAverage: api/models/indicators/weightedmovingaverage.md
+            - metrics:
+                - BaseMetric: api/models/metrics/basemetric.md
+                - MetricDefinition: api/models/metrics/metricdefinition.md
             - live:
                 - LiveMarketFeed: api/models/live/livemarketfeed.md
                 - MarketUpdate: api/models/live/marketupdate.md

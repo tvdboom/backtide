@@ -64,7 +64,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { api, post } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import SearchSelect from '../components/search-select.vue'
-import { flattenFills, paperEquitySeries } from '../state'
+import { configuredPlotlyDateTimeFormat, flattenFills, formatConfiguredTime, paperEquitySeries } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['toast'])
@@ -80,7 +80,7 @@ const updates = computed(() => state.updates || [])
 const fills = computed(() => flattenFills(updates.value))
 const equityFigure = computed(() => {
   const series = paperEquitySeries(updates.value)
-  return { data: [{ type: 'scatter', mode: 'lines', x: series.map(item => new Date(item.timestamp * 1000)), y: series.map(item => item.equity), line: { color: '#23c483', width: 2 }, fill: 'tozeroy', fillcolor: 'rgba(35,196,131,.12)' }], layout: { yaxis: { title: form.config.base_currency }, xaxis: { title: '' } } }
+  return { data: [{ type: 'scatter', mode: 'lines', x: series.map(item => new Date(item.timestamp * 1000)), y: series.map(item => item.equity), line: { color: '#23c483', width: 2 }, fill: 'tozeroy', fillcolor: 'rgba(35,196,131,.12)' }], layout: { yaxis: { title: form.config.base_currency }, xaxis: { title: '', tickformat: configuredPlotlyDateTimeFormat(props.bootstrap.display) } } }
 })
 function title(value) { return value.charAt(0).toUpperCase() + value.slice(1) }
 function capability(provider, interval = form.interval) {
@@ -93,7 +93,7 @@ function available(provider, interval = form.interval) { return Boolean(capabili
 function support(provider, interval = form.interval) { const result = capability(provider, interval); return result.reason || (result.supported ? `${interval} WebSocket supported` : 'Unavailable') }
 function money(value) { return new Intl.NumberFormat('en', { style: 'currency', currency: form.config.base_currency || 'USD', maximumFractionDigits: 2 }).format(Number(value) || 0) }
 const tone = value => Number(value) > 0 ? 'positive' : Number(value) < 0 ? 'negative' : ''
-function eventTime(market) { const value = market?.received_ts || market?.close_ts; return value ? new Date(value * 1000).toLocaleTimeString() : 'now' }
+function eventTime(market) { const value = market?.received_ts || market?.close_ts; return formatConfiguredTime(value, props.bootstrap?.display, 'now') }
 async function start() { starting.value = true; try { Object.assign(state, await post('/api/live', form)); emit('toast', 'Paper-trading session started.'); poll() } catch (error) { emit('toast', error.message, 'error') } finally { starting.value = false } }
 async function stop() { try { Object.assign(state, await post('/api/live/stop')); clearTimeout(timer); emit('toast', 'Paper-trading session stopped.') } catch (error) { emit('toast', error.message, 'error') } }
 async function poll() { try { Object.assign(state, await api('/api/live')) } catch (error) { state.error = error.message } if (state.status === 'running') timer = setTimeout(poll, 1000) }

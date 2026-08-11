@@ -6,6 +6,7 @@
 use crate::backtest::models::*;
 use crate::constants::{Positions, Symbol};
 use crate::data::models::{Currency, InstrumentType, Interval};
+use crate::metrics::engine::DEFAULT_METRICS;
 use itertools::Itertools;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::PyValueError;
@@ -361,6 +362,67 @@ impl StrategyExpConfig {
 pub struct IndicatorExpConfig {
     #[serde(default)]
     pub indicators: Vec<String>,
+}
+
+/// Metric settings for an experiment.
+///
+/// Attributes
+/// ----------
+/// metrics : list[str]
+///     Built-in metric keys or names of stored custom metrics to compute.
+///
+/// main_metric : str, default="sharpe"
+///     Metric used to rank strategies and summarize the experiment.
+///
+/// See Also
+/// --------
+/// - backtide.metrics:BaseMetric
+/// - backtide.backtest:ExperimentConfig
+#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MetricExpConfig {
+    pub metrics: Vec<String>,
+    pub main_metric: String,
+}
+
+impl Default for MetricExpConfig {
+    fn default() -> Self {
+        Self {
+            metrics: DEFAULT_METRICS.iter().map(|key| (*key).to_owned()).collect(),
+            main_metric: "sharpe".to_owned(),
+        }
+    }
+}
+
+#[pymethods]
+impl MetricExpConfig {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
+    #[new]
+    #[pyo3(signature = (metrics: "list[str]"=DEFAULT_METRICS.iter().map(|key| (*key).to_owned()).collect(), main_metric: "str"="sharpe"))]
+    fn new(metrics: Vec<String>, main_metric: &str) -> PyResult<Self> {
+        if metrics.is_empty() {
+            return Err(PyValueError::new_err("Select at least one metric."));
+        }
+        if !metrics.iter().any(|metric| metric == main_metric) {
+            return Err(PyValueError::new_err("The main metric must be included in metrics."));
+        }
+        Ok(Self {
+            metrics,
+            main_metric: main_metric.to_owned(),
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!("MetricExpConfig(metrics={:?}, main_metric={:?})", self.metrics, self.main_metric)
+    }
+
+    /// Convert to a dictionary.
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, self)?.unbind())
+    }
 }
 
 #[pymethods]
@@ -727,6 +789,7 @@ pub struct ExperimentConfigInner {
     pub portfolio: PortfolioExpConfig,
     pub strategy: StrategyExpConfig,
     pub indicators: IndicatorExpConfig,
+    pub metrics: MetricExpConfig,
     pub exchange: ExchangeExpConfig,
     pub engine: EngineExpConfig,
 }
@@ -757,6 +820,9 @@ pub struct ExperimentConfigInner {
 /// indicators : [IndicatorExpConfig]
 ///     Indicators to use in this experiment.
 ///
+/// metrics : [MetricExpConfig]
+///     Metrics to compute and the main result metric.
+///
 /// exchange : [ExchangeExpConfig]
 ///     Commission, slippage, order execution, margin and short-selling.
 ///
@@ -767,6 +833,7 @@ pub struct ExperimentConfigInner {
 /// --------
 /// - backtide.backtest:DataExpConfig
 /// - backtide.backtest:GeneralExpConfig
+/// - backtide.backtest:MetricExpConfig
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
@@ -776,6 +843,7 @@ pub struct ExperimentConfig {
     pub portfolio: PortfolioExpConfig,
     pub strategy: StrategyExpConfig,
     pub indicators: IndicatorExpConfig,
+    pub metrics: MetricExpConfig,
     pub exchange: ExchangeExpConfig,
     pub engine: EngineExpConfig,
 }
@@ -789,6 +857,7 @@ impl ExperimentConfig {
             portfolio: inner.portfolio,
             strategy: inner.strategy,
             indicators: inner.indicators,
+            metrics: inner.metrics,
             exchange: inner.exchange,
             engine: inner.engine,
         })
@@ -802,6 +871,7 @@ impl ExperimentConfig {
             portfolio: self.portfolio.clone(),
             strategy: self.strategy.clone(),
             indicators: self.indicators.clone(),
+            metrics: self.metrics.clone(),
             exchange: self.exchange.clone(),
             engine: self.engine.clone(),
         }
@@ -837,6 +907,7 @@ impl ExperimentConfig {
         portfolio: "PortfolioExpConfig" = PortfolioExpConfig::default(),
         strategy: "StrategyExpConfig" = StrategyExpConfig::default(),
         indicators: "IndicatorExpConfig" = IndicatorExpConfig::default(),
+        metrics: "MetricExpConfig" = MetricExpConfig::default(),
         exchange: "ExchangeExpConfig" = ExchangeExpConfig::default(),
         engine: "EngineExpConfig" = EngineExpConfig::default(),
     ))]
@@ -846,6 +917,7 @@ impl ExperimentConfig {
         portfolio: PortfolioExpConfig,
         strategy: StrategyExpConfig,
         indicators: IndicatorExpConfig,
+        metrics: MetricExpConfig,
         exchange: ExchangeExpConfig,
         engine: EngineExpConfig,
     ) -> Self {
@@ -855,6 +927,7 @@ impl ExperimentConfig {
             portfolio,
             strategy,
             indicators,
+            metrics,
             exchange,
             engine,
         }

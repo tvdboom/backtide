@@ -1,15 +1,24 @@
 <template>
   <div class="search-select">
     <div class="tag-field" :class="{ focused }" @click="input?.focus()">
-      <span v-for="item in modelValue" :key="item" class="tag">
-        <img
-          v-if="logos[item] && !failedLogos.has(item)"
-          :src="logos[item]"
-          alt=""
-          @error="logoFailed(item)"
-        />
-        {{ item }}
-        <button type="button" :aria-label="`Remove ${item}`" @click.stop="remove(item)">×</button>
+      <span v-for="item in modelValue" :key="item" class="tag" :class="{ detailed: showSelectedDescription }">
+        <span v-if="hasLogoEntry(item)" class="selected-symbol-logo" aria-hidden="true">
+          <ChartCandlestick v-if="!loadedSelectedLogos.has(item)" :size="13" />
+          <img
+            v-if="selectedLogos[item] || logos[item]"
+            :class="{ loaded: loadedSelectedLogos.has(item) }"
+            :src="selectedLogoSource(item)"
+            alt=""
+            @load="selectedLogoLoaded(item)"
+            @error="selectedLogoFailed(item)"
+          />
+        </span>
+        <span v-if="showSelectedDescription" class="tag-copy">
+          <strong>{{ item }}</strong>
+          <small v-if="descriptions[item]">{{ descriptions[item] }}</small>
+        </span>
+        <template v-else>{{ item }}</template>
+        <button v-if="removable" type="button" :aria-label="`Remove ${item}`" @click.stop="remove(item)">×</button>
       </span>
       <input
         :id="inputId"
@@ -17,7 +26,7 @@
         v-model="needle"
         :placeholder="modelValue.length ? '' : placeholder"
         :aria-label="label"
-        @focus="focused = true"
+        @focus="open"
         @blur="close"
         @keydown.enter.prevent="choose(filtered[0] || needle)"
         @keydown.backspace="backspace"
@@ -32,22 +41,27 @@
         :key="option"
         type="button"
         :class="{ 'plain-option': plainOptions }"
-        @mousedown.prevent="choose(option)"
+        @pointerdown.prevent
+        @click.stop.prevent="choose(option)"
       >
-        <span v-if="plainOptions" class="search-option-plain">{{ option }}</span>
+        <span v-if="plainOptions" class="search-option-plain">
+          <strong>{{ option }}</strong>
+          <small v-if="descriptions[option]">{{ descriptions[option] }}</small>
+        </span>
         <template v-else>
           <span class="search-option-logo">
             <img
-              v-if="logos[option] && !failedLogos.has(option)"
+              v-if="logos[option] && !failedMenuLogos.has(option)"
               :src="logos[option]"
               alt=""
               @error="logoFailed(option)"
             />
+            <component :is="optionIconFor(option)" v-else-if="optionIconFor(option)" :size="18" aria-hidden="true" />
             <span v-else>{{ option.slice(0, 2) }}</span>
           </span>
           <span class="search-option-copy">
-            <strong>{{ descriptions[option] || option }}</strong>
-            <small>{{ option }}</small>
+            <strong>{{ optionNameFirst ? option : descriptions[option] || option }}</strong>
+            <small>{{ optionNameFirst ? descriptions[option] : option }}</small>
           </span>
         </template>
       </button>
@@ -56,18 +70,27 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { ChartCandlestick } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
   options: { type: Array, default: () => [] },
   descriptions: { type: Object, default: () => ({}) },
   logos: { type: Object, default: () => ({}) },
+  selectedLogos: { type: Object, default: () => ({}) },
   placeholder: { type: String, default: 'Search…' },
   label: { type: String, default: 'Search and select' },
   allowCustom: Boolean,
   loading: Boolean,
+  multiple: { type: Boolean, default: true },
+  optionIcon: { type: [Object, Function], default: null },
+  optionIcons: { type: Object, default: () => ({}) },
+  optionNameFirst: Boolean,
   plainOptions: Boolean,
+  removable: { type: Boolean, default: true },
+  resultLimit: { type: Number, default: 100 },
+  showSelectedDescription: Boolean,
   inputId: { type: String, default: undefined },
   uppercaseCustom: { type: Boolean, default: true }
 })
@@ -75,23 +98,79 @@ const emit = defineEmits(['update:modelValue'])
 const input = ref(null)
 const needle = ref('')
 const focused = ref(false)
-const failedLogos = reactive(new Set())
-const filtered = computed(() => props.options
-  .filter(item => !props.modelValue.includes(item))
-  .filter(item => `${item} ${props.descriptions[item] || ''}`.toLowerCase().includes(needle.value.toLowerCase()))
-  .slice(0, 10))
+const failedMenuLogos = reactive(new Set())
+const loadedSelectedLogos = reactive(new Set())
+const selectedLogoRetries = reactive(new Map())
+let closeTimer
+const filtered = computed(() => {
+  const search = needle.value.trim().toLowerCase()
+  return props.options
+    .filter(item => !props.modelValue.includes(item))
+    .filter(item => `${item} ${props.descriptions[item] || ''}`.toLowerCase().includes(search))
+    .sort((left, right) => matchScore(left, search) - matchScore(right, search))
+    .slice(0, props.resultLimit)
+})
 
 function logoFailed(value) {
-  failedLogos.add(value)
+  failedMenuLogos.add(value)
+}
+
+function hasLogoEntry(value) {
+  return Object.prototype.hasOwnProperty.call(props.selectedLogos, value) ||
+    Object.prototype.hasOwnProperty.call(props.logos, value)
+}
+
+function selectedLogoSource(value) {
+  const source = props.selectedLogos[value] || props.logos[value] || ''
+  const retries = selectedLogoRetries.get(value) || 0
+  if (!source || !retries) return source
+  const separator = source.includes('?') ? '&' : '?'
+  return `${source}${separator}selected_retry=${retries}`
+}
+
+function selectedLogoLoaded(value) {
+  loadedSelectedLogos.add(value)
+}
+
+function selectedLogoFailed(value) {
+  loadedSelectedLogos.delete(value)
+  const retries = selectedLogoRetries.get(value) || 0
+  if (retries < 2) selectedLogoRetries.set(value, retries + 1)
+}
+
+function matchScore(value, search) {
+  if (!search) return 0
+  const symbol = String(value).toLowerCase()
+  const description = String(props.descriptions[value] || '').toLowerCase()
+  if (symbol === search) return 0
+  if (symbol.startsWith(search)) return 1
+  if (description.startsWith(search)) return 2
+  if (description.split(/[^a-z0-9]+/).some(word => word.startsWith(search))) return 3
+  if (symbol.includes(search)) return 4
+  return 5
+}
+
+function optionIconFor(value) {
+  return props.optionIcons[value] || props.optionIcon
 }
 
 function choose(value) {
+  window.clearTimeout(closeTimer)
   const clean = String(value || '').trim()
   const original = props.options.find(item => item.toUpperCase() === clean.toUpperCase())
   const custom = props.uppercaseCustom ? clean.toUpperCase() : clean
   const selected = original || (props.allowCustom ? custom : '')
-  if (selected && !props.modelValue.includes(selected)) emit('update:modelValue', [...props.modelValue, selected])
+  if (selected && !props.modelValue.includes(selected)) {
+    loadedSelectedLogos.delete(selected)
+    selectedLogoRetries.delete(selected)
+    emit('update:modelValue', props.multiple ? [...props.modelValue, selected] : [selected])
+  }
   needle.value = ''
+  if (!props.multiple) focused.value = false
+}
+function open() {
+  window.clearTimeout(closeTimer)
+  focused.value = true
 }
 function remove(value) {
   emit('update:modelValue', props.modelValue.filter(item => item !== value))
@@ -100,6 +179,8 @@ function backspace() {
   if (!needle.value && props.modelValue.length) remove(props.modelValue.at(-1))
 }
 function close() {
-  window.setTimeout(() => { focused.value = false }, 100)
+  window.clearTimeout(closeTimer)
+  closeTimer = window.setTimeout(() => { focused.value = false }, 100)
 }
+onBeforeUnmount(() => window.clearTimeout(closeTimer))
 </script>

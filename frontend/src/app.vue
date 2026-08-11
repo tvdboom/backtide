@@ -71,14 +71,16 @@
       <section v-else-if="!bootstrap" class="loading-screen">
         <span class="spinner" /> Loading your trading workspace…
       </section>
-      <component
-        :is="current.component"
-        v-else
-        :key="`${page}-${refreshKey}`"
-        :bootstrap="bootstrap"
-        @navigate="navigate"
-        @toast="showToast"
-      />
+      <KeepAlive v-else :max="20">
+        <component
+          :is="current.component"
+          :key="`${page}-${refreshKey}`"
+          :bootstrap="bootstrap"
+          @dismiss-toast="toast = null"
+          @navigate="navigate"
+          @toast="showToast"
+        />
+      </KeepAlive>
     </main>
     <Transition name="toast">
       <div
@@ -116,6 +118,7 @@ import {
   Github,
   Home,
   Menu,
+  Sigma,
   Moon,
   RefreshCw,
   Shapes,
@@ -147,6 +150,7 @@ const navigation = [
       { id: 'experiment', label: 'Experiment', icon: FlaskConical, component: markRaw(ExperimentPage) },
       { id: 'strategies', label: 'Strategies', icon: Bot, component: markRaw(LibraryPage) },
       { id: 'indicators', label: 'Indicators', icon: Shapes, component: markRaw(LibraryPage) },
+      { id: 'metrics', label: 'Metrics', icon: Sigma, component: markRaw(LibraryPage) },
       { id: 'results', label: 'Results', icon: Gauge, component: markRaw(ResultsPage) }
     ]
   },

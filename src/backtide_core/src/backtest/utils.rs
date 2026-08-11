@@ -1,8 +1,5 @@
-use crate::analysis::compute_series_stats;
 use crate::backtest::fx::FxTable;
-use crate::backtest::models::{
-    EmptyBarPolicy, EquitySample, ExperimentConfig, ExperimentConfigInner, Trade,
-};
+use crate::backtest::models::{EmptyBarPolicy, ExperimentConfig, ExperimentConfigInner};
 use crate::constants::{Cash, DataT, IndicatorsT, Positions, Symbol, MIN_POSITION};
 use crate::data::models::{Bar, InstrumentType};
 use crate::utils::python::{dict_to_dataframe, to_python};
@@ -37,6 +34,7 @@ pub fn persist_experiment_config(
         portfolio: config.portfolio.clone(),
         strategy: config.strategy.clone(),
         indicators: config.indicators.clone(),
+        metrics: config.metrics.clone(),
         exchange: config.exchange.clone(),
         engine: config.engine.clone(),
     };
@@ -176,56 +174,6 @@ pub fn compute_portfolio_equity(
     }
 
     equity + compute_invested_equity(positions, aligned, bar_index, quote_ccy, target_ccy, fx, ts)
-}
-
-/// Compute the final experiment metrics.
-pub fn compute_metrics(
-    initial_cash: f64,
-    risk_free_rate: f64,
-    curve: &[EquitySample],
-    trades: &[Trade],
-) -> HashMap<String, f64> {
-    let mut m = HashMap::new();
-
-    let final_equity = curve.last().map(|s| s.equity).unwrap_or(initial_cash);
-    let total_return = if initial_cash > 0.0 {
-        (final_equity - initial_cash) / initial_cash
-    } else {
-        0.0
-    };
-
-    // Trade-derived metrics.
-    let n_trades = trades.len() as f64;
-    let n_wins = trades.iter().filter(|t| t.pnl > 0.0).count() as f64;
-    let win_rate = if n_trades > 0.0 {
-        n_wins / n_trades
-    } else {
-        0.0
-    };
-
-    m.insert("total_return".into(), total_return);
-    m.insert("final_equity".into(), final_equity);
-    m.insert("pnl".into(), final_equity - initial_cash);
-    m.insert("n_trades".into(), n_trades);
-    m.insert("win_rate".into(), win_rate);
-
-    // Annualized stats reuse the shared kernel from `analysis.rs`.
-    let values: Vec<f64> = curve.iter().map(|s| s.equity).collect();
-    let timestamps: Vec<f64> = curve.iter().map(|s| s.timestamp as f64).collect();
-    let stats = compute_series_stats(&values, &timestamps, risk_free_rate, None);
-
-    let (cagr, ann_vol, sharpe, sortino, max_dd) = match stats {
-        Some(s) => (s.ann_return, s.ann_volatility, s.sharpe, s.sortino, s.max_dd),
-        None => (0.0, 0.0, 0.0, 0.0, 0.0),
-    };
-
-    m.insert("cagr".into(), cagr);
-    m.insert("ann_volatility".into(), ann_vol);
-    m.insert("sharpe".into(), sharpe);
-    m.insert("sortino".into(), sortino);
-    m.insert("max_dd".into(), max_dd);
-
-    m
 }
 
 // ────────────────────────────────────────────────────────────────────────────

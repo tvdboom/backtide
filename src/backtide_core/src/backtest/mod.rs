@@ -34,6 +34,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ExperimentConfig>()?;
     m.add_class::<GeneralExpConfig>()?;
     m.add_class::<IndicatorExpConfig>()?;
+    m.add_class::<MetricExpConfig>()?;
     m.add_class::<PortfolioExpConfig>()?;
     m.add_class::<StrategyExpConfig>()?;
 

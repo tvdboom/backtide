@@ -15,6 +15,8 @@ use crate::engine::Engine;
 use crate::errors::{EngineError, EngineResult};
 use crate::indicators::interface::_indicator_deterministic_name;
 use crate::indicators::utils::compute_indicators;
+use crate::metrics::engine::{compute_builtin_metrics, is_builtin_metric};
+use crate::metrics::utils::compute_custom_metric;
 use crate::strategies::interface::{BuiltinStrategy, BuyAndHold};
 use crate::strategies::utils::{load_strategies, IndicatorView};
 use crate::utils::experiment_log::{EXPERIMENT_SPAN, LOG_PATH_FIELD};
@@ -38,6 +40,7 @@ impl Engine {
         verbose: bool,
         strategy_overrides: &HashMap<String, Py<PyAny>>,
         indicator_overrides: &HashMap<String, Py<PyAny>>,
+        metric_overrides: &HashMap<String, Py<PyAny>>,
     ) -> EngineResult<ExperimentResult> {
         let started_instant = Instant::now();
         let started_at =
@@ -72,6 +75,7 @@ impl Engine {
             Benchmark: {}\n \
             Number of strategies: {}\n \
             Number of indicators: {}\n \
+            Number of metrics: {}\n \
             Risk free rate: {}%",
             config.data.symbols.len(),
             config.data.interval.to_string(),
@@ -80,6 +84,7 @@ impl Engine {
             config.strategy.benchmark.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
             config.strategy.strategies.len(),
             config.indicators.indicators.len(),
+            config.metrics.metrics.len(),
             config.engine.risk_free_rate,
         );
 
@@ -532,29 +537,67 @@ impl Engine {
                 ret - rf_ret
             });
 
-            if let Some(v) = excess_return {
-                r.metrics.insert("excess_return".into(), v);
+            if config.metrics.metrics.iter().any(|metric| metric == "excess_return") {
+                if let Some(v) = excess_return {
+                    r.metrics.insert("excess_return".into(), v);
+                } else {
+                    r.metrics.remove("excess_return");
+                }
             } else {
                 r.metrics.remove("excess_return");
             }
 
             // Alpha is only meaningful for non-benchmark runs.
-            if let Some(bench) = bench_snapshot.as_ref() {
-                if !r.is_benchmark {
-                    // If benchmark never became investable, alpha is unavailable.
-                    let alpha = bench_start_ts.and_then(|_| {
-                        strat_ret
-                            .and_then(|ret| windowed_return(bench, window_start).map(|b| ret - b))
-                    });
+            if config.metrics.metrics.iter().any(|metric| metric == "alpha") {
+                if let Some(bench) = bench_snapshot.as_ref() {
+                    if !r.is_benchmark {
+                        // If benchmark never became investable, alpha is unavailable.
+                        let alpha = bench_start_ts.and_then(|_| {
+                            strat_ret.and_then(|ret| {
+                                windowed_return(bench, window_start).map(|b| ret - b)
+                            })
+                        });
 
-                    if let Some(v) = alpha {
-                        r.metrics.insert("alpha".into(), v);
+                        if let Some(v) = alpha {
+                            r.metrics.insert("alpha".into(), v);
+                        } else {
+                            r.metrics.remove("alpha");
+                        }
                     } else {
-                        r.metrics.remove("alpha");
+                        // Benchmark strategy always has zero alpha.
+                        r.metrics.insert("alpha".into(), 0.0);
                     }
+                }
+            }
+        }
+
+        let mut custom_metrics = Vec::new();
+        for name in config.metrics.metrics.iter().filter(|name| !is_builtin_metric(name)) {
+            let loaded = Python::attach(|py| -> PyResult<Py<PyAny>> {
+                if let Some(value) = metric_overrides.get(name) {
+                    Ok(value.clone_ref(py))
                 } else {
-                    // Benchmark strategy always has zero alpha.
-                    r.metrics.insert("alpha".into(), 0.0);
+                    load_pickle(
+                        py,
+                        &self.config.data.storage_path.join("metrics").join(format!("{name}.pkl")),
+                    )
+                }
+            });
+            match loaded {
+                Ok(value) => custom_metrics.push((name.clone(), value)),
+                Err(error) => warnings.push(format!("Failed to load metric {name:?}: {error}")),
+            }
+        }
+        for run in &mut results {
+            for (name, metric) in &custom_metrics {
+                match compute_custom_metric(metric, &run.equity_curve, &run.trades) {
+                    Ok(value) => {
+                        run.metrics.insert(name.clone(), value);
+                    },
+                    Err(error) => warnings.push(format!(
+                        "Metric {name:?} failed for strategy {:?}: {error}",
+                        run.strategy_name
+                    )),
                 }
             }
         }
@@ -1719,7 +1762,8 @@ fn run_one_strategy(
 
     // ── Metrics ─────────────────────────────────────────────────────────────
 
-    let metrics = compute_metrics(
+    let metrics = compute_builtin_metrics(
+        &cfg.metrics.metrics,
         cfg.portfolio.initial_cash as f64,
         cfg.engine.risk_free_rate / 100.0,
         &equity_curve,
@@ -1874,6 +1918,7 @@ mod tests {
             portfolio: PortfolioExpConfig::default(),
             strategy: StrategyExpConfig::default(),
             indicators: IndicatorExpConfig::default(),
+            metrics: MetricExpConfig::default(),
             exchange: ExchangeExpConfig::default(),
             engine: EngineExpConfig::default(),
         }
@@ -2612,7 +2657,8 @@ mod tests {
         let (engine, _tmp) = make_engine();
         let cfg = base_config(); // symbols = ["AAPL"], but no data downloaded
 
-        let result = engine.run_experiment(&cfg, false, &HashMap::new(), &HashMap::new());
+        let result =
+            engine.run_experiment(&cfg, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
 
         // resolve_profiles will call provider which returns NotFound → cascade error
         // OR no-bars → empty timeline → ExperimentStatus::Error
@@ -2634,7 +2680,8 @@ mod tests {
         let mut cfg = base_config();
         cfg.data.symbols = vec![]; // explicitly empty
 
-        let result = engine.run_experiment(&cfg, false, &HashMap::new(), &HashMap::new());
+        let result =
+            engine.run_experiment(&cfg, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert!(result.is_err());
     }
 }

@@ -34,29 +34,40 @@ const bootstrap = {
 describe('library page', () => {
   beforeEach(() => {
     api.mockReset()
+    api.mockImplementation(async endpoint => (
+      endpoint === '/api/strategies' ? bootstrap.strategies : bootstrap.indicators
+    ))
     post.mockReset()
     put.mockReset()
     remove.mockReset()
   })
 
-  it('renders strategies immediately from bootstrap data', async () => {
+  it('refreshes strategies after rendering bootstrap data', async () => {
     location.hash = '#strategies'
     const wrapper = mount(LibraryPage, { props: { bootstrap } })
     await flushPromises()
 
     expect(wrapper.text()).toContain('Long term')
     expect(wrapper.find('.loading-screen').exists()).toBe(false)
-    expect(api).not.toHaveBeenCalled()
+    expect(api).toHaveBeenCalledWith('/api/strategies')
   })
 
-  it('renders indicators immediately from bootstrap data', async () => {
+  it('refreshes indicators after rendering bootstrap data', async () => {
     location.hash = '#indicators'
+    api.mockResolvedValue({
+      ...bootstrap.indicators,
+      saved: [
+        ...bootstrap.indicators.saved,
+        { name: 'ind11', type: 'BollingerBands', builtin: true, description: 'Freshly saved.' }
+      ]
+    })
     const wrapper = mount(LibraryPage, { props: { bootstrap } })
     await flushPromises()
 
     expect(wrapper.text()).toContain('Fast SMA')
+    expect(wrapper.text()).toContain('ind11')
     expect(wrapper.find('.loading-screen').exists()).toBe(false)
-    expect(api).not.toHaveBeenCalled()
+    expect(api).toHaveBeenCalledWith('/api/indicators')
   })
 
   it.each(['strategies', 'indicators'])('distinguishes an empty %s library from no search matches', async page => {
@@ -66,6 +77,7 @@ describe('library page', () => {
       ...bootstrap,
       [page]: { ...bootstrap[page], saved: [] }
     }
+    api.mockResolvedValue(emptyBootstrap[page])
     const emptyWrapper = mount(LibraryPage, { props: { bootstrap: emptyBootstrap } })
     await flushPromises()
 
@@ -73,6 +85,7 @@ describe('library page', () => {
     expect(emptyWrapper.text()).not.toContain(`No matching ${page}`)
     emptyWrapper.unmount()
 
+    api.mockResolvedValue(bootstrap[page])
     const filteredWrapper = mount(LibraryPage, { props: { bootstrap } })
     await filteredWrapper.get('.search-box input').setValue(`Missing ${title}`)
 
@@ -216,6 +229,9 @@ describe('library page', () => {
       }
     })
     await flushPromises()
+
+    expect(wrapper.find('.library-card details').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Source code')
 
     await wrapper.get(`[aria-label="Edit ${name}"]`).trigger('click')
     const modal = wrapper.get('.modal')

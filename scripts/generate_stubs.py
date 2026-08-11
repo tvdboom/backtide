@@ -56,6 +56,7 @@ SUBMODULES = [
     "data",
     "indicators",
     "live",
+    "metrics",
     "sizers",
     "storage",
     "strategies",

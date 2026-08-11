@@ -47,9 +47,10 @@ the app can start jobs and modify the configured local Backtide store.
 | Section | Purpose |
 |---|---|
 | **Home** | Review recent experiments, stored datasets, and shortcuts into the main workflows. |
-| **Experiment** | Configure market data, portfolio state, strategies, indicators, execution assumptions, risk controls, and engine behavior. |
+| **Experiment** | Configure market data, portfolio state, strategies, indicators, metrics, execution assumptions, risk controls, and engine behavior. |
 | **Strategies** | Search, create, inspect, and remove built-in or custom Python strategies. |
 | **Indicators** | Search, create, inspect, and remove built-in or custom Python indicators. |
+| **Metrics** | Browse Rust built-ins and create, inspect, or remove custom Python metrics. |
 | **Results** | Compare completed strategy runs and inspect metrics, equity, cash, drawdown, trades, orders, configuration, and logs. |
 | **Paper trading** | Run a strategy against live provider WebSocket candles with local simulated fills. See [Live and paper trading]. |
 | **Download** | Resolve instruments and download OHLCV bars into the local database. |

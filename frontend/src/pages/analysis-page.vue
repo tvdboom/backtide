@@ -6,7 +6,6 @@
       <label>Interval<select v-model="form.interval"><option v-for="item in availableIntervals" :key="item">{{ item }}</option></select></label>
       <label>Price<select v-model="form.price_col"><option value="open">Open</option><option value="high">High</option><option value="low">Low</option><option value="close">Close</option><option value="adj_close">Adjusted close</option></select></label>
       <label v-if="form.plot === 'volatility'">Window<input v-model.number="form.window" type="number" min="2" /></label>
-      <button class="primary" :disabled="loading || !form.symbols.length" @click="plot"><Play :size="16" /> Run analysis</button>
     </section>
     <section class="panel chart-workspace">
       <div class="chart-tabs" role="tablist">
@@ -19,8 +18,8 @@
 </template>
 
 <script setup>
-import { BarChart3, CandlestickChart, ChartLine, ChartNoAxesCombined, CircleDollarSign, Grid3X3, Play, ScatterChart, Waves } from 'lucide-vue-next'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { BarChart3, CandlestickChart, ChartLine, ChartNoAxesCombined, CircleDollarSign, Grid3X3, ScatterChart, Waves } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, post } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import SearchSelect from '../components/search-select.vue'
@@ -49,20 +48,46 @@ const names = computed(() => Object.fromEntries(storage.value.map(row => [row.sy
 const availableIntervals = computed(() => [...new Set(storage.value.filter(row => !form.symbols.length || form.symbols.includes(row.symbol)).map(row => row.interval))])
 const current = computed(() => plots.find(item => item.id === form.plot))
 const analysisSymbols = computed(() => symbolsForAnalysis(form.symbols, form.plot))
+let refreshTimer
+let requestId = 0
+let ready = false
 async function plot() {
+  const id = ++requestId
   loading.value = true; error.value = ''
-  try { figure.value = await post('/api/analysis', { ...form, symbols: analysisSymbols.value }) }
-  catch (reason) { error.value = reason.message; emit('toast', reason.message, 'error') }
-  finally { loading.value = false }
+  try {
+    const result = await post('/api/analysis', { ...form, symbols: analysisSymbols.value })
+    if (id === requestId) figure.value = result
+  } catch (reason) {
+    if (id === requestId) { error.value = reason.message; emit('toast', reason.message, 'error') }
+  } finally {
+    if (id === requestId) loading.value = false
+  }
 }
-function selectPlot(value) { form.plot = value; if (form.symbols.length) plot() }
+function schedulePlot() {
+  if (!ready) return
+  window.clearTimeout(refreshTimer)
+  if (!form.symbols.length) { figure.value = null; return }
+  if (!availableIntervals.value.includes(form.interval)) {
+    form.interval = availableIntervals.value.includes('1d') ? '1d' : availableIntervals.value[0] || '1d'
+    return
+  }
+  refreshTimer = window.setTimeout(plot, 120)
+}
+function selectPlot(value) { form.plot = value }
+watch(() => [form.symbols.join('|'), form.interval, form.price_col, form.window, form.plot], schedulePlot)
 onMounted(async () => {
   storage.value = await api('/api/storage')
   const requested = JSON.parse(sessionStorage.getItem('backtide:analysis-symbols') || '[]')
+  const requestedInterval = sessionStorage.getItem('backtide:analysis-interval')
   sessionStorage.removeItem('backtide:analysis-symbols')
+  sessionStorage.removeItem('backtide:analysis-interval')
   form.symbols = requested.filter(symbol => symbols.value.includes(symbol))
   if (!form.symbols.length) form.symbols = symbols.value.slice(0, 2)
-  form.interval = availableIntervals.value.includes('1d') ? '1d' : availableIntervals.value[0] || '1d'
+  form.interval = requestedInterval && availableIntervals.value.includes(requestedInterval)
+    ? requestedInterval
+    : availableIntervals.value.includes('1d') ? '1d' : availableIntervals.value[0] || '1d'
+  ready = true
   if (form.symbols.length) plot()
 })
+onBeforeUnmount(() => window.clearTimeout(refreshTimer))
 </script>

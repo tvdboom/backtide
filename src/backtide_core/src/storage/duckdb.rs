@@ -692,6 +692,7 @@ impl Storage for DuckDb {
             portfolio: config.portfolio.clone(),
             strategy: config.strategy.clone(),
             indicators: config.indicators.clone(),
+            metrics: config.metrics.clone(),
             exchange: config.exchange.clone(),
             engine: config.engine.clone(),
         };
@@ -1186,6 +1187,7 @@ mod tests {
             portfolio: PortfolioExpConfig::default(),
             strategy: StrategyExpConfig::default(),
             indicators: IndicatorExpConfig::default(),
+            metrics: MetricExpConfig::default(),
             exchange: ExchangeExpConfig::default(),
             engine: EngineExpConfig::default(),
         }

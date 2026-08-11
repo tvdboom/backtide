@@ -1,10 +1,10 @@
 <template>
-  <div class="page narrow-page">
+  <div class="page narrow-page download-page">
     <section class="page-intro"><div><span class="eyebrow">Market data</span><h2>Download historical bars</h2><p>Resolve instruments and fill the local data store from your configured provider.</p></div></section>
     <form class="panel form-section" @submit.prevent="download">
       <div class="segmented wide-control"><button v-for="type in enums.instrument_types" :key="type" type="button" :class="{ active: form.instrument_type === optionValue('instrument_type', type) }" @click="setType(type)"><component :is="instrumentTypeIcon(type)" :size="16" />{{ type }}</button></div>
       <div class="form-grid two">
-        <label class="wide">Symbols<SearchSelect :key="form.instrument_type" v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :loading="loadingInstruments" allow-custom input-id="download-symbols" label="Download symbols" placeholder="Search symbols or company names…" /></label>
+        <label class="wide symbol-select-field">Symbols<SearchSelect :key="form.instrument_type" v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" :loading="loadingInstruments" allow-custom input-id="download-symbols" label="Download symbols" placeholder="Search symbols or company names…" /><small class="logo-attribution">Selected logos provided by <a href="https://parqet.com/api" target="_blank" rel="noreferrer">Parqet</a>.</small></label>
         <label class="wide">Intervals<SearchSelect v-model="form.intervals" :options="enums.intervals" plain-options placeholder="Choose intervals…" /></label>
         <label class="toggle-label"><span>Full available history<small>Provider limits still apply by interval.</small></span><input v-model="form.full_history" type="checkbox" class="toggle" /></label>
         <span />
@@ -43,9 +43,9 @@
               <div class="download-intervals">
                 <div v-for="interval in profile.intervals" :key="interval.interval" class="download-interval-row">
                   <span class="download-interval-badge">{{ interval.interval }}</span>
-                  <span class="download-range"><small>Provider availability</small><span>{{ interval.available_start }} <ArrowRight :size="12" /> {{ interval.available_end }}</span></span>
-                  <span class="download-range requested"><small>Download range</small><span>{{ interval.download_start }} <ArrowRight :size="12" /> {{ interval.download_end }}</span></span>
-                  <span class="download-row-count"><span class="download-row-value"><strong>~{{ compact(interval.estimated_bars) }}</strong><span>bars</span></span><small>{{ interval.days }} days</small></span>
+                  <span class="download-range"><small>Provider availability</small><span>{{ displayDate(interval.available_start) }} <ArrowRight :size="12" /> {{ displayDate(interval.available_end) }}</span></span>
+                  <span class="download-range requested"><small>Download range</small><span>{{ displayDate(interval.download_start) }} <ArrowRight :size="12" /> {{ displayDate(interval.download_end) }}</span></span>
+                  <span class="download-row-count"><span class="download-row-value"><strong>~{{ compact(interval.estimated_bars) }}</strong><span>bars</span></span><small>{{ formatDaySpan(interval.days) }}</small></span>
                 </div>
               </div>
             </article>
@@ -71,7 +71,7 @@ import { ArrowLeftRight, ArrowRight, BarChart3, Bitcoin, ChartCandlestick, Chevr
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, post, query } from '../api'
 import SearchSelect from '../components/search-select.vue'
-import { experimentOptionValue, instrumentLogoUrl } from '../state'
+import { experimentOptionValue, formatConfiguredDate, formatDaySpan, instrumentLogoUrl, selectedInstrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
@@ -94,9 +94,25 @@ let planTimer
 let planController
 const symbols = computed(() => instruments.value.map(item => item.symbol))
 const names = computed(() => Object.fromEntries(instruments.value.map(item => [item.symbol, item.name])))
-const logos = computed(() => Object.fromEntries(instruments.value.map(item => [
-  item.symbol,
-  instrumentLogoUrl(item.symbol, item.instrument_type, props.bootstrap.display.logokit_api_key)
+const logos = computed(() => {
+  const values = Object.fromEntries(instruments.value.map(item => [
+    item.symbol,
+    instrumentLogoUrl(item.symbol, item.instrument_type, props.bootstrap.display.logokit_api_key)
+  ]))
+  for (const symbol of form.symbols) {
+    if (!values[symbol]) {
+      values[symbol] = instrumentLogoUrl(
+        symbol,
+        form.instrument_type,
+        props.bootstrap.display.logokit_api_key
+      )
+    }
+  }
+  return values
+})
+const selectedLogos = computed(() => Object.fromEntries(form.symbols.map(symbol => [
+  symbol,
+  selectedInstrumentLogoUrl(symbol, form.instrument_type)
 ])))
 const jobActive = computed(() => ['queued', 'running'].includes(job.value?.status))
 const jobTitle = computed(() => {
@@ -174,6 +190,7 @@ async function loadInstruments() {
   }
 }
 function compact(value) { return new Intl.NumberFormat('en', { notation: Number(value) > 99_999 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(Number(value) || 0) }
+function displayDate(value) { return formatConfiguredDate(value, props.bootstrap?.display) }
 function duration(value) {
   const seconds = Math.floor(Number(value) || 0)
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
@@ -238,9 +255,27 @@ async function download() {
     const requestedSymbols = [...form.symbols]
     job.value = await post('/api/downloads', { ...form, start: form.full_history ? null : form.start, end: form.full_history ? null : form.end })
     downloadedSymbols.value = requestedSymbols
+    resetDownloadForm()
     await poll()
   } catch (error) { emit('toast', error.message, 'error') }
   finally { loading.value = false }
+}
+function resetDownloadForm() {
+  const instrumentType = form.instrument_type
+  clearTimeout(planTimer)
+  planController?.abort()
+  planController = null
+  Object.assign(form, {
+    instrument_type: instrumentType,
+    symbols: [],
+    intervals: ['1d'],
+    full_history: true,
+    start: '',
+    end: ''
+  })
+  plan.value = null
+  planError.value = ''
+  planning.value = false
 }
 function inspectData() {
   sessionStorage.setItem('backtide:analysis-symbols', JSON.stringify(downloadedSymbols.value))

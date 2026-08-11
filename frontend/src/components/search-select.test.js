@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils'
+import { BrainCircuit } from 'lucide-vue-next'
 import { describe, expect, it } from 'vitest'
 import SearchSelect from './search-select.vue'
 
@@ -12,7 +13,7 @@ describe('search-select', () => {
 
     await input.trigger('focus')
     await input.setValue('MS')
-    await wrapper.get('.search-menu button').trigger('mousedown')
+    await wrapper.get('.search-menu button').trigger('click')
 
     expect(wrapper.emitted('update:modelValue')[0]).toEqual([['MSFT']])
   })
@@ -107,5 +108,158 @@ describe('search-select', () => {
     await wrapper.get('input').trigger('focus')
 
     expect(wrapper.get('[role="status"]').text()).toContain('Loading options')
+  })
+
+  it('renders library names first with their algorithm or custom type below', async () => {
+    const wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: [],
+        options: ['Momentum study'],
+        descriptions: { 'Momentum study': 'MACD' },
+        optionNameFirst: true
+      }
+    })
+
+    await wrapper.get('input').trigger('focus')
+
+    expect(wrapper.get('.search-option-copy strong').text()).toBe('Momentum study')
+    expect(wrapper.get('.search-option-copy small').text()).toBe('MACD')
+  })
+
+  it('shows up to one hundred options, supports a visual icon, and replaces a single selection', async () => {
+    const wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: ['OLD'],
+        options: Array.from({ length: 15 }, (_, index) => `ITEM${index + 1}`),
+        multiple: false,
+        optionIcon: BrainCircuit
+      }
+    })
+
+    await wrapper.get('input').trigger('focus')
+
+    expect(wrapper.findAll('.search-menu button')).toHaveLength(15)
+    expect(wrapper.get('.search-option-logo svg').exists()).toBe(true)
+    await wrapper.get('.search-menu button').trigger('click')
+    expect(wrapper.emitted('update:modelValue')[0]).toEqual([['ITEM1']])
+    expect(wrapper.find('.search-menu').exists()).toBe(false)
+  })
+
+  it('ranks ticker matches first and bounds a large searchable result set', async () => {
+    const options = [
+      ...Array.from({ length: 110 }, (_, index) => `ITEM${index}`),
+      'INGA.AS'
+    ]
+    const descriptions = Object.fromEntries(options.map(option => [
+      option,
+      option === 'INGA.AS' ? 'ING GROEP N.V.' : `${option} trading company`
+    ]))
+    const wrapper = mount(SearchSelect, {
+      props: { modelValue: [], options, descriptions }
+    })
+
+    await wrapper.get('input').trigger('focus')
+    await wrapper.get('input').setValue('ING')
+
+    expect(wrapper.findAll('.search-menu button')).toHaveLength(100)
+    expect(wrapper.get('.search-menu button small').text()).toBe('INGA.AS')
+  })
+
+  it('retries a selected logo even if its menu image failed', async () => {
+    let wrapper
+    wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: [],
+        options: ['INGA.AS'],
+        logos: { 'INGA.AS': 'https://example.test/inga.png' },
+        'onUpdate:modelValue': value => wrapper.setProps({ modelValue: value })
+      }
+    })
+
+    await wrapper.get('input').trigger('focus')
+    await wrapper.get('.search-menu img').trigger('error')
+    await wrapper.get('.search-menu button').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('.tag img').attributes('src')).toBe('https://example.test/inga.png')
+  })
+
+  it('shows an immediate fallback while retrying a selected symbol logo', async () => {
+    const wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: ['AVIANRO'],
+        options: [],
+        logos: { AVIANRO: 'https://example.test/avianro.png' }
+      }
+    })
+
+    const selectedLogo = wrapper.get('.selected-symbol-logo')
+    expect(selectedLogo.get('svg').exists()).toBe(true)
+
+    await selectedLogo.get('img').trigger('error')
+    expect(selectedLogo.get('img').attributes('src')).toContain('selected_retry=1')
+
+    await selectedLogo.get('img').trigger('load')
+    expect(selectedLogo.find('svg').exists()).toBe(false)
+    expect(selectedLogo.get('img').classes()).toContain('loaded')
+  })
+
+  it('uses the dedicated selected logo instead of a failed menu logo', async () => {
+    const wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: ['ABN.AS'],
+        options: ['ABN.AS'],
+        logos: { 'ABN.AS': 'https://example.test/menu-logo.png' },
+        selectedLogos: { 'ABN.AS': 'https://example.test/selected-logo.png' }
+      }
+    })
+
+    expect(wrapper.get('.selected-symbol-logo img').attributes('src')).toBe(
+      'https://example.test/selected-logo.png'
+    )
+  })
+
+  it('keeps one detailed benchmark selection after the control closes', async () => {
+    let wrapper
+    wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: ['ASML'],
+        options: ['ASML', 'AAPL'],
+        descriptions: { ASML: 'ASML Holding N.V.', AAPL: 'Apple Inc.' },
+        logos: { ASML: 'https://example.test/asml.png' },
+        multiple: false,
+        showSelectedDescription: true,
+        'onUpdate:modelValue': value => wrapper.setProps({ modelValue: value })
+      }
+    })
+
+    expect(wrapper.get('.tag').text()).toContain('ASML Holding N.V.')
+    await wrapper.get('input').trigger('focus')
+    await wrapper.get('.search-menu button').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('.tag')).toHaveLength(1)
+    expect(wrapper.get('.tag').text()).toContain('AAPL')
+    expect(wrapper.find('.search-menu').exists()).toBe(false)
+  })
+
+  it('shows an explanation below plain order-type options without an image', async () => {
+    const wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: [],
+        options: ['Market', 'Limit'],
+        descriptions: {
+          Market: 'Execute at the best available market price.',
+          Limit: 'Execute only at the chosen price or better.'
+        },
+        plainOptions: true
+      }
+    })
+
+    await wrapper.get('input').trigger('focus')
+
+    expect(wrapper.get('.search-option-plain strong').text()).toBe('Market')
+    expect(wrapper.get('.search-option-plain small').text()).toContain('best available')
+    expect(wrapper.find('.search-option-logo').exists()).toBe(false)
   })
 })

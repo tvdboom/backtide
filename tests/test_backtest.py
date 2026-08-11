@@ -570,7 +570,9 @@ class TestRunExperimentKwargs:
 
         monkeypatch.setattr(backtest_module.uuid, "uuid4", lambda: _FakeUuid())
 
-        def _fake_run_experiment(cfg, _verbose, _strategy_overrides, _indicator_overrides):
+        def _fake_run_experiment(
+            cfg, _verbose, _strategy_overrides, _indicator_overrides, _metric_overrides
+        ):
             raise _CaptureConfig(cfg)
 
         monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
@@ -598,7 +600,9 @@ class TestRunExperimentKwargs:
                 super().__init__("captured")
                 self.cfg = cfg
 
-        def _fake_run_experiment(cfg, _verbose, _strategy_overrides, _indicator_overrides):
+        def _fake_run_experiment(
+            cfg, _verbose, _strategy_overrides, _indicator_overrides, _metric_overrides
+        ):
             raise _CaptureConfig(cfg)
 
         monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
@@ -622,7 +626,9 @@ class TestRunExperimentKwargs:
         """Explicit falsy flat kwargs are not replaced by config defaults."""
         captured = {}
 
-        def _fake_run_experiment(cfg, _verbose, _strategy_overrides, _indicator_overrides):
+        def _fake_run_experiment(
+            cfg, _verbose, _strategy_overrides, _indicator_overrides, _metric_overrides
+        ):
             captured["config"] = cfg
             return object()
 
@@ -655,7 +661,9 @@ class TestRunExperimentKwargs:
         """Flat fields take precedence while preserving other section fields."""
         captured = {}
 
-        def _fake_run_experiment(cfg, _verbose, _strategy_overrides, _indicator_overrides):
+        def _fake_run_experiment(
+            cfg, _verbose, _strategy_overrides, _indicator_overrides, _metric_overrides
+        ):
             captured["config"] = cfg
             return object()
 

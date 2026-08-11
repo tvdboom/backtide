@@ -26,8 +26,8 @@
                   <span><strong>{{ row.symbol }}</strong><small>{{ row.name || row.instrument_type }}</small></span>
                 </div>
               </td>
-              <td><span class="badge neutral">{{ row.interval }}</span></td><td>{{ row.provider }}</td>
-              <td>{{ date(row.first_ts || row.earliest_ts) }} <ArrowRight :size="13"/> {{ date(row.last_ts || row.latest_ts) }}</td>
+              <td><span class="badge neutral">{{ formatIntervalLabel(row.interval) }}</span></td><td>{{ row.provider }}</td>
+              <td><span class="coverage-range">{{ date(row.first_ts || row.earliest_ts) }} <ArrowRight :size="13"/> {{ date(row.last_ts || row.latest_ts) }} <small v-if="coverageDuration(row)">({{ coverageDuration(row) }})</small></span></td>
               <td class="number">{{ compact(row.n_rows || row.rows) }}</td>
               <td><button class="icon-button" aria-label="Open in analysis" @click="openAnalysis(row)"><ChartNoAxesCombined :size="16"/></button></td>
             </tr>
@@ -49,10 +49,10 @@
 
 <script setup>
 import { ArrowRight, ChartNoAxesCombined, Database, Plus, Rows3, Search, Shapes, Trash2, TriangleAlert, WalletCards } from 'lucide-vue-next'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref } from 'vue'
 import { api, remove } from '../api'
 import ConfirmationModal from '../components/confirmation-modal.vue'
-import { instrumentLogoUrl } from '../state'
+import { formatConfiguredDate, formatDaySpan, formatIntervalLabel, instrumentLogoUrl } from '../state'
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
 const rows = ref([])
@@ -63,12 +63,21 @@ const selected = ref(new Set())
 const deleting = ref(false)
 const pendingDelete = ref(null)
 const failedLogos = ref(new Set())
+let activatedOnce = false
 const filtered = computed(() => rows.value.filter(row => Object.values(row).join(' ').toLowerCase().includes(search.value.toLowerCase())))
 const allSelected = computed(() => filtered.value.length && filtered.value.every(row => selected.value.has(key(row))))
 const key = row => `${row.symbol}|${row.interval}|${row.provider}`
 const logoKey = row => `${row.symbol}|${row.instrument_type}`
 const compact = value => new Intl.NumberFormat('en', { notation: Number(value) > 99999 ? 'compact' : 'standard' }).format(Number(value) || 0)
-function date(value) { if (!value) return '—'; return new Date(Number(value) * (Number(value) < 1e12 ? 1000 : 1)).toLocaleDateString() }
+const timestampMs = value => Number(value) * (Number(value) < 1e12 ? 1000 : 1)
+function date(value) { return formatConfiguredDate(value, props.bootstrap?.display) }
+function coverageDuration(row) {
+  const start = timestampMs(row.first_ts || row.earliest_ts)
+  const end = timestampMs(row.last_ts || row.latest_ts)
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return ''
+  const days = Math.max(0, Math.floor(Math.abs(end - start) / 86_400_000))
+  return formatDaySpan(days)
+}
 function logo(row) {
   if (failedLogos.value.has(logoKey(row))) return ''
   return instrumentLogoUrl(row.symbol, row.instrument_type, props.bootstrap?.display?.logokit_api_key)
@@ -93,6 +102,7 @@ async function load() {
 }
 function openAnalysis(row) {
   sessionStorage.setItem('backtide:analysis-symbols', JSON.stringify([row.symbol]))
+  sessionStorage.setItem('backtide:analysis-interval', row.interval)
   emit('navigate', 'analysis')
 }
 function requestDelete() {
@@ -114,4 +124,8 @@ async function destroy() {
   finally { deleting.value = false }
 }
 onMounted(load)
+onActivated(() => {
+  if (activatedOnce) load()
+  activatedOnce = true
+})
 </script>

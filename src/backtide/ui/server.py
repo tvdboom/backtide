@@ -81,6 +81,8 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 self._json(self.services.strategy_catalog())
             elif path == "/api/indicators":
                 self._json(self.services.indicator_catalog())
+            elif path == "/api/metrics":
+                self._json(self.services.metric_catalog())
             elif path == "/api/live":
                 self._json(self.services.live_status())
             else:
@@ -109,6 +111,7 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 "/api/config/parse": self.services.parse_experiment_config,
                 "/api/strategies": self.services.save_strategy,
                 "/api/indicators": self.services.save_indicator,
+                "/api/metrics": self.services.save_metric,
                 "/api/live": self.services.start_live,
             }
             if path == "/api/experiments/abort":
@@ -141,6 +144,8 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 result = self.services.delete_strategy(unquote(path.rsplit("/", 1)[1]))
             elif path.startswith("/api/indicators/"):
                 result = self.services.delete_indicator(unquote(path.rsplit("/", 1)[1]))
+            elif path.startswith("/api/metrics/"):
+                result = self.services.delete_metric(unquote(path.rsplit("/", 1)[1]))
             else:
                 raise APIError("Endpoint not found.", 404)
             self._json(result)
@@ -159,6 +164,8 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 result = self.services.update_strategy(unquote(path.rsplit("/", 1)[1]), body)
             elif path.startswith("/api/indicators/"):
                 result = self.services.update_indicator(unquote(path.rsplit("/", 1)[1]), body)
+            elif path.startswith("/api/metrics/"):
+                result = self.services.update_metric(unquote(path.rsplit("/", 1)[1]), body)
             else:
                 raise APIError("Endpoint not found.", 404)
             self._json(result)

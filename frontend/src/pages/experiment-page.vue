@@ -8,7 +8,7 @@
         <input type="file" accept=".toml,.yaml,.yml,.json" @change="importConfig" />
       </label>
     </section>
-    <form class="panel experiment-builder" novalidate @submit.prevent="run">
+    <form class="panel experiment-builder" novalidate @keydown.enter="preventImplicitSubmit" @submit.prevent="run">
       <div class="tabs" role="tablist">
         <button v-for="(item, index) in tabs" :key="item" type="button" :class="{ active: tab === index }" @click="tab = index"><span>{{ index + 1 }}</span>{{ item }}</button>
       </div>
@@ -20,7 +20,7 @@
             <strong>{{ issue.title }}</strong>
             <small>{{ issue.message }}</small>
           </span>
-          <button type="button" aria-label="Dismiss experiment warning" @click="issue = null">
+          <button type="button" aria-label="Dismiss experiment warning" @click="dismissIssue">
             <X :size="15" />
           </button>
         </div>
@@ -28,8 +28,9 @@
 
       <div v-if="tab === 0" class="form-section">
         <div class="section-copy"><h3>Experiment identity</h3><p>Give this research run a recognizable name and context.</p></div>
-        <div class="form-grid two">
-          <label class="wide">Name<input id="experiment-name" v-model="config.general.name" maxlength="80" placeholder="Enter a name..." /></label>
+        <div class="form-grid experiment-identity-grid">
+          <label>Name<input id="experiment-name" v-model="config.general.name" maxlength="80" placeholder="Enter a name..." /></label>
+          <label>Icon<select id="experiment-icon" v-model="config.general.icon"><option v-for="item in experimentIcons" :key="item.value" :value="item.value">{{ item.value }} {{ item.label }}</option></select></label>
           <label class="wide">Tags<SearchSelect v-model="config.general.tags" :options="[]" :uppercase-custom="false" allow-custom input-id="experiment-tags" label="Experiment tags" placeholder="Type a tag and press Enter…" /></label>
           <label class="wide">Description<textarea v-model="config.general.description" rows="5" placeholder="Add a description..." /></label>
         </div>
@@ -41,7 +42,7 @@
           <button v-for="type in enums.instrument_types" :key="type" type="button" :class="{ active: config.data.instrument_type === optionValue('instrument_type', type) }" @click="setInstrumentType(type)"><component :is="instrumentTypeIcon(type)" :size="16" />{{ type }}</button>
         </div>
         <div class="form-grid two">
-          <label class="wide">Symbols<SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /></label>
+          <label class="wide symbol-select-field">Symbols<SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /><small class="logo-attribution">Selected logos provided by <a href="https://parqet.com/api" target="_blank" rel="noreferrer">Parqet</a>.</small></label>
           <label>Interval<select id="experiment-interval" v-model="config.data.interval"><option v-for="item in enums.intervals" :key="item" :value="optionValue('interval', item)">{{ item }}</option></select></label>
           <label class="toggle-label"><span>Full available history<small>Use the provider's maximum range.</small></span><input v-model="config.data.full_history" type="checkbox" class="toggle" /></label>
           <label v-if="!config.data.full_history">Start date<input id="experiment-start-date" v-model="config.data.start_date" type="date" /></label>
@@ -51,7 +52,7 @@
 
       <div v-if="tab === 2" class="form-section">
         <div class="section-copy"><h3>Starting portfolio</h3><p>Set the capital base and any positions held before the first bar.</p></div>
-        <div class="form-grid two">
+        <div class="portfolio-basics">
           <label>Initial cash<input id="experiment-initial-cash" v-model.number="config.portfolio.initial_cash" type="number" min="1" step="1" /></label>
           <div class="field-label">
             <span>Base currency</span>
@@ -61,29 +62,66 @@
               input-id="experiment-base-currency"
             />
           </div>
-          <label class="wide">Starting positions<textarea :value="positionsText" rows="5" placeholder="AAPL: 10&#10;MSFT: 5" @input="positionsText = $event.target.value" /><small>One symbol and quantity per line.</small></label>
+        </div>
+        <div class="starting-positions">
+          <div class="starting-positions-heading">
+            <span><strong>Starting positions</strong><small>Choose from the symbols in your market universe.</small></span>
+            <button type="button" class="secondary" :disabled="!availablePositionSymbols.length" @click="addPosition"><Plus :size="16" /> Add position</button>
+          </div>
+          <div v-if="!positions.length" class="position-empty">No starting positions. The experiment will begin entirely in cash.</div>
+          <div v-for="(position, index) in positions" :key="`${position.symbol}-${index}`" class="position-row">
+            <div class="position-field"><span>Symbol</span><InstrumentSelect v-model="position.symbol" :options="positionOptions(index)" :descriptions="symbolNames" :logos="symbolLogos" :label="`Starting position ${index + 1} symbol`" /></div>
+            <label>Quantity<input v-model.number="position.quantity" type="number" step="any" /></label>
+            <button type="button" class="icon-button danger" :aria-label="position.symbol ? `Remove ${position.symbol} starting position` : 'Remove empty starting position'" @click="removePosition(index)"><Trash2 :size="16" /></button>
+          </div>
         </div>
       </div>
 
       <div v-if="tab === 3" class="form-section">
         <div class="section-copy"><h3>Trading logic</h3><p>Select saved strategies, optional indicators and a benchmark.</p></div>
         <div class="form-grid two">
-          <label class="wide">Strategies<SearchSelect v-model="config.strategy.strategies" :options="savedStrategies" input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></label>
-          <label class="wide">Indicators<SearchSelect v-model="config.indicators.indicators" :options="savedIndicators" placeholder="Search saved indicators…" /></label>
-          <label>Benchmark<input v-model="config.strategy.benchmark" placeholder="Optional ticker" /></label>
-          <div class="callout"><Info :size="18" /><span>Strategies and indicators are managed in their dedicated library pages.</span></div>
+          <label class="wide">Strategies<SearchSelect v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></label>
+          <section v-if="selectedStrategies.length" class="selection-insights wide" aria-label="Selected strategy details">
+            <article v-for="item in selectedStrategies" :key="item.name" class="asset-selection-card">
+              <header><span class="metric-icon"><LibraryAssetIcon kind="strategy" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ catalogTypeLabel(item.type) }}</small></span></header>
+              <p>{{ item.description }}</p>
+              <div v-if="item.required_indicators?.length" class="required-indicators"><strong>Injected indicators</strong><div class="indicator-chip-list"><span v-for="indicator in item.required_indicators" :key="indicator.name" class="indicator-chip" :title="indicator.description"><Shapes :size="14" />{{ indicator.name }}</span></div></div>
+            </article>
+          </section>
+          <label class="wide">Indicators<SearchSelect v-model="config.indicators.indicators" :options="savedIndicators" :descriptions="indicatorOptionDetails" :option-icons="indicatorOptionIcons" option-name-first label="Experiment indicators" placeholder="Search saved indicators…" /></label>
+          <section v-if="selectedIndicators.length" class="selection-insights wide" aria-label="Selected indicator details">
+            <article v-for="item in selectedIndicators" :key="item.name" class="asset-selection-card compact-card">
+              <header><span class="metric-icon"><LibraryAssetIcon kind="indicator" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ catalogTypeLabel(item.type) }}</small></span></header>
+              <p>{{ item.description }}</p>
+            </article>
+          </section>
+          <div class="field-label wide"><span>Benchmark</span><small class="field-help">Compare strategy performance against one stock or ETF over the same period.</small><BenchmarkSelect v-model="config.strategy.benchmark" :options="benchmarkSymbols" :descriptions="symbolNames" :logos="symbolLogos" label="Experiment benchmark" :placeholder="benchmarkPlaceholder" /></div>
         </div>
       </div>
 
       <div v-if="tab === 4" class="form-section">
+        <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, then select the experiment headline.</p></div>
+        <div class="form-grid two">
+          <label class="wide">Metrics<SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /></label>
+          <label>Main metric<select id="experiment-main-metric" v-model="config.metrics.main_metric"><option v-for="key in config.metrics.metrics" :key="key" :value="key">{{ metricLabel(key) }}</option></select><small>The best value appears in the results overview.</small></label>
+          <section v-if="selectedMetrics.length" class="selection-insights wide" aria-label="Selected metric details">
+            <article v-for="item in selectedMetrics" :key="item.key" class="asset-selection-card compact-card">
+              <header><span class="metric-icon"><LibraryAssetIcon kind="metric" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ item.builtin ? 'Built-in' : 'Custom' }}</small></span></header>
+              <p>{{ item.description }}</p>
+            </article>
+          </section>
+        </div>
+      </div>
+
+      <div v-if="tab === 5" class="form-section">
         <div class="section-copy"><h3>Execution model</h3><p>Model commissions, slippage, fills and supported order types.</p></div>
         <div class="settings-stack">
           <fieldset class="settings-group">
             <legend>Fees and price impact</legend>
             <div class="form-grid three">
-              <label>Commission<select v-model="config.exchange.commission_type"><option v-for="item in enums.commission_types" :key="item" :value="optionValue('commission_type', item)">{{ item }}</option></select></label>
-              <label>Commission (%)<input v-model.number="config.exchange.commission_pct" type="number" min="0" step="0.01" /></label>
-              <label>Fixed commission<input v-model.number="config.exchange.commission_fixed" type="number" min="0" step="0.01" /></label>
+              <label>Commission<select id="experiment-commission-type" v-model="config.exchange.commission_type"><option v-for="item in enums.commission_types" :key="item" :value="optionValue('commission_type', item)">{{ item }}</option></select></label>
+              <label v-if="showsPercentageCommission">Commission (%)<input v-model.number="config.exchange.commission_pct" type="number" min="0" step="0.01" /></label>
+              <label v-if="showsFixedCommission">Fixed commission<input v-model.number="config.exchange.commission_fixed" type="number" min="0" step="0.01" /></label>
               <label>Slippage (%)<input v-model.number="config.exchange.slippage" type="number" min="0" step="0.01" /></label>
             </div>
           </fieldset>
@@ -91,13 +129,13 @@
             <legend>Order handling</legend>
             <div class="form-grid two">
               <label class="toggle-label"><span>Partial fills<small>Allow available volume to fill part of an order.</small></span><input v-model="config.exchange.partial_fills" type="checkbox" class="toggle" /></label>
-              <label>Allowed order types<SearchSelect v-model="config.exchange.allowed_order_types" :options="enums.order_types" input-id="experiment-order-types" label="Allowed order types" /></label>
+              <label>Allowed order types<SearchSelect v-model="config.exchange.allowed_order_types" :options="enums.order_types" :descriptions="orderTypeDescriptions" plain-options input-id="experiment-order-types" label="Allowed order types" /></label>
             </div>
           </fieldset>
         </div>
       </div>
 
-      <div v-if="tab === 5" class="form-section">
+      <div v-if="tab === 6" class="form-section">
         <div class="section-copy"><h3>Risk controls</h3><p>Bound leverage, short exposure, concentration and currency handling.</p></div>
         <div class="settings-stack">
           <fieldset class="settings-group">
@@ -139,7 +177,7 @@
         </div>
       </div>
 
-      <div v-if="tab === 6" class="form-section">
+      <div v-if="tab === 7" class="form-section">
         <div class="section-copy"><h3>Engine behavior</h3><p>Choose warmup and timing conventions used on every simulation bar.</p></div>
         <fieldset class="settings-group">
           <legend>Simulation timing</legend>
@@ -167,50 +205,153 @@
 import {
   ArrowLeftRight,
   Bitcoin,
+  Bot,
+  Braces,
   ChartCandlestick,
   ChevronLeft,
   ChevronRight,
-  Info,
   Landmark,
   Play,
+  Plus,
+  Shapes,
+  Sigma,
+  SquareCode,
+  Trash2,
   TriangleAlert,
   Upload,
   X
 } from 'lucide-vue-next'
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { post, query } from '../api'
+import BenchmarkSelect from '../components/benchmark-select.vue'
 import CurrencySelect from '../components/currency-select.vue'
+import InstrumentSelect from '../components/instrument-select.vue'
+import LibraryAssetIcon from '../components/library-asset-icon.vue'
 import SearchSelect from '../components/search-select.vue'
 import {
   cloneApiState,
   consumeExperimentDraft,
   experimentOptionValue,
-  instrumentLogoUrl
+  instrumentLogoUrl,
+  selectedInstrumentLogoUrl
 } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
-const tabs = ['General', 'Market data', 'Portfolio', 'Strategy', 'Execution', 'Risk', 'Engine']
+const tabs = ['General', 'Market data', 'Portfolio', 'Strategy', 'Metrics', 'Execution', 'Risk', 'Engine']
+const experimentIcons = [
+  { value: '🧪', label: 'Research' },
+  { value: '📈', label: 'Growth' },
+  { value: '🎯', label: 'Target' },
+  { value: '🚀', label: 'Launch' },
+  { value: '💡', label: 'Idea' },
+  { value: '🌊', label: 'Trend' },
+  { value: '🧭', label: 'Explore' },
+  { value: '⚛️', label: 'Model' },
+  { value: '🏆', label: 'Champion' },
+  { value: '🔬', label: 'Inspect' }
+]
 const enums = props.bootstrap.enums
 const savedDraft = consumeExperimentDraft(sessionStorage)
 const config = reactive(cloneApiState(savedDraft || props.bootstrap.defaults))
+if (!config.metrics) config.metrics = { metrics: ['total_return', 'final_equity', 'pnl', 'n_trades', 'win_rate', 'cagr', 'ann_volatility', 'sharpe', 'sortino', 'max_dd', 'excess_return', 'alpha'], main_metric: 'sharpe' }
+if (!config.general.icon) config.general.icon = experimentIcons[0].value
 const optionValue = experimentOptionValue
 const tab = ref(0)
 const running = ref(false)
 const issue = ref(null)
+let issueTimer
 const instruments = ref([])
 const loadingInstruments = ref(false)
-const positionsText = ref(Object.entries(config.portfolio.starting_positions || {}).map(([key, value]) => `${key}: ${value}`).join('\n'))
+const positions = ref(Object.entries(config.portfolio.starting_positions || {}).map(([symbol, quantity]) => ({ symbol, quantity })))
 const symbols = computed(() => instruments.value.map(item => item.symbol))
 const symbolNames = computed(() => Object.fromEntries(instruments.value.map(item => [item.symbol, item.name])))
-const symbolLogos = computed(() => Object.fromEntries(instruments.value.map(item => [
-  item.symbol,
-  instrumentLogoUrl(item.symbol, item.instrument_type, props.bootstrap.display.logokit_api_key)
+const symbolLogos = computed(() => {
+  const values = Object.fromEntries(instruments.value.map(item => [
+    item.symbol,
+    instrumentLogoUrl(item.symbol, item.instrument_type, props.bootstrap.display.logokit_api_key)
+  ]))
+  for (const symbol of config.data.symbols) {
+    if (!values[symbol]) {
+      values[symbol] = instrumentLogoUrl(
+        symbol,
+        config.data.instrument_type,
+        props.bootstrap.display.logokit_api_key
+      )
+    }
+  }
+  return values
+})
+const selectedSymbolLogos = computed(() => Object.fromEntries(config.data.symbols.map(symbol => [
+  symbol,
+  selectedInstrumentLogoUrl(symbol, config.data.instrument_type)
 ])))
 const savedStrategies = computed(() => props.bootstrap.strategies.saved.map(item => item.name))
 const savedIndicators = computed(() => props.bootstrap.indicators.saved.map(item => item.name))
+const metricCatalog = computed(() => [
+  ...(props.bootstrap.metrics?.builtin || []),
+  ...(props.bootstrap.metrics?.saved || [])
+])
+const metricOptions = computed(() => metricCatalog.value.map(item => item.key))
+const metricOptionDetails = computed(() => Object.fromEntries(metricCatalog.value.map(item => [item.key, item.builtin ? 'Rust built-in' : 'Custom Python'])))
+const metricOptionIcons = computed(() => Object.fromEntries(metricCatalog.value.map(item => [item.key, item.builtin ? Sigma : Braces])))
+const strategyOptionDetails = computed(() => Object.fromEntries(
+  props.bootstrap.strategies.saved.map(item => [
+    item.name, item.builtin ? catalogTypeLabel(item.type) : 'Custom'
+  ])))
+const indicatorOptionDetails = computed(() => Object.fromEntries(
+  props.bootstrap.indicators.saved.map(item => [
+    item.name, item.builtin ? catalogTypeLabel(item.type) : 'Custom'
+  ])))
+const strategyOptionIcons = computed(() => Object.fromEntries(
+  props.bootstrap.strategies.saved.map(item => [item.name, item.builtin ? Bot : SquareCode])))
+const indicatorOptionIcons = computed(() => Object.fromEntries(
+  props.bootstrap.indicators.saved.map(item => [item.name, item.builtin ? Shapes : Braces])))
+const selectedStrategies = computed(() => config.strategy.strategies
+  .map(name => props.bootstrap.strategies.saved.find(item => item.name === name))
+  .filter(Boolean))
+const selectedIndicators = computed(() => config.indicators.indicators
+  .map(name => props.bootstrap.indicators.saved.find(item => item.name === name))
+  .filter(Boolean))
+const selectedMetrics = computed(() => config.metrics.metrics
+  .map(key => metricCatalog.value.find(item => item.key === key))
+  .filter(Boolean))
+const benchmarkSymbols = computed(() => ['stocks', 'etf'].includes(config.data.instrument_type) ? symbols.value : [])
+const benchmarkPlaceholder = computed(() => benchmarkSymbols.value.length
+  ? 'Search or enter a benchmark ticker…'
+  : 'Enter an optional benchmark ticker…')
+const showsPercentageCommission = computed(() => [
+  'Percentage',
+  'PercentagePlusFixed'
+].includes(config.exchange.commission_type))
+const showsFixedCommission = computed(() => [
+  'Fixed',
+  'PercentagePlusFixed'
+].includes(config.exchange.commission_type))
+const availablePositionSymbols = computed(() => config.data.symbols.filter(symbol =>
+  !positions.value.some(position => position.symbol === symbol)))
+const orderTypeDescriptions = computed(() => Object.fromEntries(enums.order_types.map(item => [
+  item,
+  {
+    market: 'Execute at the best available market price.',
+    limit: 'Execute only at the chosen price or better.',
+    stoploss: 'Trigger a protective market order at the stop price.',
+    takeprofit: 'Close a position at the chosen profit target.',
+    stoplimit: 'Trigger a limit order when the stop price is reached.',
+    stoplosslimit: 'Trigger a protective limit order when the stop price is reached.',
+    takeprofitlimit: 'Trigger a closing limit order when the profit target is reached.',
+    trailingstop: 'Follow favorable prices and trigger a market order after a reversal.',
+    trailingstoplimit: 'Follow favorable prices and trigger a limit order after a reversal.',
+    settleposition: 'Close or settle an existing position without opening a new one.',
+    cancel: 'Cancel an existing pending order.'
+  }[String(item).replaceAll(/[^a-z]/gi, '').toLowerCase()] || 'Control how and when an order may be filled.'
+])))
 
 function enumLabel(value) { return String(value).replace(/([a-z])([A-Z])/g, '$1 $2').replace('Na N', 'NaN') }
+function catalogTypeLabel(value) {
+  return enumLabel(value).replace(/\b(Macd|Rsi|Roc|Rsrs|Sma|Ema|Vwap)\b/g, token => token.toUpperCase())
+}
+function metricLabel(key) { return metricCatalog.value.find(item => item.key === key)?.name || enumLabel(key) }
 const instrumentTypeIcons = {
   Stocks: ChartCandlestick,
   ETF: Landmark,
@@ -255,8 +396,27 @@ async function setInstrumentType(type) {
     await showInstrumentError(error)
   }
 }
+function addPosition() {
+  const symbol = availablePositionSymbols.value[0]
+  if (symbol) positions.value.push({ symbol, quantity: 1 })
+}
+function removePosition(index) { positions.value.splice(index, 1) }
+function positionOptions(currentIndex) {
+  const current = positions.value[currentIndex]?.symbol
+  return config.data.symbols.filter(symbol => symbol === current ||
+    !positions.value.some((position, index) => index !== currentIndex && position.symbol === symbol))
+}
 function parsePositions() {
-  return Object.fromEntries(positionsText.value.split('\n').map(line => line.split(':')).filter(parts => parts.length === 2).map(([symbol, quantity]) => [symbol.trim().toUpperCase(), Number(quantity)]).filter(([, quantity]) => Number.isFinite(quantity)))
+  return Object.fromEntries(positions.value
+    .map(position => [position.symbol, Number(position.quantity)])
+    .filter(([symbol, quantity]) => config.data.symbols.includes(symbol) && Number.isFinite(quantity)))
+}
+
+function preventImplicitSubmit(event) {
+  if (event.defaultPrevented) return
+  if (event.target instanceof HTMLInputElement && event.target.type !== 'submit') {
+    event.preventDefault()
+  }
 }
 
 function validationIssue() {
@@ -278,20 +438,26 @@ function validationIssue() {
   if (!config.strategy.strategies.length) {
     return { tab: 3, selector: '#experiment-strategies', message: 'Select at least one strategy.' }
   }
+  if (!config.metrics.metrics.length) {
+    return { tab: 4, selector: '#experiment-metrics', message: 'Select at least one metric.' }
+  }
+  if (!config.metrics.metrics.includes(config.metrics.main_metric)) {
+    return { tab: 4, selector: '#experiment-main-metric', message: 'Choose a main metric from the selected metrics.' }
+  }
   if (!config.exchange.allowed_order_types.length) {
-    return { tab: 4, selector: '#experiment-order-types', message: 'Select at least one allowed order type.' }
+    return { tab: 5, selector: '#experiment-order-types', message: 'Select at least one allowed order type.' }
   }
   if (config.exchange.allow_margin && (!Number.isFinite(config.exchange.max_leverage) || config.exchange.max_leverage < 1)) {
-    return { tab: 5, selector: '#experiment-max-leverage', message: 'Maximum leverage must be at least 1.' }
+    return { tab: 6, selector: '#experiment-max-leverage', message: 'Maximum leverage must be at least 1.' }
   }
   if (!Number.isFinite(config.exchange.max_position_size) || config.exchange.max_position_size < 1 || config.exchange.max_position_size > 100) {
-    return { tab: 5, selector: '#experiment-max-position', message: 'Maximum position size must be between 1% and 100%.' }
+    return { tab: 6, selector: '#experiment-max-position', message: 'Maximum position size must be between 1% and 100%.' }
   }
   if (config.exchange.conversion_mode === 'CustomInterval' && (!Number.isInteger(config.exchange.conversion_interval) || config.exchange.conversion_interval < 1)) {
-    return { tab: 5, selector: '#experiment-conversion-interval', message: 'Enter a custom conversion interval of at least one bar.' }
+    return { tab: 6, selector: '#experiment-conversion-interval', message: 'Enter a custom conversion interval of at least one bar.' }
   }
   if (!Number.isInteger(config.engine.warmup_period) || config.engine.warmup_period < 0) {
-    return { tab: 6, selector: '#experiment-warmup', message: 'Warmup bars must be a whole number of zero or greater.' }
+    return { tab: 7, selector: '#experiment-warmup', message: 'Warmup bars must be a whole number of zero or greater.' }
   }
   return null
 }
@@ -313,31 +479,51 @@ function locateIssue(message) {
   }
 }
 
-async function showIssue(message, location = locateIssue(message)) {
+async function showIssue(message, location = locateIssue(message), correctable = false) {
+  window.clearTimeout(issueTimer)
   tab.value = location.tab
   issue.value = {
     kind: 'error',
     title: `Check ${tabs[location.tab]}`,
-    message
+    message,
+    correctable
   }
-  emit('toast', message, 'error')
+  issueTimer = window.setTimeout(dismissIssue, 4500)
   await nextTick()
   const target = document.querySelector(location.selector)
   target?.focus()
   target?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
 }
 
-async function run() {
+function dismissIssue() {
+  window.clearTimeout(issueTimer)
   issue.value = null
+}
+
+function resetExperiment() {
+  const instrumentType = config.data.instrument_type
+  const defaults = cloneApiState(props.bootstrap.defaults)
+  defaults.data.instrument_type = instrumentType
+  if (!defaults.general.icon) defaults.general.icon = experimentIcons[0].value
+  Object.assign(config, defaults)
+  positions.value = []
+  tab.value = 0
+  dismissIssue()
+}
+
+async function run() {
+  dismissIssue()
   const invalid = validationIssue()
   if (invalid) {
-    await showIssue(invalid.message, invalid)
+    await showIssue(invalid.message, invalid, true)
     return
   }
   running.value = true
   try {
-    config.portfolio.starting_positions = parsePositions()
-    const job = await post('/api/experiments', config)
+    const payload = cloneApiState(config)
+    payload.portfolio.starting_positions = parsePositions()
+    const job = await post('/api/experiments', payload)
+    resetExperiment()
     emit('toast', `Experiment queued · ${job.id}`)
     emit('navigate', 'results')
   } catch (error) { await showIssue(error.message) }
@@ -349,15 +535,28 @@ async function importConfig(event) {
   const suffix = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
   try {
     Object.assign(config, await post('/api/config/parse', { suffix, text: await file.text() }))
-    positionsText.value = Object.entries(config.portfolio.starting_positions || {})
-      .map(([key, value]) => `${key}: ${value}`)
-      .join('\n')
+    positions.value = Object.entries(config.portfolio.starting_positions || {})
+      .filter(([symbol]) => config.data.symbols.includes(symbol))
+      .map(([symbol, quantity]) => ({ symbol, quantity }))
     await loadInstruments()
-    issue.value = null
+    dismissIssue()
     emit('toast', 'Configuration imported.')
   } catch (error) {
     await showIssue(error.message)
   }
 }
+watch(() => [...config.data.symbols], selected => {
+  positions.value = positions.value.filter(position => selected.includes(position.symbol))
+})
+watch(() => [...config.metrics.metrics], selected => {
+  if (!selected.includes(config.metrics.main_metric)) config.metrics.main_metric = selected[0] || ''
+})
+watch(config, () => {
+  if (!issue.value?.correctable) return
+  const invalid = validationIssue()
+  if (invalid?.message === issue.value.message) return
+  dismissIssue()
+}, { deep: true })
+onBeforeUnmount(() => window.clearTimeout(issueTimer))
 onMounted(initializeInstruments)
 </script>

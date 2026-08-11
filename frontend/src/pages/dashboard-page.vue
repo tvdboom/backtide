@@ -34,8 +34,9 @@
         <div v-if="loading" class="empty-state" role="status"><span class="spinner" /><p>Loading recent experiments…</p></div>
         <div v-else-if="!loadError && !data?.experiments?.length" class="empty-state"><Beaker/><p>No experiments yet.</p><button class="secondary" @click="$emit('navigate', 'experiment')">Create your first</button></div>
         <button v-for="experiment in data?.experiments" :key="experiment.id" class="activity-row" @click="openExperiment(experiment)">
-          <span class="asset-avatar">{{ (experiment.name || 'E').slice(0, 2).toUpperCase() }}</span>
+          <span class="experiment-avatar" aria-hidden="true">{{ experiment.icon || '🧪' }}</span>
           <span><strong>{{ experiment.name }}</strong><small>{{ time(experiment.started_at) }}</small></span>
+          <span class="sharpe-value"><small>Sharpe</small><strong :class="sharpeTone(experiment.best_sharpe)">{{ sharpe(experiment.best_sharpe) }}</strong></span>
           <span class="badge" :class="String(experiment.status).toLowerCase()">{{ experiment.status }}</span>
           <ChevronRight :size="17" />
         </button>
@@ -44,12 +45,15 @@
         <div class="panel-header"><div><span class="eyebrow">Market data</span><h3>Recently stored</h3></div><button class="text-button" @click="$emit('navigate', 'storage')">Manage <ArrowUpRight :size="15" /></button></div>
         <div v-if="loading" class="empty-state" role="status"><span class="spinner" /><p>Loading stored market data…</p></div>
         <div v-else-if="!loadError && !data?.storage?.length" class="empty-state"><Database/><p>Your local database is empty.</p><button class="secondary" @click="$emit('navigate', 'download')">Download data</button></div>
-        <div v-for="row in data?.storage" :key="`${row.symbol}-${row.interval}`" class="activity-row static-row">
+        <button v-for="row in data?.storage" :key="`${row.symbol}-${row.interval}-${row.provider}`" class="activity-row market-row" type="button" @click="openAnalysis(row)">
           <img v-if="logo(row.symbol, row.instrument_type)" :src="logo(row.symbol, row.instrument_type)" class="symbol-logo" alt="" />
           <span v-else class="asset-avatar">{{ row.symbol?.slice(0, 2) }}</span>
           <span><strong>{{ row.symbol }}</strong><small>{{ row.provider }} · {{ row.interval }}</small></span>
-          <strong class="row-value">{{ format(row.n_rows || row.rows) }}</strong>
-        </div>
+          <svg class="market-sparkline" viewBox="0 0 116 38" role="img" :aria-label="`${row.symbol} recent price trend`">
+            <polyline :points="sparklinePoints(row.sparkline)" vector-effect="non-scaling-stroke" />
+          </svg>
+          <ChevronRight :size="17" />
+        </button>
       </article>
     </section>
   </div>
@@ -57,15 +61,16 @@
 
 <script setup>
 import { ArrowUpRight, Beaker, ChevronRight, Database, FlaskConical, Radio, Rows3, Shapes, TriangleAlert, WalletCards } from 'lucide-vue-next'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref } from 'vue'
 import { api } from '../api'
-import { instrumentLogoUrl } from '../state'
+import { formatConfiguredDateTime, instrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
 const data = ref(null)
 const loading = ref(true)
 const loadError = ref('')
+let activatedOnce = false
 const metrics = computed(() => [
   { label: 'Experiments', value: loading.value || loadError.value ? '—' : format(data.value?.metrics?.experiments), note: 'stored locally', icon: FlaskConical },
   { label: 'Instruments', value: loading.value || loadError.value ? '—' : format(data.value?.metrics?.symbols), note: 'ready to analyze', icon: WalletCards },
@@ -73,13 +78,38 @@ const metrics = computed(() => [
   { label: 'Data series', value: loading.value || loadError.value ? '—' : format(data.value?.metrics?.series), note: 'provider feeds', icon: Shapes }
 ])
 function format(value) { return new Intl.NumberFormat('en', { notation: Number(value) > 99999 ? 'compact' : 'standard' }).format(value || 0) }
-function time(value) { if (!value) return 'Recently'; return new Date(Number(value) * (Number(value) < 1e12 ? 1000 : 1)).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) }
+function time(value) { return formatConfiguredDateTime(value, props.bootstrap?.display, 'Recently') }
+function sharpe(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const number = Number(value)
+  return Number.isFinite(number) ? number.toFixed(2) : '—'
+}
+function sharpeTone(value) {
+  if (value === null || value === undefined || value === '') return ''
+  const number = Number(value)
+  return Number.isFinite(number) ? (number > 0 ? 'positive' : number < 0 ? 'negative' : '') : ''
+}
+function sparklinePoints(values = []) {
+  const points = values.map(Number).filter(Number.isFinite)
+  if (!points.length) return ''
+  const minimum = Math.min(...points)
+  const range = Math.max(...points) - minimum || 1
+  return points.map((value, index) => {
+    const x = points.length === 1 ? 58 : index * 116 / (points.length - 1)
+    const y = 35 - ((value - minimum) / range * 32)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+}
 function logo(symbol, type = '') {
   return instrumentLogoUrl(symbol, type, props.bootstrap.display.logokit_api_key)
 }
 function openExperiment(experiment) {
   sessionStorage.setItem('backtide:result-id', experiment.id)
   emit('navigate', 'results')
+}
+function openAnalysis(row) {
+  sessionStorage.setItem('backtide:analysis-symbols', JSON.stringify([row.symbol]))
+  emit('navigate', 'analysis')
 }
 async function load() {
   loading.value = true
@@ -95,4 +125,8 @@ async function load() {
   }
 }
 onMounted(load)
+onActivated(() => {
+  if (activatedOnce) load()
+  activatedOnce = true
+})
 </script>

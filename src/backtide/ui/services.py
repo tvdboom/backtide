@@ -15,6 +15,7 @@ import json
 import math
 from pathlib import Path
 import threading
+import tomllib
 from typing import Any
 import uuid
 
@@ -211,6 +212,7 @@ class BacktideServices:
             },
             "strategies": self.strategy_catalog(),
             "indicators": self.indicator_catalog(),
+            "metrics": self.metric_catalog(),
             "live": self.live_capabilities(),
         }
 
@@ -387,6 +389,7 @@ class BacktideServices:
 
         details = []
         estimated_bars = 0
+        series_count = 0
         for index, profile in enumerate(profiles):
             earliest_by_interval = {
                 str(key): int(value) for key, value in profile.earliest_ts.items()
@@ -433,6 +436,8 @@ class BacktideServices:
                     }
                 )
 
+            series_count += len(profile_intervals)
+
             details.append(
                 {
                     "symbol": str(profile.symbol),
@@ -455,15 +460,47 @@ class BacktideServices:
                 "estimated_bars": estimated_bars,
                 "estimated_seconds": estimated_bars / 40_000,
                 "estimated_bytes": estimated_bars * 120,
-                "series": sum(len(profile["intervals"]) for profile in details),
+                "series": series_count,
             },
         }
 
     def experiments(self, search: str | None = None) -> list[dict[str, Any]]:
-        """Return persisted experiment summaries."""
-        from backtide.storage import query_experiments
+        """Return persisted experiment summaries with lightweight run metrics."""
+        from backtide.storage import query_experiments, query_strategy_runs
 
-        return dataframe_records(query_experiments(search=search))
+        experiments = dataframe_records(query_experiments(search=search, limit=100))
+        from backtide.config import get_config
+
+        experiment_root = Path(get_config().data.storage_path) / "experiments"
+        metric_catalog = self.metric_catalog()
+        for experiment in experiments:
+            runs = query_strategy_runs(
+                experiment["id"],
+                include_equity_curve=False,
+            )
+            experiment["runs"] = [
+                _clean(
+                    public_attributes(
+                        run,
+                        (
+                            "strategy_id",
+                            "strategy_name",
+                            "base_currency",
+                            "is_benchmark",
+                            "metrics",
+                            "error",
+                        ),
+                    )
+                )
+                for run in runs
+            ]
+            config_text = self._read_text(
+                experiment_root / experiment["id"] / "config.toml", max_bytes=500_000
+            )
+            experiment.update(
+                self._primary_metric_summary(config_text, experiment["runs"], metric_catalog)
+            )
+        return experiments
 
     def experiment(self, experiment_id: str) -> dict[str, Any]:
         """Return an experiment and all per-strategy run details."""
@@ -475,16 +512,27 @@ class BacktideServices:
             raise APIError("Experiment not found.", 404)
         runs = [
             self._serialize_run(run)
-            for run in query_strategy_runs(experiment_id, include_equity_curve=False)
+            for run in query_strategy_runs(
+                experiment_id,
+                include_equity_curve=False,
+            )
         ]
         root = Path(get_config().data.storage_path) / "experiments" / experiment_id
         config_text = self._read_text(root / "config.toml", max_bytes=500_000)
-        log_text = self._read_text(root / "logs.txt", max_bytes=1_000_000)
+        log_text, logs_truncated = self._read_log_tail(
+            root / "logs.txt",
+            max_lines=1_000,
+            max_bytes=200_000,
+        )
+        experiment = rows[0]
+        experiment.update(self._primary_metric_summary(config_text, runs))
         return {
-            "experiment": rows[0],
+            "experiment": experiment,
             "runs": runs,
             "config": config_text,
+            "config_metadata": self._experiment_config_metadata(config_text),
             "logs": log_text,
+            "logs_truncated": logs_truncated,
         }
 
     def result_plot(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -714,6 +762,7 @@ class BacktideServices:
                     "type": value.__class__.__name__,
                     "builtin": builtin,
                     "description": self._catalog_description(value),
+                    "required_indicators": self._required_indicator_catalog(value),
                     "source": getattr(value, "_source_code", None),
                     "params": self._constructor_values(value) if builtin else {},
                 }
@@ -869,6 +918,86 @@ class BacktideServices:
         """Delete one saved indicator file."""
         return {"deleted": self._delete_saved("indicators", name)}
 
+    def metric_catalog(self) -> dict[str, list[dict[str, Any]]]:
+        """Return Rust built-in metrics and saved custom Python metrics."""
+        from backtide.config import get_config
+        from backtide.metrics import BUILTIN_METRICS
+        from backtide.metrics.utils import _load_stored_metrics
+
+        builtins = [
+            {
+                "key": value.key,
+                "name": value.name,
+                "type": value.key,
+                "builtin": True,
+                "description": value.description,
+                "percentage": value.percentage,
+                "higher_is_better": value.higher_is_better,
+            }
+            for value in BUILTIN_METRICS
+        ]
+        saved = [
+            {
+                "key": name,
+                "name": name,
+                "type": type(value).__name__,
+                "builtin": False,
+                "description": self._catalog_description(value),
+                "percentage": bool(getattr(value, "percentage", False)),
+                "higher_is_better": bool(getattr(value, "higher_is_better", True)),
+                "source": getattr(value, "_source_code", None),
+            }
+            for name, value in _load_stored_metrics(get_config()).items()
+        ]
+        return {"builtin": builtins, "saved": saved}
+
+    def save_metric(self, payload: dict[str, Any]) -> dict[str, str]:
+        """Validate and save a custom Python metric."""
+        from backtide.config import get_config
+        from backtide.metrics import BUILTIN_METRICS
+        from backtide.metrics.utils import _build_custom_metric, _check_metric_code, _save_metric
+
+        name = self._safe_name(payload.get("name"))
+        if any(metric.key == name for metric in BUILTIN_METRICS):
+            raise APIError(f"{name!r} is reserved for a built-in metric.", 409)
+        code = str(payload.get("code") or "")
+        if error := _check_metric_code(code):
+            raise APIError(error)
+        _save_metric(_build_custom_metric(code), name, get_config())
+        return {"saved": name}
+
+    def update_metric(self, original_name: str, payload: dict[str, Any]) -> dict[str, str]:
+        """Replace a saved custom metric."""
+        from backtide.config import get_config
+        from backtide.metrics import BUILTIN_METRICS
+        from backtide.metrics.utils import (
+            _build_custom_metric,
+            _check_metric_code,
+            _load_stored_metrics,
+            _save_metric,
+        )
+
+        cfg = get_config()
+        name = self._safe_name(payload.get("name"))
+        if any(metric.key == name for metric in BUILTIN_METRICS):
+            raise APIError(f"{name!r} is reserved for a built-in metric.", 409)
+        return self._update_saved_asset(
+            folder="metrics",
+            label="metric",
+            original_name=original_name,
+            payload=payload,
+            stored=_load_stored_metrics(cfg),
+            storage_path=Path(cfg.data.storage_path),
+            is_builtin=lambda _value: False,
+            validate=_check_metric_code,
+            build=_build_custom_metric,
+            save=lambda value, name: _save_metric(value, name, cfg),
+        )
+
+    def delete_metric(self, name: str) -> dict[str, bool]:
+        """Delete one saved custom metric."""
+        return {"deleted": self._delete_saved("metrics", name)}
+
     def live_capabilities(self) -> dict[str, Any]:
         """Describe provider support for WebSocket market data."""
         try:
@@ -1006,6 +1135,49 @@ class BacktideServices:
         ]
         return _clean(output)
 
+    def _primary_metric_summary(
+        self,
+        config_text: str | None,
+        runs: list[dict[str, Any]],
+        catalog: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve the configured headline metric and its best strategy value."""
+        try:
+            metric_key = str(
+                tomllib.loads(config_text or "").get("metrics", {}).get("main_metric")
+            )
+        except (tomllib.TOMLDecodeError, TypeError):
+            metric_key = "sharpe"
+        if not metric_key or metric_key == "None":
+            metric_key = "sharpe"
+        catalog = catalog or self.metric_catalog()
+        definition = next(
+            (
+                item
+                for item in catalog["builtin"] + catalog["saved"]
+                if item.get("key") == metric_key
+            ),
+            None,
+        )
+        candidates = [run for run in runs if not run.get("is_benchmark")] or runs
+        values = [
+            float(run["metrics"][metric_key])
+            for run in candidates
+            if run.get("metrics", {}).get(metric_key) is not None
+        ]
+        higher_is_better = bool(definition.get("higher_is_better", True)) if definition else True
+        best = (max(values) if higher_is_better else min(values)) if values else None
+        return {
+            "primary_metric": metric_key,
+            "primary_metric_name": (
+                definition.get("name", metric_key) if definition else metric_key
+            ),
+            "primary_metric_value": best,
+            "primary_metric_percentage": bool(definition.get("percentage", False))
+            if definition
+            else False,
+        }
+
     def _query_result_runs(self, experiment_id: str) -> list[Any]:
         """Load and retain one full result so adjacent plot requests reuse it."""
         from backtide.storage import query_strategy_runs
@@ -1074,6 +1246,48 @@ class BacktideServices:
         return data.decode("utf-8", errors="replace")
 
     @staticmethod
+    def _read_log_tail(
+        path: Path,
+        *,
+        max_lines: int,
+        max_bytes: int,
+    ) -> tuple[str | None, bool]:
+        """Read a bounded tail of a potentially large experiment log."""
+        if not path.is_file():
+            return None, False
+        size = path.stat().st_size
+        start = max(0, size - max_bytes)
+        with path.open("rb") as file:
+            file.seek(start)
+            text = file.read(max_bytes).decode("utf-8", errors="replace")
+        lines = text.splitlines()
+        line_truncated = len(lines) > max_lines
+        if line_truncated:
+            text = "\n".join(lines[-max_lines:])
+        return text, start > 0 or line_truncated
+
+    @staticmethod
+    def _experiment_config_metadata(config_text: str | None) -> dict[str, Any] | None:
+        """Return the display metadata needed by the experiment result summary."""
+        if not config_text:
+            return None
+        try:
+            data = tomllib.loads(config_text).get("data", {})
+        except tomllib.TOMLDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        symbols = data.get("symbols")
+        return {
+            "symbols": len(symbols) if isinstance(symbols, list) else 0,
+            "instrument_type": str(data.get("instrument_type") or ""),
+            "interval": str(data.get("interval") or "—"),
+            "full_history": bool(data.get("full_history", False)),
+            "start_date": data.get("start_date"),
+            "end_date": data.get("end_date"),
+        }
+
+    @staticmethod
     def _constructor_parameters(cls: Any) -> list[dict[str, Any]]:
         parameters = []
         for name, parameter in inspect.signature(cls).parameters.items():
@@ -1137,8 +1351,24 @@ class BacktideServices:
         description = getattr(value, "description", None)
         if callable(description):
             return str(description())
+        if description:
+            return str(description)
         doc = inspect.getdoc(type(value))
         return doc.splitlines()[0] if doc else f"Custom {type(value).__name__}."
+
+    @classmethod
+    def _required_indicator_catalog(cls, strategy: Any) -> list[dict[str, str]]:
+        """Return display metadata for indicators auto-injected by a strategy."""
+        from backtide.strategies.utils import _resolve_auto_indicators
+
+        return [
+            {
+                "name": name,
+                "type": type(indicator).__name__,
+                "description": cls._catalog_description(indicator),
+            }
+            for name, indicator, _source in _resolve_auto_indicators([strategy])
+        ]
 
     @staticmethod
     def _download_date(value: Any, timezone: Any, *, fallback: date) -> date:

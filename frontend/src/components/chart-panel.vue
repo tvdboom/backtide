@@ -32,8 +32,10 @@ async function draw() {
   try {
     await nextTick()
     plotly ||= (await import('plotly.js-dist-min')).default
+    const figureLayout = { ...(props.figure.layout || {}) }
+    delete figureLayout.width
     const layout = {
-      ...props.figure.layout,
+      ...figureLayout,
       autosize: true,
       paper_bgcolor: 'transparent',
       plot_bgcolor: 'transparent',
@@ -41,17 +43,17 @@ async function draw() {
         color: themeColor('--chart-text', '#9ba9c4'),
         family: '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'
       },
-      margin: { l: 56, r: 24, t: 32, b: 48, ...props.figure.layout?.margin },
-      legend: { bgcolor: 'rgba(0, 0, 0, 0)', ...props.figure.layout?.legend },
+      margin: { l: 56, r: 24, t: 32, b: 48, ...figureLayout.margin },
+      legend: { bgcolor: 'rgba(0, 0, 0, 0)', ...figureLayout.legend },
       xaxis: {
         gridcolor: themeColor('--chart-grid', '#1c2940'),
         zerolinecolor: themeColor('--chart-zero', '#263550'),
-        ...props.figure.layout?.xaxis
+        ...figureLayout.xaxis
       },
       yaxis: {
         gridcolor: themeColor('--chart-grid', '#1c2940'),
         zerolinecolor: themeColor('--chart-zero', '#263550'),
-        ...props.figure.layout?.yaxis
+        ...figureLayout.yaxis
       }
     }
     await plotly.react(chart.value, props.figure.data || [], layout, {
