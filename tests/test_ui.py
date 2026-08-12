@@ -59,6 +59,26 @@ class StubServices(BacktideServices):
             "limit": limit,
         }
 
+    def live_sessions(self):
+        """Return deterministic persisted paper sessions."""
+        return [{"id": "abc123", "status": "stopped"}]
+
+    def live_session(self, session_id):
+        """Return a deterministic persisted paper session."""
+        return {"id": session_id, "status": "stopped"}
+
+    def paper_config_from_experiment(self, experiment_id):
+        """Return a deterministic paper-trading draft."""
+        return {"experiment_id": experiment_id, "provider": "kraken"}
+
+    def replay_live(self, payload):
+        """Return the replay request for route assertions."""
+        return {"replayed": payload["session_id"]}
+
+    def sizer_catalog(self):
+        """Return a deterministic position-sizer catalog."""
+        return {"builtin": [{"type": "FixedFractional"}], "saved": []}
+
 
 @pytest.fixture
 def web_server():
@@ -223,6 +243,39 @@ class TestJSONRoutes:
         assert response.status == 200
         assert json.loads(body) == [{"search": "momentum", "limit": 10, "offset": 10}]
 
+    def test_live_history_and_replay_routes(self, web_server):
+        """Paper session history routes expose persisted sessions and replay control."""
+        response, body = request(web_server, "GET", "/api/live/sessions")
+        assert response.status == 200
+        assert json.loads(body) == [{"id": "abc123", "status": "stopped"}]
+
+        response, body = request(web_server, "GET", "/api/live/sessions/abc123")
+        assert response.status == 200
+        assert json.loads(body) == {"id": "abc123", "status": "stopped"}
+
+        response, body = request(
+            web_server,
+            "POST",
+            "/api/live/replay",
+            {"session_id": "abc123"},
+        )
+        assert response.status == 200
+        assert json.loads(body) == {"replayed": "abc123"}
+
+    def test_experiment_paper_config_route(self, web_server):
+        """Experiment promotion returns a live wizard draft."""
+        response, body = request(web_server, "GET", "/api/experiments/experiment-1/paper-config")
+
+        assert response.status == 200
+        assert json.loads(body) == {"experiment_id": "experiment-1", "provider": "kraken"}
+
+    def test_sizer_library_route(self, web_server):
+        """Position sizers have a first-class Library collection endpoint."""
+        response, body = request(web_server, "GET", "/api/sizers")
+
+        assert response.status == 200
+        assert json.loads(body) == {"builtin": [{"type": "FixedFractional"}], "saved": []}
+
 
 class TestJobStore:
     """Tests for bounded background work snapshots."""
@@ -334,6 +387,23 @@ class TestSerialization:
             },
         ]
 
+    def test_required_numeric_constructor_parameters_keep_number_controls(self):
+        """Stringified PyO3 annotations still produce numeric library inputs."""
+
+        class Example:
+            def __init__(self, amount: float):
+                pass
+
+        assert BacktideServices._constructor_parameters(Example) == [
+            {
+                "name": "amount",
+                "label": "Amount",
+                "kind": "number",
+                "default": None,
+                "required": True,
+            }
+        ]
+
     def test_constructor_values_return_the_saved_builtin_configuration(self):
         """Saved built-ins expose the values needed to prefill every editor control."""
 
@@ -373,6 +443,14 @@ class TestSerialization:
             BacktideServices._catalog_description(CustomStrategy())
             == "Trade a deterministic custom signal."
         )
+
+    def test_library_names_are_limited_to_twenty_characters(self):
+        """Reusable asset names stay compact enough for every library editor."""
+        name = "Twenty character nam"
+        assert BacktideServices._safe_library_name(name) == name
+
+        with pytest.raises(APIError, match="20 characters or fewer"):
+            BacktideServices._safe_library_name("Twenty-one characters")
 
 
 class TestServiceCommands:
@@ -425,11 +503,155 @@ class TestServiceCommands:
         monkeypatch.setattr(services, "strategy_catalog", lambda: {"saved": []})
         monkeypatch.setattr(services, "indicator_catalog", lambda: {"saved": []})
         monkeypatch.setattr(services, "metric_catalog", lambda: {"builtin": [], "saved": []})
+        monkeypatch.setattr(services, "sizer_catalog", lambda: {"builtin": [], "saved": []})
         monkeypatch.setattr(services, "live_capabilities", lambda: {"providers": {}})
 
         result = services.bootstrap()
 
         assert result["defaults"]["portfolio"]["base_currency"] == "EUR"
+
+    def test_sizer_catalog_describes_required_numeric_parameters(self, monkeypatch, tmp_path):
+        """Built-in sizers are cataloged without constructing missing required arguments."""
+        import backtide.config
+
+        monkeypatch.setattr(
+            backtide.config,
+            "get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path)),
+        )
+
+        catalog = BacktideServices().sizer_catalog()
+        fixed = next(item for item in catalog["builtin"] if item["type"] == "FixedNotional")
+
+        assert len(catalog["builtin"]) == 7
+        assert fixed["name"] == "Fixed Notional"
+        assert fixed["parameters"] == [
+            {
+                "name": "amount",
+                "label": "Amount",
+                "kind": "number",
+                "default": 1_000.0,
+                "required": False,
+            }
+        ]
+
+        fractional = next(item for item in catalog["builtin"] if item["type"] == "FixedFractional")
+        assert fractional["name"] == "Fixed Fractional"
+        assert fractional["parameters"][0]["default"] == 0.1
+
+    def test_save_sizer_persists_and_reloads_a_builtin(self, monkeypatch, tmp_path):
+        """A built-in sizer preset survives the complete library persistence path."""
+        import cloudpickle
+
+        import backtide.config
+
+        monkeypatch.setattr(
+            backtide.config,
+            "get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path)),
+        )
+        services = BacktideServices()
+
+        result = services.save_sizer(
+            {
+                "kind": "builtin",
+                "name": "Ten percent",
+                "type": "FixedFractional",
+                "params": {"fraction": 0.1},
+            }
+        )
+        saved = services.sizer_catalog()["saved"]
+        with (tmp_path / "sizers" / "Ten percent.pkl").open("rb") as stream:
+            stored = cloudpickle.load(stream)
+
+        assert result == {"saved": "Ten percent"}
+        assert stored == {
+            "format": "backtide.builtin-sizer.v1",
+            "type": "FixedFractional",
+            "parameters": {"fraction": 0.1},
+        }
+        assert saved == [
+            {
+                "name": "Ten percent",
+                "type": "FixedFractional",
+                "builtin": True,
+                "description": "Allocate a fixed percentage of total current equity.",
+                "source": None,
+                "params": {"fraction": 0.1},
+            }
+        ]
+
+    def test_sizer_loader_removes_empty_failed_saves(self, tmp_path):
+        """An empty artifact from an interrupted save is cleaned without deserialization."""
+        from backtide.sizers.utils import _load_stored_sizers
+
+        folder = tmp_path / "sizers"
+        folder.mkdir()
+        failed = folder / "Equal weights.pkl"
+        failed.touch()
+        cfg = SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path))
+
+        assert _load_stored_sizers(cfg) == {}
+        assert not failed.exists()
+
+    def test_sizer_save_failure_preserves_the_previous_file(self, monkeypatch, tmp_path):
+        """Atomic sizer writes never truncate an existing reusable preset."""
+        from backtide.sizers import FixedFractional, utils
+
+        folder = tmp_path / "sizers"
+        folder.mkdir()
+        target = folder / "Allocation.pkl"
+        target.write_bytes(b"previous")
+        cfg = SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path))
+
+        def fail_dump(_value, _stream):
+            raise TypeError("simulated pickle failure")
+
+        monkeypatch.setattr(utils.cloudpickle, "dump", fail_dump)
+
+        with pytest.raises(TypeError, match="simulated pickle failure"):
+            utils._save_sizer(FixedFractional(0.1), "Allocation", cfg)
+
+        assert target.read_bytes() == b"previous"
+        assert list(folder.glob("*.tmp")) == []
+
+    def test_experiment_configuration_prefills_the_paper_wizard(self, monkeypatch, tmp_path):
+        """Compatible research settings are promoted with live-safe defaults."""
+        from backtide.backtest import ExperimentConfig
+        import backtide.config
+
+        experiment = ExperimentConfig.from_dict(
+            {
+                "data": {"symbols": ["BTC-USD"], "interval": "FiveMinutes"},
+                "portfolio": {"initial_cash": 25_000, "base_currency": "EUR"},
+                "strategy": {"strategies": ["Momentum"]},
+                "indicators": {"indicators": ["Fast SMA"]},
+                "metrics": {"metrics": ["total_return", "sharpe", "alpha"]},
+                "engine": {"warmup_period": 120, "risk_free_rate": 2.5},
+                "exchange": {"allow_margin": True, "max_leverage": 3.0},
+            }
+        )
+        folder = tmp_path / "experiments" / "experiment-1"
+        folder.mkdir(parents=True)
+        (folder / "config.toml").write_text(experiment.to_toml(), encoding="utf-8")
+        monkeypatch.setattr(
+            backtide.config,
+            "get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path)),
+        )
+
+        result = BacktideServices().paper_config_from_experiment("experiment-1")
+
+        assert result["provider"] == "kraken"
+        assert result["interval"] == "5m"
+        assert result["symbols"] == ["BTC-USD"]
+        assert result["strategies"] == ["Momentum"]
+        assert result["indicators"] == ["Fast SMA"]
+        assert result["warmup_bars"] == 120
+        assert result["config"]["initial_cash"] == 25_000
+        assert result["config"]["allow_margin"] is True
+        assert result["config"]["max_leverage"] == 3.0
+        assert result["config"]["metrics"] == ["total_return", "sharpe"]
 
     def test_download_converts_browser_dates_before_dispatch(self, monkeypatch):
         """Download jobs pass inclusive UTC seconds to the data API."""
@@ -1251,3 +1473,341 @@ class TestLiveTradingManager:
     def test_stop_without_session_is_idempotent(self):
         """Stopping before start leaves the manager in an idle state."""
         assert LiveTradingManager().stop()["status"] == "idle"
+
+    def test_replay_ignores_config_fields_unsupported_by_the_loaded_engine(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Current session journals replay against an older compatible native config."""
+        captured = {}
+
+        class LegacyConfig:
+            def __init__(self, initial_cash=100_000.0):
+                captured["initial_cash"] = initial_cash
+
+        class Session:
+            def __init__(self, config, strategy):
+                captured.update(config=config, strategy=strategy)
+
+            @staticmethod
+            def snapshot():
+                return None
+
+        session_id = "0123456789abcdef"
+        folder = tmp_path / session_id
+        folder.mkdir()
+        (folder / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": session_id,
+                    "config": {
+                        "mode": "paper",
+                        "strategies": [],
+                        "config": {
+                            "initial_cash": 25_000.0,
+                            "allowed_order_types": ["Market"],
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.live",
+            SimpleNamespace(
+                MarketUpdate=SimpleNamespace,
+                PaperTradingConfig=LegacyConfig,
+                PaperTradingSession=Session,
+            ),
+        )
+        manager = LiveTradingManager(tmp_path)
+
+        manager.replay(session_id)
+        thread = manager._thread
+        assert thread is not None
+        thread.join(timeout=1.0)
+
+        assert captured["initial_cash"] == 25_000.0
+        assert captured["strategy"] is None
+
+    def test_mock_feed_updates_session_and_stops_cleanly(self, monkeypatch, tmp_path):
+        """A mocked WebSocket batch is processed, serialized, and canceled on stop."""
+        processed = threading.Event()
+        instances = []
+        market = SimpleNamespace(
+            symbol="BTC-USD",
+            interval="1m",
+            open_ts=1_700_000_000,
+            close_ts=1_700_000_060,
+            open=100.0,
+            high=102.0,
+            low=99.0,
+            close=101.0,
+            volume=10.0,
+            is_final=True,
+            provider="mock",
+            received_ts=1_700_000_061,
+        )
+        snapshot = SimpleNamespace(
+            latest_prices={"BTC-USD": 101.0},
+            equity=1_001.0,
+            realized_pnl=1.0,
+            unrealized_pnl=0.0,
+            processed_bars=1,
+            portfolio=SimpleNamespace(cash={"USD": 900.0}, positions={"BTC-USD": 1.0}, orders=[]),
+        )
+
+        class Feed:
+            def __init__(self, provider, symbols, interval, *, include_partial=True):
+                self.arguments = (provider, symbols, interval, include_partial)
+                self.canceled = threading.Event()
+                self.emitted = False
+                instances.append(self)
+
+            def cancel(self):
+                self.canceled.set()
+
+            def collect(self, max_events, timeout_seconds):
+                assert (max_events, timeout_seconds) == (10, 5.0)
+                if not self.emitted:
+                    self.emitted = True
+                    return [market]
+                self.canceled.wait(timeout=1.0)
+                return []
+
+        class Session:
+            def __init__(self, config, strategy):
+                assert config.values == {"initial_cash": 1_000.0}
+                assert strategy is None
+
+            def on_bar(self, value, orders=None):
+                assert value is market
+                assert orders is None
+                processed.set()
+                return SimpleNamespace(
+                    market=market,
+                    fills=[],
+                    orders_submitted=0,
+                    processed=True,
+                    snapshot=snapshot,
+                )
+
+            @staticmethod
+            def snapshot():
+                return snapshot
+
+        class Config:
+            def __init__(self, **values):
+                self.values = values
+
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.live",
+            SimpleNamespace(
+                LiveMarketFeed=Feed,
+                PaperTradingConfig=Config,
+                PaperTradingSession=Session,
+            ),
+        )
+        manager = LiveTradingManager(tmp_path)
+
+        manager.start(
+            {
+                "provider": "KRAKEN",
+                "interval": "1m",
+                "symbols": [" btc-usd ", ""],
+                "config": {"initial_cash": 1_000.0},
+            }
+        )
+        assert processed.wait(timeout=1.0)
+        status = manager.stop()
+
+        assert status["status"] == "stopped"
+        assert status["config"]["provider"] == "kraken"
+        assert status["config"]["symbols"] == ["BTC-USD"]
+        assert status["updates"][0]["market"]["close"] == 101.0
+        assert status["updates"][0]["snapshot"]["equity"] == 1_001.0
+        assert len(instances) == 2
+        assert instances[0].canceled.is_set()
+        assert instances[1].canceled.is_set()
+
+    def test_mock_feed_failure_sets_terminal_error(self, monkeypatch, tmp_path):
+        """A mocked WebSocket failure stops the worker and exposes its message."""
+        failed = threading.Event()
+
+        class Feed:
+            def __init__(self, _provider, _symbols, _interval, *, include_partial=True):
+                self.include_partial = include_partial
+
+            def cancel(self):
+                return None
+
+            def collect(self, max_events, timeout_seconds):
+                assert (max_events, timeout_seconds, self.include_partial) == (10, 5.0, True)
+                failed.set()
+                raise RuntimeError("mock socket disconnected")
+
+        class Session:
+            def __init__(self, _config, _strategy):
+                pass
+
+            @staticmethod
+            def snapshot():
+                return SimpleNamespace(
+                    latest_prices={},
+                    equity=1_000.0,
+                    realized_pnl=0.0,
+                    unrealized_pnl=0.0,
+                    processed_bars=0,
+                    portfolio=SimpleNamespace(cash={}, positions={}, orders=[]),
+                )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.live",
+            SimpleNamespace(
+                LiveMarketFeed=Feed,
+                PaperTradingConfig=lambda **_values: object(),
+                PaperTradingSession=Session,
+            ),
+        )
+        manager = LiveTradingManager(tmp_path)
+
+        manager.start({"provider": "binance", "symbols": ["BTC-USDT"]})
+        assert failed.wait(timeout=1.0)
+        thread = manager._thread
+        assert thread is not None
+        thread.join(timeout=1.0)
+        status = manager.status()
+
+        assert status["status"] == "error"
+        assert status["error"] == "mock socket disconnected"
+
+    def test_combines_independent_strategy_accounts_with_fill_attribution(self, tmp_path):
+        """Multiple strategies keep separate accounts and expose attributed fills."""
+        market = SimpleNamespace(
+            symbol="BTC-USD",
+            interval="1m",
+            open_ts=1_700_000_000,
+            close_ts=1_700_000_060,
+            open=100.0,
+            high=100.0,
+            low=100.0,
+            close=100.0,
+            volume=10.0,
+            n_trades=1,
+            is_final=True,
+            provider="mock",
+            received_ts=1_700_000_061,
+        )
+
+        def snapshot(equity):
+            return SimpleNamespace(
+                latest_prices={"BTC-USD": 100.0},
+                equity=equity,
+                realized_pnl=equity - 1_000.0,
+                unrealized_pnl=0.0,
+                processed_bars=1,
+                gross_exposure=100.0,
+                net_exposure=100.0,
+                leverage=0.1,
+                buying_power=900.0,
+                drawdown=0.0,
+                peak_equity=equity,
+                total_costs=0.0,
+                trading_halted=False,
+                halt_reason=None,
+                metrics={"pnl": equity - 1_000.0},
+                portfolio=SimpleNamespace(
+                    cash={"USD": equity - 100.0},
+                    positions={"BTC-USD": 1.0},
+                    orders=[],
+                ),
+            )
+
+        class Session:
+            def __init__(self, name, equity):
+                self.name = name
+                self.value = snapshot(equity)
+
+            def on_bar(self, _market, _orders):
+                order = SimpleNamespace(
+                    id=f"{self.name}-order",
+                    symbol="BTC-USD",
+                    order_type="Market",
+                    quantity=1.0,
+                    price=None,
+                    limit_price=None,
+                )
+                fill = SimpleNamespace(
+                    order=order,
+                    timestamp=1_700_000_060,
+                    status="Filled",
+                    fill_price=100.0,
+                    commission=0.0,
+                    realized_pnl=0.0,
+                    reason="test fill",
+                )
+                return SimpleNamespace(
+                    market=market,
+                    fills=[fill],
+                    orders_submitted=1,
+                    processed=True,
+                    snapshot=self.value,
+                    indicators={},
+                )
+
+            def snapshot(self):
+                return self.value
+
+        manager = LiveTradingManager(tmp_path)
+        manager._sessions = {
+            "Momentum": Session("momentum", 1_010.0),
+            "Mean reversion": Session("mean", 990.0),
+        }
+        manager._session = manager._sessions["Momentum"]
+        manager._prepare_session()
+
+        manager._process_market(market)
+        status = manager.status()
+
+        assert status["snapshot"]["equity"] == 2_000.0
+        assert set(status["strategies"]) == {"Momentum", "Mean reversion"}
+        assert {fill["strategy"] for fill in status["updates"][0]["fills"]} == {
+            "Momentum",
+            "Mean reversion",
+        }
+
+    def test_persists_and_reads_a_replayable_session_journal(self, tmp_path):
+        """Session manifests and exact market events survive manager recreation."""
+        manager = LiveTradingManager(tmp_path)
+        manager._prepare_session()
+        manager._config = {"mode": "paper", "provider": "mock", "symbols": ["BTC-USD"]}
+        manager._session = SimpleNamespace(snapshot=lambda: None)
+        update = {
+            "market": {"symbol": "BTC-USD", "close": 101.0},
+            "fills": [],
+            "snapshot": {"equity": 1_001.0},
+        }
+
+        manager._append_event(update)
+        manager._persist_manifest("stopped")
+
+        sessions = LiveTradingManager(tmp_path).sessions()
+        assert manager._session_id is not None
+        restored = LiveTradingManager(tmp_path).session(manager._session_id)
+        assert sessions[0]["id"] == manager._session_id
+        assert restored["status"] == "stopped"
+        assert restored["updates"] == [update]
+
+    def test_pause_and_resume_update_observable_state(self, tmp_path):
+        """Pause control is reflected in health without discarding the session."""
+        manager = LiveTradingManager(tmp_path)
+        manager._session = SimpleNamespace(snapshot=lambda: None)
+
+        manager.pause()
+        assert manager.status()["health"]["paused"] is True
+        manager.resume()
+        assert manager.status()["health"]["paused"] is False

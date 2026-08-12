@@ -54,7 +54,7 @@ bootstrap_docs_experiment()
 
 # Directory in which to store all plots from the examples
 shutil.rmtree(DIR_EXAMPLES := "docs_sources/img/examples/", ignore_errors=True)
-os.mkdir(DIR_EXAMPLES)
+os.makedirs(DIR_EXAMPLES, exist_ok=True)
 
 # Cached output (same across code blocks)
 cached_last_value = None

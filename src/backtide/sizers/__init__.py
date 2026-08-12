@@ -15,3 +15,25 @@ from backtide.core.sizers import (
     VolatilityScaled,
 )
 from backtide.sizers.base import BaseSizer
+
+BUILTIN_SIZERS = (
+    EqualWeight,
+    FixedFractional,
+    FixedNotional,
+    FixedQuantity,
+    KellyCriterion,
+    RiskBased,
+    VolatilityScaled,
+)
+
+__all__ = [
+    "BUILTIN_SIZERS",
+    "BaseSizer",
+    "EqualWeight",
+    "FixedFractional",
+    "FixedNotional",
+    "FixedQuantity",
+    "KellyCriterion",
+    "RiskBased",
+    "VolatilityScaled",
+]

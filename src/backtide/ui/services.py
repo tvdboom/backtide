@@ -7,13 +7,14 @@ Description: Application services exposed by the local web interface.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, date, datetime
 import inspect
 import json
 import math
 from pathlib import Path
+import re
 import threading
 import tomllib
 from typing import Any
@@ -215,6 +216,7 @@ class BacktideServices:
             "strategies": self.strategy_catalog(),
             "indicators": self.indicator_catalog(),
             "metrics": self.metric_catalog(),
+            "sizers": self.sizer_catalog(),
             "live": self.live_capabilities(),
         }
 
@@ -847,7 +849,7 @@ class BacktideServices:
             _save_strategy,
         )
 
-        name = self._safe_name(payload.get("name"))
+        name = self._safe_library_name(payload.get("name"))
         instance = self._build_library_asset(
             payload,
             label="strategy",
@@ -938,7 +940,7 @@ class BacktideServices:
         )
 
         cfg = get_config()
-        name = self._safe_name(payload.get("name"))
+        name = self._safe_library_name(payload.get("name"))
         instance = self._build_library_asset(
             payload,
             label="indicator",
@@ -1019,13 +1021,107 @@ class BacktideServices:
         ]
         return {"builtin": builtins, "saved": saved}
 
+    def sizer_catalog(self) -> dict[str, list[dict[str, Any]]]:
+        """Return built-in and saved position sizers with display metadata."""
+        from backtide.config import get_config
+        from backtide.sizers import BUILTIN_SIZERS
+        from backtide.sizers.utils import (
+            BUILTIN_SIZER_DEFAULTS,
+            _is_builtin_sizer,
+            _load_stored_sizers,
+        )
+
+        builtins = []
+        for cls in BUILTIN_SIZERS:
+            doc = inspect.getdoc(cls)
+            builtins.append(
+                {
+                    "type": cls.__name__,
+                    "name": self._display_name(cls.__name__),
+                    "description": doc.splitlines()[0] if doc else f"Built-in {cls.__name__}.",
+                    "parameters": self._constructor_parameters(
+                        cls,
+                        defaults=BUILTIN_SIZER_DEFAULTS[cls.__name__],
+                    ),
+                }
+            )
+        saved = []
+        for name, value in _load_stored_sizers(get_config()).items():
+            builtin = _is_builtin_sizer(value)
+            saved.append(
+                {
+                    "name": name,
+                    "type": type(value).__name__,
+                    "builtin": builtin,
+                    "description": self._catalog_description(value),
+                    "source": getattr(value, "_source_code", None),
+                    "params": self._constructor_values(value) if builtin else {},
+                }
+            )
+        return {"builtin": builtins, "saved": saved}
+
+    def save_sizer(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate and persist a built-in preset or custom position sizer."""
+        from backtide.config import get_config
+        from backtide.sizers import BUILTIN_SIZERS
+        from backtide.sizers.utils import _build_custom_sizer, _check_sizer_code, _save_sizer
+
+        cfg = get_config()
+        name = self._safe_library_name(payload.get("name"))
+        instance = self._build_library_asset(
+            payload,
+            label="sizer",
+            builtins=BUILTIN_SIZERS,
+            validate=_check_sizer_code,
+            build=_build_custom_sizer,
+        )
+        _save_sizer(instance, name, cfg)
+        return {"saved": name}
+
+    def update_sizer(self, original_name: str, payload: dict[str, Any]) -> dict[str, str]:
+        """Replace a saved position sizer."""
+        from backtide.config import get_config
+        from backtide.sizers import BUILTIN_SIZERS
+        from backtide.sizers.utils import (
+            _build_custom_sizer,
+            _check_sizer_code,
+            _is_builtin_sizer,
+            _load_stored_sizers,
+            _save_sizer,
+        )
+
+        cfg = get_config()
+        return self._update_saved_asset(
+            folder="sizers",
+            label="sizer",
+            original_name=original_name,
+            payload=payload,
+            stored=_load_stored_sizers(cfg),
+            storage_path=Path(cfg.data.storage_path),
+            is_builtin=_is_builtin_sizer,
+            validate=_check_sizer_code,
+            build=_build_custom_sizer,
+            rebuild=lambda value: self._build_library_asset(
+                value,
+                label="sizer",
+                builtins=BUILTIN_SIZERS,
+                validate=_check_sizer_code,
+                build=_build_custom_sizer,
+            ),
+            save=lambda value, name: _save_sizer(value, name, cfg),
+        )
+
+    def delete_sizer(self, name: str) -> dict[str, bool]:
+        """Delete one saved position-sizer file."""
+        return {"deleted": self._delete_saved("sizers", name)}
+
     def save_metric(self, payload: dict[str, Any]) -> dict[str, str]:
         """Validate and save a custom Python metric."""
         from backtide.config import get_config
         from backtide.metrics import BUILTIN_METRICS
         from backtide.metrics.utils import _build_custom_metric, _check_metric_code, _save_metric
 
-        name = self._safe_name(payload.get("name"))
+        name = self._safe_library_name(payload.get("name"))
         if any(metric.key == name for metric in BUILTIN_METRICS):
             raise APIError(f"{name!r} is reserved for a built-in metric.", 409)
         code = str(payload.get("code") or "")
@@ -1046,7 +1142,7 @@ class BacktideServices:
         )
 
         cfg = get_config()
-        name = self._safe_name(payload.get("name"))
+        name = self._safe_library_name(payload.get("name"))
         if any(metric.key == name for metric in BUILTIN_METRICS):
             raise APIError(f"{name!r} is reserved for a built-in metric.", 409)
         return self._update_saved_asset(
@@ -1126,6 +1222,119 @@ class BacktideServices:
             return {"status": "idle"}
         return manager.stop()
 
+    def live_sessions(self) -> list[dict[str, Any]]:
+        """Return persisted paper-session summaries."""
+        from backtide.ui.live import LiveTradingManager
+
+        manager = getattr(self, "_live_manager", None) or LiveTradingManager()
+        return manager.sessions()
+
+    def live_session(self, session_id: str) -> dict[str, Any]:
+        """Return one persisted paper session and its event journal."""
+        from backtide.ui.live import LiveTradingManager
+
+        manager = getattr(self, "_live_manager", None) or LiveTradingManager()
+        return manager.session(session_id)
+
+    def replay_live(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Replay a persisted paper session through a fresh engine."""
+        from backtide.ui.live import LiveTradingManager
+
+        manager = getattr(self, "_live_manager", None)
+        if manager is None:
+            manager = self._live_manager = LiveTradingManager()
+        return manager.replay(str(payload.get("session_id") or ""))
+
+    def pause_live(self) -> dict[str, Any]:
+        """Pause the active paper strategy without closing its feed."""
+        manager = getattr(self, "_live_manager", None)
+        return manager.pause() if manager else {"status": "idle"}
+
+    def resume_live(self) -> dict[str, Any]:
+        """Resume the active paper strategy."""
+        manager = getattr(self, "_live_manager", None)
+        return manager.resume() if manager else {"status": "idle"}
+
+    def flatten_live(self) -> dict[str, Any]:
+        """Request liquidation of all paper positions."""
+        manager = getattr(self, "_live_manager", None)
+        return manager.flatten() if manager else {"status": "idle"}
+
+    def cancel_live_orders(self) -> dict[str, Any]:
+        """Request cancellation of every resting paper order."""
+        manager = getattr(self, "_live_manager", None)
+        return manager.cancel_all() if manager else {"status": "idle"}
+
+    def paper_config_from_experiment(self, experiment_id: str) -> dict[str, Any]:
+        """Translate compatible experiment settings into a paper-session draft."""
+        from backtide.backtest import ExperimentConfig
+        from backtide.config import get_config
+
+        root = Path(get_config().data.storage_path) / "experiments" / experiment_id
+        text = self._read_text(root / "config.toml", max_bytes=500_000)
+        if not text:
+            raise APIError("The experiment configuration was not found.", 404)
+        config = ExperimentConfig.from_toml(text).to_dict()
+        data = config.get("data", {})
+        portfolio = config.get("portfolio", {})
+        strategy = config.get("strategy", {})
+        indicators = config.get("indicators", {})
+        metrics = config.get("metrics", {})
+        exchange = config.get("exchange", {})
+        engine = config.get("engine", {})
+        provider = str(data.get("provider") or "kraken").lower()
+        if provider == "yahoo":
+            provider = "kraken"
+        interval = {
+            "OneMinute": "1m",
+            "FiveMinutes": "5m",
+            "FifteenMinutes": "15m",
+            "ThirtyMinutes": "30m",
+            "OneHour": "1h",
+            "FourHours": "4h",
+            "OneDay": "1d",
+            "OneWeek": "1w",
+        }.get(str(data.get("interval")), str(data.get("interval") or "1m"))
+        live_metrics = [
+            key for key in metrics.get("metrics", []) if key not in {"alpha", "excess_return"}
+        ]
+        return {
+            "provider": provider,
+            "interval": interval,
+            "symbols": data.get("symbols", []),
+            "strategies": strategy.get("strategies", []),
+            "indicators": indicators.get("indicators", []),
+            "warmup_bars": int(engine.get("warmup_period") or 0),
+            "config": {
+                "initial_cash": portfolio.get("initial_cash", 10_000),
+                "base_currency": portfolio.get("base_currency", "USD"),
+                "commission_pct": exchange.get("commission_pct", 0.1),
+                "commission_fixed": exchange.get("commission_fixed", 0.0),
+                "slippage": exchange.get("slippage", 0.05),
+                "allow_short": exchange.get("allow_short_selling", False),
+                "allow_margin": exchange.get("allow_margin", False),
+                "max_leverage": exchange.get("max_leverage", 2.0),
+                "initial_margin": exchange.get("initial_margin", 50.0),
+                "maintenance_margin": exchange.get("maintenance_margin", 25.0),
+                "margin_interest": exchange.get("margin_interest", 0.0),
+                "borrow_rate": exchange.get("borrow_rate", 0.0),
+                "max_position_size": exchange.get("max_position_size", 100.0),
+                "allowed_order_types": exchange.get("allowed_order_types", ["Market"]),
+                "partial_fills": exchange.get("partial_fills", False),
+                "metrics": live_metrics,
+                "risk_free_rate": engine.get("risk_free_rate", 0.0),
+            },
+            "compatibility": {
+                "source_experiment_id": experiment_id,
+                "warnings": [
+                    "Historical date ranges and benchmark execution are not copied.",
+                    "Yahoo data was replaced with Kraken because Yahoo has no live WebSocket.",
+                ]
+                if str(data.get("provider") or "").lower() == "yahoo"
+                else ["Historical date ranges and benchmark execution are not copied."],
+            },
+        }
+
     def _delete_saved(self, folder: str, name: str) -> bool:
         from backtide.config import get_config
 
@@ -1152,7 +1361,7 @@ class BacktideServices:
     ) -> dict[str, str]:
         """Replace a saved library object without leaving an old file after a rename."""
         original = self._safe_name(original_name)
-        name = self._safe_name(payload.get("name"))
+        name = self._safe_library_name(payload.get("name"))
         original_path = storage_path / folder / f"{original}.pkl"
         target_path = storage_path / folder / f"{name}.pkl"
 
@@ -1293,6 +1502,19 @@ class BacktideServices:
             raise APIError("Enter a valid name.")
         return name
 
+    @classmethod
+    def _safe_library_name(cls, value: Any) -> str:
+        """Validate the compact display name used by reusable library assets."""
+        name = cls._safe_name(value)
+        if len(name) > 20:
+            raise APIError("Library names must be 20 characters or fewer.")
+        return name
+
+    @staticmethod
+    def _display_name(value: str) -> str:
+        """Split a CamelCase Python type into a readable display name."""
+        return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", value)
+
     @staticmethod
     def _download_name(value: Any) -> str:
         """Return a filename-safe ASCII experiment name for browser downloads."""
@@ -1385,15 +1607,41 @@ class BacktideServices:
         }
 
     @staticmethod
-    def _constructor_parameters(cls: Any) -> list[dict[str, Any]]:
+    def _constructor_parameters(
+        cls: Any,
+        *,
+        defaults: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        signature = inspect.signature(cls)
+        defaults = defaults or {}
+        documented_types: dict[str, str] = {}
+        for line in (inspect.getdoc(cls) or "").splitlines():
+            name, separator, type_name = line.strip().partition(":")
+            if separator and name.strip() in signature.parameters:
+                documented_types[name.strip()] = type_name.strip().lower()
         parameters = []
-        for name, parameter in inspect.signature(cls).parameters.items():
+        for name, parameter in signature.parameters.items():
             default = parameter.default
             if default is inspect.Parameter.empty:
-                default = None
-            if isinstance(default, bool):
+                default = defaults.get(name)
+            annotation = parameter.annotation
+            annotation_name = (
+                annotation if isinstance(annotation, str) else getattr(annotation, "__name__", "")
+            ).lower()
+            documented_type = documented_types.get(name, "")
+            if (
+                isinstance(default, bool)
+                or annotation is bool
+                or annotation_name == "bool"
+                or documented_type.startswith("bool")
+            ):
                 kind = "boolean"
-            elif isinstance(default, (int, float)):
+            elif (
+                isinstance(default, (int, float))
+                or annotation in (int, float)
+                or annotation_name in {"int", "float"}
+                or documented_type.startswith(("int", "float"))
+            ):
                 kind = "number"
             else:
                 kind = "text"
@@ -1403,7 +1651,8 @@ class BacktideServices:
                     "label": name.replace("_", " ").title(),
                     "kind": kind,
                     "default": default,
-                    "required": parameter.default is inspect.Parameter.empty,
+                    "required": parameter.default is inspect.Parameter.empty
+                    and name not in defaults,
                 }
             )
         return parameters
@@ -1411,15 +1660,14 @@ class BacktideServices:
     @staticmethod
     def _constructor_values(value: Any) -> dict[str, Any]:
         """Return the constructor values stored in a built-in library object."""
-        _, args = value.__reduce__()
-        return dict(zip(inspect.signature(type(value)).parameters, args, strict=True))
+        return {name: getattr(value, name) for name in inspect.signature(type(value)).parameters}
 
     @staticmethod
     def _build_library_asset(
         payload: dict[str, Any],
         *,
         label: str,
-        builtins: list[Any],
+        builtins: Sequence[Any],
         validate: Callable[[str], str | None],
         build: Callable[[str], Any],
     ) -> Any:

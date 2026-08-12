@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <section class="page-intro">
-      <div><h2>{{ title }}</h2><p>Save built-in presets or bring your own Python implementation.</p></div>
+      <div><h2>{{ title }}</h2><p>{{ intro }}</p></div>
       <button class="primary" @click="openAdd"><Plus :size="16" /> Add {{ singular.toLowerCase() }}</button>
     </section>
     <section class="toolbar panel compact">
@@ -27,11 +27,11 @@
     <div v-if="editor" class="modal-layer" @mousedown.self="closeEditor">
       <form class="modal panel library-editor" @submit.prevent="save">
         <div class="panel-header"><div><span class="eyebrow">{{ isEditing ? 'Saved reusable asset' : 'New reusable asset' }}</span><h3>{{ isEditing ? 'Edit' : 'Add' }} {{ singular }}</h3></div><button type="button" class="icon-button" aria-label="Close" @click="closeEditor"><X /></button></div>
-        <div v-if="!isMetric" class="segmented library-editor-mode"><button type="button" :class="{ active: editor === 'builtin' }" @click="selectEditor('builtin')">Built-in</button><button type="button" :class="{ active: editor === 'custom' }" @click="selectEditor('custom')">Custom Python</button></div>
+        <div v-if="!isMetric" class="segmented library-editor-mode"><button type="button" :class="{ active: editor === 'builtin' }" @click="selectEditor('builtin')">Built-in</button><button type="button" :class="{ active: editor === 'custom' }" @click="selectEditor('custom')">Custom</button></div>
         <div class="form-grid two library-editor-fields">
-          <label v-if="editor === 'builtin'">Name<input v-model="draft.name" required maxlength="80" /></label>
+          <label v-if="editor === 'builtin'">Name<input v-model="draft.name" required maxlength="20" /></label>
           <div v-else class="custom-source-row wide">
-            <label>Name<input v-model="draft.name" required maxlength="80" /></label>
+            <label>Name<input v-model="draft.name" required maxlength="20" /></label>
             <label class="file-button upload-code-button" title="Replace the editor contents with a Python file">
               <Upload :size="16" />
               <span>Load Python file</span>
@@ -66,7 +66,7 @@
 import { Info, Library, Pencil, Plus, Save, Search, Trash2, TriangleAlert, Upload, X } from 'lucide-vue-next'
 import { computed, onActivated, onMounted, reactive, ref, watch } from 'vue'
 import { api, post, put, remove } from '../api'
-import { indicatorCodePlaceholder, metricCodePlaceholder, strategyCodePlaceholder } from '../code-placeholders'
+import { indicatorCodePlaceholder, metricCodePlaceholder, sizerCodePlaceholder, strategyCodePlaceholder } from '../code-placeholders'
 import ConfirmationModal from '../components/confirmation-modal.vue'
 import LibraryAssetIcon from '../components/library-asset-icon.vue'
 import PythonEditor from '../components/python-editor.vue'
@@ -75,15 +75,19 @@ const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['toast'])
 const isStrategy = location.hash.slice(1) === 'strategies'
 const isMetric = location.hash.slice(1) === 'metrics'
-const title = isStrategy ? 'Strategies' : isMetric ? 'Metrics' : 'Indicators'
-const singular = isStrategy ? 'Strategy' : isMetric ? 'Metric' : 'Indicator'
-const endpoint = isStrategy ? '/api/strategies' : isMetric ? '/api/metrics' : '/api/indicators'
-const initialCatalog = isStrategy ? props.bootstrap.strategies : isMetric ? props.bootstrap.metrics : props.bootstrap.indicators
-const assetKind = isStrategy ? 'strategy' : isMetric ? 'metric' : 'indicator'
+const isSizer = location.hash.slice(1) === 'sizers'
+const title = isStrategy ? 'Strategies' : isMetric ? 'Metrics' : isSizer ? 'Sizers' : 'Indicators'
+const singular = isStrategy ? 'Strategy' : isMetric ? 'Metric' : isSizer ? 'Sizer' : 'Indicator'
+const endpoint = isStrategy ? '/api/strategies' : isMetric ? '/api/metrics' : isSizer ? '/api/sizers' : '/api/indicators'
+const initialCatalog = isStrategy ? props.bootstrap.strategies : isMetric ? props.bootstrap.metrics : isSizer ? props.bootstrap.sizers : props.bootstrap.indicators
+const assetKind = isStrategy ? 'strategy' : isMetric ? 'metric' : isSizer ? 'sizer' : 'indicator'
+const intro = isSizer
+  ? 'Save position-sizing presets for use by custom strategy order logic.'
+  : 'Save built-in presets or bring your own Python implementation.'
 const dataframeClass = props.bootstrap.display?.dataframe_class || 'pd.DataFrame'
 const customCodePlaceholder = isStrategy
   ? strategyCodePlaceholder(dataframeClass)
-  : isMetric ? metricCodePlaceholder(dataframeClass) : indicatorCodePlaceholder(dataframeClass)
+  : isMetric ? metricCodePlaceholder(dataframeClass) : isSizer ? sizerCodePlaceholder() : indicatorCodePlaceholder(dataframeClass)
 const catalog = reactive({ builtin: [], saved: [] })
 const search = ref('')
 const filter = ref('all')
@@ -137,8 +141,8 @@ async function save() {
 }
 function openAdd() {
   editingName.value = ''
-  draft.name = ''
   draft.type = catalog.builtin[0]?.type || ''
+  draft.name = isSizer ? selectedBuiltin.value?.name || '' : ''
   draft.code = ''
   draft.params = {}
   editor.value = isMetric ? 'custom' : 'builtin'
@@ -162,6 +166,7 @@ function resetParameters() {
   draft.params = Object.fromEntries(
     (selectedBuiltin.value?.parameters || []).map(parameter => [parameter.name, parameter.default])
   )
+  if (isSizer && !isEditing.value) draft.name = selectedBuiltin.value?.name || ''
 }
 function selectEditor(value) {
   editor.value = value

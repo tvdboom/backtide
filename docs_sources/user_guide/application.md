@@ -44,18 +44,20 @@ the app can start jobs and modify the configured local Backtide store.
 
 ## Sections
 
-| Section | Purpose |
-|---|---|
-| **Home** | Review recent experiments, stored datasets, and shortcuts into the main workflows. |
-| **Experiment** | Configure market data, portfolio state, strategies, indicators, metrics, execution assumptions, risk controls, and engine behavior. |
-| **Strategies** | Search, create, inspect, and remove built-in or custom Python strategies. |
-| **Indicators** | Search, create, inspect, and remove built-in or custom Python indicators. |
-| **Metrics** | Browse Rust built-ins and create, inspect, or remove custom Python metrics. |
-| **Results** | Compare completed strategy runs and inspect metrics, equity, cash, drawdown, trades, orders, configuration, and logs. |
-| **Paper trading** | Run a strategy against live provider WebSocket candles with local simulated fills. See [Paper trading]. |
-| **Download** | Resolve instruments and download OHLCV bars into the local database. |
-| **Storage** | Search stored series, inspect coverage, open a series in analysis, or delete selected data. |
-| **Analysis** | Build interactive price, returns, correlation, seasonality, volatility, volume, dividend, and other supported plots. |
+| Group | Section | Purpose |
+|---|---|---|
+| **Overview** | Home | Review recent experiments, stored datasets, active sessions, and workflow shortcuts. |
+| **Research** | Experiments | Configure data, portfolios, reusable assets, execution assumptions, risk, and engine behavior. |
+| **Research** | Results | Compare completed runs and inspect metrics, equity, trades, orders, configuration, and logs. |
+| **Research** | Analysis | Build interactive price, return, correlation, seasonality, volatility, volume, and dividend plots. |
+| **Trading** | Paper trading | Configure and run live-data strategies with local simulated execution. See [Paper trading]. |
+| **Trading** | Session history | Inspect persisted journals and replay a prior session through a fresh paper engine. |
+| **Library** | Strategies | Create and manage strategies used by research and paper trading. |
+| **Library** | Indicators | Manage strategy dependencies and optional research/live monitoring indicators. |
+| **Library** | Metrics | Browse built-in and custom performance definitions. |
+| **Library** | Sizers | Save reusable built-in presets or custom position-sizing policies. |
+| **Data** | Download | Resolve instruments and download normalized OHLCV bars. |
+| **Data** | Storage | Inspect coverage, open stored series in Analysis, or delete selected data. |
 
 Searchable selectors are keyboard accessible and remain usable on smaller screens.
 Long-running downloads and experiments run in background jobs, so the interface can

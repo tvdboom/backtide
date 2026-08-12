@@ -85,6 +85,15 @@ impl ExchangeMarketDataStream {
             },
         };
 
+        Self::connect_to(provider, symbols, interval, endpoint).await
+    }
+
+    async fn connect_to(
+        provider: Provider,
+        symbols: &[String],
+        interval: Interval,
+        endpoint: &str,
+    ) -> Result<Self, LiveStreamError> {
         let (mut socket, _) = connect_async(endpoint).await?;
         let subscription = subscription_message(provider, symbols, interval)?;
         socket.send(Message::Text(subscription.to_string().into())).await?;
@@ -476,6 +485,8 @@ fn received_ts() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::accept_async;
 
     fn partial_update(open_ts: u64, close: f64) -> MarketUpdate {
         MarketUpdate {
@@ -493,6 +504,29 @@ mod tests {
             is_final: false,
             received_ts: open_ts as i64,
         }
+    }
+
+    fn binance_message(symbol: &str, open_ts: u64, is_final: bool) -> Value {
+        json!({
+            "s": symbol,
+            "k": {
+                "t": open_ts * 1_000,
+                "T": (open_ts + 60) * 1_000 - 1,
+                "o": "100.0",
+                "h": "110.0",
+                "l": "90.0",
+                "c": "105.0",
+                "v": "12.5",
+                "n": 42,
+                "x": is_final
+            }
+        })
+    }
+
+    async fn local_websocket() -> (String, TcpListener) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+        (endpoint, listener)
     }
 
     #[tokio::test]
@@ -531,6 +565,163 @@ mod tests {
     }
 
     #[test]
+    fn rejects_empty_or_whitespace_subscription_symbols() {
+        for symbols in [Vec::new(), vec![" ".to_owned()]] {
+            let error = validate_subscription(Provider::Binance, &symbols, Interval::OneMinute)
+                .unwrap_err();
+
+            assert!(error.to_string().contains("non-empty symbol"));
+        }
+    }
+
+    #[test]
+    fn builds_provider_specific_subscription_messages() {
+        let symbols = vec!["BTC-USD".to_owned(), "ETH-USD".to_owned()];
+
+        assert_eq!(
+            subscription_message(Provider::Binance, &symbols, Interval::OneMinute).unwrap(),
+            json!({
+                "method": "SUBSCRIBE",
+                "params": ["btcusd@kline_1m", "ethusd@kline_1m"],
+                "id": 1
+            })
+        );
+        assert_eq!(
+            subscription_message(Provider::Coinbase, &symbols, Interval::FiveMinutes).unwrap(),
+            json!({
+                "type": "subscribe",
+                "channel": "candles",
+                "product_ids": ["BTC-USD", "ETH-USD"]
+            })
+        );
+        assert_eq!(
+            subscription_message(Provider::Kraken, &symbols, Interval::FifteenMinutes).unwrap(),
+            json!({
+                "method": "subscribe",
+                "params": {
+                    "channel": "ohlc",
+                    "symbol": ["BTC/USD", "ETH/USD"],
+                    "interval": 15,
+                    "snapshot": true
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn loopback_socket_subscribes_pongs_filters_and_normalizes() {
+        let (endpoint, listener) = local_websocket().await;
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(tcp).await.unwrap();
+            let subscription = socket.next().await.unwrap().unwrap();
+            assert_eq!(
+                subscription.into_text().unwrap(),
+                json!({
+                    "method": "SUBSCRIBE",
+                    "params": ["btcusdt@kline_1m"],
+                    "id": 1
+                })
+                .to_string()
+            );
+
+            socket.send(Message::Ping(vec![1, 2, 3].into())).await.unwrap();
+            let pong = socket.next().await.unwrap().unwrap();
+            assert_eq!(pong, Message::Pong(vec![1, 2, 3].into()));
+            socket
+                .send(Message::Text(
+                    binance_message("ETHUSDT", 1_700_000_000, true).to_string().into(),
+                ))
+                .await
+                .unwrap();
+            socket
+                .send(Message::Text(
+                    binance_message("BTCUSDT", 1_700_000_060, true).to_string().into(),
+                ))
+                .await
+                .unwrap();
+        });
+        let mut stream = ExchangeMarketDataStream::connect_to(
+            Provider::Binance,
+            &["BTC-USDT".to_owned()],
+            Interval::OneMinute,
+            &endpoint,
+        )
+        .await
+        .unwrap();
+
+        let update = stream.next_update().await.unwrap().unwrap();
+
+        assert_eq!(update.symbol, "BTC-USDT");
+        assert_eq!(update.open_ts, 1_700_000_060);
+        assert!(update.is_final);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn coinbase_socket_sends_candle_and_heartbeat_subscriptions() {
+        let (endpoint, listener) = local_websocket().await;
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(tcp).await.unwrap();
+            let candles: Value =
+                serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                    .unwrap();
+            let heartbeat: Value =
+                serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                    .unwrap();
+            (candles, heartbeat)
+        });
+
+        let _stream = ExchangeMarketDataStream::connect_to(
+            Provider::Coinbase,
+            &["BTC-USD".to_owned()],
+            Interval::FiveMinutes,
+            &endpoint,
+        )
+        .await
+        .unwrap();
+        let (candles, heartbeat) = server.await.unwrap();
+
+        assert_eq!(
+            candles,
+            json!({
+                "type": "subscribe",
+                "channel": "candles",
+                "product_ids": ["BTC-USD"]
+            })
+        );
+        assert_eq!(heartbeat, json!({"type": "subscribe", "channel": "heartbeats"}));
+    }
+
+    #[tokio::test]
+    async fn loopback_socket_reports_malformed_json_and_clean_close() {
+        let (endpoint, listener) = local_websocket().await;
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(tcp).await.unwrap();
+            socket.next().await.unwrap().unwrap();
+            socket.send(Message::Text("not-json".into())).await.unwrap();
+            socket.close(None).await.unwrap();
+        });
+        let mut stream = ExchangeMarketDataStream::connect_to(
+            Provider::Binance,
+            &["BTC-USDT".to_owned()],
+            Interval::OneMinute,
+            &endpoint,
+        )
+        .await
+        .unwrap();
+
+        let error = stream.next_update().await.unwrap_err();
+
+        assert!(matches!(error, LiveStreamError::InvalidMessage(_)));
+        assert!(error.to_string().contains("invalid JSON"));
+        assert!(stream.next_update().await.unwrap().is_none());
+        server.await.unwrap();
+    }
+
+    #[test]
     fn parses_binance_closed_kline() {
         let message = json!({
             "s": "BTCUSDT",
@@ -554,6 +745,62 @@ mod tests {
         assert_eq!(updates[0].symbol, "BTCUSDT");
         assert_eq!(updates[0].open_ts, 1_700_000_000);
         assert!(updates[0].is_final);
+    }
+
+    #[test]
+    fn ignores_provider_control_messages() {
+        assert!(parse_binance(Interval::OneMinute, &json!({"result": null, "id": 1}))
+            .unwrap()
+            .is_empty());
+        assert!(parse_coinbase(Interval::FiveMinutes, &json!({"channel": "heartbeats"}))
+            .unwrap()
+            .is_empty());
+        assert!(parse_kraken(Interval::OneMinute, &json!({"channel": "status"}))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn rejects_malformed_provider_fields() {
+        let mut binance = binance_message("BTCUSDT", 1_700_000_000, true);
+        binance["k"]["c"] = json!("not-a-price");
+        assert!(parse_binance(Interval::OneMinute, &binance)
+            .unwrap_err()
+            .to_string()
+            .contains("invalid numeric field \"c\""));
+
+        let coinbase = json!({
+            "events": [{"candles": [{
+                "start": "-1",
+                "product_id": "BTC-USD",
+                "open": "1",
+                "high": "1",
+                "low": "1",
+                "close": "1",
+                "volume": "1"
+            }]}]
+        });
+        assert!(parse_coinbase(Interval::FiveMinutes, &coinbase)
+            .unwrap_err()
+            .to_string()
+            .contains("invalid integer field \"start\""));
+
+        let kraken = json!({
+            "channel": "ohlc",
+            "data": [{
+                "symbol": "BTC/USD",
+                "interval_begin": "1969-12-31T23:59:59Z",
+                "open": 1,
+                "high": 1,
+                "low": 1,
+                "close": 1,
+                "volume": 1
+            }]
+        });
+        assert!(parse_kraken(Interval::OneMinute, &kraken)
+            .unwrap_err()
+            .to_string()
+            .contains("predates Unix epoch"));
     }
 
     #[test]

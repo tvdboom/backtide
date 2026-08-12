@@ -36,20 +36,52 @@ Start the packaged web application as usual:
 backtide launch
 ```
 
-Open **Paper trading** under **Live**, then:
+Open **Paper trading** under **Trading**. The setup is divided into five focused steps:
 
-1. Choose Binance, Kraken, or Coinbase and a supported candle interval.
-2. Add one or more canonical symbols, such as `BTC-USDT`.
-3. Select a saved strategy and configure starting cash, commission, slippage,
-   short selling, margin, and partial-candle behavior.
-4. Start the session. The equity chart, latest prices, positions, fills, and
-   market-event feed update while the session is running.
-5. Stop the session before changing its configuration.
+1. **Market** selects the provider, interval, symbols, historical warm-up, and bounded
+   strategy history.
+2. **Strategy & monitoring** selects zero or more strategies, optional dashboard
+   indicators, live-compatible metrics, and partial-candle behavior. Strategy-required
+   indicators are always included automatically.
+3. **Account & execution** configures starting cash, fees, slippage, allowed order
+   types, and optional candle-volume participation.
+4. **Risk** configures short selling, position concentration, drawdown halts, leverage,
+   initial and maintenance margin, margin interest, and short borrow cost.
+5. **Review** summarizes the complete session before connection.
 
-The session is deliberately local and in-memory. Its bounded event history keeps
-long-running browser sessions from growing without limit. Stopping the process
-closes the current feed and discards the paper account unless you export the
-values yourself.
+While a session is active, the dashboard shows account performance, exposure, leverage,
+buying power, drawdown, costs, selected metrics, latest indicator values, fills, prices,
+and connection diagnostics. You can pause strategy evaluation, resume it, cancel resting
+orders, request a complete flatten, or stop the session.
+
+When multiple strategies are selected, each receives an independent paper account with the
+configured starting cash. Orders, fills, snapshots, and metrics remain attributed to that
+strategy; the headline account cards show the sum of those isolated accounts. This avoids one
+strategy's orders changing another strategy's decisions while still making side-by-side forward
+testing possible.
+
+Every session is persisted beneath the configured Backtide storage directory. The
+**Session history** page lists completed sessions and can replay their recorded normalized
+market events through a new paper engine. Browser event buffers remain bounded, while the
+on-disk journal retains the complete recorded session. The table shows both the start and finish
+timestamps. **Live paper** means the journal came from a real-time provider feed; **Replay** means
+the same normalized events were subsequently processed from disk. Both modes use simulated fills
+and never submit broker orders. Replays preserve event ordering and reuse the saved session
+settings, but process the journal as quickly as the engine allows rather than reconnecting to the
+provider or waiting for the original wall-clock intervals. Use **Go live** instead to reconnect to
+the provider immediately with the session's saved market, strategy, account, execution, and risk
+settings.
+
+### Margin behavior
+
+`allow_margin=True` enables bounded borrowing; it no longer means unlimited negative cash.
+Exposure-increasing orders must satisfy both `max_leverage` and `initial_margin`, as well as
+the per-symbol `max_position_size`. Financing costs accrue from event timestamps. When the
+equity-to-gross-exposure ratio falls below `maintenance_margin`, the paper broker halts new
+exposure and liquidates marked positions deterministically.
+
+This is Backtide's generic cross-margin simulation. It does not claim to duplicate an
+exchange's product-specific liquidation engine, insurance fund, or order-book execution.
 
 <br>
 
@@ -192,6 +224,14 @@ backoff.
   is still rejected as `insufficient cash` instead of being changed silently.
 - `allow_short` and `allow_margin` are off by default. Orders that violate the
   configured account rules are rejected with a reason in [`PaperFill`].
+- `allowed_order_types` controls which market, limit, stop, trailing, settlement,
+  and cancellation requests the session accepts.
+- With `partial_fills=True`, a fill is capped at `max_volume_participation` of the
+  current candle volume. The remainder stays open under the same order identifier and can fill
+  on later candles or be canceled. Candle volume remains a simplified liquidity proxy.
+- Selected built-in metrics are computed from the bounded authoritative equity and
+  completed-trade history. Benchmark-relative metrics require a separate synchronized
+  benchmark and therefore are not offered by the live setup.
 - `max_history` bounds the bars retained per symbol for strategy evaluation.
 
 Use [`PaperTradingSession.snapshot`](../api/live/papertradingsession.md) whenever you need

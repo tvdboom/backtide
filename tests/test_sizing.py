@@ -3,6 +3,7 @@
 Verifies that all sizers calculate quantities correctly.
 """
 
+import cloudpickle
 import pytest
 
 from backtide.sizers import (
@@ -14,6 +15,27 @@ from backtide.sizers import (
     RiskBased,
     VolatilityScaled,
 )
+
+
+@pytest.mark.parametrize(
+    "sizer",
+    [
+        EqualWeight(4),
+        FixedFractional(0.1),
+        FixedNotional(500.0),
+        FixedQuantity(2.5),
+        KellyCriterion(0.55, 100.0, 50.0, 0.4),
+        RiskBased(0.01),
+        VolatilityScaled(0.02),
+    ],
+    ids=lambda sizer: type(sizer).__name__,
+)
+def test_builtin_sizer_cloudpickle_round_trip(sizer):
+    """Built-in sizers retain their type and configuration when persisted."""
+    restored = cloudpickle.loads(cloudpickle.dumps(sizer))
+
+    assert type(restored) is type(sizer)
+    assert repr(restored) == repr(sizer)
 
 
 class TestFixedQuantity:

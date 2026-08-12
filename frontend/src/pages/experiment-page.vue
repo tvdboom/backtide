@@ -29,33 +29,37 @@
       <div v-if="tab === 0" class="form-section">
         <div class="section-copy"><h3>Experiment identity</h3><p>Give this research run a recognizable name and context.</p></div>
         <div class="form-grid experiment-identity-grid">
-          <label>Name<input id="experiment-name" v-model="config.general.name" maxlength="80" placeholder="Enter a name..." /></label>
-          <label>Icon<select id="experiment-icon" v-model="config.general.icon"><option v-for="item in experimentIcons" :key="item.value" :value="item.value">{{ item.value }} {{ item.label }}</option></select></label>
-          <label class="wide">Tags<SearchSelect v-model="config.general.tags" :options="[]" :uppercase-custom="false" allow-custom input-id="experiment-tags" label="Experiment tags" placeholder="Type a tag and press Enter…" /></label>
-          <label class="wide">Description<textarea v-model="config.general.description" rows="5" placeholder="Add a description..." /></label>
+          <label>Name<FieldInfo text="Give the experiment a recognizable name for results and history." /><input id="experiment-name" v-model="config.general.name" maxlength="80" placeholder="Enter a name..." /></label>
+          <label>Icon<FieldInfo text="Choose the icon used to identify this experiment in the interface." /><select id="experiment-icon" v-model="config.general.icon"><option v-for="item in experimentIcons" :key="item.value" :value="item.value">{{ item.value }} {{ item.label }}</option></select></label>
+          <label class="wide">Tags<FieldInfo text="Add searchable labels that help organize related experiments." /><SearchSelect v-model="config.general.tags" :options="[]" :uppercase-custom="false" allow-custom input-id="experiment-tags" label="Experiment tags" placeholder="Type a tag and press Enter…" /></label>
+          <label class="wide">Description<FieldInfo text="Record the hypothesis, purpose, or assumptions behind this experiment." /><textarea v-model="config.general.description" rows="5" placeholder="Add a description..." /></label>
         </div>
       </div>
 
       <div v-if="tab === 1" class="form-section">
         <div class="section-copy"><h3>Market universe</h3><p>Choose a comparable asset class, time range, and bar resolution.</p></div>
-        <div class="segmented wide-control">
-          <button v-for="type in enums.instrument_types" :key="type" type="button" :class="{ active: config.data.instrument_type === optionValue('instrument_type', type) }" @click="setInstrumentType(type)"><component :is="instrumentTypeIcon(type)" :size="16" />{{ type }}</button>
+        <div class="instrument-type-control">
+          <span class="field-control-label">Instrument type<FieldInfo text="Choose the asset class used to build the experiment's market universe." /></span>
+          <div class="segmented wide-control">
+            <button v-for="type in enums.instrument_types" :key="type" type="button" :class="{ active: config.data.instrument_type === optionValue('instrument_type', type) }" @click="setInstrumentType(type)"><component :is="instrumentTypeIcon(type)" :size="16" />{{ type }}</button>
+          </div>
         </div>
         <div class="form-grid two">
-          <label class="wide symbol-select-field">Symbols<SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /></label>
-          <label>Interval<select id="experiment-interval" v-model="config.data.interval"><option v-for="item in enums.intervals" :key="item" :value="optionValue('interval', item)">{{ item }}</option></select></label>
-          <label class="toggle-label"><span>Full available history<small>Use the provider's maximum range.</small></span><input v-model="config.data.full_history" type="checkbox" class="toggle" /></label>
-          <label v-if="!config.data.full_history">Start date<input id="experiment-start-date" v-model="config.data.start_date" type="date" /></label>
-          <label v-if="!config.data.full_history">End date<input id="experiment-end-date" v-model="config.data.end_date" type="date" /></label>
+          <label class="wide symbol-select-field">Symbols<FieldInfo text="Choose the instruments whose historical bars will be used in the experiment." /><SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /></label>
+          <label>Interval<FieldInfo text="Set the duration represented by each historical market-data bar." /><select id="experiment-interval" v-model="config.data.interval"><option v-for="item in enums.intervals" :key="item" :value="optionValue('interval', item)">{{ item }}</option></select></label>
+          <label class="toggle-label"><span>Full available history</span><FieldInfo text="Use every historical bar available from the selected provider." /><input v-model="config.data.full_history" type="checkbox" class="toggle" /></label>
+          <label v-if="!config.data.full_history">Start date<FieldInfo text="Set the first calendar date included in the experiment." /><input id="experiment-start-date" v-model="config.data.start_date" type="date" /></label>
+          <label v-if="!config.data.full_history">End date<FieldInfo text="Set the last calendar date included in the experiment." /><input id="experiment-end-date" v-model="config.data.end_date" type="date" /></label>
         </div>
       </div>
 
       <div v-if="tab === 2" class="form-section">
         <div class="section-copy"><h3>Starting portfolio</h3><p>Set the capital base and any positions held before the first bar.</p></div>
         <div class="portfolio-basics">
-          <label>Initial cash<input id="experiment-initial-cash" v-model.number="config.portfolio.initial_cash" type="number" min="0" step="100" /></label>
+          <label>Initial cash<FieldInfo text="Set the cash balance available to each strategy when the simulation starts." /><input id="experiment-initial-cash" v-model.number="config.portfolio.initial_cash" type="number" min="0" step="100" /></label>
           <div class="field-label">
             <span>Base currency</span>
+            <FieldInfo text="Choose the currency used to value the portfolio and report results." />
             <CurrencySelect
               :model-value="config.portfolio.base_currency"
               :options="enums.currencies"
@@ -71,8 +75,8 @@
           </div>
           <div v-if="!positions.length" class="position-empty">No starting positions. The experiment will begin entirely in cash.</div>
           <div v-for="(position, index) in positions" :key="`${position.symbol}-${index}`" class="position-row">
-            <div class="position-field"><span>Symbol</span><InstrumentSelect v-model="position.symbol" :options="positionOptions(index)" :descriptions="symbolNames" :logos="symbolLogos" :label="`Starting position ${index + 1} symbol`" /></div>
-            <label>Quantity<input v-model.number="position.quantity" type="number" step="any" /></label>
+            <div class="position-field"><span>Symbol</span><FieldInfo text="Choose a market-universe symbol to hold before the first bar." /><InstrumentSelect v-model="position.symbol" :options="positionOptions(index)" :descriptions="symbolNames" :logos="symbolLogos" :label="`Starting position ${index + 1} symbol`" /></div>
+            <label>Quantity<FieldInfo text="Set the number of units held in this starting position." /><input v-model.number="position.quantity" type="number" step="any" /></label>
             <button type="button" class="icon-button danger" :aria-label="position.symbol ? `Remove ${position.symbol} starting position` : 'Remove empty starting position'" @click="removePosition(index)"><Trash2 :size="16" /></button>
           </div>
         </div>
@@ -81,8 +85,8 @@
       <div v-if="tab === 3" class="form-section">
         <div class="section-copy"><h3>Trading logic</h3><p>Select saved strategies, optional indicators and a benchmark.</p></div>
         <div class="form-grid two">
-          <div class="field-label wide benchmark-field"><span>Benchmark</span><small class="field-help">Compare performance against a passive benchmark for this asset class.</small><BenchmarkSelect :model-value="config.strategy.benchmark" :options="benchmarkSymbols" :descriptions="symbolNames" :logos="symbolLogos" label="Experiment benchmark" :placeholder="benchmarkPlaceholder" @update:model-value="setBenchmark" /></div>
-          <label class="wide">Strategies<SearchSelect v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></label>
+          <div class="field-label wide benchmark-field"><span>Benchmark</span><FieldInfo text="Choose a passive reference instrument used to compare experiment performance." /><small class="field-help">Compare performance against a passive benchmark for this asset class.</small><BenchmarkSelect :model-value="config.strategy.benchmark" :options="benchmarkSymbols" :descriptions="symbolNames" :logos="symbolLogos" label="Experiment benchmark" :placeholder="benchmarkPlaceholder" @update:model-value="setBenchmark" /></div>
+          <label class="wide">Strategies<FieldInfo text="Select the saved trading strategies to run against the same market data." /><SearchSelect v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></label>
           <section v-if="selectedStrategies.length" class="selection-insights wide" aria-label="Selected strategy details">
             <article v-for="item in selectedStrategies" :key="item.name" class="asset-selection-card">
               <header><span class="metric-icon"><LibraryAssetIcon kind="strategy" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ catalogTypeLabel(item.type) }}</small></span></header>
@@ -90,7 +94,7 @@
               <div v-if="item.required_indicators?.length" class="required-indicators"><strong>Injected indicators</strong><div class="indicator-chip-list"><span v-for="indicator in item.required_indicators" :key="indicator.name" class="indicator-chip" :title="indicator.description"><Shapes :size="14" />{{ indicator.name }}</span></div></div>
             </article>
           </section>
-          <label class="wide">Indicators<SearchSelect v-model="config.indicators.indicators" :options="savedIndicators" :descriptions="indicatorOptionDetails" :option-icons="indicatorOptionIcons" option-name-first label="Experiment indicators" placeholder="Search saved indicators…" /></label>
+          <label class="wide">Indicators<FieldInfo text="Add optional indicators that will be calculated and supplied during the simulation." /><SearchSelect v-model="config.indicators.indicators" :options="savedIndicators" :descriptions="indicatorOptionDetails" :option-icons="indicatorOptionIcons" option-name-first label="Experiment indicators" placeholder="Search saved indicators…" /></label>
           <section v-if="selectedIndicators.length" class="selection-insights wide" aria-label="Selected indicator details">
             <article v-for="item in selectedIndicators" :key="item.name" class="asset-selection-card compact-card">
               <header><span class="metric-icon"><LibraryAssetIcon kind="indicator" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ catalogTypeLabel(item.type) }}</small></span></header>
@@ -103,8 +107,8 @@
       <div v-if="tab === 4" class="form-section">
         <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, then select the experiment headline.</p></div>
         <div class="form-grid two">
-          <label class="wide">Metrics<SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /></label>
-          <label>Main metric<select id="experiment-main-metric" v-model="config.metrics.main_metric"><option v-for="key in config.metrics.metrics" :key="key" :value="key">{{ metricLabel(key) }}</option></select><small>The best value appears in the results overview.</small></label>
+          <label class="wide">Metrics<FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /></label>
+          <label>Main metric<FieldInfo text="Select the headline measure used to rank and summarize experiment results." /><select id="experiment-main-metric" v-model="config.metrics.main_metric"><option v-for="key in config.metrics.metrics" :key="key" :value="key">{{ metricLabel(key) }}</option></select><small>The best value appears in the results overview.</small></label>
           <section v-if="selectedMetrics.length" class="selection-insights wide" aria-label="Selected metric details">
             <article v-for="item in selectedMetrics" :key="item.key" class="asset-selection-card compact-card">
               <header><span class="metric-icon"><LibraryAssetIcon kind="metric" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ item.builtin ? 'Built-in' : 'Custom' }}</small></span></header>
@@ -120,17 +124,17 @@
           <fieldset class="settings-group">
             <legend>Fees and price impact</legend>
             <div class="form-grid three">
-              <label>Commission<select id="experiment-commission-type" v-model="config.exchange.commission_type"><option v-for="item in enums.commission_types" :key="item" :value="optionValue('commission_type', item)">{{ item }}</option></select></label>
-              <label v-if="showsPercentageCommission">Commission (%)<input v-model.number="config.exchange.commission_pct" type="number" min="0" step="0.01" /></label>
-              <label v-if="showsFixedCommission">Fixed commission<input v-model.number="config.exchange.commission_fixed" type="number" min="0" step="0.01" /></label>
-              <label>Slippage (%)<input v-model.number="config.exchange.slippage" type="number" min="0" step="0.01" /></label>
+              <label>Commission<FieldInfo text="Choose whether simulated transaction costs use percentage, fixed, or combined fees." /><select id="experiment-commission-type" v-model="config.exchange.commission_type"><option v-for="item in enums.commission_types" :key="item" :value="optionValue('commission_type', item)">{{ item }}</option></select></label>
+              <label v-if="showsPercentageCommission">Commission (%)<FieldInfo text="Apply this percentage fee to the value of each simulated fill." /><input v-model.number="config.exchange.commission_pct" type="number" min="0" step="0.01" /></label>
+              <label v-if="showsFixedCommission">Fixed commission<FieldInfo text="Apply this fixed cash fee to each simulated fill." /><input v-model.number="config.exchange.commission_fixed" type="number" min="0" step="0.01" /></label>
+              <label>Slippage (%)<FieldInfo text="Move simulated fill prices against the order by this percentage." /><input v-model.number="config.exchange.slippage" type="number" min="0" step="0.01" /></label>
             </div>
           </fieldset>
           <fieldset class="settings-group">
             <legend>Order handling</legend>
             <div class="form-grid two">
-              <label class="toggle-label"><span>Partial fills<small>Allow available volume to fill part of an order.</small></span><input v-model="config.exchange.partial_fills" type="checkbox" class="toggle" /></label>
-              <label>Allowed order types<SearchSelect v-model="config.exchange.allowed_order_types" :options="enums.order_types" :descriptions="orderTypeDescriptions" plain-options input-id="experiment-order-types" label="Allowed order types" /></label>
+              <label class="toggle-label"><span>Partial fills</span><FieldInfo text="Permit an order to fill only the quantity supported by available market volume." /><input v-model="config.exchange.partial_fills" type="checkbox" class="toggle" /></label>
+              <label>Allowed order types<FieldInfo text="Choose which simulated order instructions strategies may submit." /><SearchSelect v-model="config.exchange.allowed_order_types" :options="enums.order_types" :descriptions="orderTypeDescriptions" plain-options input-id="experiment-order-types" label="Allowed order types" /></label>
             </div>
           </fieldset>
         </div>
@@ -143,13 +147,13 @@
             <legend>Margin</legend>
             <p>Control leverage, collateral requirements, and margin-limit behavior.</p>
             <div class="form-grid three">
-              <label class="toggle-label"><span>Margin trading<small>Allow positions to use borrowed capital.</small></span><input v-model="config.exchange.allow_margin" type="checkbox" class="toggle" /></label>
+              <label class="toggle-label"><span>Margin trading</span><FieldInfo text="Allow simulated positions to use borrowed funds within the configured margin limits." /><input v-model="config.exchange.allow_margin" type="checkbox" class="toggle" /></label>
               <template v-if="config.exchange.allow_margin">
-                <label>Maximum leverage<input id="experiment-max-leverage" v-model.number="config.exchange.max_leverage" type="number" min="1" step="0.1" /></label>
-                <label>Initial margin (%)<input v-model.number="config.exchange.initial_margin" type="number" min="0" max="100" step="1" /></label>
-                <label>Maintenance margin (%)<input v-model.number="config.exchange.maintenance_margin" type="number" min="0" max="100" step="1" /></label>
-                <label>Margin interest (% annual)<input v-model.number="config.exchange.margin_interest" type="number" min="0" step="0.1" /></label>
-                <label class="toggle-label"><span>Raise on margin limit<small>Abort when an order breaches margin rules.</small></span><input v-model="config.exchange.raise_on_margin_limit" type="checkbox" class="toggle" /></label>
+                <label>Maximum leverage<FieldInfo text="Limit gross exposure to this multiple of portfolio equity." /><input id="experiment-max-leverage" v-model.number="config.exchange.max_leverage" type="number" min="1" step="0.1" /></label>
+                <label>Initial margin (%)<FieldInfo text="Require this percentage of a new leveraged position as opening collateral." /><input v-model.number="config.exchange.initial_margin" type="number" min="0" max="100" step="1" /></label>
+                <label>Maintenance margin (%)<FieldInfo text="Require this collateral percentage to keep a leveraged position open." /><input v-model.number="config.exchange.maintenance_margin" type="number" min="0" max="100" step="1" /></label>
+                <label>Margin interest (% annual)<FieldInfo text="Charge this annual rate on simulated borrowed cash." /><input v-model.number="config.exchange.margin_interest" type="number" min="0" step="0.1" /></label>
+                <label class="toggle-label"><span>Raise on margin limit</span><FieldInfo text="Stop the experiment with an error when an order exceeds a margin limit." /><input v-model="config.exchange.raise_on_margin_limit" type="checkbox" class="toggle" /></label>
               </template>
             </div>
           </fieldset>
@@ -157,10 +161,10 @@
             <legend>Short selling</legend>
             <p>Choose whether short positions are allowed and how violations are handled.</p>
             <div class="form-grid three">
-              <label class="toggle-label"><span>Short selling<small>Allow quantities below zero.</small></span><input v-model="config.exchange.allow_short_selling" type="checkbox" class="toggle" /></label>
+              <label class="toggle-label"><span>Short selling</span><FieldInfo text="Allow strategies to sell assets they do not currently hold." /><input v-model="config.exchange.allow_short_selling" type="checkbox" class="toggle" /></label>
               <template v-if="config.exchange.allow_short_selling">
-                <label>Borrow rate (% annual)<input v-model.number="config.exchange.borrow_rate" type="number" min="0" step="0.1" /></label>
-                <label class="toggle-label"><span>Raise on short violation<small>Abort when a disallowed short is submitted.</small></span><input v-model="config.exchange.raise_on_short_violation" type="checkbox" class="toggle" /></label>
+                <label>Borrow rate (% annual)<FieldInfo text="Charge this annual rate on the value of simulated short positions." /><input v-model.number="config.exchange.borrow_rate" type="number" min="0" step="0.1" /></label>
+                <label class="toggle-label"><span>Raise on short violation</span><FieldInfo text="Stop the experiment with an error when a strategy submits a disallowed short order." /><input v-model="config.exchange.raise_on_short_violation" type="checkbox" class="toggle" /></label>
               </template>
             </div>
           </fieldset>
@@ -168,11 +172,11 @@
             <legend>Exposure and currency</legend>
             <p>Limit position concentration and decide when foreign cash is converted.</p>
             <div class="form-grid three">
-              <label>Max position (%)<input id="experiment-max-position" v-model.number="config.exchange.max_position_size" type="number" min="1" max="100" /></label>
-              <label>FX conversion<select v-model="config.exchange.conversion_mode"><option v-for="item in enums.conversion_modes" :key="item" :value="item">{{ enumLabel(item) }}</option></select></label>
-              <label v-if="config.exchange.conversion_mode === 'HoldUntilThreshold'">Conversion threshold<input v-model.number="config.exchange.conversion_threshold" type="number" min="0" step="100" /></label>
-              <label v-if="config.exchange.conversion_mode === 'EndOfPeriod'">Conversion period<select v-model="config.exchange.conversion_period"><option :value="null">Not set</option><option v-for="item in enums.conversion_periods" :key="item" :value="optionValue('conversion_period', item)">{{ item }}</option></select></label>
-              <label v-if="config.exchange.conversion_mode === 'CustomInterval'">Custom interval (bars)<input id="experiment-conversion-interval" v-model.number="config.exchange.conversion_interval" type="number" min="1" /></label>
+              <label>Max position (%)<FieldInfo text="Cap a single position at this percentage of portfolio equity." /><input id="experiment-max-position" v-model.number="config.exchange.max_position_size" type="number" min="1" max="100" /></label>
+              <label>FX conversion<FieldInfo text="Choose when non-base-currency cash balances are converted back to the portfolio currency." /><select v-model="config.exchange.conversion_mode"><option v-for="item in enums.conversion_modes" :key="item" :value="item">{{ enumLabel(item) }}</option></select></label>
+              <label v-if="config.exchange.conversion_mode === 'HoldUntilThreshold'">Conversion threshold<FieldInfo text="Convert foreign cash after its value reaches this amount." /><input v-model.number="config.exchange.conversion_threshold" type="number" min="0" step="100" /></label>
+              <label v-if="config.exchange.conversion_mode === 'EndOfPeriod'">Conversion period<FieldInfo text="Choose the calendar boundary used to convert accumulated foreign cash." /><select v-model="config.exchange.conversion_period"><option :value="null">Not set</option><option v-for="item in enums.conversion_periods" :key="item" :value="optionValue('conversion_period', item)">{{ item }}</option></select></label>
+              <label v-if="config.exchange.conversion_mode === 'CustomInterval'">Custom interval (bars)<FieldInfo text="Convert accumulated foreign cash after this number of simulation bars." /><input id="experiment-conversion-interval" v-model.number="config.exchange.conversion_interval" type="number" min="1" /></label>
             </div>
           </fieldset>
         </div>
@@ -183,11 +187,11 @@
         <fieldset class="settings-group">
           <legend>Simulation timing</legend>
           <div class="form-grid two">
-            <label>Warmup bars<input id="experiment-warmup" v-model.number="config.engine.warmup_period" type="number" min="0" /></label>
-            <label>Risk-free rate (%)<input v-model.number="config.engine.risk_free_rate" type="number" step="0.1" /></label>
-            <label class="toggle-label"><span>Trade on close<small>Fill market orders on the current close.</small></span><input v-model="config.engine.trade_on_close" type="checkbox" class="toggle" /></label>
-            <label class="toggle-label"><span>Exclusive orders<small>Keep one active order per symbol.</small></span><input v-model="config.engine.exclusive_orders" type="checkbox" class="toggle" /></label>
-            <label class="wide">Empty-bar policy<select v-model="config.engine.empty_bar_policy"><option v-for="item in enums.empty_bar_policies" :key="item" :value="item">{{ enumLabel(item) }}</option></select></label>
+            <label>Warm-up bars<FieldInfo text="Process this many bars before strategy orders are allowed, giving indicators time to initialize." /><input id="experiment-warmup" v-model.number="config.engine.warmup_period" type="number" min="0" /></label>
+            <label>Risk-free rate (%)<FieldInfo text="Set the annual reference return used by risk-adjusted metrics such as Sharpe ratio." /><input v-model.number="config.engine.risk_free_rate" type="number" step="0.1" /></label>
+            <label class="toggle-label"><span>Trade on close</span><FieldInfo text="Fill market orders using the current bar's closing price instead of the next bar." /><input v-model="config.engine.trade_on_close" type="checkbox" class="toggle" /></label>
+            <label class="toggle-label"><span>Exclusive orders</span><FieldInfo text="Allow only one active simulated order for each symbol at a time." /><input v-model="config.engine.exclusive_orders" type="checkbox" class="toggle" /></label>
+            <label class="wide">Empty-bar policy<FieldInfo text="Choose how the engine handles a missing bar for a symbol at a simulation timestamp." /><select v-model="config.engine.empty_bar_policy"><option v-for="item in enums.empty_bar_policies" :key="item" :value="item">{{ enumLabel(item) }}</option></select></label>
           </div>
         </fieldset>
       </div>
@@ -226,6 +230,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { post, query } from '../api'
 import BenchmarkSelect from '../components/benchmark-select.vue'
 import CurrencySelect from '../components/currency-select.vue'
+import FieldInfo from '../components/field-info.vue'
 import InstrumentSelect from '../components/instrument-select.vue'
 import LibraryAssetIcon from '../components/library-asset-icon.vue'
 import SearchSelect from '../components/search-select.vue'
@@ -494,7 +499,7 @@ function validationIssue() {
     return { tab: 6, selector: '#experiment-conversion-interval', message: 'Enter a custom conversion interval of at least one bar.' }
   }
   if (!Number.isInteger(config.engine.warmup_period) || config.engine.warmup_period < 0) {
-    return { tab: 7, selector: '#experiment-warmup', message: 'Warmup bars must be a whole number of zero or greater.' }
+    return { tab: 7, selector: '#experiment-warmup', message: 'Warm-up bars must be a whole number of zero or greater.' }
   }
   return null
 }

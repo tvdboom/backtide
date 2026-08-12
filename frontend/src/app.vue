@@ -43,13 +43,13 @@
         </div>
         <div class="topbar-actions" :class="{ 'has-live-session': liveSessionRunning }">
           <button
-            v-if="liveSessionRunning"
+            v-if="liveSessionVisible"
             type="button"
             class="connection live-session-link"
-            aria-label="Open active paper trading session"
+            aria-label="Open active live trading session"
             @click="navigate('live')"
           >
-            <span class="online" />Session live
+            <span :class="{ online: liveSessionRunning }" />{{ liveSessionLabel }}
           </button>
           <button
             type="button"
@@ -128,6 +128,7 @@ import {
   Sigma,
   Moon,
   RefreshCw,
+  Scale,
   Shapes,
   Sun,
   TriangleAlert,
@@ -141,6 +142,7 @@ import DownloadPage from './pages/download-page.vue'
 import ExperimentPage from './pages/experiment-page.vue'
 import LibraryPage from './pages/library-page.vue'
 import LivePage from './pages/live-page.vue'
+import LiveHistoryPage from './pages/live-history-page.vue'
 import ResultsPage from './pages/results-page.vue'
 import StoragePage from './pages/storage-page.vue'
 import { resolvePage } from './state'
@@ -152,25 +154,34 @@ const navigation = [
     items: [{ id: 'home', label: 'Home', icon: Home, component: markRaw(DashboardPage) }]
   },
   {
-    label: 'Backtest',
+    label: 'Research',
     items: [
-      { id: 'experiment', label: 'Experiment', icon: FlaskConical, component: markRaw(ExperimentPage) },
-      { id: 'strategies', label: 'Strategies', icon: Bot, component: markRaw(LibraryPage) },
-      { id: 'indicators', label: 'Indicators', icon: Shapes, component: markRaw(LibraryPage) },
-      { id: 'metrics', label: 'Metrics', icon: Sigma, component: markRaw(LibraryPage) },
-      { id: 'results', label: 'Results', icon: Gauge, component: markRaw(ResultsPage) }
+      { id: 'experiment', label: 'New experiment', icon: FlaskConical, component: markRaw(ExperimentPage) },
+      { id: 'results', label: 'Results', icon: Gauge, component: markRaw(ResultsPage) },
+      { id: 'analysis', label: 'Analysis', icon: BarChart3, component: markRaw(AnalysisPage) }
     ]
   },
   {
-    label: 'Live',
-    items: [{ id: 'live', label: 'Paper trading', icon: Activity, component: markRaw(LivePage) }]
+    label: 'Trading',
+    items: [
+      { id: 'live', label: 'Live trading', icon: Activity, component: markRaw(LivePage) },
+      { id: 'live-history', label: 'Session history', icon: Gauge, component: markRaw(LiveHistoryPage) }
+    ]
+  },
+  {
+    label: 'Library',
+    items: [
+      { id: 'strategies', label: 'Strategies', icon: Bot, component: markRaw(LibraryPage) },
+      { id: 'indicators', label: 'Indicators', icon: Shapes, component: markRaw(LibraryPage) },
+      { id: 'metrics', label: 'Metrics', icon: Sigma, component: markRaw(LibraryPage) },
+      { id: 'sizers', label: 'Sizers', icon: Scale, component: markRaw(LibraryPage) }
+    ]
   },
   {
     label: 'Data',
     items: [
       { id: 'download', label: 'Download', icon: CloudDownload, component: markRaw(DownloadPage) },
-      { id: 'storage', label: 'Storage', icon: Database, component: markRaw(StoragePage) },
-      { id: 'analysis', label: 'Analysis', icon: BarChart3, component: markRaw(AnalysisPage) }
+      { id: 'storage', label: 'Storage', icon: Database, component: markRaw(StoragePage) }
     ]
   }
 ]
@@ -180,6 +191,8 @@ const current = computed(() => flat.find(item => item.id === page.value) || flat
 const bootstrap = ref(null)
 const fatalError = ref('')
 const liveSessionRunning = ref(false)
+const liveSessionVisible = ref(false)
+const liveSessionLabel = ref('Session live')
 const refreshKey = ref(0)
 const sidebarOpen = ref(false)
 const toast = ref(null)
@@ -196,14 +209,26 @@ async function load() {
   }
 }
 
-function setLiveStatus(running) {
-  liveSessionRunning.value = Boolean(running)
+function setLiveStatus(value) {
+  if (typeof value === 'boolean') {
+    liveSessionRunning.value = value
+    liveSessionVisible.value = value
+    liveSessionLabel.value = 'Session live'
+    return
+  }
+  const running = ['running', 'paused'].includes(value?.status)
+  const replay = value?.config?.mode === 'replay'
+  liveSessionRunning.value = running
+  liveSessionVisible.value = running || replay
+  liveSessionLabel.value = replay
+    ? running ? 'Replay running' : value?.status === 'error' ? 'Replay failed' : 'Replay complete'
+    : value?.status === 'paused' ? 'Session paused' : 'Session live'
 }
 
 async function pollLiveStatus() {
   try {
     const state = await api('/api/live')
-    setLiveStatus(state.status === 'running')
+    setLiveStatus(state)
   } catch {
     setLiveStatus(false)
   } finally {

@@ -112,3 +112,18 @@ class MyMetric(BaseMetric):
 
 MyMetric()`
 }
+
+export function sizerCodePlaceholder() {
+  return `from backtide.sizers import BaseSizer
+
+
+class MySizer(BaseSizer):
+    def calculate(self, equity, price, stop_distance=None, atr=None):
+        """Return the signed or unsigned quantity for a new order."""
+        if price <= 0:
+            return 0.0
+        return equity * 0.01 / price
+
+
+MySizer()`
+}

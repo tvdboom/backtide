@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, nextTick, ref } from 'vue'
 import LivePage from './live-page.vue'
 
 const { api, post, query } = vi.hoisted(() => ({
@@ -70,6 +71,27 @@ const bootstrap = {
   strategies: { saved: [] }
 }
 
+const completedReplay = {
+  status: 'stopped',
+  config: {
+    mode: 'replay', provider: 'kraken', interval: '1m', symbols: ['BTC-USD'],
+    strategies: [], config: { initial_cash: 10_000, base_currency: 'EUR' }
+  },
+  snapshot: {
+    latest_prices: { 'BTC-USD': 60_000 }, equity: 10_000,
+    portfolio: { positions: {}, cash: { EUR: 10_000 }, orders: [] }
+  },
+  updates: [{
+    market: {
+      symbol: 'BTC-USD', received_ts: 1_700_000_000,
+      open: 59_900, high: 60_100, low: 59_800, close: 60_000,
+      volume: 2.5, is_final: true
+    },
+    fills: [], snapshot: { equity: 10_000 }
+  }],
+  error: null
+}
+
 describe('live page', () => {
   beforeEach(() => {
     api.mockReset().mockResolvedValue({
@@ -94,36 +116,147 @@ describe('live page', () => {
     expect(input.value).toBe('10000')
   })
 
-  it('orders the session fields in the requested row sequence', async () => {
+  it('keeps percentage limits valid at their one-hundred-percent defaults', async () => {
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+    const percentageLimits = wrapper.findAll('input[min="0.01"][max="100"]')
+
+    expect(percentageLimits).toHaveLength(2)
+    for (const input of percentageLimits) {
+      expect(input.attributes('step')).toBe('0.01')
+      expect(input.element.value).toBe('100')
+      expect(input.element.validity.valid).toBe(true)
+    }
+  })
+
+  it('aligns live configuration labels with the experiment setup', async () => {
     const wrapper = mount(LivePage, { props: { bootstrap } })
     await flushPromises()
 
-    const fields = wrapper.get('.form-grid').element.children
-    const labels = Array.from(fields, field => {
-      if (field.tagName === 'FIELDSET') return field.querySelector('legend').textContent
-      return field.firstElementChild?.tagName === 'SPAN'
-        ? field.firstElementChild.childNodes[0].textContent
-        : field.childNodes[0].textContent
-    })
+    expect(wrapper.findAll('.live-form-tabs button').map(button => button.text())).toEqual([
+      '1Market data',
+      '2Strategy & metrics',
+      '3Portfolio & execution',
+      '4Risk'
+    ])
+    const visibleLabels = () => Array.from(wrapper.get('.form-grid').element.children)
+      .filter(field => field.style.display !== 'none')
+      .map(field => {
+        const heading = field.tagName === 'FIELDSET' ? field.querySelector('legend') : field
+        const directText = [...heading.childNodes].find(node =>
+          node.nodeType === Node.TEXT_NODE && node.textContent.trim())
+        if (directText) return directText.textContent.trim()
+        return [...heading.firstElementChild.childNodes].find(node =>
+          node.nodeType === Node.TEXT_NODE && node.textContent.trim())?.textContent.trim()
+      })
 
-    expect(labels).toEqual([
+    expect(visibleLabels()).toEqual([
       'Provider',
-      'Interval',
       'Symbols',
-      'Initial cash',
-      'Base currency',
-      'Strategy',
-      'Commission (%)',
-      'Fixed commission',
-      'History limit',
-      'Slippage (%)',
-      'Allow short positions',
-      'Allow margin',
+      'Interval',
+      'Warm-up bars',
+      'History limit'
+    ])
+    expect(wrapper.get('.live-interval-field').classes()).not.toContain('wide')
+    await wrapper.findAll('.live-form-tabs button')[1].trigger('click')
+    expect(visibleLabels()).toEqual([
+      'Strategies',
+      'Indicators',
+      'Metrics',
+      'Risk-free rate (%)',
       'Trade partial bars'
     ])
-    expect(fields[1].classList.contains('wide')).toBe(true)
-    expect(fields[2].classList.contains('wide')).toBe(true)
-    expect(fields[5].classList.contains('wide')).toBe(true)
+  })
+
+  it('can start from every setup step with sensible defaults', async () => {
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+    const tabs = wrapper.findAll('.live-form-tabs button')
+
+    expect(wrapper.get('.live-button').element.disabled).toBe(false)
+    expect(wrapper.get('#live-initial-cash').element.value).toBe('10000')
+    for (const tab of tabs) {
+      await tab.trigger('click')
+      expect(wrapper.get('.live-button').text()).toContain('Start live session')
+      expect(wrapper.get('.live-button').element.disabled).toBe(false)
+    }
+  })
+
+  it('explains every live-session setting', async () => {
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    const settings = [...wrapper.get('.form-grid').element.children]
+    expect(settings.length).toBeGreaterThan(20)
+    expect(settings.every(setting => setting.querySelector('.field-info'))).toBe(true)
+    expect(wrapper.findAll('.toggle-label small')).toHaveLength(0)
+  })
+
+  it('refreshes a cached page and opens a completed replay instead of setup', async () => {
+    api.mockReset()
+      .mockResolvedValueOnce({
+        status: 'idle', config: {}, snapshot: {}, updates: [], error: null
+      })
+      .mockResolvedValueOnce(completedReplay)
+    const show = ref(true)
+    const Host = defineComponent({
+      components: { LivePage },
+      setup: () => ({ bootstrap, show }),
+      template: '<KeepAlive><LivePage v-if="show" :bootstrap="bootstrap" /></KeepAlive>'
+    })
+    const wrapper = mount(Host)
+    await flushPromises()
+    expect(wrapper.find('.live-setup').exists()).toBe(true)
+
+    show.value = false
+    await nextTick()
+    show.value = true
+    await nextTick()
+    await flushPromises()
+
+    expect(api).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.live-setup').exists()).toBe(false)
+    expect(wrapper.find('.live-dashboard').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Live market prices')
+    expect(wrapper.get('.session-actions').text()).toContain('Replay complete')
+    expect(wrapper.get('.session-actions').text()).not.toContain('Stop')
+    wrapper.unmount()
+  })
+
+  it('submits complete execution and risk defaults from the wizard', async () => {
+    post.mockResolvedValue({
+      status: 'running',
+      config: {},
+      snapshot: {},
+      strategies: {},
+      updates: [],
+      health: {},
+      error: null
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith('/api/live', expect.objectContaining({
+      provider: 'kraken',
+      interval: '1m',
+      warmup_bars: 500,
+      strategies: [],
+      indicators: [],
+      config: expect.objectContaining({
+        allow_margin: false,
+        max_leverage: 2,
+        initial_margin: 50,
+        maintenance_margin: 25,
+        max_position_size: 100,
+        max_drawdown: 0,
+        partial_fills: false,
+        max_volume_participation: 100,
+        metrics: expect.arrayContaining(['total_return', 'sharpe', 'max_dd'])
+      })
+    }))
   })
 
   it('uses the searchable currency selector with flags', async () => {
@@ -248,6 +381,18 @@ describe('live page', () => {
     expect(figure.data[0].hovertemplate).toContain('Volume')
     expect(wrapper.get('.live-chart').text()).toContain('Live market prices')
     expect(wrapper.get('.live-chart').text()).not.toContain('Live updates')
+    expect(wrapper.get('.quote-board').text()).toContain('Watchlist')
+    expect(wrapper.get('.event-feed').text()).toContain('Market event feed')
+    expect(wrapper.find('.live-metrics').exists()).toBe(false)
+    expect(wrapper.find('.live-tables').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Cancel orders')
+    expect(wrapper.text()).not.toContain('Flatten')
+    expect(wrapper.text()).not.toContain('Equity')
+    expect(wrapper.text()).not.toContain('Realized P&L')
+    expect(wrapper.text()).not.toContain('Unrealized P&L')
+    expect(wrapper.text()).not.toContain('Open positions')
+    expect(wrapper.text()).not.toContain('Positions & cash')
+    expect(wrapper.text()).not.toContain('Recent order outcomes')
     expect(wrapper.findAll('.event-volume').map(value => value.text())).toEqual([
       'volume 3',
       'volume 2.5'
@@ -287,6 +432,15 @@ describe('live page', () => {
     expect(chart.props('figure').data[0].y).toEqual([0, 25])
     expect(chart.props('figure').data[0].fill).toBeUndefined()
     expect(chart.props('figure').layout.yaxis.title).toBe('Net P&L (EUR)')
+    expect(wrapper.get('.live-metrics').text()).toContain('Equity')
+    expect(wrapper.get('.live-tables').text()).toContain('Positions & cash')
+    expect(wrapper.get('.live-tables').text()).toContain('Recent order outcomes')
+    expect(wrapper.text()).toContain('Cancel orders')
+    expect(wrapper.text()).toContain('Flatten')
+    expect(wrapper.findAll('.action-popover').map(item => item.text())).toEqual([
+      'Cancel every open simulated order before the next market update.',
+      'Close all simulated positions on the next market update.'
+    ])
     wrapper.unmount()
   })
 

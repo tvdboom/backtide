@@ -70,6 +70,7 @@
               </div>
               <div class="result-actions">
                 <button class="secondary" :disabled="!detail.config" @click="reuseSetup"><CopyPlus :size="15"/> Reuse setup</button>
+                <button class="secondary" :disabled="!detail.config" @click="paperTrade"><Activity :size="15"/> Paper trade</button>
                 <button class="secondary" :disabled="!detail.config" @click="openDocument('config')"><FileCode2 :size="15"/> Config</button>
                 <button class="secondary" :disabled="detail.logs == null" @click="openDocument('logs')"><ScrollText :size="15"/> Logs</button>
                 <button class="icon-button danger" aria-label="Delete experiment" @click="requestDelete()"><Trash2 :size="17"/></button>
@@ -524,6 +525,13 @@ async function reuseSetup() {
     const config = await post('/api/config/parse', { suffix: '.toml', text: detail.value.config })
     sessionStorage.setItem('backtide:experiment-config', JSON.stringify(config))
     emit('navigate', 'experiment')
+  } catch (error) { emit('toast', error.message, 'error') }
+}
+async function paperTrade() {
+  try {
+    const config = await api(`/api/experiments/${encodeURIComponent(selectedId.value)}/paper-config`)
+    sessionStorage.setItem('backtide:paper-config', JSON.stringify(config))
+    emit('navigate', 'live')
   } catch (error) { emit('toast', error.message, 'error') }
 }
 function requestDelete(experiment = detail.value?.experiment) {

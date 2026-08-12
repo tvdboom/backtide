@@ -1,6 +1,6 @@
 //! Data models used by live market feeds and paper-trading sessions.
 
-use crate::backtest::models::{Order, OrderStatus, Portfolio};
+use crate::backtest::models::{Order, OrderStatus, OrderType, Portfolio};
 use crate::data::models::{Bar, Currency};
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,44 @@ use std::collections::HashMap;
 /// max_history : int, default=10000
 ///     Maximum bars retained per symbol for strategy evaluation.
 ///
+/// max_leverage : float, default=2
+///     Maximum gross exposure divided by current equity when margin is enabled.
+///
+/// initial_margin : float, default=50
+///     Minimum equity percentage required when increasing exposure.
+///
+/// maintenance_margin : float, default=25
+///     Minimum equity percentage maintained against gross exposure. Breaches
+///     trigger deterministic paper liquidation.
+///
+/// margin_interest : float, default=0
+///     Annual percentage charged on negative base-currency cash.
+///
+/// borrow_rate : float, default=0
+///     Annual percentage charged on short notional.
+///
+/// max_position_size : float, default=100
+///     Maximum absolute per-symbol notional as a percentage of equity.
+///
+/// max_drawdown : float, default=0
+///     Drawdown percentage that halts exposure-increasing orders. Zero disables
+///     the guard.
+///
+/// allowed_order_types : list[str | OrderType], default=all order types
+///     Order types accepted by the paper broker.
+///
+/// partial_fills : bool, default=False
+///     Whether fills are capped by `max_volume_participation`.
+///
+/// max_volume_participation : float, default=100
+///     Maximum percentage of a candle's volume available to one simulated fill.
+///
+/// metrics : list[str]
+///     Built-in performance metric keys maintained during the session.
+///
+/// risk_free_rate : float, default=0
+///     Annual risk-free rate used by risk-adjusted performance metrics.
+///
 /// See Also
 /// --------
 /// - backtide.live:PaperTradingSession
@@ -76,6 +114,30 @@ pub struct PaperTradingConfig {
     pub trade_on_partial: bool,
     /// Maximum number of candles retained per symbol.
     pub max_history: usize,
+    /// Maximum gross-exposure-to-equity ratio when margin is enabled.
+    pub max_leverage: f64,
+    /// Equity percentage required to open or increase exposure.
+    pub initial_margin: f64,
+    /// Equity percentage required to maintain open exposure.
+    pub maintenance_margin: f64,
+    /// Annual percentage charged on negative cash.
+    pub margin_interest: f64,
+    /// Annual percentage charged on short notional.
+    pub borrow_rate: f64,
+    /// Per-symbol absolute notional cap as a percentage of equity.
+    pub max_position_size: f64,
+    /// Drawdown percentage that halts exposure-increasing orders; zero disables it.
+    pub max_drawdown: f64,
+    /// Order types accepted by the paper broker.
+    pub allowed_order_types: Vec<OrderType>,
+    /// Whether candle volume constrains fill quantity.
+    pub partial_fills: bool,
+    /// Maximum percentage of candle volume available to one fill.
+    pub max_volume_participation: f64,
+    /// Built-in metric keys maintained during the session.
+    pub metrics: Vec<String>,
+    /// Annual risk-free rate used by risk-adjusted metrics.
+    pub risk_free_rate: f64,
 }
 
 impl Default for PaperTradingConfig {
@@ -90,6 +152,39 @@ impl Default for PaperTradingConfig {
             allow_margin: false,
             trade_on_partial: false,
             max_history: 10_000,
+            max_leverage: 2.0,
+            initial_margin: 50.0,
+            maintenance_margin: 25.0,
+            margin_interest: 0.0,
+            borrow_rate: 0.0,
+            max_position_size: 100.0,
+            max_drawdown: 0.0,
+            allowed_order_types: vec![
+                OrderType::Market,
+                OrderType::Limit,
+                OrderType::StopLoss,
+                OrderType::TakeProfit,
+                OrderType::StopLossLimit,
+                OrderType::TakeProfitLimit,
+                OrderType::TrailingStop,
+                OrderType::TrailingStopLimit,
+                OrderType::SettlePosition,
+                OrderType::Cancel,
+            ],
+            partial_fills: false,
+            max_volume_participation: 100.0,
+            metrics: vec![
+                "total_return".to_owned(),
+                "pnl".to_owned(),
+                "final_equity".to_owned(),
+                "n_trades".to_owned(),
+                "win_rate".to_owned(),
+                "ann_volatility".to_owned(),
+                "sharpe".to_owned(),
+                "sortino".to_owned(),
+                "max_dd".to_owned(),
+            ],
+            risk_free_rate: 0.0,
         }
     }
 }
@@ -110,6 +205,18 @@ impl PaperTradingConfig {
         allow_margin: "bool" = false,
         trade_on_partial: "bool" = false,
         max_history: "int" = 10_000,
+        max_leverage: "float" = 2.0,
+        initial_margin: "float" = 50.0,
+        maintenance_margin: "float" = 25.0,
+        margin_interest: "float" = 0.0,
+        borrow_rate: "float" = 0.0,
+        max_position_size: "float" = 100.0,
+        max_drawdown: "float" = 0.0,
+        allowed_order_types: "list[str | OrderType]" = PaperTradingConfig::default().allowed_order_types,
+        partial_fills: "bool" = false,
+        max_volume_participation: "float" = 100.0,
+        metrics: "list[str]" = PaperTradingConfig::default().metrics,
+        risk_free_rate: "float" = 0.0,
     ))]
     fn new(
         initial_cash: f64,
@@ -121,6 +228,18 @@ impl PaperTradingConfig {
         allow_margin: bool,
         trade_on_partial: bool,
         max_history: usize,
+        max_leverage: f64,
+        initial_margin: f64,
+        maintenance_margin: f64,
+        margin_interest: f64,
+        borrow_rate: f64,
+        max_position_size: f64,
+        max_drawdown: f64,
+        allowed_order_types: Vec<OrderType>,
+        partial_fills: bool,
+        max_volume_participation: f64,
+        metrics: Vec<String>,
+        risk_free_rate: f64,
     ) -> Self {
         Self {
             initial_cash,
@@ -132,6 +251,18 @@ impl PaperTradingConfig {
             allow_margin,
             trade_on_partial,
             max_history,
+            max_leverage,
+            initial_margin,
+            maintenance_margin,
+            margin_interest,
+            borrow_rate,
+            max_position_size,
+            max_drawdown,
+            allowed_order_types,
+            partial_fills,
+            max_volume_participation,
+            metrics,
+            risk_free_rate,
         }
     }
 
@@ -415,6 +546,36 @@ pub struct PaperFill {
 /// processed_bars : int
 ///     Number of updates that triggered matching or strategy evaluation.
 ///
+/// gross_exposure : float
+///     Sum of absolute marked position values.
+///
+/// net_exposure : float
+///     Signed marked value of all positions.
+///
+/// leverage : float
+///     Gross exposure divided by equity.
+///
+/// buying_power : float
+///     Remaining gross exposure capacity under the configured leverage cap.
+///
+/// drawdown : float
+///     Fractional decline from peak session equity.
+///
+/// peak_equity : float
+///     Highest marked equity observed during the session.
+///
+/// total_costs : float
+///     Cumulative commissions, margin interest, and short-borrow charges.
+///
+/// trading_halted : bool
+///     Whether a configured risk guard is rejecting exposure-increasing orders.
+///
+/// halt_reason : str | None
+///     Human-readable reason for the active risk halt.
+///
+/// metrics : dict[str, float]
+///     Selected live-compatible performance metrics computed from session state.
+///
 /// See Also
 /// --------
 /// - backtide.live:PaperTradingSession
@@ -443,6 +604,26 @@ pub struct PaperTradingSnapshot {
     pub unrealized_pnl: f64,
     /// Number of market updates that triggered matching or strategy evaluation.
     pub processed_bars: u64,
+    /// Sum of absolute marked position values.
+    pub gross_exposure: f64,
+    /// Signed marked value of all positions.
+    pub net_exposure: f64,
+    /// Gross exposure divided by equity.
+    pub leverage: f64,
+    /// Remaining gross exposure capacity under the configured leverage cap.
+    pub buying_power: f64,
+    /// Fractional decline from peak equity.
+    pub drawdown: f64,
+    /// Highest equity observed during the session.
+    pub peak_equity: f64,
+    /// Cumulative commissions and financing costs.
+    pub total_costs: f64,
+    /// Whether exposure-increasing orders are currently halted by a risk control.
+    pub trading_halted: bool,
+    /// Human-readable reason for the active trading halt.
+    pub halt_reason: Option<String>,
+    /// Live-compatible performance metrics.
+    pub metrics: HashMap<String, f64>,
 }
 
 /// State transition produced after processing a market update.
@@ -463,6 +644,10 @@ pub struct PaperTradingSnapshot {
 ///
 /// processed : bool
 ///     Whether this update was new, valid, and eligible for trading.
+///
+/// indicators : dict[str, dict[str, list[list[float]]]]
+///     Latest values for configured and strategy-required indicators, grouped
+///     by deterministic indicator name and symbol.
 ///
 /// See Also
 /// --------
@@ -495,4 +680,6 @@ pub struct PaperTradingUpdate {
     pub orders_submitted: usize,
     /// Whether this update was new, valid, and eligible for trading.
     pub processed: bool,
+    /// Latest configured indicator outputs by indicator and symbol.
+    pub indicators: HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
 }

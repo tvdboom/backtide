@@ -15,6 +15,7 @@ use crate::live::providers::{
 use crate::strategies::interface::BuiltinStrategy;
 use crate::strategies::utils::IndicatorView;
 use crate::utils::python::{dict_to_dataframe, to_python};
+use futures::future::BoxFuture;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -32,13 +33,13 @@ use std::time::{Duration, Instant};
 ///
 /// Parameters
 /// ----------
-/// provider : str | Provider
+/// provider : str | [Provider]
 ///     Exchange WebSocket provider.
 ///
 /// symbols : list[str]
 ///     Provider symbols to subscribe to.
 ///
-/// interval : str | Interval, default="1m"
+/// interval : str | [Interval], default="1m"
 ///     Candle interval. Coinbase supports `"5m"` only.
 ///
 /// include_partial : bool, default=True
@@ -275,10 +276,14 @@ impl LiveMarketFeed {
 /// config : [PaperTradingConfig] | None, default=None
 ///     Execution, fee, and risk settings. Uses defaults when omitted.
 ///
-/// strategy : BaseStrategy | None, default=None
+/// strategy : [BaseStrategy] | None, default=None
 ///     Existing built-in or custom strategy. Its `evaluate` method runs after
 ///     resting orders are matched on each processable candle. Explicit orders
 ///     can also be passed to `on_bar`.
+///
+/// indicators : list[[BaseIndicator]] | None, default=None
+///     Additional indicators to compute for live monitoring. Indicators
+///     required by `strategy` are included automatically.
 ///
 /// See Also
 /// --------
@@ -311,15 +316,24 @@ pub struct PaperTradingSession {
 #[pymethods]
 impl PaperTradingSession {
     #[new]
-    #[pyo3(signature = (config=None, strategy=None))]
+    #[pyo3(signature = (config=None, strategy=None, indicators=None))]
     fn new(
         py: Python<'_>,
         config: Option<PaperTradingConfig>,
         strategy: Option<Py<PyAny>>,
+        indicators: Option<Vec<Py<PyAny>>>,
     ) -> PyResult<Self> {
         let config = config.unwrap_or_default();
         let broker = PaperBroker::new(config.clone()).map_err(PyValueError::new_err)?;
-        let indicator_objects = collect_required_indicators(py, strategy.as_ref())?;
+        let mut indicator_objects = collect_required_indicators(py, strategy.as_ref())?;
+        let mut seen =
+            indicator_objects.iter().map(|(name, _)| name.clone()).collect::<HashSet<_>>();
+        for indicator in indicators.unwrap_or_default() {
+            let name = _indicator_deterministic_name(indicator.bind(py).as_any())?;
+            if seen.insert(name.clone()) {
+                indicator_objects.push((name, indicator));
+            }
+        }
 
         Ok(Self {
             broker,
@@ -381,7 +395,13 @@ impl PaperTradingSession {
         if processed {
             self.broker.submit_orders(explicit_orders, &market, &mut fills, false);
             self.broker.submit_orders(strategy_orders, &market, &mut fills, true);
+            self.broker.finish_update(market.close_ts as i64);
         }
+        let indicators = if processed {
+            self.compute_latest_indicators()?
+        } else {
+            HashMap::new()
+        };
 
         Ok(PaperTradingUpdate {
             market,
@@ -389,6 +409,7 @@ impl PaperTradingSession {
             snapshot: self.broker.snapshot(),
             orders_submitted,
             processed,
+            indicators,
         })
     }
 
@@ -409,6 +430,26 @@ impl PaperTradingSession {
     /// ```
     fn snapshot(&self) -> PaperTradingSnapshot {
         self.broker.snapshot()
+    }
+
+    /// Seed strategy and indicator history without trading or changing the account.
+    ///
+    /// Parameters
+    /// ----------
+    /// markets : list[[MarketUpdate]]
+    ///     Historical candles in chronological order.
+    ///
+    /// Returns
+    /// -------
+    /// int
+    ///     Number of valid candles offered to the bounded history buffers.
+    #[pyo3(signature = (markets: "list[MarketUpdate]"))]
+    fn warm_up(&mut self, markets: Vec<MarketUpdate>) -> usize {
+        let count = markets.iter().filter(|market| market.is_valid_bar()).count();
+        for market in &markets {
+            self.record_history(market);
+        }
+        count
     }
 
     fn __repr__(&self) -> String {
@@ -724,8 +765,43 @@ async fn collect_updates_reusable(
     reconnect_attempts: usize,
     initial_backoff: Duration,
     canceled: Arc<AtomicBool>,
-    mut retained_stream: Option<Box<dyn MarketDataStream>>,
+    retained_stream: Option<Box<dyn MarketDataStream>>,
 ) -> Result<(Vec<MarketUpdate>, Option<Box<dyn MarketDataStream>>), LiveStreamError> {
+    let mut connector = move |deadline: Instant, canceled: Arc<AtomicBool>| {
+        let symbols = symbols.clone();
+        Box::pin(async move {
+            cancellable_connect(provider, &symbols, interval, deadline, &canceled).await
+        }) as BoxFuture<'static, _>
+    };
+    collect_updates_with_connector(
+        max_events,
+        timeout,
+        include_partial,
+        reconnect_attempts,
+        initial_backoff,
+        canceled,
+        retained_stream,
+        &mut connector,
+    )
+    .await
+}
+
+async fn collect_updates_with_connector<F>(
+    max_events: usize,
+    timeout: Duration,
+    include_partial: bool,
+    reconnect_attempts: usize,
+    initial_backoff: Duration,
+    canceled: Arc<AtomicBool>,
+    mut retained_stream: Option<Box<dyn MarketDataStream>>,
+    connector: &mut F,
+) -> Result<(Vec<MarketUpdate>, Option<Box<dyn MarketDataStream>>), LiveStreamError>
+where
+    F: FnMut(
+        Instant,
+        Arc<AtomicBool>,
+    ) -> BoxFuture<'static, Result<Option<Box<dyn MarketDataStream>>, LiveStreamError>>,
+{
     let deadline = Instant::now() + timeout;
     let mut updates = Vec::with_capacity(max_events);
     let mut attempt = 0_usize;
@@ -738,7 +814,7 @@ async fn collect_updates_reusable(
         let mut stream = if let Some(stream) = retained_stream.take() {
             stream
         } else {
-            match cancellable_connect(provider, &symbols, interval, deadline, &canceled).await {
+            match connector(deadline, Arc::clone(&canceled)).await {
                 Ok(Some(stream)) => stream,
                 Ok(None) => break,
                 Err(error) => {
@@ -962,8 +1038,37 @@ mod tests {
     use super::*;
     use crate::backtest::models::OrderStatus;
     use crate::data::models::Currency;
+    use crate::indicators::interface::SimpleMovingAverage;
     use crate::live::providers::MockMarketDataStream;
     use crate::strategies::interface::BuyAndHold;
+    use async_trait::async_trait;
+    use std::future::pending;
+    use tokio::sync::Notify;
+
+    type ConnectResult = Result<Option<Box<dyn MarketDataStream>>, LiveStreamError>;
+
+    struct ScriptedMarketDataStream {
+        results: VecDeque<Result<Option<MarketUpdate>, LiveStreamError>>,
+    }
+
+    #[async_trait]
+    impl MarketDataStream for ScriptedMarketDataStream {
+        async fn next_update(&mut self) -> Result<Option<MarketUpdate>, LiveStreamError> {
+            self.results.pop_front().unwrap_or(Ok(None))
+        }
+    }
+
+    struct PendingMarketDataStream {
+        started: Arc<Notify>,
+    }
+
+    #[async_trait]
+    impl MarketDataStream for PendingMarketDataStream {
+        async fn next_update(&mut self) -> Result<Option<MarketUpdate>, LiveStreamError> {
+            self.started.notify_one();
+            pending().await
+        }
+    }
 
     fn mock_update(timestamp: u64) -> MarketUpdate {
         MarketUpdate {
@@ -1000,6 +1105,40 @@ mod tests {
         assert!(feed.is_cancelled());
         feed.reset().unwrap();
         assert!(!feed.is_cancelled());
+    }
+
+    #[test]
+    fn live_feed_constructor_rejects_invalid_retry_configuration() {
+        for (attempts, backoff, message) in [
+            (0, 0.1, "reconnect_attempts must be positive"),
+            (1, 0.0, "backoff_seconds must be finite and positive"),
+            (1, f64::NAN, "backoff_seconds must be finite and positive"),
+        ] {
+            let result = LiveMarketFeed::new(
+                Provider::Binance,
+                vec!["BTC-USDT".to_owned()],
+                Interval::OneMinute,
+                true,
+                attempts,
+                backoff,
+            );
+            let Err(error) = result else {
+                panic!("invalid retry configuration was accepted");
+            };
+
+            assert!(error.to_string().contains(message));
+        }
+    }
+
+    #[test]
+    fn collection_validation_rejects_invalid_bounds() {
+        assert!(validate_collection(0, 1.0).unwrap_err().to_string().contains("max_events"));
+        for timeout in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+            assert!(validate_collection(1, timeout)
+                .unwrap_err()
+                .to_string()
+                .contains("timeout_seconds"));
+        }
     }
 
     #[test]
@@ -1052,6 +1191,241 @@ mod tests {
         assert!(retained.is_some());
     }
 
+    #[tokio::test]
+    async fn collection_reconnects_after_a_stream_closes() {
+        let connections = Arc::new(Mutex::new(VecDeque::from([
+            Ok(Some(Box::new(MockMarketDataStream::new(Vec::new())) as Box<dyn MarketDataStream>)),
+            Ok(Some(Box::new(MockMarketDataStream::new(vec![mock_update(1_000)]))
+                as Box<dyn MarketDataStream>)),
+        ])));
+        let connector_connections = Arc::clone(&connections);
+        let mut connector = move |_deadline: Instant, _canceled: Arc<AtomicBool>| {
+            let result = connector_connections.lock().unwrap().pop_front().unwrap();
+            Box::pin(async move { result }) as BoxFuture<'static, ConnectResult>
+        };
+
+        let (updates, retained) = collect_updates_with_connector(
+            1,
+            Duration::from_secs(1),
+            true,
+            2,
+            Duration::ZERO,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            &mut connector,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].open_ts, 1_000);
+        assert!(retained.is_some());
+        assert!(connections.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn collection_stops_after_reconnect_attempts_are_exhausted() {
+        let connections = Arc::new(Mutex::new(VecDeque::from([
+            Err(LiveStreamError::InvalidMessage("first failure".to_owned())),
+            Err(LiveStreamError::InvalidMessage("final failure".to_owned())),
+        ])));
+        let connector_connections = Arc::clone(&connections);
+        let mut connector = move |_deadline: Instant, _canceled: Arc<AtomicBool>| {
+            let result = connector_connections.lock().unwrap().pop_front().unwrap();
+            Box::pin(async move { result }) as BoxFuture<'static, ConnectResult>
+        };
+
+        let result = collect_updates_with_connector(
+            1,
+            Duration::from_secs(1),
+            true,
+            2,
+            Duration::ZERO,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            &mut connector,
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("retry exhaustion was not returned");
+        };
+
+        assert!(error.to_string().contains("final failure"));
+        assert!(connections.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn collection_filters_partial_updates_when_requested() {
+        let mut partial = mock_update(1_000);
+        partial.is_final = false;
+        let stream = MockMarketDataStream::new(vec![partial, mock_update(1_000)]);
+
+        let (updates, retained) = collect_updates_reusable(
+            Provider::Binance,
+            vec!["BTC-USDT".to_owned()],
+            Interval::OneMinute,
+            1,
+            Duration::from_secs(1),
+            false,
+            1,
+            Duration::ZERO,
+            Arc::new(AtomicBool::new(false)),
+            Some(Box::new(stream)),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(updates.len(), 1);
+        assert!(updates[0].is_final);
+        assert!(retained.is_some());
+    }
+
+    #[tokio::test]
+    async fn collection_returns_received_updates_before_a_stream_error() {
+        let stream = ScriptedMarketDataStream {
+            results: VecDeque::from([
+                Ok(Some(mock_update(1_000))),
+                Err(LiveStreamError::InvalidMessage("bad candle".to_owned())),
+            ]),
+        };
+
+        let (updates, retained) = collect_updates_reusable(
+            Provider::Binance,
+            vec!["BTC-USDT".to_owned()],
+            Interval::OneMinute,
+            2,
+            Duration::from_secs(1),
+            true,
+            1,
+            Duration::ZERO,
+            Arc::new(AtomicBool::new(false)),
+            Some(Box::new(stream)),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].open_ts, 1_000);
+        assert!(retained.is_none());
+    }
+
+    #[tokio::test]
+    async fn collection_reports_error_when_stream_fails_before_an_update() {
+        let stream = ScriptedMarketDataStream {
+            results: VecDeque::from([Err(LiveStreamError::InvalidMessage(
+                "bad candle".to_owned(),
+            ))]),
+        };
+
+        let result = collect_updates_reusable(
+            Provider::Binance,
+            vec!["BTC-USDT".to_owned()],
+            Interval::OneMinute,
+            1,
+            Duration::from_secs(1),
+            true,
+            1,
+            Duration::ZERO,
+            Arc::new(AtomicBool::new(false)),
+            Some(Box::new(stream)),
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("stream error was not returned");
+        };
+
+        assert!(error.to_string().contains("bad candle"));
+    }
+
+    #[tokio::test]
+    async fn collection_reports_provider_close_before_an_update() {
+        let result = collect_updates_reusable(
+            Provider::Binance,
+            vec!["BTC-USDT".to_owned()],
+            Interval::OneMinute,
+            1,
+            Duration::from_secs(1),
+            true,
+            1,
+            Duration::ZERO,
+            Arc::new(AtomicBool::new(false)),
+            Some(Box::new(MockMarketDataStream::new(Vec::new()))),
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("provider close was not returned");
+        };
+
+        assert!(error.to_string().contains("provider closed"));
+    }
+
+    #[tokio::test]
+    async fn collection_timeout_keeps_a_healthy_pending_stream() {
+        let started = Arc::new(Notify::new());
+        let stream = PendingMarketDataStream {
+            started: Arc::clone(&started),
+        };
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            collect_updates_reusable(
+                Provider::Binance,
+                vec!["BTC-USDT".to_owned()],
+                Interval::OneMinute,
+                1,
+                Duration::from_millis(20),
+                true,
+                1,
+                Duration::ZERO,
+                Arc::new(AtomicBool::new(false)),
+                Some(Box::new(stream)),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert!(result.0.is_empty());
+        assert!(result.1.is_some());
+        started.notified().await;
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_a_pending_stream_poll() {
+        let started = Arc::new(Notify::new());
+        let canceled = Arc::new(AtomicBool::new(false));
+        let stream = PendingMarketDataStream {
+            started: Arc::clone(&started),
+        };
+        let task_canceled = Arc::clone(&canceled);
+        let task = tokio::spawn(async move {
+            collect_updates_reusable(
+                Provider::Binance,
+                vec!["BTC-USDT".to_owned()],
+                Interval::OneMinute,
+                1,
+                Duration::from_secs(10),
+                true,
+                1,
+                Duration::ZERO,
+                task_canceled,
+                Some(Box::new(stream)),
+            )
+            .await
+        });
+        started.notified().await;
+
+        canceled.store(true, Ordering::Release);
+        let (updates, retained) = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("cancellation must be observed within the 250 ms poll bound")
+            .unwrap()
+            .unwrap();
+
+        assert!(updates.is_empty());
+        assert!(retained.is_none());
+    }
+
     #[test]
     fn reconnect_backoff_is_exponential_and_capped() {
         let initial = Duration::from_millis(100);
@@ -1064,7 +1438,7 @@ mod tests {
     fn built_in_strategy_can_drive_paper_session() {
         Python::attach(|py| {
             let strategy = Py::new(py, BuyAndHold::new(Some("BTC-USD".to_owned())))?.into_any();
-            let mut session = PaperTradingSession::new(py, None, Some(strategy))?;
+            let mut session = PaperTradingSession::new(py, None, Some(strategy), None)?;
             let market = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
@@ -1101,7 +1475,7 @@ mod tests {
                 slippage: 0.1,
                 ..PaperTradingConfig::default()
             };
-            let mut session = PaperTradingSession::new(py, Some(config), Some(strategy))?;
+            let mut session = PaperTradingSession::new(py, Some(config), Some(strategy), None)?;
             let market = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
@@ -1140,7 +1514,7 @@ mod tests {
     #[test]
     fn history_replaces_partial_and_ignores_stale_bars() {
         Python::attach(|py| {
-            let mut session = PaperTradingSession::new(py, None, None)?;
+            let mut session = PaperTradingSession::new(py, None, None, None)?;
             let mut current = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
@@ -1182,6 +1556,47 @@ mod tests {
             assert!(!result.processed);
             assert_eq!(session.histories["BTC-USD"].len(), 1);
             assert_eq!(session.histories["BTC-USD"].back().unwrap().close, 101.0);
+            PyResult::Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn warmup_seeds_monitoring_indicators_without_changing_account() {
+        Python::attach(|py| {
+            let indicator = Py::new(py, SimpleMovingAverage::new(2))?.into_any();
+            let mut session = PaperTradingSession::new(py, None, None, Some(vec![indicator]))?;
+            let mut first = mock_update(1_000);
+            first.close = 1.0;
+            first.open = 1.0;
+            first.high = 1.0;
+            first.low = 1.0;
+            let mut second = mock_update(1_060);
+            second.close = 2.0;
+            second.open = 2.0;
+            second.high = 2.0;
+            second.low = 2.0;
+
+            assert_eq!(session.warm_up(vec![first, second]), 2);
+            let before = session.snapshot();
+            assert_eq!(before.processed_bars, 0);
+            assert_eq!(before.equity, 100_000.0);
+
+            let mut live = mock_update(1_120);
+            live.close = 3.0;
+            live.open = 3.0;
+            live.high = 3.0;
+            live.low = 3.0;
+            let result = session.on_bar(py, live, None)?;
+            let values = result
+                .indicators
+                .values()
+                .next()
+                .and_then(|symbols| symbols.get("BTC-USDT"))
+                .expect("SMA monitoring output should be present");
+
+            assert_eq!(values, &vec![vec![2.5]]);
+            assert_eq!(result.snapshot.processed_bars, 1);
             PyResult::Ok(())
         })
         .unwrap();

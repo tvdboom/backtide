@@ -28,15 +28,25 @@ const bootstrap = {
       parameters: [{ name: 'period', label: 'Period', kind: 'number', default: 14, required: false }]
     }],
     saved: [{ name: 'Fast SMA', type: 'SMA', builtin: true, description: 'Follow the trend.', params: { period: 8 } }]
+  },
+  sizers: {
+    builtin: [{
+      type: 'FixedFractional',
+      name: 'Fixed Fractional',
+      parameters: [{ name: 'fraction', label: 'Fraction', kind: 'number', default: 0.1, required: false }]
+    }],
+    saved: [{ name: 'Ten percent', type: 'FixedFractional', builtin: true, description: 'Use ten percent.', params: { fraction: 0.1 } }]
   }
 }
 
 describe('library page', () => {
   beforeEach(() => {
     api.mockReset()
-    api.mockImplementation(async endpoint => (
-      endpoint === '/api/strategies' ? bootstrap.strategies : bootstrap.indicators
-    ))
+    api.mockImplementation(async endpoint => {
+      if (endpoint === '/api/strategies') return bootstrap.strategies
+      if (endpoint === '/api/sizers') return bootstrap.sizers
+      return bootstrap.indicators
+    })
     post.mockReset()
     put.mockReset()
     remove.mockReset()
@@ -50,6 +60,25 @@ describe('library page', () => {
     expect(wrapper.text()).toContain('Long term')
     expect(wrapper.find('.loading-screen').exists()).toBe(false)
     expect(api).toHaveBeenCalledWith('/api/strategies')
+  })
+
+  it.each(['strategies', 'indicators', 'sizers'])('labels %s editor options without implementation details', async page => {
+    location.hash = `#${page}`
+    const wrapper = mount(LibraryPage, {
+      props: { bootstrap },
+      global: { stubs: { PythonEditor: { template: '<div class="python-editor-stub" />' } } }
+    })
+    await flushPromises()
+
+    await wrapper.get('.page-intro .primary').trigger('click')
+
+    const labels = wrapper.findAll('.library-editor-mode button').map(button => button.text())
+    expect(labels).toEqual(['Built-in', 'Custom'])
+    expect(wrapper.get('.library-editor-mode').text()).not.toContain('Python')
+    expect(wrapper.get('.library-editor input[required]').attributes('maxlength')).toBe('20')
+
+    await wrapper.findAll('.library-editor-mode button')[1].trigger('click')
+    expect(wrapper.get('.custom-source-row input[required]').attributes('maxlength')).toBe('20')
   })
 
   it('refreshes indicators after rendering bootstrap data', async () => {
@@ -68,6 +97,22 @@ describe('library page', () => {
     expect(wrapper.text()).toContain('ind11')
     expect(wrapper.find('.loading-screen').exists()).toBe(false)
     expect(api).toHaveBeenCalledWith('/api/indicators')
+  })
+
+  it('manages sizers as a first-class library asset', async () => {
+    location.hash = '#sizers'
+    const wrapper = mount(LibraryPage, { props: { bootstrap } })
+    await flushPromises()
+
+    expect(wrapper.get('h2').text()).toBe('Sizers')
+    expect(wrapper.text()).toContain('Ten percent')
+    expect(api).toHaveBeenCalledWith('/api/sizers')
+
+    await wrapper.get('.primary').trigger('click')
+    expect(wrapper.get('.library-editor').text()).toContain('Fixed Fractional')
+    expect(wrapper.get('.library-editor input[required]').element.value).toBe('Fixed Fractional')
+    expect(wrapper.get('.library-editor input[type="number"]').element.value).toBe('0.1')
+    expect(wrapper.text()).toContain('custom strategy order logic')
   })
 
   it.each(['strategies', 'indicators'])('distinguishes an empty %s library from no search matches', async page => {

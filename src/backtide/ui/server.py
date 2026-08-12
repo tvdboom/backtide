@@ -65,6 +65,10 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                         int(self._first(query, "limit") or 10_000),
                     )
                 )
+            elif path == "/api/live/sessions":
+                self._json(self.services.live_sessions())
+            elif path.startswith("/api/live/sessions/"):
+                self._json(self.services.live_session(unquote(path.rsplit("/", 1)[1])))
             elif path == "/api/bars":
                 self._json(
                     self.services.bars(
@@ -98,6 +102,9 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                         int(self._first(query, "limit") or 100),
                     )
                 )
+            elif path.startswith("/api/experiments/") and path.endswith("/paper-config"):
+                experiment_id = unquote(path[len("/api/experiments/") : -len("/paper-config")])
+                self._json(self.services.paper_config_from_experiment(experiment_id))
             elif path.startswith("/api/experiments/"):
                 self._json(self.services.experiment(unquote(path.rsplit("/", 1)[1])))
             elif path == "/api/jobs":
@@ -110,6 +117,8 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 self._json(self.services.indicator_catalog())
             elif path == "/api/metrics":
                 self._json(self.services.metric_catalog())
+            elif path == "/api/sizers":
+                self._json(self.services.sizer_catalog())
             elif path == "/api/live":
                 self._json(self.services.live_status())
             else:
@@ -139,12 +148,22 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 "/api/strategies": self.services.save_strategy,
                 "/api/indicators": self.services.save_indicator,
                 "/api/metrics": self.services.save_metric,
+                "/api/sizers": self.services.save_sizer,
                 "/api/live": self.services.start_live,
+                "/api/live/replay": self.services.replay_live,
             }
             if path == "/api/experiments/abort":
                 result = self.services.abort_experiment()
             elif path == "/api/live/stop":
                 result = self.services.stop_live()
+            elif path == "/api/live/pause":
+                result = self.services.pause_live()
+            elif path == "/api/live/resume":
+                result = self.services.resume_live()
+            elif path == "/api/live/flatten":
+                result = self.services.flatten_live()
+            elif path == "/api/live/cancel-all":
+                result = self.services.cancel_live_orders()
             elif path not in routes:
                 raise APIError("Endpoint not found.", 404)
             else:
@@ -173,6 +192,8 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 result = self.services.delete_indicator(unquote(path.rsplit("/", 1)[1]))
             elif path.startswith("/api/metrics/"):
                 result = self.services.delete_metric(unquote(path.rsplit("/", 1)[1]))
+            elif path.startswith("/api/sizers/"):
+                result = self.services.delete_sizer(unquote(path.rsplit("/", 1)[1]))
             else:
                 raise APIError("Endpoint not found.", 404)
             self._json(result)
@@ -193,6 +214,8 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 result = self.services.update_indicator(unquote(path.rsplit("/", 1)[1]), body)
             elif path.startswith("/api/metrics/"):
                 result = self.services.update_metric(unquote(path.rsplit("/", 1)[1]), body)
+            elif path.startswith("/api/sizers/"):
+                result = self.services.update_sizer(unquote(path.rsplit("/", 1)[1]), body)
             else:
                 raise APIError("Endpoint not found.", 404)
             self._json(result)

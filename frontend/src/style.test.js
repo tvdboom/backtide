@@ -70,6 +70,23 @@ describe('dashboard activity', () => {
 })
 
 describe('paper trading setup', () => {
+  it('matches toggle rows to the standard control height', () => {
+    expect(declaration('.toggle-label')).toContain('min-height: 42px')
+    expect(declaration('.toggle-label')).toContain('height: 42px')
+    expect(declaration('.toggle-label .field-info')).toContain('right: 52px')
+  })
+
+  it('shows accessible field and action popovers on hover or focus', () => {
+    expect(declaration('.field-info-popover, .action-popover')).toContain('visibility: hidden')
+    expect(styles).toContain('.field-info:hover .field-info-popover')
+    expect(styles).toContain('.field-info:focus-visible .field-info-popover')
+    expect(styles).toContain('.action-help:focus-within .action-popover')
+  })
+
+  it('keeps the interval control to one half of the two-column form', () => {
+    expect(declaration('.live-interval-field')).toContain('grid-column: span 1')
+  })
+
   it('matches the cash and base-currency control dimensions', () => {
     expect(declaration('.live-cash-field input')).toContain('height: 42px')
     expect(declaration('.live-base-currency .currency-select')).toContain('width: 100%')

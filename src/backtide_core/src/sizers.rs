@@ -117,6 +117,10 @@ impl EqualWeight {
     fn __repr__(&self) -> String {
         format!("EqualWeight({})", self.n_positions)
     }
+
+    fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyAny>, (u32,)) {
+        (py.get_type::<Self>().into_any(), (self.n_positions,))
+    }
 }
 
 impl Sizer for EqualWeight {
@@ -179,6 +183,10 @@ impl FixedFractional {
 
     fn __repr__(&self) -> String {
         format!("FixedFractional({})", self.fraction)
+    }
+
+    fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyAny>, (f64,)) {
+        (py.get_type::<Self>().into_any(), (self.fraction,))
     }
 }
 
@@ -245,6 +253,10 @@ impl FixedNotional {
     fn __repr__(&self) -> String {
         format!("FixedNotional({})", self.amount)
     }
+
+    fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyAny>, (f64,)) {
+        (py.get_type::<Self>().into_any(), (self.amount,))
+    }
 }
 
 impl Sizer for FixedNotional {
@@ -305,6 +317,10 @@ impl FixedQuantity {
 
     fn __repr__(&self) -> String {
         format!("FixedQuantity({})", self.quantity)
+    }
+
+    fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyAny>, (f64,)) {
+        (py.get_type::<Self>().into_any(), (self.quantity,))
     }
 }
 
@@ -378,6 +394,13 @@ impl KellyCriterion {
         format!(
             "KellyCriterion({}, {}, {}, {})",
             self.win_rate, self.avg_win, self.avg_loss, self.fraction
+        )
+    }
+
+    fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyAny>, (f64, f64, f64, f64)) {
+        (
+            py.get_type::<Self>().into_any(),
+            (self.win_rate, self.avg_win, self.avg_loss, self.fraction),
         )
     }
 }
@@ -463,6 +486,10 @@ impl RiskBased {
     fn __repr__(&self) -> String {
         format!("RiskBased({})", self.risk_pct)
     }
+
+    fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyAny>, (f64,)) {
+        (py.get_type::<Self>().into_any(), (self.risk_pct,))
+    }
 }
 
 impl Sizer for RiskBased {
@@ -535,6 +562,10 @@ impl VolatilityScaled {
 
     fn __repr__(&self) -> String {
         format!("VolatilityScaled({})", self.risk_pct)
+    }
+
+    fn __reduce__<'py>(&self, py: Python<'py>) -> (Bound<'py, PyAny>, (f64,)) {
+        (py.get_type::<Self>().into_any(), (self.risk_pct,))
     }
 }
 

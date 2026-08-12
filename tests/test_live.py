@@ -76,6 +76,55 @@ class TestProviderSupport:
 
         assert not feed.is_cancelled()
 
+    @pytest.mark.parametrize("symbols", [[], [""], [" "]])
+    def test_feed_rejects_empty_symbols(self, symbols):
+        """Test symbol validation completes before opening a WebSocket."""
+        with pytest.raises(ValueError, match="non-empty symbol"):
+            LiveMarketFeed("binance", symbols)
+
+    @pytest.mark.parametrize(
+        ("options", "message"),
+        [
+            ({"reconnect_attempts": 0}, "reconnect_attempts must be positive"),
+            ({"backoff_seconds": 0.0}, "backoff_seconds must be finite and positive"),
+            ({"backoff_seconds": float("inf")}, "backoff_seconds must be finite and positive"),
+            ({"backoff_seconds": float("nan")}, "backoff_seconds must be finite and positive"),
+        ],
+    )
+    def test_feed_rejects_invalid_retry_options(self, options, message):
+        """Test retry validation completes before opening a WebSocket."""
+        with pytest.raises(ValueError, match=message):
+            LiveMarketFeed("binance", ["BTC-USDT"], **options)
+
+    def test_feed_cancel_reset_and_canceled_collection(self):
+        """Test cancellation is idempotent and avoids network access during collection."""
+        feed = LiveMarketFeed("binance", ["BTC-USDT"])
+
+        feed.cancel()
+        feed.cancel()
+
+        assert feed.is_cancelled()
+        assert feed.collect(max_events=1, timeout_seconds=0.01) == []
+        feed.reset()
+        assert not feed.is_cancelled()
+
+    @pytest.mark.parametrize("timeout", [0.0, -1.0, float("inf"), float("nan")])
+    def test_feed_rejects_invalid_collection_timeout(self, timeout):
+        """Test collection timeout bounds without making a network request."""
+        feed = LiveMarketFeed("binance", ["BTC-USDT"])
+        feed.cancel()
+
+        with pytest.raises(ValueError, match="timeout_seconds must be finite and positive"):
+            feed.collect(timeout_seconds=timeout)
+
+    def test_feed_rejects_zero_collection_limit(self):
+        """Test a zero event limit is rejected before collection starts."""
+        feed = LiveMarketFeed("binance", ["BTC-USDT"])
+        feed.cancel()
+
+        with pytest.raises(ValueError, match="max_events must be positive"):
+            feed.collect(max_events=0)
+
 
 class TestPaperTradingSession:
     """Tests for deterministic paper execution and accounting."""

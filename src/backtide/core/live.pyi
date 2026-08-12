@@ -12,7 +12,7 @@ __all__ = [
     "list_live_instruments",
 ]
 
-from backtide.core.backtest import Order, OrderStatus, Portfolio
+from backtide.core.backtest import Order, OrderStatus, OrderType, Portfolio
 from backtide.core.data import Currency, Instrument
 
 class LiveMarketFeed:
@@ -25,13 +25,13 @@ class LiveMarketFeed:
 
     Parameters
     ----------
-    provider : str | Provider
+    provider : str | [Provider]
         Exchange WebSocket provider.
 
     symbols : list[str]
         Provider symbols to subscribe to.
 
-    interval : str | Interval, default="1m"
+    interval : str | [Interval], default="1m"
         Candle interval. Coinbase supports `"5m"` only.
 
     include_partial : bool, default=True
@@ -382,6 +382,44 @@ class PaperTradingConfig:
     max_history : int, default=10000
         Maximum bars retained per symbol for strategy evaluation.
 
+    max_leverage : float, default=2
+        Maximum gross exposure divided by current equity when margin is enabled.
+
+    initial_margin : float, default=50
+        Minimum equity percentage required when increasing exposure.
+
+    maintenance_margin : float, default=25
+        Minimum equity percentage maintained against gross exposure. Breaches
+        trigger deterministic paper liquidation.
+
+    margin_interest : float, default=0
+        Annual percentage charged on negative base-currency cash.
+
+    borrow_rate : float, default=0
+        Annual percentage charged on short notional.
+
+    max_position_size : float, default=100
+        Maximum absolute per-symbol notional as a percentage of equity.
+
+    max_drawdown : float, default=0
+        Drawdown percentage that halts exposure-increasing orders. Zero disables
+        the guard.
+
+    allowed_order_types : list[str | OrderType], default=all order types
+        Order types accepted by the paper broker.
+
+    partial_fills : bool, default=False
+        Whether fills are capped by `max_volume_participation`.
+
+    max_volume_participation : float, default=100
+        Maximum percentage of a candle's volume available to one simulated fill.
+
+    metrics : list[str]
+        Built-in performance metric keys maintained during the session.
+
+    risk_free_rate : float, default=0
+        Annual risk-free rate used by risk-adjusted performance metrics.
+
     See Also
     --------
     - backtide.live:PaperTradingSession
@@ -403,11 +441,23 @@ class PaperTradingConfig:
 
     allow_margin: bool
     allow_short: bool
+    allowed_order_types: list[str | OrderType]
     base_currency: Currency
+    borrow_rate: float
     commission_fixed: float
     commission_pct: float
     initial_cash: float
+    initial_margin: float
+    maintenance_margin: float
+    margin_interest: float
+    max_drawdown: float
     max_history: int
+    max_leverage: float
+    max_position_size: float
+    max_volume_participation: float
+    metrics: list[str]
+    partial_fills: bool
+    risk_free_rate: float
     slippage: float
     trade_on_partial: bool
 
@@ -442,10 +492,14 @@ class PaperTradingSession:
     config : [PaperTradingConfig] | None, default=None
         Execution, fee, and risk settings. Uses defaults when omitted.
 
-    strategy : BaseStrategy | None, default=None
+    strategy : [BaseStrategy] | None, default=None
         Existing built-in or custom strategy. Its `evaluate` method runs after
         resting orders are matched on each processable candle. Explicit orders
         can also be passed to `on_bar`.
+
+    indicators : list[[BaseIndicator]] | None, default=None
+        Additional indicators to compute for live monitoring. Indicators
+        required by `strategy` are included automatically.
 
     See Also
     --------
@@ -544,6 +598,20 @@ class PaperTradingSession:
         ```
 
         """
+    def warm_up(self, markets) -> int:
+        """Seed strategy and indicator history without trading or changing the account.
+
+        Parameters
+        ----------
+        markets : list[[MarketUpdate]]
+            Historical candles in chronological order.
+
+        Returns
+        -------
+        int
+            Number of valid candles offered to the bounded history buffers.
+
+        """
 
 class PaperTradingSnapshot:
     """Mark-to-market snapshot of a paper-trading account.
@@ -568,6 +636,36 @@ class PaperTradingSnapshot:
     processed_bars : int
         Number of updates that triggered matching or strategy evaluation.
 
+    gross_exposure : float
+        Sum of absolute marked position values.
+
+    net_exposure : float
+        Signed marked value of all positions.
+
+    leverage : float
+        Gross exposure divided by equity.
+
+    buying_power : float
+        Remaining gross exposure capacity under the configured leverage cap.
+
+    drawdown : float
+        Fractional decline from peak session equity.
+
+    peak_equity : float
+        Highest marked equity observed during the session.
+
+    total_costs : float
+        Cumulative commissions, margin interest, and short-borrow charges.
+
+    trading_halted : bool
+        Whether a configured risk guard is rejecting exposure-increasing orders.
+
+    halt_reason : str | None
+        Human-readable reason for the active risk halt.
+
+    metrics : dict[str, float]
+        Selected live-compatible performance metrics computed from session state.
+
     See Also
     --------
     - backtide.live:PaperTradingSession
@@ -584,11 +682,21 @@ class PaperTradingSnapshot:
 
     """
 
+    buying_power: float
+    drawdown: float
     equity: float
+    gross_exposure: float
+    halt_reason: str | None
     latest_prices: dict[str, float]
+    leverage: float
+    metrics: dict[str, float]
+    net_exposure: float
+    peak_equity: float
     portfolio: Portfolio
     processed_bars: int
     realized_pnl: float
+    total_costs: float
+    trading_halted: bool
     unrealized_pnl: float
 
     def __eq__(self, value, /):
@@ -636,6 +744,10 @@ class PaperTradingUpdate:
     processed : bool
         Whether this update was new, valid, and eligible for trading.
 
+    indicators : dict[str, dict[str, list[list[float]]]]
+        Latest values for configured and strategy-required indicators, grouped
+        by deterministic indicator name and symbol.
+
     See Also
     --------
     - backtide.live:MarketUpdate
@@ -658,6 +770,7 @@ class PaperTradingUpdate:
     """
 
     fills: list[PaperFill]
+    indicators: dict[str, dict[str, list[list[float]]]]
     market: MarketUpdate
     orders_submitted: int
     processed: bool
@@ -700,7 +813,7 @@ def collect_market_updates(
 
     A timeout returns the updates collected so far.
 
-    !!! warning "Yahoo Finance is not supported"
+    !!! warning
         Yahoo Finance is intentionally rejected because it does not provide an
         official live market-data WebSocket. Choose Binance, Coinbase, or Kraken.
 

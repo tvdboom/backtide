@@ -75,6 +75,22 @@ describe('experiment page', () => {
     expect(wrapper.get('#experiment-icon').findAll('option').length).toBeGreaterThan(5)
   })
 
+  it('explains every experiment setting', async () => {
+    const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+    await flushPromises()
+
+    for (const tab of wrapper.findAll('.tabs button')) {
+      await tab.trigger('click')
+      const settings = wrapper.findAll(
+        '.experiment-builder label, .experiment-builder .field-label, '
+        + '.experiment-builder .position-field, .experiment-builder .field-control-label'
+      )
+      expect(settings.length).toBeGreaterThan(0)
+      expect(settings.every(setting => setting.find('.field-info').exists())).toBe(true)
+      expect(wrapper.findAll('.toggle-label small')).toHaveLength(0)
+    }
+  })
+
   it('labels selected metrics as built-in or custom without implementation details', async () => {
     const pageBootstrap = structuredClone(bootstrap)
     pageBootstrap.defaults.metrics.metrics.push('MyMetric')

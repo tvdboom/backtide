@@ -13,6 +13,7 @@ vi.mock('./pages/download-page.vue', () => ({ default: { name: 'DownloadPage', t
 vi.mock('./pages/experiment-page.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('./pages/library-page.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('./pages/live-page.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('./pages/live-history-page.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('./pages/results-page.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('./pages/storage-page.vue', () => ({ default: { name: 'StoragePage', template: '<div>Storage page</div>' } }))
 
@@ -56,19 +57,48 @@ describe('App theme control', () => {
     wrapper.unmount()
   })
 
-  it('shows an active live session in the top bar and opens paper trading', async () => {
+  it('groups workflows and reusable assets by product role', async () => {
+    api.mockResolvedValueOnce({})
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const labels = wrapper.findAll('.nav-label').map(label => label.text())
+    expect(labels).toEqual(['Overview', 'Research', 'Trading', 'Library', 'Data'])
+    expect(wrapper.text()).toContain('New experiment')
+    expect(wrapper.text()).toContain('Live trading')
+    expect(wrapper.text()).toContain('Strategies')
+    expect(wrapper.text()).toContain('Indicators')
+    expect(wrapper.text()).toContain('Metrics')
+    expect(wrapper.text()).toContain('Sizers')
+    wrapper.unmount()
+  })
+
+  it('shows an active live session in the top bar and opens live trading', async () => {
     api.mockImplementation(path => Promise.resolve(path === '/api/live' ? { status: 'running' } : {}))
     const wrapper = mount(App)
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('Local engine')
-    const liveSession = wrapper.get('[aria-label="Open active paper trading session"]')
+    const liveSession = wrapper.get('[aria-label="Open active live trading session"]')
     expect(liveSession.text()).toContain('Session live')
     expect(liveSession.get('span').classes()).toContain('online')
 
     await liveSession.trigger('click')
 
     expect(location.hash).toBe('#live')
+    wrapper.unmount()
+  })
+
+  it('keeps a completed replay accessible from the top bar', async () => {
+    api.mockImplementation(path => Promise.resolve(path === '/api/live'
+      ? { status: 'stopped', config: { mode: 'replay' } }
+      : {}))
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const replay = wrapper.get('[aria-label="Open active live trading session"]')
+    expect(replay.text()).toContain('Replay complete')
+    expect(replay.get('span').classes()).not.toContain('online')
     wrapper.unmount()
   })
 })

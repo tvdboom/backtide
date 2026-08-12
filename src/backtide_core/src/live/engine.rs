@@ -1,12 +1,15 @@
 //! Deterministic paper-broker execution and portfolio accounting.
 
-use crate::backtest::models::{Order, OrderId, OrderStatus, OrderType, Portfolio, SizerSlot};
+use crate::backtest::models::{
+    EquitySample, Order, OrderId, OrderStatus, OrderType, Portfolio, SizerSlot, Trade,
+};
 use crate::backtest::orders::{apply_slippage, resolve_trigger, TriggerOutcome};
 use crate::backtest::utils::{is_negligible, is_significant};
 use crate::constants::{CashAmount, PositionAmount};
 use crate::live::models::{
     MarketUpdate, PaperFill, PaperTradingConfig, PaperTradingSnapshot, PaperTradingUpdate,
 };
+use crate::metrics::engine::{compute_builtin_metrics, is_builtin_metric};
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -27,12 +30,21 @@ pub struct PaperBroker {
     last_processed_final_ts: HashMap<String, u64>,
     realized_pnl: f64,
     processed_bars: u64,
+    peak_equity: f64,
+    total_costs: f64,
+    equity_curve: Vec<EquitySample>,
+    trades: Vec<Trade>,
+    entry_timestamps: HashMap<String, i64>,
+    last_accrual_ts: Option<i64>,
+    trading_halted: bool,
+    halt_reason: Option<String>,
 }
 
 impl PaperBroker {
     /// Create a broker from validated paper-trading configuration.
     pub fn new(config: PaperTradingConfig) -> Result<Self, String> {
         validate_config(&config)?;
+        let initial_cash = config.initial_cash;
         let mut portfolio = Portfolio::default();
         portfolio.cash.clear();
         portfolio.cash.insert(config.base_currency, config.initial_cash);
@@ -48,6 +60,14 @@ impl PaperBroker {
             last_processed_final_ts: HashMap::new(),
             realized_pnl: 0.0,
             processed_bars: 0,
+            peak_equity: initial_cash,
+            total_costs: 0.0,
+            equity_curve: Vec::new(),
+            trades: Vec::new(),
+            entry_timestamps: HashMap::new(),
+            last_accrual_ts: None,
+            trading_halted: false,
+            halt_reason: None,
         })
     }
 
@@ -66,6 +86,7 @@ impl PaperBroker {
         let orders_submitted = orders.len();
         if should_process {
             self.submit_orders(orders, &market, &mut fills, false);
+            self.finish_update(market.close_ts as i64);
         }
 
         PaperTradingUpdate {
@@ -74,6 +95,7 @@ impl PaperBroker {
             snapshot: self.snapshot(),
             orders_submitted,
             processed: should_process,
+            indicators: HashMap::new(),
         }
     }
 
@@ -101,8 +123,10 @@ impl PaperBroker {
             && (market.is_final || self.config.trade_on_partial);
         if should_process {
             let bar = market.bar();
+            self.accrue_financing(market.close_ts as i64);
             self.processed_bars += 1;
             self.match_resting_orders(&market.symbol, &bar, &mut fills);
+            self.enforce_maintenance_margin(market.close_ts as i64, &mut fills);
             if market.is_final {
                 self.last_processed_final_ts.insert(market.symbol.clone(), market.open_ts);
             }
@@ -127,6 +151,7 @@ impl PaperBroker {
     pub fn snapshot(&self) -> PaperTradingSnapshot {
         let cash = self.portfolio.cash.amount(&self.config.base_currency);
         let mut market_value = 0.0;
+        let mut gross_exposure = 0.0;
         let mut unrealized_pnl = 0.0;
 
         for (symbol, quantity) in &self.portfolio.positions {
@@ -134,6 +159,7 @@ impl PaperBroker {
                 continue;
             };
             market_value += quantity * price;
+            gross_exposure += quantity.abs() * price;
 
             if let Some(cost) = self.average_cost.get(symbol) {
                 unrealized_pnl += if *quantity >= 0.0 {
@@ -144,14 +170,189 @@ impl PaperBroker {
             }
         }
 
+        let equity = cash + market_value;
+        let leverage = if equity > 0.0 {
+            gross_exposure / equity
+        } else {
+            f64::INFINITY
+        };
+        let leverage_cap = self.effective_leverage_cap();
+        let buying_power = if equity > 0.0 && leverage_cap.is_finite() {
+            (equity * leverage_cap - gross_exposure).max(0.0)
+        } else if equity > 0.0 {
+            f64::INFINITY
+        } else {
+            0.0
+        };
+        let drawdown = if self.peak_equity > 0.0 {
+            (equity - self.peak_equity) / self.peak_equity
+        } else {
+            0.0
+        };
+        let selected = self
+            .config
+            .metrics
+            .iter()
+            .filter(|key| !matches!(key.as_str(), "alpha" | "excess_return"))
+            .cloned()
+            .collect::<Vec<_>>();
+        let metrics = compute_builtin_metrics(
+            &selected,
+            self.config.initial_cash,
+            self.config.risk_free_rate,
+            &self.equity_curve,
+            &self.trades,
+        );
+
         PaperTradingSnapshot {
             portfolio: self.portfolio.clone(),
             latest_prices: self.latest_prices.clone(),
-            equity: cash + market_value,
+            equity,
             realized_pnl: self.realized_pnl,
             unrealized_pnl,
             processed_bars: self.processed_bars,
+            gross_exposure,
+            net_exposure: market_value,
+            leverage,
+            buying_power,
+            drawdown,
+            peak_equity: self.peak_equity,
+            total_costs: self.total_costs,
+            trading_halted: self.trading_halted,
+            halt_reason: self.halt_reason.clone(),
+            metrics,
         }
+    }
+
+    /// Record the authoritative account sample after processing an eligible update.
+    pub(crate) fn finish_update(&mut self, timestamp: i64) {
+        let snapshot = self.snapshot();
+        self.peak_equity = self.peak_equity.max(snapshot.equity);
+        let drawdown = if self.peak_equity > 0.0 {
+            (snapshot.equity - self.peak_equity) / self.peak_equity
+        } else {
+            0.0
+        };
+        self.equity_curve.push(EquitySample {
+            timestamp,
+            equity: snapshot.equity,
+            cash: snapshot.portfolio.cash,
+            drawdown,
+        });
+        if self.equity_curve.len() > self.config.max_history {
+            self.equity_curve.remove(0);
+        }
+        if self.config.max_drawdown > 0.0 && -drawdown * 100.0 >= self.config.max_drawdown {
+            self.trading_halted = true;
+            self.halt_reason =
+                Some(format!("maximum drawdown {:.2}% reached", self.config.max_drawdown));
+        }
+    }
+
+    fn effective_leverage_cap(&self) -> f64 {
+        if !self.config.allow_margin {
+            return 1.0;
+        }
+        let leverage = if self.config.max_leverage > 0.0 {
+            self.config.max_leverage
+        } else {
+            f64::INFINITY
+        };
+        let initial_margin = if self.config.initial_margin > 0.0 {
+            100.0 / self.config.initial_margin
+        } else {
+            f64::INFINITY
+        };
+        leverage.min(initial_margin)
+    }
+
+    fn current_gross_exposure(&self) -> f64 {
+        self.portfolio
+            .positions
+            .iter()
+            .filter_map(|(symbol, quantity)| {
+                self.latest_prices.get(symbol).map(|price| quantity.abs() * price)
+            })
+            .sum()
+    }
+
+    fn accrue_financing(&mut self, timestamp: i64) {
+        let Some(previous) = self.last_accrual_ts.replace(timestamp) else {
+            return;
+        };
+        let elapsed = timestamp.saturating_sub(previous) as f64;
+        if elapsed <= 0.0 {
+            return;
+        }
+        let year_fraction = elapsed / (365.25 * 24.0 * 60.0 * 60.0);
+        let cash = self.portfolio.cash.amount(&self.config.base_currency);
+        let borrowed = (-cash).max(0.0);
+        let short_notional: f64 = self
+            .portfolio
+            .positions
+            .iter()
+            .filter(|(_, quantity)| **quantity < 0.0)
+            .filter_map(|(symbol, quantity)| {
+                self.latest_prices.get(symbol).map(|price| quantity.abs() * price)
+            })
+            .sum();
+        let cost = borrowed * self.config.margin_interest / 100.0 * year_fraction
+            + short_notional * self.config.borrow_rate / 100.0 * year_fraction;
+        if cost <= 0.0 || !cost.is_finite() {
+            return;
+        }
+        self.portfolio.cash.insert(self.config.base_currency, cash - cost);
+        self.realized_pnl -= cost;
+        self.total_costs += cost;
+    }
+
+    fn enforce_maintenance_margin(&mut self, timestamp: i64, fills: &mut Vec<PaperFill>) {
+        if !self.config.allow_margin || self.config.maintenance_margin <= 0.0 {
+            return;
+        }
+        let snapshot = self.snapshot();
+        if snapshot.gross_exposure <= 0.0
+            || snapshot.equity / snapshot.gross_exposure * 100.0 >= self.config.maintenance_margin
+        {
+            return;
+        }
+        self.trading_halted = true;
+        self.halt_reason = Some(format!(
+            "maintenance margin {:.2}% breached; positions liquidated",
+            self.config.maintenance_margin
+        ));
+        let positions = self
+            .portfolio
+            .positions
+            .iter()
+            .map(|(symbol, quantity)| (symbol.clone(), *quantity))
+            .collect::<Vec<_>>();
+        for (symbol, quantity) in positions {
+            let Some(price) = self.latest_prices.get(&symbol).copied() else {
+                continue;
+            };
+            let order = Order {
+                id: OrderId::new(),
+                symbol,
+                quantity: -quantity,
+                order_type: OrderType::Market,
+                price: None,
+                limit_price: None,
+                sizer: None,
+            };
+            let (fill, _) = self.execute(
+                order,
+                timestamp,
+                price,
+                None,
+                "maintenance-margin liquidation".to_owned(),
+                false,
+                None,
+            );
+            fills.push(fill);
+        }
+        self.portfolio.orders.clear();
+        self.trail_state.clear();
     }
 
     fn match_resting_orders(
@@ -180,14 +381,21 @@ impl PaperBroker {
                     raw_px,
                     reason,
                     limit_cap,
-                } => fills.push(self.execute(
-                    order,
-                    bar.open_ts as i64,
-                    raw_px,
-                    limit_cap,
-                    reason,
-                    false,
-                )),
+                } => {
+                    let (fill, remainder) = self.execute(
+                        order,
+                        bar.open_ts as i64,
+                        raw_px,
+                        limit_cap,
+                        reason,
+                        false,
+                        Some(bar.volume),
+                    );
+                    fills.push(fill);
+                    if let Some(remainder) = remainder {
+                        still_open.push(remainder);
+                    }
+                },
                 TriggerOutcome::Pending => still_open.push(order),
                 TriggerOutcome::Cancel {
                     reason,
@@ -208,6 +416,16 @@ impl PaperBroker {
         fills: &mut Vec<PaperFill>,
         fit_buys_to_cash: bool,
     ) {
+        if order.order_type != OrderType::Cancel
+            && !self.config.allowed_order_types.contains(&order.order_type)
+        {
+            fills.push(rejected_fill(
+                order,
+                market.close_ts as i64,
+                "order type is disabled for this session".to_owned(),
+            ));
+            return;
+        }
         if order.order_type == OrderType::Cancel {
             if let Some(index) = self.portfolio.orders.iter().position(|open| open.id == order.id) {
                 let canceled = self.portfolio.orders.remove(index);
@@ -246,14 +464,19 @@ impl PaperBroker {
         }
 
         if order.order_type == OrderType::Market && order.symbol == market.symbol {
-            fills.push(self.execute(
+            let (fill, remainder) = self.execute(
                 order,
                 market.close_ts as i64,
                 market.close,
                 None,
                 "live market fill".to_owned(),
                 fit_buys_to_cash,
-            ));
+                Some(market.volume),
+            );
+            fills.push(fill);
+            if let Some(remainder) = remainder {
+                self.portfolio.orders.push(remainder);
+            }
         } else {
             self.portfolio.orders.push(order);
         }
@@ -267,7 +490,8 @@ impl PaperBroker {
         limit_cap: Option<f64>,
         mut reason: String,
         fit_buy_to_cash: bool,
-    ) -> PaperFill {
+        available_volume: Option<f64>,
+    ) -> (PaperFill, Option<Order>) {
         if let Some(sizer) = order.sizer.take() {
             let equity = self.snapshot().equity;
             let stop_distance = order.price.and_then(|price| {
@@ -293,8 +517,26 @@ impl PaperBroker {
             match quantity {
                 Ok(quantity) => order.quantity = quantity,
                 Err(error) => {
-                    return rejected_fill(order, timestamp, format!("sizer failed: {error}"));
+                    return (
+                        rejected_fill(order, timestamp, format!("sizer failed: {error}")),
+                        None,
+                    );
                 },
+            }
+        }
+
+        let requested_quantity = order.quantity;
+        let mut volume_limited = false;
+        if self.config.partial_fills {
+            if let Some(volume) = available_volume.filter(|value| value.is_finite() && *value > 0.0)
+            {
+                let maximum = volume * self.config.max_volume_participation / 100.0;
+                if order.quantity.abs() > maximum && is_significant(order.quantity.abs() - maximum)
+                {
+                    order.quantity = order.quantity.signum() * maximum;
+                    volume_limited = true;
+                    reason.push_str("; quantity capped by candle-volume participation");
+                }
             }
         }
 
@@ -303,7 +545,10 @@ impl PaperBroker {
             || !order.quantity.is_finite()
             || is_negligible(order.quantity)
         {
-            return rejected_fill(order, timestamp, "invalid fill price or quantity".to_owned());
+            return (
+                rejected_fill(order, timestamp, "invalid fill price or quantity".to_owned()),
+                None,
+            );
         }
 
         let fill_price = apply_slippage(raw_price, order.quantity, self.config.slippage, limit_cap);
@@ -311,7 +556,7 @@ impl PaperBroker {
         let mut new_quantity = old_quantity + order.quantity;
 
         if !self.config.allow_short && new_quantity < 0.0 && is_significant(new_quantity) {
-            return rejected_fill(order, timestamp, "short selling is disabled".to_owned());
+            return (rejected_fill(order, timestamp, "short selling is disabled".to_owned()), None);
         }
 
         let mut notional = fill_price * order.quantity.abs();
@@ -341,9 +586,72 @@ impl PaperBroker {
                 reason.push_str("; quantity reduced to fit available cash");
             }
         }
-        if !self.config.allow_margin && next_cash < 0.0 && is_significant(next_cash) {
-            return rejected_fill(order, timestamp, "insufficient cash".to_owned());
+        let increasing_exposure = new_quantity.abs() > old_quantity.abs();
+        if increasing_exposure {
+            if self.trading_halted {
+                return (
+                    rejected_fill(
+                        order,
+                        timestamp,
+                        self.halt_reason
+                            .clone()
+                            .unwrap_or_else(|| "trading is halted by a risk control".to_owned()),
+                    ),
+                    None,
+                );
+            }
+            let equity = self.snapshot().equity;
+            if equity <= 0.0 || !equity.is_finite() {
+                return (
+                    rejected_fill(order, timestamp, "account equity is not positive".to_owned()),
+                    None,
+                );
+            }
+            let position_notional = new_quantity.abs() * fill_price;
+            let position_cap = equity * self.config.max_position_size / 100.0;
+            if position_notional > position_cap && is_significant(position_notional - position_cap)
+            {
+                return (
+                    rejected_fill(
+                        order,
+                        timestamp,
+                        format!(
+                            "order would exceed max_position_size ({:.2}% of equity)",
+                            self.config.max_position_size
+                        ),
+                    ),
+                    None,
+                );
+            }
+            let current_symbol_notional = old_quantity.abs() * fill_price;
+            let proposed_gross =
+                self.current_gross_exposure() - current_symbol_notional + position_notional;
+            let leverage_cap = self.effective_leverage_cap();
+            if proposed_gross > equity * leverage_cap
+                && is_significant(proposed_gross - equity * leverage_cap)
+            {
+                return (
+                    rejected_fill(
+                        order,
+                        timestamp,
+                        format!("order would exceed maximum leverage ({leverage_cap:.2}x)"),
+                    ),
+                    None,
+                );
+            }
         }
+        if !self.config.allow_margin && next_cash < 0.0 && is_significant(next_cash) {
+            return (rejected_fill(order, timestamp, "insufficient cash".to_owned()), None);
+        }
+
+        let remainder =
+            if volume_limited && is_significant(requested_quantity.abs() - order.quantity.abs()) {
+                let mut remainder = order.clone();
+                remainder.quantity = requested_quantity - order.quantity;
+                Some(remainder)
+            } else {
+                None
+            };
 
         self.portfolio.cash.insert(
             self.config.base_currency,
@@ -365,18 +673,23 @@ impl PaperBroker {
             order.quantity,
             fill_price,
             commission,
+            timestamp,
         );
+        self.total_costs += commission;
         self.trail_state.remove(&order.id);
 
-        PaperFill {
-            order,
-            timestamp,
-            status: OrderStatus::Filled,
-            fill_price: Some(fill_price),
-            commission,
-            realized_pnl: Some(pnl),
-            reason,
-        }
+        (
+            PaperFill {
+                order,
+                timestamp,
+                status: OrderStatus::Filled,
+                fill_price: Some(fill_price),
+                commission,
+                realized_pnl: Some(pnl),
+                reason,
+            },
+            remainder,
+        )
     }
 
     fn update_cost_basis(
@@ -386,6 +699,7 @@ impl PaperBroker {
         delta: f64,
         price: f64,
         commission: f64,
+        timestamp: i64,
     ) -> f64 {
         let old_cost = self.average_cost.get(symbol).copied().unwrap_or(price);
         let new_quantity = old_quantity + delta;
@@ -400,6 +714,7 @@ impl PaperBroker {
                 (old_cost * old_quantity.abs() + price * delta.abs()) / total
             };
             self.average_cost.insert(symbol.to_owned(), average);
+            self.entry_timestamps.entry(symbol.to_owned()).or_insert(timestamp);
         } else {
             let closed = old_quantity.abs().min(delta.abs());
             realized += if old_quantity > 0.0 {
@@ -407,11 +722,25 @@ impl PaperBroker {
             } else {
                 (old_cost - price) * closed
             };
+            self.trades.push(Trade {
+                symbol: symbol.to_owned(),
+                quantity: old_quantity.signum() * closed,
+                entry_ts: self.entry_timestamps.get(symbol).copied().unwrap_or(timestamp),
+                exit_ts: timestamp,
+                entry_price: old_cost,
+                exit_price: price,
+                pnl: realized,
+            });
+            if self.trades.len() > self.config.max_history {
+                self.trades.remove(0);
+            }
 
             if is_negligible(new_quantity) {
                 self.average_cost.remove(symbol);
+                self.entry_timestamps.remove(symbol);
             } else if new_quantity.signum() != old_quantity.signum() {
                 self.average_cost.insert(symbol.to_owned(), price);
+                self.entry_timestamps.insert(symbol.to_owned(), timestamp);
             }
         }
 
@@ -435,6 +764,56 @@ fn validate_config(config: &PaperTradingConfig) -> Result<(), String> {
     }
     if config.max_history == 0 {
         return Err("max_history must be positive".to_owned());
+    }
+    if !config.max_leverage.is_finite() || config.max_leverage < 1.0 {
+        return Err("max_leverage must be finite and at least 1".to_owned());
+    }
+    if !config.initial_margin.is_finite()
+        || config.initial_margin < 0.0
+        || config.initial_margin > 100.0
+    {
+        return Err("initial_margin must be between 0 and 100".to_owned());
+    }
+    if !config.maintenance_margin.is_finite()
+        || config.maintenance_margin < 0.0
+        || config.maintenance_margin > 100.0
+    {
+        return Err("maintenance_margin must be between 0 and 100".to_owned());
+    }
+    if config.maintenance_margin > config.initial_margin && config.initial_margin > 0.0 {
+        return Err("maintenance_margin cannot exceed initial_margin".to_owned());
+    }
+    for (name, value) in [
+        ("margin_interest", config.margin_interest),
+        ("borrow_rate", config.borrow_rate),
+        ("max_drawdown", config.max_drawdown),
+    ] {
+        if !value.is_finite() || value < 0.0 {
+            return Err(format!("{name} must be finite and non-negative"));
+        }
+    }
+    if !config.max_position_size.is_finite()
+        || config.max_position_size <= 0.0
+        || config.max_position_size > 100.0
+    {
+        return Err("max_position_size must be between 0 and 100".to_owned());
+    }
+    if config.allowed_order_types.is_empty() {
+        return Err("allowed_order_types must not be empty".to_owned());
+    }
+    if !config.max_volume_participation.is_finite()
+        || config.max_volume_participation <= 0.0
+        || config.max_volume_participation > 100.0
+    {
+        return Err("max_volume_participation must be between 0 and 100".to_owned());
+    }
+    if !config.risk_free_rate.is_finite() {
+        return Err("risk_free_rate must be finite".to_owned());
+    }
+    for metric in &config.metrics {
+        if !is_builtin_metric(metric) {
+            return Err(format!("unsupported live metric {metric:?}"));
+        }
     }
     Ok(())
 }
@@ -496,6 +875,20 @@ mod tests {
             price: None,
             limit_price: None,
             sizer: None,
+        }
+    }
+
+    fn market_for(symbol: &str, quantity: f64) -> Order {
+        Order {
+            symbol: symbol.to_owned(),
+            ..market(quantity)
+        }
+    }
+
+    fn update_for(symbol: &str, close: f64, timestamp: u64) -> MarketUpdate {
+        MarketUpdate {
+            symbol: symbol.to_owned(),
+            ..update(close, timestamp)
         }
     }
 
@@ -581,5 +974,142 @@ mod tests {
         assert!(!stale.processed);
         assert_eq!(stale.snapshot.latest_prices["BTC-USD"], 101.0);
         assert_eq!(stale.snapshot.portfolio.positions["BTC-USD"], 1.0);
+    }
+
+    #[test]
+    fn leverage_limit_applies_across_symbols() {
+        let config = PaperTradingConfig {
+            initial_cash: 100.0,
+            allow_margin: true,
+            ..PaperTradingConfig::default()
+        };
+        let mut broker = PaperBroker::new(config).unwrap();
+        broker.process(update(10.0, 1_000), vec![market(10.0)]);
+        broker.process(update_for("ETH-USD", 10.0, 1_060), vec![market_for("ETH-USD", 10.0)]);
+
+        let result =
+            broker.process(update_for("SOL-USD", 1.0, 1_120), vec![market_for("SOL-USD", 1.0)]);
+
+        assert_eq!(result.fills[0].status, OrderStatus::Rejected);
+        assert!(result.fills[0].reason.contains("maximum leverage"));
+        assert_eq!(result.snapshot.gross_exposure, 200.0);
+    }
+
+    #[test]
+    fn maintenance_margin_breach_liquidates_and_halts() {
+        let config = PaperTradingConfig {
+            initial_cash: 100.0,
+            allow_margin: true,
+            ..PaperTradingConfig::default()
+        };
+        let mut broker = PaperBroker::new(config).unwrap();
+        broker.process(update(10.0, 1_000), vec![market(10.0)]);
+        broker.process(update_for("ETH-USD", 10.0, 1_060), vec![market_for("ETH-USD", 10.0)]);
+
+        let result = broker.process(update(1.0, 1_120), Vec::new());
+
+        assert!(result.snapshot.portfolio.positions.is_empty());
+        assert!(result.snapshot.trading_halted);
+        assert!(result
+            .snapshot
+            .halt_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("maintenance margin")));
+        assert_eq!(result.fills.len(), 2);
+        assert!(result
+            .fills
+            .iter()
+            .all(|fill| fill.reason.contains("maintenance-margin liquidation")));
+    }
+
+    #[test]
+    fn partial_fill_respects_volume_participation() {
+        let config = PaperTradingConfig {
+            partial_fills: true,
+            max_volume_participation: 10.0,
+            ..PaperTradingConfig::default()
+        };
+        let mut broker = PaperBroker::new(config).unwrap();
+
+        let result = broker.process(update(100.0, 1_000), vec![market(1.0)]);
+
+        assert_eq!(result.fills[0].status, OrderStatus::Filled);
+        assert!((result.fills[0].order.quantity - 0.1).abs() < 1e-12);
+        assert!(result.fills[0].reason.contains("candle-volume participation"));
+        assert_eq!(result.snapshot.portfolio.orders.len(), 1);
+        assert!((result.snapshot.portfolio.orders[0].quantity - 0.9).abs() < 1e-12);
+
+        let next = broker.process(update(101.0, 1_060), Vec::new());
+        assert!((next.fills[0].order.quantity - 0.1).abs() < 1e-12);
+        assert!((next.snapshot.portfolio.orders[0].quantity - 0.8).abs() < 1e-12);
+    }
+
+    #[test]
+    fn selected_metrics_update_after_a_round_trip() {
+        let config = PaperTradingConfig {
+            metrics: vec!["total_return".to_owned(), "pnl".to_owned(), "n_trades".to_owned()],
+            ..PaperTradingConfig::default()
+        };
+        let mut broker = PaperBroker::new(config).unwrap();
+        broker.process(update(100.0, 1_000), vec![market(10.0)]);
+
+        let result = broker.process(update(110.0, 1_060), vec![market(-10.0)]);
+
+        assert_eq!(result.snapshot.metrics["pnl"], 100.0);
+        assert_eq!(result.snapshot.metrics["n_trades"], 1.0);
+        assert!((result.snapshot.metrics["total_return"] - 0.001).abs() < 1e-12);
+    }
+
+    #[test]
+    fn maximum_drawdown_halts_new_risk() {
+        let config = PaperTradingConfig {
+            initial_cash: 100.0,
+            max_drawdown: 10.0,
+            ..PaperTradingConfig::default()
+        };
+        let mut broker = PaperBroker::new(config).unwrap();
+        broker.process(update(10.0, 1_000), vec![market(10.0)]);
+
+        let drawdown = broker.process(update(8.0, 1_060), Vec::new());
+        assert!(drawdown.snapshot.trading_halted);
+        assert!((drawdown.snapshot.drawdown + 0.2).abs() < 1e-12);
+
+        let rejected =
+            broker.process(update_for("ETH-USD", 1.0, 1_120), vec![market_for("ETH-USD", 1.0)]);
+        assert_eq!(rejected.fills[0].status, OrderStatus::Rejected);
+        assert!(rejected.fills[0].reason.contains("maximum drawdown"));
+    }
+
+    #[test]
+    fn borrowed_cash_accrues_configured_margin_interest() {
+        let config = PaperTradingConfig {
+            initial_cash: 100.0,
+            allow_margin: true,
+            margin_interest: 10.0,
+            ..PaperTradingConfig::default()
+        };
+        let mut broker = PaperBroker::new(config).unwrap();
+        broker.process(update(10.0, 1_000), vec![market(10.0)]);
+        broker.process(update_for("ETH-USD", 10.0, 1_060), vec![market_for("ETH-USD", 10.0)]);
+
+        let one_year_later = 1_060 + (365.25 * 24.0 * 60.0 * 60.0) as u64;
+        let result = broker.process(update(10.0, one_year_later), Vec::new());
+
+        assert!((result.snapshot.total_costs - 10.0).abs() < 1e-6);
+        assert!((result.snapshot.equity - 90.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn invalid_risk_configuration_is_rejected() {
+        let config = PaperTradingConfig {
+            initial_margin: 20.0,
+            maintenance_margin: 25.0,
+            ..PaperTradingConfig::default()
+        };
+
+        assert_eq!(
+            PaperBroker::new(config).unwrap_err(),
+            "maintenance_margin cannot exceed initial_margin"
+        );
     }
 }
