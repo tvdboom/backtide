@@ -19,7 +19,8 @@ describe('analysis page', () => {
       symbol: 'AAPL',
       interval: '1d',
       provider: 'yahoo',
-      name: 'Apple Inc.'
+      name: 'Apple Inc.',
+      instrument_type: 'stocks'
     }])
     post.mockReset().mockResolvedValue({ data: [], layout: {} })
     sessionStorage.clear()
@@ -32,6 +33,20 @@ describe('analysis page', () => {
     expect(wrapper.find('.chart-title .badge').exists()).toBe(false)
     expect(wrapper.get('.chart-title').text()).not.toContain('1 series')
     expect(wrapper.text()).not.toContain('Run analysis')
+  })
+
+  it('shows instrument logos in the symbol menu and selected chips', async () => {
+    const wrapper = mount(AnalysisPage, {
+      props: { bootstrap: { display: { logokit_api_key: 'test-token' } } }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.selected-symbol-logo img').attributes('src')).toContain('img.logokit.com/ticker/AAPL')
+
+    await wrapper.get('.tag button').trigger('click')
+    await wrapper.get('.tag-field input').trigger('focus')
+
+    expect(wrapper.get('.search-option-logo img').attributes('src')).toContain('img.logokit.com/ticker/AAPL')
   })
 
   it('preselects requested download symbols without conversion legs', async () => {

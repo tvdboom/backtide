@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <section class="page-intro">
-      <div><span class="eyebrow">Backtest builder</span><h2>Design an experiment</h2><p>Configure market data, portfolio rules, execution assumptions and strategy logic.</p></div>
+      <div><h2>Design an experiment</h2><p>Configure market data, portfolio rules, execution assumptions and strategy logic.</p></div>
       <label class="file-button import-config-button">
         <Upload :size="18" />
         <span><strong>Import config</strong><small>TOML, YAML or JSON</small></span>
@@ -42,7 +42,7 @@
           <button v-for="type in enums.instrument_types" :key="type" type="button" :class="{ active: config.data.instrument_type === optionValue('instrument_type', type) }" @click="setInstrumentType(type)"><component :is="instrumentTypeIcon(type)" :size="16" />{{ type }}</button>
         </div>
         <div class="form-grid two">
-          <label class="wide symbol-select-field">Symbols<SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /><small class="logo-attribution">Selected logos provided by <a href="https://parqet.com/api" target="_blank" rel="noreferrer">Parqet</a>.</small></label>
+          <label class="wide symbol-select-field">Symbols<SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /></label>
           <label>Interval<select id="experiment-interval" v-model="config.data.interval"><option v-for="item in enums.intervals" :key="item" :value="optionValue('interval', item)">{{ item }}</option></select></label>
           <label class="toggle-label"><span>Full available history<small>Use the provider's maximum range.</small></span><input v-model="config.data.full_history" type="checkbox" class="toggle" /></label>
           <label v-if="!config.data.full_history">Start date<input id="experiment-start-date" v-model="config.data.start_date" type="date" /></label>
@@ -53,13 +53,14 @@
       <div v-if="tab === 2" class="form-section">
         <div class="section-copy"><h3>Starting portfolio</h3><p>Set the capital base and any positions held before the first bar.</p></div>
         <div class="portfolio-basics">
-          <label>Initial cash<input id="experiment-initial-cash" v-model.number="config.portfolio.initial_cash" type="number" min="1" step="1" /></label>
+          <label>Initial cash<input id="experiment-initial-cash" v-model.number="config.portfolio.initial_cash" type="number" min="0" step="100" /></label>
           <div class="field-label">
             <span>Base currency</span>
             <CurrencySelect
-              v-model="config.portfolio.base_currency"
+              :model-value="config.portfolio.base_currency"
               :options="enums.currencies"
               input-id="experiment-base-currency"
+              @update:model-value="setBaseCurrency"
             />
           </div>
         </div>
@@ -80,6 +81,7 @@
       <div v-if="tab === 3" class="form-section">
         <div class="section-copy"><h3>Trading logic</h3><p>Select saved strategies, optional indicators and a benchmark.</p></div>
         <div class="form-grid two">
+          <div class="field-label wide benchmark-field"><span>Benchmark</span><small class="field-help">Compare performance against a passive benchmark for this asset class.</small><BenchmarkSelect :model-value="config.strategy.benchmark" :options="benchmarkSymbols" :descriptions="symbolNames" :logos="symbolLogos" label="Experiment benchmark" :placeholder="benchmarkPlaceholder" @update:model-value="setBenchmark" /></div>
           <label class="wide">Strategies<SearchSelect v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></label>
           <section v-if="selectedStrategies.length" class="selection-insights wide" aria-label="Selected strategy details">
             <article v-for="item in selectedStrategies" :key="item.name" class="asset-selection-card">
@@ -95,7 +97,6 @@
               <p>{{ item.description }}</p>
             </article>
           </section>
-          <div class="field-label wide"><span>Benchmark</span><small class="field-help">Compare strategy performance against one stock or ETF over the same period.</small><BenchmarkSelect v-model="config.strategy.benchmark" :options="benchmarkSymbols" :descriptions="symbolNames" :logos="symbolLogos" label="Experiment benchmark" :placeholder="benchmarkPlaceholder" /></div>
         </div>
       </div>
 
@@ -231,9 +232,9 @@ import SearchSelect from '../components/search-select.vue'
 import {
   cloneApiState,
   consumeExperimentDraft,
+  defaultExperimentBenchmark,
   experimentOptionValue,
-  instrumentLogoUrl,
-  selectedInstrumentLogoUrl
+  instrumentLogoUrl
 } from '../state'
 
 const props = defineProps({ bootstrap: Object })
@@ -260,6 +261,7 @@ const optionValue = experimentOptionValue
 const tab = ref(0)
 const running = ref(false)
 const issue = ref(null)
+const benchmarkIsAutomatic = ref(!savedDraft && !config.strategy.benchmark)
 let issueTimer
 const instruments = ref([])
 const loadingInstruments = ref(false)
@@ -271,7 +273,7 @@ const symbolLogos = computed(() => {
     item.symbol,
     instrumentLogoUrl(item.symbol, item.instrument_type, props.bootstrap.display.logokit_api_key)
   ]))
-  for (const symbol of config.data.symbols) {
+  for (const symbol of [...config.data.symbols, config.strategy.benchmark].filter(Boolean)) {
     if (!values[symbol]) {
       values[symbol] = instrumentLogoUrl(
         symbol,
@@ -284,7 +286,11 @@ const symbolLogos = computed(() => {
 })
 const selectedSymbolLogos = computed(() => Object.fromEntries(config.data.symbols.map(symbol => [
   symbol,
-  selectedInstrumentLogoUrl(symbol, config.data.instrument_type)
+  instrumentLogoUrl(
+    symbol,
+    config.data.instrument_type,
+    props.bootstrap.display.logokit_api_key
+  )
 ])))
 const savedStrategies = computed(() => props.bootstrap.strategies.saved.map(item => item.name))
 const savedIndicators = computed(() => props.bootstrap.indicators.saved.map(item => item.name))
@@ -293,7 +299,7 @@ const metricCatalog = computed(() => [
   ...(props.bootstrap.metrics?.saved || [])
 ])
 const metricOptions = computed(() => metricCatalog.value.map(item => item.key))
-const metricOptionDetails = computed(() => Object.fromEntries(metricCatalog.value.map(item => [item.key, item.builtin ? 'Rust built-in' : 'Custom Python'])))
+const metricOptionDetails = computed(() => Object.fromEntries(metricCatalog.value.map(item => [item.key, item.builtin ? 'Built-in' : 'Custom'])))
 const metricOptionIcons = computed(() => Object.fromEntries(metricCatalog.value.map(item => [item.key, item.builtin ? Sigma : Braces])))
 const strategyOptionDetails = computed(() => Object.fromEntries(
   props.bootstrap.strategies.saved.map(item => [
@@ -316,7 +322,18 @@ const selectedIndicators = computed(() => config.indicators.indicators
 const selectedMetrics = computed(() => config.metrics.metrics
   .map(key => metricCatalog.value.find(item => item.key === key))
   .filter(Boolean))
-const benchmarkSymbols = computed(() => ['stocks', 'etf'].includes(config.data.instrument_type) ? symbols.value : [])
+const automaticBenchmark = computed(() => defaultExperimentBenchmark(
+  config.portfolio.base_currency,
+  config.data.instrument_type,
+  symbols.value
+))
+const benchmarkSymbols = computed(() => config.data.instrument_type === 'forex'
+  ? []
+  : [...new Set([
+      ...symbols.value,
+      automaticBenchmark.value,
+      config.strategy.benchmark
+    ].filter(Boolean))])
 const benchmarkPlaceholder = computed(() => benchmarkSymbols.value.length
   ? 'Search or enter a benchmark ticker…'
   : 'Enter an optional benchmark ticker…')
@@ -384,17 +401,37 @@ async function initializeInstruments() {
     await loadInstruments()
   } catch (error) {
     await showInstrumentError(error)
+  } finally {
+    applyAutomaticBenchmark()
   }
 }
 async function setInstrumentType(type) {
   config.data.instrument_type = optionValue('instrument_type', type)
   config.data.symbols = []
   instruments.value = []
+  resetBenchmarkDefault()
   try {
     await loadInstruments()
   } catch (error) {
     await showInstrumentError(error)
+  } finally {
+    applyAutomaticBenchmark()
   }
+}
+function applyAutomaticBenchmark() {
+  if (benchmarkIsAutomatic.value) config.strategy.benchmark = automaticBenchmark.value
+}
+function resetBenchmarkDefault() {
+  benchmarkIsAutomatic.value = true
+  applyAutomaticBenchmark()
+}
+function setBenchmark(value) {
+  benchmarkIsAutomatic.value = false
+  config.strategy.benchmark = value
+}
+function setBaseCurrency(value) {
+  config.portfolio.base_currency = value
+  resetBenchmarkDefault()
 }
 function addPosition() {
   const symbol = availablePositionSymbols.value[0]
@@ -506,6 +543,8 @@ function resetExperiment() {
   defaults.data.instrument_type = instrumentType
   if (!defaults.general.icon) defaults.general.icon = experimentIcons[0].value
   Object.assign(config, defaults)
+  benchmarkIsAutomatic.value = true
+  applyAutomaticBenchmark()
   positions.value = []
   tab.value = 0
   dismissIssue()
@@ -534,6 +573,7 @@ async function importConfig(event) {
   if (!file) return
   const suffix = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
   try {
+    benchmarkIsAutomatic.value = false
     Object.assign(config, await post('/api/config/parse', { suffix, text: await file.text() }))
     positions.value = Object.entries(config.portfolio.starting_positions || {})
       .filter(([symbol]) => config.data.symbols.includes(symbol))

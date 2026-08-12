@@ -1,5 +1,5 @@
-# Live and paper trading
-------------------------
+# Paper trading
+---------------
 
 Backtide can apply the same strategy objects used by the backtest engine to live
 exchange candles. Market data arrives over public provider WebSockets and orders
@@ -23,7 +23,8 @@ make real execution differ from the paper result.
 | **Yahoo Finance** | No | Yahoo does not publish an official market-data WebSocket. Use an exchange provider for live mode. |
 
 Historical downloads still support every provider described in the [data guide][data].
-Live support is checked separately with [`provider_live_support`].
+The application checks live support before starting a session and only offers intervals
+available from the selected exchange.
 
 <br>
 
@@ -49,6 +50,42 @@ The session is deliberately local and in-memory. Its bounded event history keeps
 long-running browser sessions from growing without limit. Stopping the process
 closes the current feed and discards the paper account unless you export the
 values yourself.
+
+<br>
+
+## Using the command line
+
+Start a paper-trading session from TOML, YAML, or JSON with
+`backtide start-live-session`. For example, save this as `live.toml`:
+
+```toml
+provider = "kraken"
+symbols = ["BTC-USD"]
+interval = "1m"
+strategy = "my-saved-strategy"
+batch_size = 10
+timeout_seconds = 5
+
+[paper]
+initial_cash = 25000
+commission_pct = 0.1
+slippage = 0.05
+```
+
+The optional `strategy` value names a strategy saved in the application's
+**Library**. Omit it to monitor the feed and paper account without generating
+orders. Every field accepted by [`PaperTradingConfig`] can be placed under
+`paper`.
+
+Start the session and press Ctrl+C when you want to stop:
+
+```console
+backtide start-live-session live.toml
+```
+
+The command validates provider support before connecting, prints processed
+candles with current equity and fill counts, and closes the WebSocket during
+shutdown.
 
 <br>
 
@@ -104,10 +141,38 @@ for market in updates:
 ```
 
 The collector always has both an event limit and a timeout. A timeout returns the
-events received so far instead of leaving the caller blocked indefinitely. For a
-longer-lived worker, create a [`LiveMarketFeed`], call `collect` in bounded batches,
-and call `cancel` during shutdown. The feed reconnects transient disconnections with
-bounded exponential backoff.
+events received so far instead of leaving the caller blocked indefinitely.
+
+To run continuously from Python, compose [`LiveMarketFeed`] with
+[`PaperTradingSession`]. This is the same public API used by the CLI and the
+application:
+
+```python
+from backtide.live import LiveMarketFeed, PaperTradingSession
+from backtide.strategies import BuyAndHold
+
+feed = LiveMarketFeed("kraken", ["BTC-USD"], interval="1m")
+session = PaperTradingSession(strategy=BuyAndHold())
+
+try:  # norun
+    while True:
+        for market in feed.collect(max_events=10, timeout_seconds=5):
+            transition = session.on_bar(market)
+            if transition.processed:
+                print(market.symbol, transition.snapshot.equity)
+except KeyboardInterrupt:
+    pass
+finally:
+    feed.cancel()
+
+final_snapshot = session.snapshot()
+feed.cancel()  # hide
+```
+
+Each `collect` call remains bounded, while the outer loop keeps the session
+running until interrupted. `cancel` closes the retained WebSocket during
+shutdown. The feed reconnects transient disconnections with bounded exponential
+backoff.
 
 <br>
 
@@ -122,10 +187,13 @@ bounded exponential backoff.
 - Market orders are paper-filled from the current candle with configured slippage
   and commission. Cash, positions, realized PnL, unrealized PnL, and equity are
   updated together.
+- When margin is disabled, a strategy-generated buy is reduced when necessary to
+  leave room for slippage and commission. An explicitly submitted oversized order
+  is still rejected as `insufficient cash` instead of being changed silently.
 - `allow_short` and `allow_margin` are off by default. Orders that violate the
   configured account rules are rejected with a reason in [`PaperFill`].
 - `max_history` bounds the bars retained per symbol for strategy evaluation.
 
-Use [`PaperTradingSession.snapshot`](../api/models/live/papertradingsession.md) whenever you need
+Use [`PaperTradingSession.snapshot`](../api/live/papertradingsession.md) whenever you need
 the latest read-only account view without processing another market event. It returns a
 [`PaperTradingSnapshot`](../api/models/live/papertradingsnapshot.md).

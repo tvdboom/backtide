@@ -29,7 +29,7 @@ class LiveTradingManager:
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate configuration and start collecting provider updates."""
-        from backtide.live import PaperTradingConfig, PaperTradingSession, provider_live_support
+        from backtide.live import LiveMarketFeed, PaperTradingConfig, PaperTradingSession
 
         provider = str(payload.get("provider", "kraken")).lower()
         interval = str(payload.get("interval", "1m"))
@@ -37,9 +37,11 @@ class LiveTradingManager:
         symbols = [symbol for symbol in symbols if symbol]
         if not symbols:
             raise APIError("Select at least one live symbol.")
-        supported, reason = provider_live_support(provider, interval)
-        if not supported:
-            raise APIError(reason or f"{provider.title()} does not support live data.")
+        try:
+            validation_feed = LiveMarketFeed(provider, symbols, interval)
+            validation_feed.cancel()
+        except (RuntimeError, TypeError, ValueError) as exc:
+            raise APIError(str(exc)) from exc
         with self._lock:
             if self._thread and self._thread.is_alive():
                 raise APIError("A paper-trading session is already running.", 409)

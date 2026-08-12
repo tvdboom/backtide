@@ -65,7 +65,7 @@ impl PaperBroker {
         let (mut fills, should_process) = self.begin_update(&market);
         let orders_submitted = orders.len();
         if should_process {
-            self.submit_orders(orders, &market, &mut fills);
+            self.submit_orders(orders, &market, &mut fills, false);
         }
 
         PaperTradingUpdate {
@@ -116,9 +116,10 @@ impl PaperBroker {
         orders: Vec<Order>,
         market: &MarketUpdate,
         fills: &mut Vec<PaperFill>,
+        fit_buys_to_cash: bool,
     ) {
         for order in orders {
-            self.submit_order(order, market, fills);
+            self.submit_order(order, market, fills, fit_buys_to_cash);
         }
     }
 
@@ -179,7 +180,14 @@ impl PaperBroker {
                     raw_px,
                     reason,
                     limit_cap,
-                } => fills.push(self.execute(order, bar.open_ts as i64, raw_px, limit_cap, reason)),
+                } => fills.push(self.execute(
+                    order,
+                    bar.open_ts as i64,
+                    raw_px,
+                    limit_cap,
+                    reason,
+                    false,
+                )),
                 TriggerOutcome::Pending => still_open.push(order),
                 TriggerOutcome::Cancel {
                     reason,
@@ -193,7 +201,13 @@ impl PaperBroker {
         self.portfolio.orders = still_open;
     }
 
-    fn submit_order(&mut self, order: Order, market: &MarketUpdate, fills: &mut Vec<PaperFill>) {
+    fn submit_order(
+        &mut self,
+        order: Order,
+        market: &MarketUpdate,
+        fills: &mut Vec<PaperFill>,
+        fit_buys_to_cash: bool,
+    ) {
         if order.order_type == OrderType::Cancel {
             if let Some(index) = self.portfolio.orders.iter().position(|open| open.id == order.id) {
                 let canceled = self.portfolio.orders.remove(index);
@@ -238,6 +252,7 @@ impl PaperBroker {
                 market.close,
                 None,
                 "live market fill".to_owned(),
+                fit_buys_to_cash,
             ));
         } else {
             self.portfolio.orders.push(order);
@@ -250,7 +265,8 @@ impl PaperBroker {
         timestamp: i64,
         raw_price: f64,
         limit_cap: Option<f64>,
-        reason: String,
+        mut reason: String,
+        fit_buy_to_cash: bool,
     ) -> PaperFill {
         if let Some(sizer) = order.sizer.take() {
             let equity = self.snapshot().equity;
@@ -292,22 +308,51 @@ impl PaperBroker {
 
         let fill_price = apply_slippage(raw_price, order.quantity, self.config.slippage, limit_cap);
         let old_quantity = self.portfolio.positions.amount(&order.symbol);
-        let new_quantity = old_quantity + order.quantity;
+        let mut new_quantity = old_quantity + order.quantity;
 
         if !self.config.allow_short && new_quantity < 0.0 && is_significant(new_quantity) {
             return rejected_fill(order, timestamp, "short selling is disabled".to_owned());
         }
 
-        let notional = fill_price * order.quantity.abs();
-        let commission =
+        let mut notional = fill_price * order.quantity.abs();
+        let mut commission =
             notional * self.config.commission_pct / 100.0 + self.config.commission_fixed;
         let cash = self.portfolio.cash.amount(&self.config.base_currency);
-        let next_cash = cash - order.quantity * fill_price - commission;
+        let mut next_cash = cash - order.quantity * fill_price - commission;
+        if fit_buy_to_cash
+            && order.quantity > 0.0
+            && !self.config.allow_margin
+            && next_cash < 0.0
+            && is_significant(next_cash)
+        {
+            let price_with_variable_fee = fill_price * (1.0 + self.config.commission_pct / 100.0);
+            let available_cash = cash - self.config.commission_fixed;
+            let affordable_quantity = available_cash / price_with_variable_fee;
+            if affordable_quantity.is_finite()
+                && affordable_quantity > 0.0
+                && is_significant(affordable_quantity)
+            {
+                order.quantity = order.quantity.min(affordable_quantity);
+                notional = fill_price * order.quantity;
+                commission =
+                    notional * self.config.commission_pct / 100.0 + self.config.commission_fixed;
+                next_cash = cash - notional - commission;
+                new_quantity = old_quantity + order.quantity;
+                reason.push_str("; quantity reduced to fit available cash");
+            }
+        }
         if !self.config.allow_margin && next_cash < 0.0 && is_significant(next_cash) {
             return rejected_fill(order, timestamp, "insufficient cash".to_owned());
         }
 
-        self.portfolio.cash.insert(self.config.base_currency, next_cash);
+        self.portfolio.cash.insert(
+            self.config.base_currency,
+            if is_negligible(next_cash) {
+                0.0
+            } else {
+                next_cash
+            },
+        );
         if is_negligible(new_quantity) {
             self.portfolio.positions.remove(&order.symbol);
         } else {

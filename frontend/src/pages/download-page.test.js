@@ -88,6 +88,9 @@ describe('download page', () => {
 
     await selectors[0].get('input').trigger('focus')
     await selectors[0].get('.search-menu button').trigger('click')
+    expect(wrapper.get('.selected-symbol-logo img').attributes('src')).toBe(
+      'https://img.logokit.com/ticker/AAPL?token=test%20token'
+    )
     await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
 
@@ -208,9 +211,9 @@ describe('download page', () => {
 
     expect(wrapper.get('.tag').text()).toContain('AVIANRO')
     expect(wrapper.get('.selected-symbol-logo img').attributes('src')).toBe(
-      'https://assets.parqet.com/logos/symbol/AVIANRO?format=png&size=64'
+      'https://img.logokit.com/ticker/AVIANRO?token=test%20token'
     )
-    expect(wrapper.get('.logo-attribution').text()).toContain('Parqet')
+    expect(wrapper.find('.logo-attribution').exists()).toBe(false)
   })
 
   it('surfaces symbol catalog failures in the form', async () => {

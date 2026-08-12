@@ -5,8 +5,14 @@
     :: signature
     :: head
     :: table:
-        - attributes
+        - parameters
     :: see also
+
+<br>
+
+## Example
+
+:: examples
 
 <br>
 
@@ -17,4 +23,3 @@
     include:
         - on_bar
         - snapshot
-

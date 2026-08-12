@@ -184,27 +184,31 @@ describe('search-select', () => {
     expect(wrapper.get('.tag img').attributes('src')).toBe('https://example.test/inga.png')
   })
 
-  it('shows an immediate fallback while retrying a selected symbol logo', async () => {
+  it('falls back to the dedicated selected logo if the menu logo fails in the chip', async () => {
     const wrapper = mount(SearchSelect, {
       props: {
         modelValue: ['AVIANRO'],
         options: [],
-        logos: { AVIANRO: 'https://example.test/avianro.png' }
+        logos: { AVIANRO: 'https://example.test/menu-logo.png' },
+        selectedLogos: { AVIANRO: 'https://example.test/selected-logo.png' }
       }
     })
 
     const selectedLogo = wrapper.get('.selected-symbol-logo')
     expect(selectedLogo.get('svg').exists()).toBe(true)
+    expect(selectedLogo.get('img').attributes('src')).toBe('https://example.test/menu-logo.png')
 
     await selectedLogo.get('img').trigger('error')
-    expect(selectedLogo.get('img').attributes('src')).toContain('selected_retry=1')
+    expect(selectedLogo.get('img').attributes('src')).toBe(
+      'https://example.test/selected-logo.png'
+    )
 
     await selectedLogo.get('img').trigger('load')
     expect(selectedLogo.find('svg').exists()).toBe(false)
     expect(selectedLogo.get('img').classes()).toContain('loaded')
   })
 
-  it('uses the dedicated selected logo instead of a failed menu logo', async () => {
+  it('retains the same working menu logo after selecting a symbol', async () => {
     const wrapper = mount(SearchSelect, {
       props: {
         modelValue: ['ABN.AS'],
@@ -215,7 +219,7 @@ describe('search-select', () => {
     })
 
     expect(wrapper.get('.selected-symbol-logo img').attributes('src')).toBe(
-      'https://example.test/selected-logo.png'
+      'https://example.test/menu-logo.png'
     )
   })
 

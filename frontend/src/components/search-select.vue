@@ -5,7 +5,7 @@
         <span v-if="hasLogoEntry(item)" class="selected-symbol-logo" aria-hidden="true">
           <ChartCandlestick v-if="!loadedSelectedLogos.has(item)" :size="13" />
           <img
-            v-if="selectedLogos[item] || logos[item]"
+            v-if="selectedLogoSource(item)"
             :class="{ loaded: loadedSelectedLogos.has(item) }"
             :src="selectedLogoSource(item)"
             alt=""
@@ -100,7 +100,7 @@ const needle = ref('')
 const focused = ref(false)
 const failedMenuLogos = reactive(new Set())
 const loadedSelectedLogos = reactive(new Set())
-const selectedLogoRetries = reactive(new Map())
+const selectedLogoFailures = reactive(new Map())
 let closeTimer
 const filtered = computed(() => {
   const search = needle.value.trim().toLowerCase()
@@ -121,11 +121,12 @@ function hasLogoEntry(value) {
 }
 
 function selectedLogoSource(value) {
-  const source = props.selectedLogos[value] || props.logos[value] || ''
-  const retries = selectedLogoRetries.get(value) || 0
-  if (!source || !retries) return source
-  const separator = source.includes('?') ? '&' : '?'
-  return `${source}${separator}selected_retry=${retries}`
+  return selectedLogoCandidates(value)[selectedLogoFailures.get(value) || 0] || ''
+}
+
+function selectedLogoCandidates(value) {
+  return [props.logos[value], props.selectedLogos[value]]
+    .filter((source, index, sources) => source && sources.indexOf(source) === index)
 }
 
 function selectedLogoLoaded(value) {
@@ -134,8 +135,7 @@ function selectedLogoLoaded(value) {
 
 function selectedLogoFailed(value) {
   loadedSelectedLogos.delete(value)
-  const retries = selectedLogoRetries.get(value) || 0
-  if (retries < 2) selectedLogoRetries.set(value, retries + 1)
+  selectedLogoFailures.set(value, (selectedLogoFailures.get(value) || 0) + 1)
 }
 
 function matchScore(value, search) {
@@ -162,7 +162,7 @@ function choose(value) {
   const selected = original || (props.allowCustom ? custom : '')
   if (selected && !props.modelValue.includes(selected)) {
     loadedSelectedLogos.delete(selected)
-    selectedLogoRetries.delete(selected)
+    selectedLogoFailures.delete(selected)
     emit('update:modelValue', props.multiple ? [...props.modelValue, selected] : [selected])
   }
   needle.value = ''

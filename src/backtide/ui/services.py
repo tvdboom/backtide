@@ -190,8 +190,10 @@ class BacktideServices:
         from backtide.data import Currency, InstrumentType, Interval, Provider
 
         cfg = get_config()
+        defaults = ExperimentConfig().to_dict()
+        defaults["portfolio"]["base_currency"] = str(cfg.general.base_currency)
         return {
-            "defaults": ExperimentConfig().to_dict(),
+            "defaults": defaults,
             "enums": {
                 "instrument_types": self._variants(InstrumentType),
                 "intervals": self._variants(Interval),
@@ -220,7 +222,7 @@ class BacktideServices:
         """Return recent experiments and local storage statistics."""
         from backtide.storage import query_bars_summary, query_experiments
 
-        experiments = dataframe_records(query_experiments(limit=6))
+        experiments = self.experiments(limit=6)
         storage = dataframe_records(query_bars_summary())
         symbols = {row.get("symbol") for row in storage if row.get("symbol")}
         bars = sum(int(row.get("n_rows") or row.get("rows") or 0) for row in storage)
@@ -266,6 +268,17 @@ class BacktideServices:
                 if needle in f"{row.get('symbol', '')} {row.get('name', '')}".casefold()
             ]
         return rows
+
+    def live_instruments(
+        self,
+        provider: str,
+        limit: int = 10_000,
+    ) -> list[dict[str, Any]]:
+        """Return the complete canonical spot catalog for one live provider."""
+        from backtide.live import list_live_instruments
+
+        values = list_live_instruments(provider, limit=min(max(limit, 1), 10_000))
+        return [public_attributes(value, self.instrument_fields) for value in values]
 
     def bars(
         self,
@@ -464,11 +477,20 @@ class BacktideServices:
             },
         }
 
-    def experiments(self, search: str | None = None) -> list[dict[str, Any]]:
-        """Return persisted experiment summaries with lightweight run metrics."""
+    def experiments(
+        self,
+        search: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Return one page of persisted experiment summaries with lightweight run metrics."""
         from backtide.storage import query_experiments, query_strategy_runs
 
-        experiments = dataframe_records(query_experiments(search=search, limit=100))
+        bounded_limit = max(1, min(int(limit), 100))
+        bounded_offset = max(0, int(offset))
+        experiments = dataframe_records(
+            query_experiments(search=search, limit=bounded_offset + bounded_limit)
+        )[bounded_offset : bounded_offset + bounded_limit]
         from backtide.config import get_config
 
         experiment_root = Path(get_config().data.storage_path) / "experiments"
@@ -503,7 +525,7 @@ class BacktideServices:
         return experiments
 
     def experiment(self, experiment_id: str) -> dict[str, Any]:
-        """Return an experiment and all per-strategy run details."""
+        """Return experiment details without embedding large order histories."""
         from backtide.config import get_config
         from backtide.storage import query_experiments, query_strategy_runs
 
@@ -511,7 +533,7 @@ class BacktideServices:
         if not rows:
             raise APIError("Experiment not found.", 404)
         runs = [
-            self._serialize_run(run)
+            self._serialize_run(run, include_orders=False)
             for run in query_strategy_runs(
                 experiment_id,
                 include_equity_curve=False,
@@ -534,6 +556,52 @@ class BacktideServices:
             "logs": log_text,
             "logs_truncated": logs_truncated,
         }
+
+    def experiment_orders(
+        self,
+        experiment_id: str,
+        strategy_id: str | None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Return one newest-first page of orders for a strategy run."""
+        if offset < 0:
+            raise APIError("Order offset must be zero or greater.")
+        if limit < 1 or limit > 500:
+            raise APIError("Order limit must be between 1 and 500.")
+        runs = self._query_result_runs(experiment_id)
+        if not runs:
+            raise APIError("Experiment runs were not found.", 404)
+        run = self._select_run(runs, strategy_id)
+        orders = sorted(
+            run.orders,
+            key=lambda item: self._order_timestamp(item.timestamp),
+            reverse=True,
+        )
+        page = orders[offset : offset + limit]
+        return {
+            "orders": [self._serialize_order_record(order) for order in page],
+            "offset": offset,
+            "limit": limit,
+            "total": len(orders),
+            "has_more": offset + len(page) < len(orders),
+        }
+
+    def experiment_log(self, experiment_id: str) -> tuple[str, bytes]:
+        """Return the complete experiment log and a safe download filename."""
+        from backtide.config import get_config
+        from backtide.storage import query_experiments
+
+        rows = dataframe_records(query_experiments(experiment_id))
+        if not rows:
+            raise APIError("Experiment not found.", 404)
+        experiment_root = (Path(get_config().data.storage_path) / "experiments").resolve()
+        log_path = (experiment_root / experiment_id / "logs.txt").resolve()
+        if experiment_root not in log_path.parents or not log_path.is_file():
+            raise APIError("Experiment log not found.", 404)
+        name = self._download_name(rows[0].get("name") or experiment_id)
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+        return f"{name}-logs.txt", text.encode()
 
     def result_plot(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Build an existing experiment-result Plotly figure."""
@@ -942,7 +1010,7 @@ class BacktideServices:
                 "name": name,
                 "type": type(value).__name__,
                 "builtin": False,
-                "description": self._catalog_description(value),
+                "description": self._custom_metric_description(value),
                 "percentage": bool(getattr(value, "percentage", False)),
                 "higher_is_better": bool(getattr(value, "higher_is_better", True)),
                 "source": getattr(value, "_source_code", None),
@@ -1001,7 +1069,7 @@ class BacktideServices:
     def live_capabilities(self) -> dict[str, Any]:
         """Describe provider support for WebSocket market data."""
         try:
-            from backtide.live import provider_live_support
+            from backtide.live import LiveMarketFeed
         except ImportError:
             return {
                 "available": False,
@@ -1014,7 +1082,10 @@ class BacktideServices:
             interval_support = {}
             for interval in intervals:
                 try:
-                    supported, reason = provider_live_support(provider, interval)
+                    feed = LiveMarketFeed(provider, ["BTC-USD"], interval)
+                    feed.cancel()
+                    supported = True
+                    reason = f"{provider.title()} public WebSocket supports {interval}."
                 except (RuntimeError, TypeError, ValueError) as exc:
                     supported, reason = False, str(exc)
                 interval_support[interval] = {"supported": supported, "reason": reason}
@@ -1108,7 +1179,8 @@ class BacktideServices:
             original_path.unlink(missing_ok=True)
         return {"saved": name}
 
-    def _serialize_run(self, run: Any) -> dict[str, Any]:
+    def _serialize_run(self, run: Any, *, include_orders: bool = True) -> dict[str, Any]:
+        """Serialize one strategy run, optionally omitting its order history."""
         output = public_attributes(run, self.run_fields)
         output["trades"] = [
             public_attributes(
@@ -1125,15 +1197,20 @@ class BacktideServices:
             )
             for trade in run.trades
         ]
-        output["orders"] = [
+        output["order_count"] = len(run.orders)
+        if include_orders:
+            output["orders"] = [self._serialize_order_record(order) for order in run.orders]
+        return _clean(output)
+
+    def _serialize_order_record(self, order: Any) -> dict[str, Any]:
+        """Serialize one stored order together with its submitted order details."""
+        return _clean(
             public_attributes(
                 order,
                 ("timestamp", "status", "fill_price", "commission", "pnl", "reason"),
             )
             | {"order": self._serialize_order(order.order)}
-            for order in run.orders
-        ]
-        return _clean(output)
+        )
 
     def _primary_metric_summary(
         self,
@@ -1197,6 +1274,17 @@ class BacktideServices:
         )
 
     @staticmethod
+    def _order_timestamp(value: Any) -> float:
+        """Normalize stored timestamp values for newest-first order sorting."""
+        timestamp = getattr(value, "timestamp", None)
+        if callable(timestamp):
+            return float(timestamp())
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
     def _safe_name(value: Any) -> str:
         name = str(value or "").strip()
         if not name or len(name) > 80 or any(char in name for char in '<>:"/\\|?*'):
@@ -1204,6 +1292,15 @@ class BacktideServices:
         if name in {".", ".."}:
             raise APIError("Enter a valid name.")
         return name
+
+    @staticmethod
+    def _download_name(value: Any) -> str:
+        """Return a filename-safe ASCII experiment name for browser downloads."""
+        name = "".join(
+            char if char.isascii() and (char.isalnum() or char in " -_.") else "_"
+            for char in str(value or "")
+        ).strip(" ._")
+        return name[:80] or "experiment"
 
     @staticmethod
     def _variants(enum: Any) -> list[str]:
@@ -1355,6 +1452,12 @@ class BacktideServices:
             return str(description)
         doc = inspect.getdoc(type(value))
         return doc.splitlines()[0] if doc else f"Custom {type(value).__name__}."
+
+    @staticmethod
+    def _custom_metric_description(value: Any) -> str:
+        """Return the custom metric class docstring as its catalog description."""
+        doc = type(value).__doc__
+        return inspect.cleandoc(doc) if doc else f"Custom {type(value).__name__}."
 
     @classmethod
     def _required_indicator_catalog(cls, strategy: Any) -> list[dict[str, str]]:

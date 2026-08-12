@@ -157,9 +157,9 @@ describe('experiment page', () => {
 
     expect(wrapper.get('.tag').text()).toContain('AVIANRO')
     expect(wrapper.get('.selected-symbol-logo img').attributes('src')).toBe(
-      'https://assets.parqet.com/logos/symbol/AVIANRO?format=png&size=64'
+      'https://img.logokit.com/ticker/AVIANRO?token=test%20token'
     )
-    expect(wrapper.get('.logo-attribution').text()).toContain('Parqet')
+    expect(wrapper.find('.logo-attribution').exists()).toBe(false)
   })
 
   it('uses a valid initial cash default', async () => {
@@ -170,8 +170,27 @@ describe('experiment page', () => {
     const input = wrapper.get('#experiment-initial-cash').element
 
     expect(input.value).toBe('10000')
-    expect(input.step).toBe('1')
+    expect(input.step).toBe('100')
     expect(input.validity.valid).toBe(true)
+    input.stepUp()
+    expect(input.value).toBe('10100')
+    input.stepDown()
+    expect(input.value).toBe('10000')
+  })
+
+  it('uses the configured base currency in a new experiment', async () => {
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.defaults.portfolio.base_currency = 'EUR'
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+
+    await wrapper.findAll('.tabs button')[2].trigger('click')
+
+    const trigger = wrapper.get('#experiment-base-currency')
+    expect(trigger.text()).toContain('EUR')
+    expect(trigger.get('.currency-flag').attributes('src')).toBe(
+      'https://flagcdn.com/eu.svg'
+    )
   })
 
   it('uses the compact currency dropdown backed by currency metadata', async () => {
@@ -198,7 +217,10 @@ describe('experiment page', () => {
       'https://flagcdn.com/us.svg'
     ])
 
-    await options[0].trigger('click')
+    await wrapper.get('[aria-label="Search base currencies"]').setValue('euro')
+    expect(wrapper.findAll('.currency-menu [role="option"]')).toHaveLength(1)
+
+    await wrapper.get('.currency-menu [role="option"]').trigger('click')
     expect(wrapper.get('#experiment-base-currency').text()).toContain('EUR')
   })
 
@@ -287,7 +309,11 @@ describe('experiment page', () => {
 
     const benchmarkInput = wrapper.get('input[aria-label="Experiment benchmark"]')
     const benchmarkControl = benchmarkInput.element.closest('.benchmark-select')
-    expect(wrapper.text()).toContain('Compare strategy performance against one stock or ETF')
+    const strategyInput = wrapper.get('#experiment-strategies')
+    const benchmarkPosition = benchmarkInput.element.compareDocumentPosition(strategyInput.element)
+    expect(benchmarkPosition & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(benchmarkInput.element.value).toBe('SPY')
+    expect(wrapper.text()).toContain('Compare performance against a passive benchmark')
     await benchmarkInput.trigger('focus')
     const benchmarkMenu = wrapper.findAll('.search-menu').at(-1)
     expect(benchmarkMenu.text()).toContain('AAPL')
@@ -304,6 +330,40 @@ describe('experiment page', () => {
     expect(benchmarkControl.querySelector('.tag')).toBeNull()
     expect(benchmarkControl.querySelector('.search-menu')).toBeNull()
     expect(wrapper.text()).not.toContain('managed in their dedicated library pages')
+  })
+
+  it('updates the automatic benchmark for currency and asset-class changes', async () => {
+    query.mockResolvedValue([
+      { symbol: 'BTC-EUR', name: 'Bitcoin / Euro', instrument_type: 'crypto' }
+    ])
+    const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+    await flushPromises()
+
+    await wrapper.findAll('.tabs button')[2].trigger('click')
+    await wrapper.get('#experiment-base-currency').trigger('click')
+    await wrapper.get('[aria-label="Search base currencies"]').setValue('euro')
+    await wrapper.get('.currency-menu [role="option"]').trigger('click')
+
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+    expect(wrapper.get('input[aria-label="Experiment benchmark"]').element.value).toBe('EXW1.DE')
+
+    await wrapper.findAll('.tabs button')[1].trigger('click')
+    await wrapper.findAll('.segmented button')[3].trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+
+    const benchmarkInput = wrapper.get('input[aria-label="Experiment benchmark"]')
+    expect(benchmarkInput.element.value).toBe('BTC-EUR')
+    await benchmarkInput.trigger('focus')
+    await benchmarkInput.setValue('ETH-EUR')
+    await benchmarkInput.trigger('keydown.enter')
+    expect(benchmarkInput.element.value).toBe('ETH-EUR')
+
+    await wrapper.findAll('.tabs button')[1].trigger('click')
+    await wrapper.findAll('.segmented button')[2].trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+    expect(wrapper.get('input[aria-label="Experiment benchmark"]').element.value).toBe('')
   })
 
   it('omits injected-indicator chrome when a strategy has no injected indicators', async () => {

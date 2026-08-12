@@ -55,12 +55,12 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     provider. If you need data from a different provider for the same instrument
     type, you can run separate sessions with different configuration files.
 
-??? faq "Does Backtide support live / paper trading?"
+??? faq "Does Backtide support paper trading?"
     Yes. Backtide can consume public Binance, Coinbase, and Kraken candle
     WebSockets and run strategies through its local paper-trading engine. It never
     submits real broker orders. Yahoo Finance has no official market-data WebSocket,
     so it remains available for historical downloads but not live sessions. See
-    the [live and paper trading guide](user_guide/live_trading.md).
+    the [paper trading guide](user_guide/live_trading.md).
 
 ??? faq "How do I launch the interactive UI?"
     Run `backtide launch` from the command line. This starts a local

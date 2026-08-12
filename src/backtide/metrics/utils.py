@@ -44,6 +44,9 @@ def _check_metric_code(code: str) -> str | None:
     signature = inspect.signature(instance.compute)
     if list(signature.parameters) != ["equity_curve", "trades"]:
         return "Method `compute` must have signature: `compute(self, equity_curve, trades)`."
+    description = type(instance).__doc__
+    if not description or not inspect.cleandoc(description):
+        return "Metric class must define a docstring used as its description."
     if not isinstance(instance.percentage, bool):
         return "Metric `percentage` must be a bool."
     if not isinstance(instance.higher_is_better, bool):

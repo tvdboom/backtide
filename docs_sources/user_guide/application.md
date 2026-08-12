@@ -52,7 +52,7 @@ the app can start jobs and modify the configured local Backtide store.
 | **Indicators** | Search, create, inspect, and remove built-in or custom Python indicators. |
 | **Metrics** | Browse Rust built-ins and create, inspect, or remove custom Python metrics. |
 | **Results** | Compare completed strategy runs and inspect metrics, equity, cash, drawdown, trades, orders, configuration, and logs. |
-| **Paper trading** | Run a strategy against live provider WebSocket candles with local simulated fills. See [Live and paper trading]. |
+| **Paper trading** | Run a strategy against live provider WebSocket candles with local simulated fills. See [Paper trading]. |
 | **Download** | Resolve instruments and download OHLCV bars into the local database. |
 | **Storage** | Search stored series, inspect coverage, open a series in analysis, or delete selected data. |
 | **Analysis** | Build interactive price, returns, correlation, seasonality, volatility, volume, dividend, and other supported plots. |

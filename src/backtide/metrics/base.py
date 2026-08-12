@@ -23,9 +23,6 @@ class BaseMetric(ABC):
 
     Attributes
     ----------
-    description : str, default=""
-        Short explanation shown in the metric library.
-
     percentage : bool, default=False
         Whether the returned fraction should be displayed as a percentage.
 
@@ -38,7 +35,10 @@ class BaseMetric(ABC):
     from backtide.metrics import BaseMetric
 
     class GainToPain(BaseMetric):
-        description = "Gross gains divided by gross losses."
+        '''Return gross gains divided by gross losses.'''
+
+        percentage = False
+        higher_is_better = True
 
         def compute(self, equity_curve, trades):
             pnl = trades["pnl"]
@@ -49,7 +49,6 @@ class BaseMetric(ABC):
 
     """
 
-    description = ""
     percentage = False
     higher_is_better = True
 

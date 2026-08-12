@@ -225,6 +225,7 @@ class AutoDocs:
 
         """
         params = signature(self.obj).parameters
+        documented_defaults = self._documented_defaults()
 
         # Assign an object type
         if check_is_dataclass(self.obj):
@@ -256,7 +257,9 @@ class AutoDocs:
                         else:
                             sign.append(k)
                     else:
-                        if isinstance(v.default, str):
+                        if v.default is Ellipsis and k in documented_defaults:
+                            sign.append(f"{k}={documented_defaults[k]}")
+                        elif isinstance(v.default, str):
                             sign.append(f'{k}="{v.default}"')
                         else:
                             sign.append(f"{k}={v.default}")
@@ -287,6 +290,19 @@ class AutoDocs:
 
         # \n\n in front of signature to break potential lists in markdown
         return f"\n\n{anchor}<div class='sign'>{obj} {module}{name}{parameters}{url}</div>"
+
+    def _documented_defaults(self) -> dict[str, str]:
+        """Return defaults that PyO3 signatures can only expose as ellipses."""
+        block = self.get_block("Parameters")
+        if not block:
+            return {}
+
+        defaults = {}
+        for header in re.findall(r"^[a-zA-Z*]\w*\s*:.*$", block, re.M):
+            match = re.search(r"(?<=default=).+?$", header)
+            if match:
+                defaults[header.split(":", 1)[0].strip("* ")] = match.group().strip()
+        return defaults
 
     def get_summary(self) -> str:
         """Return the object's summary.
@@ -451,7 +467,7 @@ class AutoDocs:
                             if default.startswith("'") and default.endswith("'"):
                                 default = default[1:-1]
 
-                            if default != str(real.default):
+                            if real.default is not Ellipsis and default != str(real.default):
                                 raise ValueError(
                                     f"Default value {real.default} of parameter {param} "
                                     f"of object {self.obj} doesn't match the value "

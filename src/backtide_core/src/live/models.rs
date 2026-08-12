@@ -38,6 +38,23 @@ use std::collections::HashMap;
 ///
 /// max_history : int, default=10000
 ///     Maximum bars retained per symbol for strategy evaluation.
+///
+/// See Also
+/// --------
+/// - backtide.live:PaperTradingSession
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.live import PaperTradingConfig
+///
+/// config = PaperTradingConfig(
+///     initial_cash=25_000,
+///     commission_pct=0.1,
+///     slippage=0.05,
+/// )
+/// print(config.initial_cash)
+/// ```
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.live")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PaperTradingConfig {
@@ -171,6 +188,29 @@ impl PaperTradingConfig {
 ///
 /// received_ts : int
 ///     Local receipt Unix timestamp in seconds.
+///
+/// See Also
+/// --------
+/// - backtide.live:PaperTradingSession
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.live import MarketUpdate
+///
+/// market = MarketUpdate(
+///     symbol="BTC-USD",
+///     interval="1m",
+///     open_ts=1_700_000_000,
+///     close_ts=1_700_000_060,
+///     open=100.0,
+///     high=102.0,
+///     low=99.0,
+///     close=101.0,
+///     volume=5.0,
+/// )
+/// print(market.close)
+/// ```
 #[pyclass(get_all, frozen, from_py_object, module = "backtide.live")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MarketUpdate {
@@ -316,6 +356,24 @@ impl MarketUpdate {
 ///
 /// reason : str
 ///     Human-readable matching or rejection reason.
+///
+/// See Also
+/// --------
+/// - backtide.live:PaperTradingUpdate
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.backtest import Order
+/// from backtide.live import MarketUpdate, PaperTradingSession
+///
+/// market = MarketUpdate(
+///     "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+///     100.0, 102.0, 99.0, 101.0,
+/// )
+/// fill = PaperTradingSession().on_bar(market, [Order("BTC-USD", 1.0)]).fills[0]
+/// print(fill.fill_price)
+/// ```
 #[pyclass(get_all, frozen, skip_from_py_object, module = "backtide.live")]
 #[derive(Clone, Debug)]
 pub struct PaperFill {
@@ -356,6 +414,20 @@ pub struct PaperFill {
 ///
 /// processed_bars : int
 ///     Number of updates that triggered matching or strategy evaluation.
+///
+/// See Also
+/// --------
+/// - backtide.live:PaperTradingSession
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.live import PaperTradingSession
+///
+/// snapshot = PaperTradingSession().snapshot()
+/// print(snapshot.equity)
+/// print(snapshot.portfolio.positions)
+/// ```
 #[pyclass(get_all, frozen, skip_from_py_object, module = "backtide.live")]
 #[derive(Clone, Debug)]
 pub struct PaperTradingSnapshot {
@@ -391,6 +463,25 @@ pub struct PaperTradingSnapshot {
 ///
 /// processed : bool
 ///     Whether this update was new, valid, and eligible for trading.
+///
+/// See Also
+/// --------
+/// - backtide.live:MarketUpdate
+/// - backtide.live:PaperTradingSession
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.live import MarketUpdate, PaperTradingSession
+///
+/// market = MarketUpdate(
+///     "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+///     100.0, 102.0, 99.0, 101.0,
+/// )
+/// update = PaperTradingSession().on_bar(market)
+/// print(update.processed)
+/// print(update.snapshot.equity)
+/// ```
 #[pyclass(get_all, frozen, skip_from_py_object, module = "backtide.live")]
 #[derive(Clone, Debug)]
 pub struct PaperTradingUpdate {

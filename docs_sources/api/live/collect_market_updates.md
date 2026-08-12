@@ -7,7 +7,6 @@
     :: table:
         - parameters
         - returns
-        - raises
     :: see also
 
 <br>
@@ -15,4 +14,3 @@
 ## Example
 
 :: examples
-

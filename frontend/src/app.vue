@@ -41,10 +41,16 @@
           <span class="eyebrow">{{ current.group }}</span>
           <h1>{{ current.label }}</h1>
         </div>
-        <div class="topbar-actions">
-          <div class="connection">
-            <span :class="{ online: connected }" />{{ connected ? 'Local engine' : 'Connecting' }}
-          </div>
+        <div class="topbar-actions" :class="{ 'has-live-session': liveSessionRunning }">
+          <button
+            v-if="liveSessionRunning"
+            type="button"
+            class="connection live-session-link"
+            aria-label="Open active paper trading session"
+            @click="navigate('live')"
+          >
+            <span class="online" />Session live
+          </button>
           <button
             type="button"
             class="icon-button theme-toggle"
@@ -77,6 +83,7 @@
           :key="`${page}-${refreshKey}`"
           :bootstrap="bootstrap"
           @dismiss-toast="toast = null"
+          @live-status="setLiveStatus"
           @navigate="navigate"
           @toast="showToast"
         />
@@ -126,7 +133,7 @@ import {
   TriangleAlert,
   X
 } from 'lucide-vue-next'
-import { computed, markRaw, onMounted, ref } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from './api'
 import AnalysisPage from './pages/analysis-page.vue'
 import DashboardPage from './pages/dashboard-page.vue'
@@ -172,20 +179,35 @@ const page = ref(resolvePage(location.hash, flat.map(item => item.id)))
 const current = computed(() => flat.find(item => item.id === page.value) || flat[0])
 const bootstrap = ref(null)
 const fatalError = ref('')
-const connected = ref(false)
+const liveSessionRunning = ref(false)
 const refreshKey = ref(0)
 const sidebarOpen = ref(false)
 const toast = ref(null)
 const theme = ref(document.documentElement.dataset.theme || resolveTheme())
-let toastTimer
+let toastTimer, liveStatusTimer
 
 async function load() {
   fatalError.value = ''
   try {
     bootstrap.value = await api('/api/bootstrap')
-    connected.value = true
+    void pollLiveStatus()
   } catch (error) {
     fatalError.value = error.message
+  }
+}
+
+function setLiveStatus(running) {
+  liveSessionRunning.value = Boolean(running)
+}
+
+async function pollLiveStatus() {
+  try {
+    const state = await api('/api/live')
+    setLiveStatus(state.status === 'running')
+  } catch {
+    setLiveStatus(false)
+  } finally {
+    liveStatusTimer = setTimeout(pollLiveStatus, 2000)
   }
 }
 
@@ -212,4 +234,5 @@ onMounted(() => {
   addEventListener('hashchange', () => { page.value = resolvePage(location.hash, flat.map(item => item.id)) })
   load()
 })
+onBeforeUnmount(() => { clearTimeout(toastTimer); clearTimeout(liveStatusTimer) })
 </script>

@@ -3,6 +3,7 @@ import {
   cloneApiState,
   configuredPlotlyDateTimeFormat,
   consumeExperimentDraft,
+  defaultExperimentBenchmark,
   experimentOptionValue,
   flattenFills,
   formatConfiguredDate,
@@ -14,7 +15,6 @@ import {
   instrumentLogoUrl,
   paperEquitySeries,
   resolvePage,
-  selectedInstrumentLogoUrl,
   symbolsForAnalysis
 } from './state'
 
@@ -130,12 +130,11 @@ describe('result and route state', () => {
     expect(configuredPlotlyDateTimeFormat(display)).toBe('%d-%m-%Y %H:%M')
   })
 
-  it('builds directly loadable selected-symbol logo URLs', () => {
-    expect(selectedInstrumentLogoUrl('ABN.AS', 'Stocks')).toBe(
-      'https://assets.parqet.com/logos/symbol/ABN.AS?format=png&size=64'
-    )
-    expect(selectedInstrumentLogoUrl('BTC-USD', 'Crypto')).toBe(
-      'https://assets.parqet.com/logos/crypto/BTC?format=png&size=64'
-    )
+  it('restores the original benchmark defaults for each experiment context', () => {
+    expect(defaultExperimentBenchmark('USD', 'Stocks')).toBe('SPY')
+    expect(defaultExperimentBenchmark('EUR', 'ETF')).toBe('EXW1.DE')
+    expect(defaultExperimentBenchmark('EUR', 'Crypto', ['BTC-EUR'])).toBe('BTC-EUR')
+    expect(defaultExperimentBenchmark('EUR', 'Crypto', ['ETH-EUR'])).toBe('BTC-USD')
+    expect(defaultExperimentBenchmark('USD', 'Forex')).toBeNull()
   })
 })

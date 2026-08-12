@@ -14,8 +14,20 @@ from backtide.core.live import (
     PaperTradingSnapshot,
     PaperTradingUpdate,
     collect_market_updates,
-    provider_live_support,
 )
+
+try:
+    from backtide.core.live import list_live_instruments
+except ImportError:
+
+    def list_live_instruments(provider: str, limit: int = 10_000) -> list[object]:
+        """Report that the installed Rust extension predates instrument discovery."""
+        del provider, limit
+        raise RuntimeError(
+            "The installed Backtide extension does not support live instrument discovery. "
+            "Run `just build` and restart Backtide."
+        )
+
 
 __all__ = [
     "LiveMarketFeed",
@@ -26,5 +38,5 @@ __all__ = [
     "PaperTradingSnapshot",
     "PaperTradingUpdate",
     "collect_market_updates",
-    "provider_live_support",
+    "list_live_instruments",
 ]

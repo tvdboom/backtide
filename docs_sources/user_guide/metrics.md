@@ -7,7 +7,7 @@ Rust metrics and lets you save custom Python metrics alongside custom strategies
 
 Use the **Metrics** step of the experiment builder to choose the metrics computed for every
 strategy. Sharpe ratio is the default main metric. The main metric ranks the strategy runs and
-becomes the **Best _metric name_** value on the results overview. The Metrics tab for each run
+appears by name on the results overview. The Metrics tab for each run
 shows every selected value.
 
 Built-in metrics execute in the Rust engine and are distributed across the same Rayon worker
@@ -26,7 +26,8 @@ from backtide.metrics import BaseMetric
 
 
 class GainToPain(BaseMetric):
-    description = "Gross winning PnL divided by gross losing PnL."
+    """Return gross winning PnL divided by gross losing PnL."""
+
     percentage = False
     higher_is_better = True
 
@@ -40,9 +41,11 @@ class GainToPain(BaseMetric):
 GainToPain()
 ```
 
-The last expression must instantiate the metric. The returned value must convert to a finite
-`float`. Set `percentage = True` when the returned value is a fraction such as `0.12`, and set
-`higher_is_better = False` for metrics where the smallest value should be considered best.
+The class docstring is used as the metric description in the library and experiment builder;
+there is no separate `description` attribute. The last expression must instantiate the metric,
+and the returned value must convert to a finite `float`. Set `percentage = True` when the returned
+value is a fraction such as `0.12`, and set `higher_is_better = False` for metrics where the
+smallest value should be considered best.
 
 Saved metrics can be selected in the experiment builder or passed directly to
 [`run_experiment`]:
@@ -55,6 +58,3 @@ result = run_experiment(
     main_metric="GainToPain",
 )
 ```
-
-[`BaseMetric`]: ../api/models/metrics/basemetric.md
-[`run_experiment`]: ../api/backtest/run_experiment.md

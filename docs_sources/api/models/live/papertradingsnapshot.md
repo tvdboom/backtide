@@ -8,3 +8,8 @@
         - attributes
     :: see also
 
+<br>
+
+## Example
+
+:: examples

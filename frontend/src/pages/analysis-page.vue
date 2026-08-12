@@ -1,8 +1,8 @@
 <template>
   <div class="page">
-    <section class="page-intro"><div><span class="eyebrow">Visual research</span><h2>Analyze market data</h2><p>Explore prices, returns, correlation, seasonality, volatility, volume and dividends.</p></div></section>
+    <section class="page-intro"><div><h2>Analyze market data</h2><p>Explore prices, returns, correlation, seasonality, volatility, volume and dividends.</p></div></section>
     <section class="panel analysis-controls">
-      <label>Symbols<SearchSelect v-model="form.symbols" :options="symbols" :descriptions="names" placeholder="Search stored instruments…" /></label>
+      <label>Symbols<SearchSelect v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" placeholder="Search stored instruments…" /></label>
       <label>Interval<select v-model="form.interval"><option v-for="item in availableIntervals" :key="item">{{ item }}</option></select></label>
       <label>Price<select v-model="form.price_col"><option value="open">Open</option><option value="high">High</option><option value="low">Low</option><option value="close">Close</option><option value="adj_close">Adjusted close</option></select></label>
       <label v-if="form.plot === 'volatility'">Window<input v-model.number="form.window" type="number" min="2" /></label>
@@ -23,7 +23,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, post } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import SearchSelect from '../components/search-select.vue'
-import { symbolsForAnalysis } from '../state'
+import { instrumentLogoUrl, symbolsForAnalysis } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['toast'])
@@ -45,6 +45,22 @@ const loading = ref(false)
 const error = ref('')
 const symbols = computed(() => [...new Set(storage.value.map(row => row.symbol))])
 const names = computed(() => Object.fromEntries(storage.value.map(row => [row.symbol, row.name || `${row.provider} · ${row.interval}`])))
+const instrumentTypes = computed(() => Object.fromEntries(storage.value.map(row => [
+  row.symbol,
+  row.instrument_type || 'stocks'
+])))
+const logos = computed(() => Object.fromEntries(symbols.value.map(symbol => [
+  symbol,
+  instrumentLogoUrl(symbol, instrumentTypes.value[symbol], props.bootstrap?.display?.logokit_api_key)
+])))
+const selectedLogos = computed(() => Object.fromEntries(form.symbols.map(symbol => [
+  symbol,
+  instrumentLogoUrl(
+    symbol,
+    instrumentTypes.value[symbol],
+    props.bootstrap?.display?.logokit_api_key
+  )
+])))
 const availableIntervals = computed(() => [...new Set(storage.value.filter(row => !form.symbols.length || form.symbols.includes(row.symbol)).map(row => row.interval))])
 const current = computed(() => plots.find(item => item.id === form.plot))
 const analysisSymbols = computed(() => symbolsForAnalysis(form.symbols, form.plot))

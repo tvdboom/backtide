@@ -52,4 +52,39 @@ describe('currency-select', () => {
     expect(wrapper.emitted('update:modelValue')[0]).toEqual(['EUR'])
     expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
   })
+
+  it('filters currencies by code or name as the user types', async () => {
+    const wrapper = mount(CurrencySelect, { props: { modelValue: 'USD', options } })
+
+    await wrapper.get('.currency-trigger').trigger('click')
+    const search = wrapper.get('[aria-label="Search base currencies"]')
+
+    await search.setValue('euro')
+    expect(wrapper.findAll('[role="option"]').map(option => option.get('strong').text())).toEqual([
+      'EUR'
+    ])
+
+    await search.setValue('dollar')
+    expect(wrapper.findAll('[role="option"]').map(option => option.get('strong').text())).toEqual([
+      'USD'
+    ])
+  })
+
+  it('starts filtering when the user types while the compact trigger is focused', async () => {
+    const extendedOptions = [
+      ...options,
+      { code: 'CAD', name: 'Canadian Dollar', flag: '', country_code: 'ca' }
+    ]
+    const wrapper = mount(CurrencySelect, {
+      props: { modelValue: 'USD', options: extendedOptions }
+    })
+
+    await wrapper.get('.currency-trigger').trigger('keydown', { key: 'E' })
+
+    expect(wrapper.get('[aria-label="Search base currencies"]').element.value).toBe('E')
+    expect(wrapper.findAll('[role="option"]').map(option => option.get('strong').text())).toEqual([
+      'EUR',
+      'USD'
+    ])
+  })
 })

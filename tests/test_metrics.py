@@ -79,7 +79,10 @@ class TestCustomMetric:
     code = """from backtide.metrics import BaseMetric
 
 class AveragePnl(BaseMetric):
-    description = "Average trade PnL."
+    '''Return the average realized trade PnL.'''
+
+    percentage = False
+    higher_is_better = True
 
     def compute(self, equity_curve, trades):
         return float(trades["pnl"].mean()) if len(trades) else 0.0
@@ -93,6 +96,17 @@ AveragePnl()
 
         assert isinstance(metric, BaseMetric)
         assert _check_metric_code(self.code) is None
+        assert BacktideServices._custom_metric_description(metric) == (
+            "Return the average realized trade PnL."
+        )
+
+    def test_requires_a_class_docstring(self):
+        """Validation requires the description to live in the class docstring."""
+        code = self.code.replace("    '''Return the average realized trade PnL.'''\n\n", "")
+
+        assert _check_metric_code(code) == (
+            "Metric class must define a docstring used as its description."
+        )
 
     def test_rejects_non_finite_metric(self):
         """Validation rejects custom metrics that return a non-finite scalar."""

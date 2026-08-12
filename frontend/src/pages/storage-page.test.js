@@ -97,7 +97,9 @@ describe('storage page', () => {
     const wrapper = mount(StoragePage, { props: { bootstrap: {} } })
     await flushPromises()
 
-    expect(wrapper.get('.badge').text()).toBe('15m')
+    const interval = wrapper.get('.badge')
+    expect(interval.text()).toBe('15m')
+    expect(interval.classes()).toContain('interval-badge')
   })
 
   it('asks in-page before deleting selected stored series', async () => {

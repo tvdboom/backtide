@@ -13,7 +13,6 @@ __all__ = [
     "StochasticOscillator",
     "VolumeWeightedAveragePrice",
     "WeightedMovingAverage",
-    "_indicator_deterministic_name",
 ]
 
 from typing import Any, ClassVar

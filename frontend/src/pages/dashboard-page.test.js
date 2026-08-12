@@ -15,7 +15,10 @@ describe('dashboard page', () => {
 
   it('opens a recent experiment in the results page', async () => {
     api.mockResolvedValue({
-      experiments: [{ id: 'experiment-1', name: 'Momentum study', icon: '🎯', status: 'Completed', best_sharpe: 1.37 }],
+      experiments: [{
+        id: 'experiment-1', name: 'Momentum study', icon: '🎯', status: 'Completed',
+        primary_metric_name: 'CAGR', primary_metric_value: 0.137, primary_metric_percentage: true
+      }],
       metrics: {},
       storage: []
     })
@@ -25,8 +28,9 @@ describe('dashboard page', () => {
     await flushPromises()
 
     expect(wrapper.get('.experiment-avatar').text()).toBe('🎯')
-    expect(wrapper.get('.sharpe-value').text()).toContain('1.37')
-    expect(wrapper.get('.sharpe-value strong').classes()).toContain('positive')
+    expect(wrapper.get('.primary-metric-value small').text()).toBe('CAGR')
+    expect(wrapper.get('.primary-metric-value strong').text()).toBe('13.70%')
+    expect(wrapper.get('.primary-metric-value strong').classes()).toContain('positive')
 
     await wrapper.get('.activity-row').trigger('click')
 
@@ -34,12 +38,12 @@ describe('dashboard page', () => {
     expect(wrapper.emitted('navigate')).toEqual([['results']])
   })
 
-  it('uses the results-page tone rules for recent Sharpe ratios', async () => {
+  it('uses the results-page tone rules for recent primary metrics', async () => {
     api.mockResolvedValue({
       experiments: [
-        { id: 'positive', name: 'Positive', best_sharpe: 1.2 },
-        { id: 'negative', name: 'Negative', best_sharpe: -0.4 },
-        { id: 'neutral', name: 'Neutral', best_sharpe: 0 }
+        { id: 'positive', name: 'Positive', primary_metric_name: 'Alpha', primary_metric_value: 1.2 },
+        { id: 'negative', name: 'Negative', primary_metric_name: 'Alpha', primary_metric_value: -0.4 },
+        { id: 'neutral', name: 'Neutral', primary_metric_name: 'Alpha', primary_metric_value: 0 }
       ],
       metrics: {},
       storage: []
@@ -49,7 +53,7 @@ describe('dashboard page', () => {
     })
     await flushPromises()
 
-    const values = wrapper.findAll('.sharpe-value strong')
+    const values = wrapper.findAll('.primary-metric-value strong')
     expect(values[0].classes()).toContain('positive')
     expect(values[1].classes()).toContain('negative')
     expect(values[2].classes()).not.toContain('positive')

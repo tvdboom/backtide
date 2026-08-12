@@ -66,12 +66,30 @@ const detail = {
   }]
 }
 
+function mockOrderBatches(orders) {
+  query.mockImplementation((path, params = {}) => {
+    if (!path.endsWith('/orders')) return [summary]
+    const offset = Number(params.offset || 0)
+    const limit = Number(params.limit || 100)
+    const page = orders.slice(offset, offset + limit)
+    return {
+      orders: page,
+      offset,
+      limit,
+      total: orders.length,
+      has_more: offset + page.length < orders.length
+    }
+  })
+}
+
 describe('results page', () => {
   let wrapper
 
   beforeEach(() => {
     sessionStorage.clear()
-    query.mockReset().mockResolvedValue([summary])
+    query.mockReset().mockImplementation(path => path.endsWith('/orders')
+      ? { orders: [], offset: 0, limit: 100, total: 0, has_more: false }
+      : [summary])
     api.mockReset().mockImplementation(path => path === '/api/jobs' ? [] : detail)
     post.mockReset().mockImplementation((path) => {
       if (path === '/api/config/parse') return { general: { name: 'Momentum study' } }
@@ -80,7 +98,10 @@ describe('results page', () => {
     remove.mockReset()
   })
 
-  afterEach(() => wrapper?.unmount())
+  afterEach(() => {
+    wrapper?.unmount()
+    vi.unstubAllGlobals()
+  })
 
   async function mountAndOpen(bootstrap = {}) {
     wrapper = mount(ResultsPage, { props: { bootstrap } })
@@ -105,7 +126,8 @@ describe('results page', () => {
     expect(card.get('.experiment-result-title-line h3').text()).toBe('Momentum study')
     expect(card.get('.experiment-result-title-line .result-status').text()).toContain('Success')
     expect(card.get('.experiment-result-meta').text()).not.toContain('Success')
-    expect(card.get('.experiment-result-meta').text()).toContain('Best Sharpe 1.42')
+    expect(card.get('.experiment-result-meta').text()).toContain('Sharpe 1.42')
+    expect(card.get('.experiment-result-meta').text()).not.toContain('Best Sharpe')
 
     await card.get('.breakdown-toggle').trigger('click')
     expect(card.text()).toContain('Trend engine')
@@ -119,6 +141,61 @@ describe('results page', () => {
     await secondCard.get('.breakdown-toggle').trigger('click')
     expect(card.find('.experiment-breakdown').exists()).toBe(false)
     expect(secondCard.find('.experiment-breakdown').exists()).toBe(true)
+  })
+
+  it('shows a loading state before the first experiment page resolves', async () => {
+    let resolveExperiments
+    query.mockImplementation(path => path.endsWith('/orders')
+      ? { orders: [], offset: 0, limit: 100, total: 0, has_more: false }
+      : new Promise(resolve => { resolveExperiments = resolve }))
+
+    wrapper = mount(ResultsPage, { props: { bootstrap: {} } })
+
+    expect(wrapper.get('.results-list-loading').text()).toContain('Loading experiments')
+    expect(wrapper.find('.experiment-result-card').exists()).toBe(false)
+
+    resolveExperiments([summary])
+    await flushPromises()
+
+    expect(wrapper.find('.results-list-loading').exists()).toBe(false)
+    expect(wrapper.get('.experiment-result-card').text()).toContain('Momentum study')
+  })
+
+  it('loads experiment summaries in ten-item batches at the scroll sentinel', async () => {
+    const observers = []
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback) {
+        this.callback = callback
+        this.observe = vi.fn()
+        this.disconnect = vi.fn()
+        observers.push(this)
+      }
+    })
+    const summaries = Array.from({ length: 12 }, (_, index) => ({
+      ...summary,
+      id: `experiment-${index + 1}`,
+      name: `Study ${index + 1}`
+    }))
+    query.mockImplementation((path, params = {}) => {
+      if (path.endsWith('/orders')) {
+        return { orders: [], offset: 0, limit: 100, total: 0, has_more: false }
+      }
+      const offset = Number(params.offset || 0)
+      return summaries.slice(offset, offset + Number(params.limit || 10))
+    })
+
+    wrapper = mount(ResultsPage, { props: { bootstrap: {} } })
+    await flushPromises()
+
+    expect(query).toHaveBeenCalledWith('/api/experiments', { search: '', offset: 0, limit: 10 })
+    expect(wrapper.findAll('.experiment-result-card')).toHaveLength(10)
+
+    observers[0].callback([{ isIntersecting: true }])
+    await flushPromises()
+
+    expect(query).toHaveBeenCalledWith('/api/experiments', { search: '', offset: 10, limit: 10 })
+    expect(wrapper.findAll('.experiment-result-card')).toHaveLength(12)
+    expect(wrapper.text()).toContain('Study 12')
   })
 
   it('does not repeat the benchmark label when it is already the strategy name', async () => {
@@ -141,7 +218,7 @@ describe('results page', () => {
       ...detail,
       runs: [{ ...detail.runs[0], strategy_name: 'Benchmark', is_benchmark: true }]
     })
-    await mountAndOpen()
+    await mountAndOpen({ display: { logokit_api_key: 'test-token' } })
 
     const benchmark = wrapper.get('.strategy-switcher button')
     expect(benchmark.text()).toBe('Benchmark')
@@ -157,7 +234,8 @@ describe('results page', () => {
     expect(wrapper.get('.result-workspace').text()).toContain('Rolling Sharpe')
     expect(wrapper.get('.result-workspace').text()).toContain('Cumulative profit and loss over time for each strategy.')
     expect(wrapper.findAll('.result-workspace')[1].text()).toContain('Trades on price')
-    expect(wrapper.get('.result-overview-metrics').text()).toContain('Best Sharpe1.42')
+    expect(wrapper.get('.result-overview-metrics').text()).toContain('Sharpe1.42')
+    expect(wrapper.get('.result-overview-metrics').text()).not.toContain('Best Sharpe')
     expect(wrapper.get('.result-overview-metrics').text()).toContain('StatusSuccess')
     expect(wrapper.get('.result-overview-metrics').text()).toContain('Strategies1')
     expect(wrapper.get('.result-overview-metrics').text()).toContain('Symbols2')
@@ -180,20 +258,20 @@ describe('results page', () => {
 
   it('formats result, period, trade, and order dates from display configuration', async () => {
     const startedAt = Date.UTC(2026, 7, 11, 19, 5) / 1000
+    mockOrderBatches([{
+      timestamp: startedAt,
+      status: 'Filled',
+      fill_price: 100,
+      commission: 0,
+      pnl: 5,
+      order: { symbol: 'AAPL', order_type: 'Market', quantity: 1 }
+    }])
     api.mockImplementation(path => path === '/api/jobs' ? [] : {
       ...detail,
       experiment: { ...detail.experiment, started_at: startedAt },
       runs: [{
         ...detail.runs[0],
-        trades: [{ symbol: 'AAPL', entry_ts: startedAt, exit_ts: startedAt + 3600 }],
-        orders: [{
-          timestamp: startedAt,
-          status: 'Filled',
-          fill_price: 100,
-          commission: 0,
-          pnl: 5,
-          order: { symbol: 'AAPL', order_type: 'Market', quantity: 1 }
-        }]
+        trades: [{ symbol: 'AAPL', entry_ts: startedAt, exit_ts: startedAt + 3600 }]
       }]
     })
     await mountAndOpen({
@@ -211,39 +289,41 @@ describe('results page', () => {
     await tabs.find(button => button.text() === 'Trades').trigger('click')
     expect(wrapper.get('.result-table').text()).toContain('11/08/2026 19:05')
     await tabs.find(button => button.text() === 'Orders').trigger('click')
+    await flushPromises()
     expect(wrapper.get('.result-orders-table').text()).toContain('11/08/2026 19:05')
   })
 
   it('renders orders as the legacy formatted table without nested JSON', async () => {
+    mockOrderBatches([
+      {
+        timestamp: 1750000060,
+        status: 'Filled',
+        fill_price: 100,
+        commission: 1.5,
+        pnl: 50,
+        order: { id: 'buy-1', symbol: 'AAPL', order_type: 'Market', quantity: 10, price: null }
+      },
+      {
+        timestamp: 1750000000,
+        status: 'Pending',
+        fill_price: 95,
+        commission: 0,
+        pnl: -12,
+        order: { id: 'sell-1', symbol: 'MSFT', order_type: 'Limit', quantity: -2, price: 95 }
+      }
+    ])
     api.mockImplementation(path => path === '/api/jobs' ? [] : {
       ...detail,
       runs: [{
         ...detail.runs[0],
-        base_currency: 'USD',
-        orders: [
-          {
-            timestamp: 1750000060,
-            status: 'Filled',
-            fill_price: 100,
-            commission: 1.5,
-            pnl: 50,
-            order: { id: 'buy-1', symbol: 'AAPL', order_type: 'Market', quantity: 10, price: null }
-          },
-          {
-            timestamp: 1750000000,
-            status: 'Pending',
-            fill_price: 95,
-            commission: 0,
-            pnl: -12,
-            order: { id: 'sell-1', symbol: 'MSFT', order_type: 'Limit', quantity: -2, price: 95 }
-          }
-        ]
+        base_currency: 'USD'
       }]
     })
-    await mountAndOpen()
+    await mountAndOpen({ display: { logokit_api_key: 'test-token' } })
 
     const ordersTab = wrapper.findAll('.strategy-plot-tabs button').find(button => button.text() === 'Orders')
     await ordersTab.trigger('click')
+    await flushPromises()
 
     const table = wrapper.get('.result-orders-table')
     expect(table.findAll('th').map(header => header.text())).toEqual([
@@ -263,6 +343,42 @@ describe('results page', () => {
     expect(rows[1].findAll('td')[8].classes()).toContain('warning')
     expect(table.text()).not.toContain('order_type')
     expect(table.text()).not.toContain('{')
+  })
+
+  it('loads orders in batches of 100 as the table reaches the bottom', async () => {
+    const orders = Array.from({ length: 250 }, (_, index) => ({
+      timestamp: 1750001000 - index,
+      status: 'Filled',
+      fill_price: 100,
+      commission: 0,
+      pnl: index,
+      order: { id: `order-${index}`, symbol: 'AAPL', order_type: 'Market', quantity: 1 }
+    }))
+    mockOrderBatches(orders)
+    await mountAndOpen()
+
+    const ordersTab = wrapper.findAll('.strategy-plot-tabs button').find(button => button.text() === 'Orders')
+    await ordersTab.trigger('click')
+    await flushPromises()
+
+    const table = wrapper.get('.result-orders-table')
+    expect(table.findAll('tbody tr')).toHaveLength(100)
+    expect(query).toHaveBeenCalledWith('/api/experiments/experiment-1/orders', {
+      strategy_id: 'strategy-1', offset: 0, limit: 100
+    })
+
+    Object.defineProperties(table.element, {
+      scrollTop: { value: 500, writable: true },
+      clientHeight: { value: 500 },
+      scrollHeight: { value: 1000 }
+    })
+    await table.trigger('scroll')
+    await flushPromises()
+
+    expect(table.findAll('tbody tr')).toHaveLength(200)
+    expect(query).toHaveBeenCalledWith('/api/experiments/experiment-1/orders', {
+      strategy_id: 'strategy-1', offset: 100, limit: 100
+    })
   })
 
   it('opens a dashboard-requested result directly', async () => {
@@ -336,6 +452,11 @@ describe('results page', () => {
     expect(preview).toMatch(/^log line 500/)
     expect(preview).toMatch(/log line 1499$/)
     expect(wrapper.get('.document-note').text()).toContain('limited to 1,000 lines')
+    expect(wrapper.get('.document-note').text()).toContain('Download the full log')
+    const download = wrapper.get('.document-modal-actions a')
+    expect(download.text()).toContain('Download full log')
+    expect(download.attributes('href')).toBe('/api/experiments/experiment-1/logs')
+    expect(download.attributes()).toHaveProperty('download')
   })
 
   it('shows only plot names in tabs and the selected description below them', async () => {

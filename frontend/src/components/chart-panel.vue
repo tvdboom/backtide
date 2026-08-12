@@ -2,7 +2,7 @@
   <div class="chart-panel">
     <div v-if="loading" class="chart-state"><span class="spinner" /> Building chart…</div>
     <div v-else-if="error || drawError" class="chart-state error-state">{{ error || drawError }}</div>
-    <div v-else-if="!figure" class="chart-state">Choose data to build this chart.</div>
+    <div v-else-if="!figure" class="chart-state">{{ emptyMessage }}</div>
     <div ref="chart" class="plot" />
   </div>
 </template>
@@ -13,7 +13,8 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 const props = defineProps({
   figure: { type: Object, default: null },
   loading: Boolean,
-  error: { type: String, default: '' }
+  error: { type: String, default: '' },
+  emptyMessage: { type: String, default: 'Choose data to build this chart.' }
 })
 
 const chart = ref(null)

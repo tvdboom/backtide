@@ -5,8 +5,6 @@
 
 ## Test the idea. Trade the evidence.
 
----
-
 ### A refreshingly simple backtesting and paper trading platform for retail investors
 </div>
 
@@ -79,7 +77,6 @@ backtide launch
 ```
 
 That single Python installation includes the compiled backend and web frontend.
-Node.js and pnpm are needed only by contributors rebuilding `frontend/`.
 
 <br>
 

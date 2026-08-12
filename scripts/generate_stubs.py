@@ -211,6 +211,27 @@ def _parse_text_signature(text_sig: str | None, name: str) -> str | None:
     return _clean_signature(text_sig.strip(), name)
 
 
+def _replace_ellipsis_defaults(sig: str | None, doc: str | None) -> str | None:
+    """Replace opaque PyO3 defaults with values documented in Parameters."""
+    if sig is None or doc is None or "..." not in sig:
+        return sig
+
+    parameters = re.search(
+        r"^Parameters\n-+\n(.*?)(?=^[A-Z][A-Za-z ]+\n-+\n|\Z)",
+        _clean_rust_docs(doc),
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    if parameters is None:
+        return sig
+
+    for name, default in re.findall(
+        r"^(\w+)\s*:.*?default=(.+?)\s*$", parameters.group(1), flags=re.MULTILINE
+    ):
+        pattern = rf"(\b{re.escape(name)}\s*=\s*)\.\.\."
+        sig = re.sub(pattern, lambda match, value=default: f"{match.group(1)}{value}", sig)
+    return sig
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Docstring formatting
 # ─────────────────────────────────────────────────────────────────────────────
@@ -320,7 +341,7 @@ def _generate_method_stub(
     text_sig = getattr(obj, "__text_signature__", None)
     doc = getattr(obj, "__doc__", None)
 
-    sig = _parse_text_signature(text_sig, name)
+    sig = _replace_ellipsis_defaults(_parse_text_signature(text_sig, name), doc)
     ret_type = _extract_return_type_from_doc(doc, class_name=class_name)
 
     if sig:
@@ -482,7 +503,7 @@ def _generate_function_stub(name: str, func: object) -> str:
     text_sig = getattr(func, "__text_signature__", None)
     doc = getattr(func, "__doc__", None)
 
-    sig = _parse_text_signature(text_sig, name)
+    sig = _replace_ellipsis_defaults(_parse_text_signature(text_sig, name), doc)
     ret_type = _extract_return_type_from_doc(doc)
 
     ret_str = f" -> {ret_type}" if ret_type else ""
@@ -546,7 +567,7 @@ def generate_submodule_stub(submodule_name: str) -> str:
         for attr, typ in _parse_attributes_from_doc(doc).items():
             all_doc_types.setdefault(attr, typ)
 
-    all_names = [n for n, _ in classes] + [n for n, _ in functions]
+    all_names = [n for n, _ in [*classes, *functions] if not n.startswith("_")]
     if all_names:
         # Format __all__ to match ruff-format style: single line if short,
         # one entry per line if the list exceeds the line-length limit.

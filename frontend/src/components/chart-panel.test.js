@@ -25,6 +25,15 @@ describe('ChartPanel', () => {
     wrapper.unmount()
   })
 
+  it('shows a context-specific empty message when no figure exists', () => {
+    const wrapper = mount(ChartPanel, {
+      props: { figure: null, emptyMessage: 'Waiting for a filled order…' }
+    })
+
+    expect(wrapper.get('.chart-state').text()).toBe('Waiting for a filled order…')
+    expect(plotly.react).not.toHaveBeenCalled()
+  })
+
   it('redraws with the active theme colors when the theme changes', async () => {
     const figure = { data: [{ x: [1], y: [2] }], layout: {} }
     const wrapper = mount(ChartPanel, { props: { figure } })

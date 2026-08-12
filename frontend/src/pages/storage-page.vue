@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <section class="page-intro"><div><span class="eyebrow">Local database</span><h2>Stored market data</h2><p>Inspect coverage by symbol, interval and provider, then open it directly in analysis.</p></div><button class="secondary" @click="$emit('navigate', 'download')"><Plus :size="16" /> Add data</button></section>
+    <section class="page-intro"><div><h2>Stored market data</h2><p>Inspect coverage by symbol, interval and provider, then open it directly in analysis.</p></div><button class="secondary" @click="$emit('navigate', 'download')"><Plus :size="16" /> Add data</button></section>
     <section class="metric-grid three-metrics">
       <article class="metric-card"><div class="metric-icon"><Shapes :size="19" /></div><span>Series</span><strong>{{ loading ? '—' : filtered.length }}</strong><small>matching rows</small></article>
       <article class="metric-card"><div class="metric-icon"><WalletCards :size="19" /></div><span>Symbols</span><strong>{{ loading ? '—' : new Set(filtered.map(row => row.symbol)).size }}</strong><small>unique instruments</small></article>
@@ -26,7 +26,7 @@
                   <span><strong>{{ row.symbol }}</strong><small>{{ row.name || row.instrument_type }}</small></span>
                 </div>
               </td>
-              <td><span class="badge neutral">{{ formatIntervalLabel(row.interval) }}</span></td><td>{{ row.provider }}</td>
+              <td><span class="badge neutral interval-badge">{{ formatIntervalLabel(row.interval) }}</span></td><td>{{ row.provider }}</td>
               <td><span class="coverage-range">{{ date(row.first_ts || row.earliest_ts) }} <ArrowRight :size="13"/> {{ date(row.last_ts || row.latest_ts) }} <small v-if="coverageDuration(row)">({{ coverageDuration(row) }})</small></span></td>
               <td class="number">{{ compact(row.n_rows || row.rows) }}</td>
               <td><button class="icon-button" aria-label="Open in analysis" @click="openAnalysis(row)"><ChartNoAxesCombined :size="16"/></button></td>

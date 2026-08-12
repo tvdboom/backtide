@@ -307,12 +307,15 @@ fn parse_coinbase(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>
     let Some(events) = value.get("events").and_then(Value::as_array) else {
         return Ok(Vec::new());
     };
-    let mut updates = Vec::new();
+    // Coinbase snapshots can contain many historical candles for one product.
+    // A live session must start from the newest candle for every subscribed
+    // product instead of replaying the snapshot through the paper strategy.
+    let mut latest_by_symbol = HashMap::new();
     for candle in
         events.iter().filter_map(|event| event.get("candles").and_then(Value::as_array)).flatten()
     {
         let open_ts = required_u64(candle, "start")?;
-        updates.push(MarketUpdate {
+        let update = MarketUpdate {
             provider: "coinbase".to_owned(),
             symbol: required_string(candle, "product_id")?,
             interval: interval.to_string(),
@@ -326,8 +329,15 @@ fn parse_coinbase(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>
             n_trades: None,
             is_final: false,
             received_ts: received_ts(),
-        });
+        };
+        let replace = latest_by_symbol
+            .get(&update.symbol)
+            .is_none_or(|previous: &MarketUpdate| update.open_ts > previous.open_ts);
+        if replace {
+            latest_by_symbol.insert(update.symbol.clone(), update);
+        }
     }
+    let mut updates = latest_by_symbol.into_values().collect::<Vec<_>>();
     updates.sort_unstable_by_key(|update| update.open_ts);
     Ok(updates)
 }
@@ -339,7 +349,9 @@ fn parse_kraken(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>, 
     let Some(data) = value.get("data").and_then(Value::as_array) else {
         return Ok(Vec::new());
     };
-    let mut updates = Vec::with_capacity(data.len());
+    // Snapshot payloads may contain multiple historical candles per product.
+    // Keep the newest one so paper trading begins at the live edge.
+    let mut latest_by_symbol = HashMap::with_capacity(data.len());
     for candle in data {
         let begin = required_string(candle, "interval_begin")?;
         let timestamp = DateTime::parse_from_rfc3339(&begin)
@@ -348,7 +360,7 @@ fn parse_kraken(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>, 
         let open_ts = u64::try_from(timestamp).map_err(|_| {
             LiveStreamError::InvalidMessage("Kraken timestamp predates Unix epoch".to_owned())
         })?;
-        updates.push(MarketUpdate {
+        let update = MarketUpdate {
             provider: "kraken".to_owned(),
             symbol: required_string(candle, "symbol")?.replace('/', "-"),
             interval: interval.to_string(),
@@ -365,8 +377,15 @@ fn parse_kraken(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>, 
                 .and_then(|n| i32::try_from(n).ok()),
             is_final: false,
             received_ts: received_ts(),
-        });
+        };
+        let replace = latest_by_symbol
+            .get(&update.symbol)
+            .is_none_or(|previous: &MarketUpdate| update.open_ts > previous.open_ts);
+        if replace {
+            latest_by_symbol.insert(update.symbol.clone(), update);
+        }
     }
+    let mut updates = latest_by_symbol.into_values().collect::<Vec<_>>();
     updates.sort_unstable_by_key(|update| update.open_ts);
     Ok(updates)
 }
@@ -560,6 +579,40 @@ mod tests {
     }
 
     #[test]
+    fn coinbase_snapshot_keeps_only_the_latest_candle_per_symbol() {
+        let candle = |start: u64, product_id: &str, close: f64| {
+            json!({
+                "start": start.to_string(),
+                "product_id": product_id,
+                "open": close.to_string(),
+                "high": close.to_string(),
+                "low": close.to_string(),
+                "close": close.to_string(),
+                "volume": "1.0"
+            })
+        };
+        let message = json!({
+            "events": [{
+                "type": "snapshot",
+                "candles": [
+                    candle(1_700_000_000, "BTC-USD", 100.0),
+                    candle(1_700_000_300, "BTC-USD", 101.0),
+                    candle(1_700_000_000, "ETH-USD", 50.0),
+                    candle(1_700_000_300, "ETH-USD", 51.0)
+                ]
+            }]
+        });
+
+        let updates = parse_coinbase(Interval::FiveMinutes, &message).unwrap();
+
+        assert_eq!(updates.len(), 2);
+        assert!(updates.iter().all(|update| update.open_ts == 1_700_000_300));
+        let mut symbols = updates.iter().map(|update| update.symbol.as_str()).collect::<Vec<_>>();
+        symbols.sort_unstable();
+        assert_eq!(symbols, ["BTC-USD", "ETH-USD"]);
+    }
+
+    #[test]
     fn parses_kraken_ohlc() {
         let message = json!({
             "channel": "ohlc",
@@ -578,6 +631,40 @@ mod tests {
 
         assert_eq!(updates[0].symbol, "BTC-USD");
         assert_eq!(updates[0].open_ts, 1_700_000_000);
+    }
+
+    #[test]
+    fn kraken_snapshot_keeps_only_the_latest_candle_per_symbol() {
+        let candle = |begin: &str, symbol: &str, close: f64| {
+            json!({
+                "symbol": symbol,
+                "interval_begin": begin,
+                "open": close,
+                "high": close,
+                "low": close,
+                "close": close,
+                "volume": 1.0,
+                "trades": 1
+            })
+        };
+        let message = json!({
+            "channel": "ohlc",
+            "type": "snapshot",
+            "data": [
+                candle("2023-11-14T22:13:20Z", "BTC/USD", 100.0),
+                candle("2023-11-14T22:14:20Z", "BTC/USD", 101.0),
+                candle("2023-11-14T22:13:20Z", "ETH/USD", 50.0),
+                candle("2023-11-14T22:14:20Z", "ETH/USD", 51.0)
+            ]
+        });
+
+        let updates = parse_kraken(Interval::OneMinute, &message).unwrap();
+
+        assert_eq!(updates.len(), 2);
+        assert!(updates.iter().all(|update| update.open_ts == 1_700_000_060));
+        let mut symbols = updates.iter().map(|update| update.symbol.as_str()).collect::<Vec<_>>();
+        symbols.sort_unstable();
+        assert_eq!(symbols, ["BTC-USD", "ETH-USD"]);
     }
 
     #[test]

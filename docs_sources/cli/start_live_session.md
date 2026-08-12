@@ -1,11 +1,11 @@
-# PaperTradingConfig
+# start-live-session
 --------------------
 
-:: backtide.live:PaperTradingConfig
+:: backtide.cli:start_live_session
     :: signature
     :: head
     :: table:
-        - attributes
+        - parameters
     :: see also
 
 <br>

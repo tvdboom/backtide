@@ -8,12 +8,13 @@ Description: Unit tests for the CLI commands.
 import json
 import subprocess
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 import pytest
 
-from backtide.cli import download, launch, main
+from backtide.cli import download, launch, main, start_live_session
 from backtide.cli import run_experiment as run_experiment_cmd
 
 
@@ -299,3 +300,116 @@ class TestRunExperimentCommand:
         result = runner.invoke(run_experiment_cmd, [str(cfg_path), "--log_level", "debug"])
         assert result.exit_code == 0
         mock_logging.assert_called_once_with("debug")
+
+
+class TestStartLiveSessionCommand:
+    """Tests for the `start-live-session` CLI subcommand."""
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    def test_toml_session_runs_until_interrupted(
+        self,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+    ):
+        """A TOML session processes updates and cancels its feed on Ctrl+C."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        market = SimpleNamespace(symbol="BTC-USD", interval="1m", close=101.25)
+
+        class Feed:
+            canceled = False
+
+            def __init__(self, provider, symbols, interval, *, include_partial):
+                assert (provider, symbols, interval, include_partial) == (
+                    "kraken",
+                    ["BTC-USD"],
+                    "1m",
+                    True,
+                )
+                self.calls = 0
+
+            def collect(self, *, max_events, timeout_seconds):
+                assert (max_events, timeout_seconds) == (4, 2.0)
+                self.calls += 1
+                if self.calls == 1:
+                    return [market]
+                raise KeyboardInterrupt
+
+            def cancel(self):
+                Feed.canceled = True
+
+        class Session:
+            def __init__(self, config, strategy):
+                assert config == "paper-config"
+                assert strategy is None
+
+            def on_bar(self, value):
+                assert value is market
+                snapshot = SimpleNamespace(equity=101.25)
+                return SimpleNamespace(processed=True, snapshot=snapshot, fills=[])
+
+            def snapshot(self):
+                return SimpleNamespace(processed_bars=1, equity=101.25)
+
+        cfg_path = tmp_path / "live.toml"
+        cfg_path.write_text(
+            'provider = "kraken"\nsymbols = ["BTC-USD"]\nbatch_size = 4\ntimeout_seconds = 2\n',
+            encoding="utf-8",
+        )
+
+        with (
+            patch("backtide.cli.LiveMarketFeed", Feed),
+            patch("backtide.cli.PaperTradingConfig", return_value="paper-config"),
+            patch("backtide.cli.PaperTradingSession", Session),
+        ):
+            result = runner.invoke(start_live_session, [str(cfg_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "Starting live paper session" in result.output
+        assert "BTC-USD 1m close=101.25 equity=101.25 fills=0" in result.output
+        assert "processed 1 market update" in result.output
+        assert Feed.canceled
+        mock_logging.assert_called_once_with("warn")
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    def test_provider_validation_error_is_user_facing(
+        self,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+    ):
+        """An unsupported provider exits cleanly with the feed's explanation."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        cfg_path = tmp_path / "live.json"
+        cfg_path.write_text(
+            json.dumps({"provider": "yahoo", "symbols": ["AAPL"]}),
+            encoding="utf-8",
+        )
+
+        with patch(
+            "backtide.cli.LiveMarketFeed",
+            side_effect=ValueError("Yahoo Finance does not expose an official live WebSocket."),
+        ):
+            result = runner.invoke(start_live_session, [str(cfg_path)])
+
+        assert result.exit_code == 1
+        assert "Yahoo Finance does not expose an official live WebSocket" in result.output
+        mock_logging.assert_called_once_with("warn")
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    def test_symbols_are_required(self, mock_logging, mock_cfg, runner, tmp_path):
+        """A session config must define at least one symbol."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        cfg_path = tmp_path / "live.yaml"
+        cfg_path.write_text("provider: kraken\n", encoding="utf-8")
+
+        result = runner.invoke(start_live_session, [str(cfg_path)])
+
+        assert result.exit_code == 2
+        assert "symbols must be a non-empty list" in result.output
+        mock_logging.assert_called_once_with("warn")

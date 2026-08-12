@@ -1,7 +1,8 @@
 //! PyO3 interface for live feeds and paper-trading sessions.
 
 use crate::backtest::models::{Order, State};
-use crate::data::models::{Bar, InstrumentType, Interval, Provider};
+use crate::data::models::{Bar, Instrument, InstrumentType, Interval, Provider};
+use crate::data::providers::{Binance, Coinbase, DataProvider, Kraken};
 use crate::indicators::interface::_indicator_deterministic_name;
 use crate::indicators::utils::compute_indicators;
 use crate::live::engine::PaperBroker;
@@ -28,6 +29,41 @@ use std::time::{Duration, Instant};
 /// retries disconnects with exponential backoff. Call `cancel` safely from
 /// another Python thread; cancellation latency is at most 250 ms and closes
 /// the retained socket. A later call requires `reset`.
+///
+/// Parameters
+/// ----------
+/// provider : str | Provider
+///     Exchange WebSocket provider.
+///
+/// symbols : list[str]
+///     Provider symbols to subscribe to.
+///
+/// interval : str | Interval, default="1m"
+///     Candle interval. Coinbase supports `"5m"` only.
+///
+/// include_partial : bool, default=True
+///     Include updates for candles that have not closed yet.
+///
+/// reconnect_attempts : int, default=5
+///     Maximum connection attempts for a collection batch.
+///
+/// backoff_seconds : float, default=0.25
+///     Initial reconnect delay in seconds.
+///
+/// See Also
+/// --------
+/// - backtide.live:collect_market_updates
+/// - backtide.live:PaperTradingSession
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.live import LiveMarketFeed
+///
+/// feed = LiveMarketFeed("kraken", ["BTC-USD"], interval="1m")
+/// feed.cancel()
+/// print(feed.is_cancelled())
+/// ```
 #[pyclass(module = "backtide.live")]
 pub struct LiveMarketFeed {
     provider: Provider,
@@ -52,6 +88,9 @@ impl LiveMarketFeed {
         reconnect_attempts=5,
         backoff_seconds=0.25,
     ))]
+    #[pyo3(
+        text_signature = "(provider, symbols, interval='1m', include_partial=True, reconnect_attempts=5, backoff_seconds=0.25)"
+    )]
     fn new(
         provider: Provider,
         symbols: Vec<String>,
@@ -85,6 +124,28 @@ impl LiveMarketFeed {
     }
 
     /// Collect up to `max_events`, retrying transient disconnects.
+    ///
+    /// Parameters
+    /// ----------
+    /// max_events : int, default=1
+    ///     Maximum number of updates to return.
+    ///
+    /// timeout_seconds : float, default=30
+    ///     Maximum collection time in seconds.
+    ///
+    /// Returns
+    /// -------
+    /// list[[MarketUpdate]]
+    ///     Updates received before the event limit or timeout.
+    ///
+    /// Examples
+    /// --------
+    /// ```pycon
+    /// from backtide.live import LiveMarketFeed
+    ///
+    /// feed = LiveMarketFeed("binance", ["BTC-USDT"])
+    /// updates = feed.collect(max_events=10, timeout_seconds=5)  # norun
+    /// ```
     #[pyo3(signature = (max_events=1, timeout_seconds=30.0))]
     fn collect(
         &self,
@@ -146,6 +207,16 @@ impl LiveMarketFeed {
     }
 
     /// Request cancellation of an in-progress `collect` call.
+    ///
+    /// Examples
+    /// --------
+    /// ```pycon
+    /// from backtide.live import LiveMarketFeed
+    ///
+    /// feed = LiveMarketFeed("kraken", ["BTC-USD"])
+    /// feed.cancel()
+    /// print(feed.is_cancelled())
+    /// ```
     fn cancel(&self) -> PyResult<()> {
         self.canceled.store(true, Ordering::Release);
         self.stream
@@ -156,6 +227,17 @@ impl LiveMarketFeed {
     }
 
     /// Clear cancellation before intentionally reusing this feed.
+    ///
+    /// Examples
+    /// --------
+    /// ```pycon
+    /// from backtide.live import LiveMarketFeed
+    ///
+    /// feed = LiveMarketFeed("kraken", ["BTC-USD"])
+    /// feed.cancel()
+    /// feed.reset()
+    /// print(feed.is_cancelled())
+    /// ```
     fn reset(&self) -> PyResult<()> {
         if self.collecting.load(Ordering::Acquire) {
             return Err(PyRuntimeError::new_err(
@@ -167,6 +249,20 @@ impl LiveMarketFeed {
     }
 
     /// Whether cancellation has been requested.
+    ///
+    /// Returns
+    /// -------
+    /// bool
+    ///     `True` after `cancel` and `False` after construction or `reset`.
+    ///
+    /// Examples
+    /// --------
+    /// ```pycon
+    /// from backtide.live import LiveMarketFeed
+    ///
+    /// feed = LiveMarketFeed("kraken", ["BTC-USD"])
+    /// print(feed.is_cancelled())
+    /// ```
     fn is_cancelled(&self) -> bool {
         self.canceled.load(Ordering::Acquire)
     }
@@ -183,6 +279,26 @@ impl LiveMarketFeed {
 ///     Existing built-in or custom strategy. Its `evaluate` method runs after
 ///     resting orders are matched on each processable candle. Explicit orders
 ///     can also be passed to `on_bar`.
+///
+/// See Also
+/// --------
+/// - backtide.live:MarketUpdate
+/// - backtide.live:PaperTradingConfig
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.live import MarketUpdate, PaperTradingSession
+///
+/// session = PaperTradingSession()
+/// update = session.on_bar(
+///     MarketUpdate(
+///         "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+///         100.0, 102.0, 99.0, 101.0, volume=5.0,
+///     )
+/// )
+/// print(update.snapshot.equity)
+/// ```
 #[pyclass(module = "backtide.live")]
 pub struct PaperTradingSession {
     broker: PaperBroker,
@@ -229,6 +345,21 @@ impl PaperTradingSession {
     /// -------
     /// [PaperTradingUpdate]
     ///     Fills plus a complete mark-to-market account snapshot.
+    ///
+    /// Examples
+    /// --------
+    /// ```pycon
+    /// from backtide.backtest import Order
+    /// from backtide.live import MarketUpdate, PaperTradingSession
+    ///
+    /// session = PaperTradingSession()
+    /// market = MarketUpdate(
+    ///     "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+    ///     100.0, 102.0, 99.0, 101.0,
+    /// )
+    /// update = session.on_bar(market, [Order("BTC-USD", 1.0)])
+    /// print(update.processed)
+    /// ```
     #[pyo3(signature = (market, orders=None))]
     fn on_bar(
         &mut self,
@@ -236,17 +367,20 @@ impl PaperTradingSession {
         market: MarketUpdate,
         orders: Option<Vec<Order>>,
     ) -> PyResult<PaperTradingUpdate> {
-        let mut orders = orders.unwrap_or_default();
+        let explicit_orders = orders.unwrap_or_default();
         self.record_history(&market);
         let (mut fills, processed) = self.broker.begin_update(&market);
 
-        if processed && self.strategy.is_some() {
-            orders.extend(self.evaluate_strategy(py, &market)?);
-        }
+        let strategy_orders = if processed && self.strategy.is_some() {
+            self.evaluate_strategy(py, &market)?
+        } else {
+            Vec::new()
+        };
 
-        let orders_submitted = orders.len();
+        let orders_submitted = explicit_orders.len() + strategy_orders.len();
         if processed {
-            self.broker.submit_orders(orders, &market, &mut fills);
+            self.broker.submit_orders(explicit_orders, &market, &mut fills, false);
+            self.broker.submit_orders(strategy_orders, &market, &mut fills, true);
         }
 
         Ok(PaperTradingUpdate {
@@ -259,6 +393,20 @@ impl PaperTradingSession {
     }
 
     /// Return the current account state without processing a candle.
+    ///
+    /// Returns
+    /// -------
+    /// [PaperTradingSnapshot]
+    ///     Current cash, positions, prices, and profit-and-loss values.
+    ///
+    /// Examples
+    /// --------
+    /// ```pycon
+    /// from backtide.live import PaperTradingSession
+    ///
+    /// snapshot = PaperTradingSession().snapshot()
+    /// print(snapshot.equity)
+    /// ```
     fn snapshot(&self) -> PaperTradingSnapshot {
         self.broker.snapshot()
     }
@@ -390,8 +538,61 @@ impl PaperTradingSession {
 
 /// Collect a finite batch from an exchange WebSocket.
 ///
-/// Yahoo Finance is intentionally rejected because it has no official live
-/// market-data WebSocket. A timeout returns the updates collected so far.
+/// A timeout returns the updates collected so far.
+///
+/// !!! warning
+///     Yahoo Finance is intentionally rejected because it does not provide an
+///     official live market-data WebSocket. Choose Binance, Coinbase, or Kraken.
+///
+/// Parameters
+/// ----------
+/// provider : str | [Provider]
+///     Public WebSocket source. Use `"binance"`, `"coinbase"`, or `"kraken"`.
+///     `"yahoo"` is accepted by historical-data APIs but rejected here.
+///
+/// symbols : list[str]
+///     One or more canonical market symbols to subscribe to, such as
+///     `"BTC-USDT"` for Binance or `"BTC-USD"` for Coinbase and Kraken.
+///
+/// interval : str | [Interval], default="1m"
+///     Duration represented by each candle. Accepted strings are `"1m"`,
+///     `"5m"`, `"15m"`, `"30m"`, `"1h"`, `"4h"`, `"1d"`, and `"1w"` where
+///     supported by the provider. Coinbase live collection supports `"5m"` only.
+///
+/// max_events : int, default=1
+///     Maximum number of updates to return across all subscribed symbols.
+///
+/// timeout_seconds : float, default=30
+///     Maximum number of seconds to wait for the batch. When it expires, the
+///     function returns any updates already received, including an empty list.
+///
+/// include_partial : bool, default=True
+///     Whether to include in-progress candle revisions. Set to `False` to
+///     receive only candles the provider has marked as final.
+///
+/// Returns
+/// -------
+/// list[[MarketUpdate]]
+///     Updates received before the event limit or timeout.
+///
+/// See Also
+/// --------
+/// - backtide.live:LiveMarketFeed
+/// - backtide.live:PaperTradingSession
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.live import collect_market_updates
+///
+/// updates = collect_market_updates(  # norun
+///     "binance",
+///     ["BTC-USDT"],
+///     interval="1m",
+///     max_events=10,
+///     timeout_seconds=5,
+/// )
+/// ```
 #[pyfunction]
 #[pyo3(signature = (
     provider,
@@ -401,6 +602,9 @@ impl PaperTradingSession {
     timeout_seconds=30.0,
     include_partial=true,
 ))]
+#[pyo3(
+    text_signature = "(provider, symbols, interval='1m', max_events=1, timeout_seconds=30.0, include_partial=True)"
+)]
 pub fn collect_market_updates(
     py: Python<'_>,
     provider: Provider,
@@ -430,17 +634,57 @@ pub fn collect_market_updates(
     })
 }
 
-/// Report live WebSocket support without opening a connection.
+/// List the spot instruments available from a live WebSocket provider.
 ///
-/// Returns `(supported, explanation)`. Coinbase supports five-minute candles
-/// only; Yahoo has no supported WebSocket feed.
+/// Parameters
+/// ----------
+/// provider : str | [Provider]
+///     Live provider whose complete spot catalog should be returned. Yahoo
+///     Finance is rejected because it has no supported live WebSocket.
+///
+/// limit : int, default=10000
+///     Maximum number of instruments to return.
+///
+/// Returns
+/// -------
+/// list[[Instrument]]
+///     Canonical symbols and metadata reported by the selected provider.
+///
+/// Examples
+/// --------
+/// ```pycon
+/// from backtide.live import list_live_instruments
+///
+/// instruments = list_live_instruments("kraken", limit=100)
+/// print(instruments[0].symbol)
+/// ```
 #[pyfunction]
-#[pyo3(signature = (provider, interval: "str | Interval"=Interval::OneMinute))]
-pub fn provider_live_support(provider: Provider, interval: Interval) -> (bool, String) {
-    match support_message(provider, interval) {
-        Ok(message) => (true, message.to_owned()),
-        Err(message) => (false, message),
+#[pyo3(signature = (provider, limit=10_000))]
+pub fn list_live_instruments(
+    py: Python<'_>,
+    provider: Provider,
+    limit: usize,
+) -> PyResult<Vec<Instrument>> {
+    if provider == Provider::Yahoo {
+        return Err(PyValueError::new_err(
+            "Yahoo Finance does not expose an official market-data WebSocket",
+        ));
     }
+    if limit == 0 {
+        return Err(PyValueError::new_err("limit must be positive"));
+    }
+
+    let runtime = live_runtime()?;
+    let providers = live_catalog_providers(runtime)?;
+    let catalog = providers
+        .get(&provider)
+        .cloned()
+        .ok_or_else(|| PyValueError::new_err(format!("unsupported live provider: {provider}")))?;
+    py.detach(|| {
+        runtime
+            .block_on(catalog.list_instruments(InstrumentType::Crypto, None, limit.min(10_000)))
+            .map_err(Into::into)
+    })
 }
 
 async fn collect_updates(
@@ -629,6 +873,35 @@ fn live_runtime() -> PyResult<&'static tokio::runtime::Runtime> {
     RUNTIME.get().ok_or_else(|| PyRuntimeError::new_err("failed to initialize live runtime"))
 }
 
+fn live_catalog_providers(
+    runtime: &'static tokio::runtime::Runtime,
+) -> PyResult<&'static HashMap<Provider, Arc<dyn DataProvider>>> {
+    static PROVIDERS: OnceLock<HashMap<Provider, Arc<dyn DataProvider>>> = OnceLock::new();
+    static INITIALIZING: Mutex<()> = Mutex::new(());
+    if let Some(providers) = PROVIDERS.get() {
+        return Ok(providers);
+    }
+
+    let _guard = INITIALIZING
+        .lock()
+        .map_err(|_| PyRuntimeError::new_err("live catalog initialization lock is poisoned"))?;
+    if let Some(providers) = PROVIDERS.get() {
+        return Ok(providers);
+    }
+
+    let providers = runtime.block_on(async {
+        let mut providers: HashMap<Provider, Arc<dyn DataProvider>> = HashMap::new();
+        providers.insert(Provider::Binance, Arc::new(Binance::new().await?));
+        providers.insert(Provider::Coinbase, Arc::new(Coinbase::new().await?));
+        providers.insert(Provider::Kraken, Arc::new(Kraken::new().await?));
+        Ok::<_, crate::data::errors::DataError>(providers)
+    })?;
+    let _ = PROVIDERS.set(providers);
+    PROVIDERS.get().ok_or_else(|| {
+        PyRuntimeError::new_err("failed to initialize live instrument catalog providers")
+    })
+}
+
 fn stream_error_to_python(error: LiveStreamError) -> PyErr {
     match error {
         LiveStreamError::Unsupported(message) => PyValueError::new_err(message),
@@ -687,6 +960,8 @@ fn bars_to_data<'py>(py: Python<'py>, bars: &[Bar]) -> PyResult<Bound<'py, PyAny
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backtest::models::OrderStatus;
+    use crate::data::models::Currency;
     use crate::live::providers::MockMarketDataStream;
     use crate::strategies::interface::BuyAndHold;
 
@@ -709,13 +984,6 @@ mod tests {
     }
 
     #[test]
-    fn support_api_reports_yahoo_and_coinbase_constraints() {
-        assert!(!provider_live_support(Provider::Yahoo, Interval::OneMinute).0);
-        assert!(!provider_live_support(Provider::Coinbase, Interval::OneMinute).0);
-        assert!(provider_live_support(Provider::Coinbase, Interval::FiveMinutes).0);
-    }
-
-    #[test]
     fn live_feed_cancellation_can_be_reset_without_connecting() {
         let feed = LiveMarketFeed::new(
             Provider::Binance,
@@ -732,6 +1000,17 @@ mod tests {
         assert!(feed.is_cancelled());
         feed.reset().unwrap();
         assert!(!feed.is_cancelled());
+    }
+
+    #[test]
+    fn live_instrument_catalog_validates_before_network_access() {
+        Python::attach(|py| {
+            let yahoo = list_live_instruments(py, Provider::Yahoo, 100).unwrap_err();
+            assert!(yahoo.to_string().contains("does not expose"));
+
+            let empty = list_live_instruments(py, Provider::Kraken, 0).unwrap_err();
+            assert!(empty.to_string().contains("limit must be positive"));
+        });
     }
 
     #[tokio::test]
@@ -806,6 +1085,53 @@ mod tests {
             assert_eq!(result.orders_submitted, 1);
             assert_eq!(result.fills.len(), 1);
             assert!(result.snapshot.portfolio.positions.contains_key("BTC-USD"));
+            PyResult::Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn buy_and_hold_reserves_cash_for_paper_fees() {
+        Python::attach(|py| {
+            let strategy = Py::new(py, BuyAndHold::new(Some("BTC-USD".to_owned())))?.into_any();
+            let config = PaperTradingConfig {
+                initial_cash: 100.0,
+                commission_pct: 0.1,
+                commission_fixed: 0.5,
+                slippage: 0.1,
+                ..PaperTradingConfig::default()
+            };
+            let mut session = PaperTradingSession::new(py, Some(config), Some(strategy))?;
+            let market = MarketUpdate {
+                provider: "mock".to_owned(),
+                symbol: "BTC-USD".to_owned(),
+                interval: "1m".to_owned(),
+                open_ts: 1_000,
+                close_ts: 1_060,
+                open: 100.0,
+                high: 100.0,
+                low: 100.0,
+                close: 100.0,
+                volume: 1.0,
+                n_trades: Some(1),
+                is_final: true,
+                received_ts: 1_060,
+            };
+
+            let first = session.on_bar(py, market.clone(), None)?;
+            assert_eq!(first.orders_submitted, 1);
+            assert_eq!(first.fills[0].status, OrderStatus::Filled);
+            assert!(first.fills[0].order.quantity < 1.0);
+            assert!(first.fills[0].reason.contains("quantity reduced"));
+            assert_eq!(first.snapshot.portfolio.cash[&Currency::USD], 0.0);
+
+            let mut next = market;
+            next.open_ts = 1_060;
+            next.close_ts = 1_120;
+            next.received_ts = 1_120;
+            let second = session.on_bar(py, next, None)?;
+            assert_eq!(second.orders_submitted, 0);
+            assert!(second.fills.is_empty());
             PyResult::Ok(())
         })
         .unwrap();

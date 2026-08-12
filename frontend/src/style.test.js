@@ -48,6 +48,11 @@ describe('experiment selectors', () => {
     expect(declaration('.symbol-select-field .selected-symbol-logo')).toContain('width: 25px')
   })
 
+  it('keeps the benchmark selector compact on desktop', () => {
+    expect(declaration('.benchmark-field')).toContain('width: min(33.333%, 340px)')
+    expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*\.benchmark-field\s*\{\s*width: 100%;\s*\}/)
+  })
+
   it('uses one interval-row background and separates the provider logo', () => {
     expect(declaration('.download-interval-row')).toContain('background: var(--panel-start)')
     expect(styles).not.toMatch(/\.download-interval-row:nth-child/)
@@ -57,10 +62,28 @@ describe('experiment selectors', () => {
 })
 
 describe('dashboard activity', () => {
-  it('separates Sharpe from status and gives price history enough width', () => {
-    expect(declaration('.sharpe-value')).toContain('margin-right: 10px')
+  it('separates the primary metric from status and gives price history enough width', () => {
+    expect(declaration('.primary-metric-value')).toContain('margin-right: 10px')
     expect(declaration('.market-sparkline')).toContain('width: 150px')
     expect(declaration('.market-sparkline')).toContain('margin-right: 12px')
+  })
+})
+
+describe('paper trading setup', () => {
+  it('matches the cash and base-currency control dimensions', () => {
+    expect(declaration('.live-cash-field input')).toContain('height: 42px')
+    expect(declaration('.live-base-currency .currency-select')).toContain('width: 100%')
+    expect(declaration('.live-base-currency .currency-trigger')).toContain('min-height: 42px')
+    expect(declaration('.live-base-currency .currency-trigger')).toContain('height: 42px')
+  })
+
+  it('uses stable market-feed columns for close and volume values', () => {
+    expect(declaration('.event-log > div')).toContain(
+      '80px 65px 90px minmax(130px, 1fr) minmax(130px, 1fr) minmax(70px, 1fr)'
+    )
+    expect(declaration('.event-close, .event-volume, .event-fills')).toContain(
+      'white-space: nowrap'
+    )
   })
 })
 

@@ -1,17 +1,15 @@
-# provider_live_support
+# list_live_instruments
 -----------------------
 
-:: backtide.live:provider_live_support
+:: backtide.live:list_live_instruments
     :: signature
     :: head
     :: table:
         - parameters
         - returns
-    :: see also
 
 <br>
 
 ## Example
 
 :: examples
-

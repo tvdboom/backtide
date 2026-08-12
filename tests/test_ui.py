@@ -34,9 +34,30 @@ class StubServices(BacktideServices):
         """Return deterministic dashboard content."""
         return {"metrics": {"experiments": 2}}
 
+    def experiments(self, search=None, limit=100, offset=0):
+        """Return the experiment paging arguments for route assertions."""
+        return [{"search": search, "limit": limit, "offset": offset}]
+
+    def live_instruments(self, provider, limit=10_000):
+        """Return deterministic live-provider symbols for route assertions."""
+        return [{"symbol": "ADA-USD", "provider": provider, "limit": limit}]
+
     def update_strategy(self, original_name, payload):
         """Return a deterministic saved strategy update."""
         return {"original": original_name, "saved": payload["name"]}
+
+    def experiment_log(self, experiment_id):
+        """Return deterministic complete log content."""
+        return "Momentum-study-logs.txt", f"full log for {experiment_id}\n".encode()
+
+    def experiment_orders(self, experiment_id, strategy_id, offset=0, limit=100):
+        """Return deterministic paged order metadata."""
+        return {
+            "experiment_id": experiment_id,
+            "strategy_id": strategy_id,
+            "offset": offset,
+            "limit": limit,
+        }
 
 
 @pytest.fixture
@@ -119,6 +140,17 @@ class TestJSONRoutes:
         assert response.getheader("Cache-Control") == "no-store"
         assert json.loads(body) == {"status": "ok"}
 
+    def test_live_instruments_route_forwards_provider_and_limit(self, web_server):
+        """The live catalog route selects the requested exchange catalog."""
+        response, body = request(
+            web_server,
+            "GET",
+            "/api/live/instruments?provider=coinbase&limit=4321",
+        )
+
+        assert response.status == 200
+        assert json.loads(body) == [{"symbol": "ADA-USD", "provider": "coinbase", "limit": 4321}]
+
     def test_unknown_command_returns_not_found(self, web_server):
         """An unknown API command returns a structured 404 error."""
         response, body = request(web_server, "POST", "/api/missing", {})
@@ -152,6 +184,44 @@ class TestJSONRoutes:
 
         assert response.status == 200
         assert json.loads(body) == {"original": "Old name", "saved": "New name"}
+
+    def test_experiment_log_is_served_as_a_text_download(self, web_server):
+        """The log route downloads complete text with the original filename pattern."""
+        response, body = request(web_server, "GET", "/api/experiments/exp-1/logs")
+
+        assert response.status == 200
+        assert response.getheader("Content-Type") == "text/plain; charset=utf-8"
+        assert response.getheader("Content-Disposition") == (
+            'attachment; filename="Momentum-study-logs.txt"'
+        )
+        assert body == b"full log for exp-1\n"
+
+    def test_experiment_orders_route_forwards_lazy_loading_parameters(self, web_server):
+        """The order route forwards the strategy, offset, and bounded batch size."""
+        response, body = request(
+            web_server,
+            "GET",
+            "/api/experiments/exp-1/orders?strategy_id=run-2&offset=100&limit=100",
+        )
+
+        assert response.status == 200
+        assert json.loads(body) == {
+            "experiment_id": "exp-1",
+            "strategy_id": "run-2",
+            "offset": 100,
+            "limit": 100,
+        }
+
+    def test_experiments_route_forwards_lazy_loading_parameters(self, web_server):
+        """The experiment summary route forwards search, offset, and batch size."""
+        response, body = request(
+            web_server,
+            "GET",
+            "/api/experiments?search=momentum&offset=10&limit=10",
+        )
+
+        assert response.status == 200
+        assert json.loads(body) == [{"search": "momentum", "limit": 10, "offset": 10}]
 
 
 class TestJobStore:
@@ -307,6 +377,59 @@ class TestSerialization:
 
 class TestServiceCommands:
     """Tests for command validation and backend dispatch."""
+
+    def test_live_instruments_uses_provider_specific_catalog(self, monkeypatch):
+        """Paper trading receives canonical symbols from the selected provider."""
+        import backtide.live
+
+        captured = {}
+
+        def list_live_instruments(provider, limit):
+            captured.update(provider=provider, limit=limit)
+            return [
+                SimpleNamespace(
+                    symbol="ADA-USD",
+                    name="Cardano",
+                    base="ADA",
+                    quote="USD",
+                    instrument_type="Crypto",
+                    exchange=None,
+                    provider="Kraken",
+                )
+            ]
+
+        monkeypatch.setattr(backtide.live, "list_live_instruments", list_live_instruments)
+
+        result = BacktideServices().live_instruments("kraken", limit=50_000)
+
+        assert captured == {"provider": "kraken", "limit": 10_000}
+        assert result[0]["symbol"] == "ADA-USD"
+        assert result[0]["name"] == "Cardano"
+
+    def test_bootstrap_uses_configured_base_currency_for_experiments(self, monkeypatch):
+        """New experiment defaults inherit the application's configured currency."""
+        import backtide.config
+
+        cfg = SimpleNamespace(
+            general=SimpleNamespace(base_currency="EUR"),
+            data=SimpleNamespace(dataframe_library=SimpleNamespace(class_name="DataFrame")),
+            display=SimpleNamespace(
+                logokit_api_key=None,
+                timezone="UTC",
+                date_format="YYYY-MM-DD",
+                datetime_format=lambda: "YYYY-MM-DD HH:mm",
+            ),
+        )
+        monkeypatch.setattr(backtide.config, "get_config", lambda: cfg)
+        services = BacktideServices()
+        monkeypatch.setattr(services, "strategy_catalog", lambda: {"saved": []})
+        monkeypatch.setattr(services, "indicator_catalog", lambda: {"saved": []})
+        monkeypatch.setattr(services, "metric_catalog", lambda: {"builtin": [], "saved": []})
+        monkeypatch.setattr(services, "live_capabilities", lambda: {"providers": {}})
+
+        result = services.bootstrap()
+
+        assert result["defaults"]["portfolio"]["base_currency"] == "EUR"
 
     def test_download_converts_browser_dates_before_dispatch(self, monkeypatch):
         """Download jobs pass inclusive UTC seconds to the data API."""
@@ -498,11 +621,16 @@ end_date = "2024-03-01"
             ),
         )
 
-        result = BacktideServices().experiment("exp-1")
+        services = BacktideServices()
+        monkeypatch.setattr(services, "metric_catalog", lambda: {"builtin": [], "saved": []})
+
+        result = services.experiment("exp-1")
 
         assert captured == {"experiment_id": "exp-1", "include_equity_curve": False}
         assert "equity_curve" not in result["runs"][0]
         assert result["runs"][0]["metrics"] == {"return": 0.1}
+        assert "orders" not in result["runs"][0]
+        assert result["runs"][0]["order_count"] == 0
         assert result["config_metadata"] == {
             "symbols": 2,
             "instrument_type": "stocks",
@@ -511,6 +639,44 @@ end_date = "2024-03-01"
             "start_date": "2024-01-01",
             "end_date": "2024-03-01",
         }
+
+    def test_experiment_orders_are_returned_newest_first_in_bounded_pages(self, monkeypatch):
+        """Order details load in stable newest-first batches instead of the main payload."""
+        orders = [
+            SimpleNamespace(
+                timestamp=index,
+                status="Filled",
+                fill_price=100.0,
+                commission=0.0,
+                pnl=float(index),
+                reason=None,
+                order=SimpleNamespace(
+                    id=f"order-{index}",
+                    symbol="AAPL",
+                    order_type="Market",
+                    quantity=1.0,
+                    price=None,
+                    limit_price=None,
+                ),
+            )
+            for index in range(205)
+        ]
+        run = SimpleNamespace(strategy_id="run-1", orders=orders)
+        services = BacktideServices()
+        monkeypatch.setattr(services, "_query_result_runs", lambda _experiment_id: [run])
+
+        first = services.experiment_orders("exp-1", "run-1")
+        last = services.experiment_orders("exp-1", "run-1", offset=200, limit=100)
+
+        assert first["total"] == 205
+        assert first["has_more"] is True
+        assert len(first["orders"]) == 100
+        assert first["orders"][0]["timestamp"] == 204
+        assert first["orders"][-1]["timestamp"] == 105
+        assert len(last["orders"]) == 5
+        assert last["orders"][0]["timestamp"] == 4
+        assert last["orders"][-1]["timestamp"] == 0
+        assert last["has_more"] is False
 
     def test_experiment_detail_distinguishes_empty_and_missing_logs(
         self, monkeypatch, tmp_path: Path
@@ -541,6 +707,7 @@ end_date = "2024-03-01"
         )
 
         services = BacktideServices()
+        monkeypatch.setattr(services, "metric_catalog", lambda: {"builtin": [], "saved": []})
         detail = services.experiment("exp-1")
         assert detail["logs"] == ""
         assert detail["logs_truncated"] is False
@@ -579,12 +746,71 @@ end_date = "2024-03-01"
             ),
         )
 
-        detail = BacktideServices().experiment("exp-1")
+        services = BacktideServices()
+        monkeypatch.setattr(services, "metric_catalog", lambda: {"builtin": [], "saved": []})
+
+        detail = services.experiment("exp-1")
 
         assert detail["logs_truncated"] is True
         assert len(detail["logs"].splitlines()) == 1_000
         assert detail["logs"].startswith("log line 1000")
         assert detail["logs"].endswith("log line 1999")
+
+    def test_experiment_log_download_returns_the_complete_file(self, monkeypatch, tmp_path: Path):
+        """Full-log downloads are not limited by the experiment-detail preview."""
+        experiment = tmp_path / "experiments" / "exp-1"
+        experiment.mkdir(parents=True)
+        full_log = "\n".join(f"log line {index}" for index in range(2_000))
+        (experiment / "logs.txt").write_text(full_log, encoding="utf-8")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.config",
+            SimpleNamespace(
+                get_config=lambda: SimpleNamespace(
+                    data=SimpleNamespace(storage_path=str(tmp_path))
+                )
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.storage",
+            SimpleNamespace(
+                query_experiments=lambda _experiment_id: [
+                    {"id": "exp-1", "name": "Momentum / study"}
+                ]
+            ),
+        )
+
+        filename, body = BacktideServices().experiment_log("exp-1")
+
+        assert filename == "Momentum _ study-logs.txt"
+        assert body.decode() == full_log
+
+    def test_dashboard_uses_enriched_recent_experiment_metrics(self, monkeypatch):
+        """Dashboard activity keeps the configured primary metric name and value."""
+        recent = [{"id": "exp-1", "primary_metric_name": "CAGR", "primary_metric_value": 0.2}]
+        captured = {}
+        services = BacktideServices()
+
+        def experiments(search=None, limit=100):
+            captured.update(search=search, limit=limit)
+            return recent
+
+        monkeypatch.setattr(services, "experiments", experiments)
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.storage",
+            SimpleNamespace(
+                query_bars_summary=list,
+                query_experiments=lambda: [{"id": "exp-1"}],
+            ),
+        )
+
+        result = services.dashboard()
+
+        assert captured == {"search": None, "limit": 6}
+        assert result["experiments"] == recent
 
     def test_experiment_summaries_include_lightweight_strategy_metrics(self, monkeypatch):
         """Result cards include per-strategy metrics without loading equity curves."""
@@ -626,6 +852,38 @@ end_date = "2024-03-01"
                 "error": None,
             }
         ]
+
+    def test_experiment_summaries_only_enrich_the_requested_page(self, monkeypatch):
+        """Experiment paging fetches and enriches only the requested ten-item slice."""
+        captured = {}
+        rows = [{"id": f"exp-{index}", "name": f"Study {index}"} for index in range(15)]
+        enriched = []
+
+        def query_experiments(**kwargs):
+            captured.update(kwargs)
+            return rows[: kwargs["limit"]]
+
+        def query_strategy_runs(experiment_id, *, include_equity_curve=True):
+            enriched.append((experiment_id, include_equity_curve))
+            return []
+
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.storage",
+            SimpleNamespace(
+                query_experiments=query_experiments,
+                query_strategy_runs=query_strategy_runs,
+            ),
+        )
+        services = BacktideServices()
+        monkeypatch.setattr(services, "metric_catalog", dict)
+        monkeypatch.setattr(services, "_primary_metric_summary", lambda *_args: {})
+
+        result = services.experiments(search="study", limit=10, offset=10)
+
+        assert captured == {"search": "study", "limit": 20}
+        assert [item["id"] for item in result] == [f"exp-{index}" for index in range(10, 15)]
+        assert enriched == [(f"exp-{index}", False) for index in range(10, 15)]
 
     def test_required_indicator_catalog_exposes_auto_injected_metadata(self, monkeypatch):
         """Saved strategies describe indicators that the engine injects automatically."""
@@ -942,14 +1200,18 @@ class TestLiveCapabilities:
     def test_reports_coinbase_support_per_interval(self, monkeypatch):
         """Coinbase remains selectable when its supported interval is chosen."""
 
-        def provider_support(provider, interval):
-            supported = provider != "yahoo" and (provider != "coinbase" or interval == "5m")
-            return supported, "Supported." if supported else "Unsupported interval."
+        class Feed:
+            def __init__(self, provider, _symbols, interval):
+                if provider == "yahoo" or (provider == "coinbase" and interval != "5m"):
+                    raise ValueError("Unsupported interval.")
+
+            def cancel(self):
+                return None
 
         monkeypatch.setitem(
             sys.modules,
             "backtide.live",
-            SimpleNamespace(provider_live_support=provider_support),
+            SimpleNamespace(LiveMarketFeed=Feed),
         )
 
         capabilities = BacktideServices().live_capabilities()
@@ -966,16 +1228,18 @@ class TestLiveTradingManager:
 
     def test_start_rejects_unsupported_provider(self, monkeypatch):
         """A provider capability failure is returned before a thread starts."""
+
+        class UnsupportedFeed:
+            def __init__(self, _provider, _symbols, _interval):
+                raise ValueError("No WebSocket feed.")
+
         monkeypatch.setitem(
             sys.modules,
             "backtide.live",
             SimpleNamespace(
+                LiveMarketFeed=UnsupportedFeed,
                 PaperTradingConfig=object,
                 PaperTradingSession=object,
-                provider_live_support=lambda _provider, _interval: (
-                    False,
-                    "No WebSocket feed.",
-                ),
             ),
         )
 

@@ -5,8 +5,14 @@
     :: signature
     :: head
     :: table:
-        - attributes
+        - parameters
     :: see also
+
+<br>
+
+## Example
+
+:: examples
 
 <br>
 
@@ -19,4 +25,3 @@
         - cancel
         - reset
         - is_cancelled
-

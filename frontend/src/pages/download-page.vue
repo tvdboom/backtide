@@ -1,10 +1,10 @@
 <template>
   <div class="page narrow-page download-page">
-    <section class="page-intro"><div><span class="eyebrow">Market data</span><h2>Download historical bars</h2><p>Resolve instruments and fill the local data store from your configured provider.</p></div></section>
+    <section class="page-intro"><div><h2>Download historical bars</h2><p>Resolve instruments and fill the local data store from your configured provider.</p></div></section>
     <form class="panel form-section" @submit.prevent="download">
       <div class="segmented wide-control"><button v-for="type in enums.instrument_types" :key="type" type="button" :class="{ active: form.instrument_type === optionValue('instrument_type', type) }" @click="setType(type)"><component :is="instrumentTypeIcon(type)" :size="16" />{{ type }}</button></div>
       <div class="form-grid two">
-        <label class="wide symbol-select-field">Symbols<SearchSelect :key="form.instrument_type" v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" :loading="loadingInstruments" allow-custom input-id="download-symbols" label="Download symbols" placeholder="Search symbols or company names…" /><small class="logo-attribution">Selected logos provided by <a href="https://parqet.com/api" target="_blank" rel="noreferrer">Parqet</a>.</small></label>
+        <label class="wide symbol-select-field">Symbols<SearchSelect :key="form.instrument_type" v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" :loading="loadingInstruments" allow-custom input-id="download-symbols" label="Download symbols" placeholder="Search symbols or company names…" /></label>
         <label class="wide">Intervals<SearchSelect v-model="form.intervals" :options="enums.intervals" plain-options placeholder="Choose intervals…" /></label>
         <label class="toggle-label"><span>Full available history<small>Provider limits still apply by interval.</small></span><input v-model="form.full_history" type="checkbox" class="toggle" /></label>
         <span />
@@ -71,7 +71,7 @@ import { ArrowLeftRight, ArrowRight, BarChart3, Bitcoin, ChartCandlestick, Chevr
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, post, query } from '../api'
 import SearchSelect from '../components/search-select.vue'
-import { experimentOptionValue, formatConfiguredDate, formatDaySpan, instrumentLogoUrl, selectedInstrumentLogoUrl } from '../state'
+import { experimentOptionValue, formatConfiguredDate, formatDaySpan, instrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
@@ -112,7 +112,7 @@ const logos = computed(() => {
 })
 const selectedLogos = computed(() => Object.fromEntries(form.symbols.map(symbol => [
   symbol,
-  selectedInstrumentLogoUrl(symbol, form.instrument_type)
+  instrumentLogoUrl(symbol, form.instrument_type, props.bootstrap.display.logokit_api_key)
 ])))
 const jobActive = computed(() => ['queued', 'running'].includes(job.value?.status))
 const jobTitle = computed(() => {

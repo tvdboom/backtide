@@ -3,14 +3,38 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LivePage from './live-page.vue'
 
-const { api, post } = vi.hoisted(() => ({ api: vi.fn(), post: vi.fn() }))
+const { api, post, query } = vi.hoisted(() => ({
+  api: vi.fn(),
+  post: vi.fn(),
+  query: vi.fn()
+}))
 
-vi.mock('../api', () => ({ api, post }))
+vi.mock('../api', () => ({ api, post, query }))
+vi.mock('../components/chart-panel.vue', () => ({
+  default: {
+    name: 'ChartPanelStub',
+    props: { figure: Object, emptyMessage: String },
+    template: '<div class="chart-stub" />'
+  }
+}))
 
 const supported = reason => ({ supported: true, reason })
 const unsupported = reason => ({ supported: false, reason })
+const liveInstrumentCatalog = [
+  { symbol: 'ADA-USD', name: 'Cardano', instrument_type: 'Crypto', provider: 'Kraken' },
+  { symbol: 'BTC-USD', name: 'Bitcoin', instrument_type: 'Crypto', provider: 'Kraken' },
+  { symbol: 'ETH-USD', name: 'Ethereum', instrument_type: 'Crypto', provider: 'Kraken' }
+]
 const bootstrap = {
-  enums: { intervals: ['1m', '5m'] },
+  defaults: { portfolio: { initial_cash: 10000, base_currency: 'EUR' } },
+  enums: {
+    intervals: ['1m', '5m'],
+    currencies: [
+      { code: 'EUR', name: 'Euro', country_code: 'eu', flag: '🇪🇺' },
+      { code: 'USD', name: 'United States Dollar', country_code: 'us', flag: '🇺🇸' }
+    ]
+  },
+  display: { logokit_api_key: 'test-token' },
   live: {
     providers: {
       kraken: {
@@ -52,6 +76,7 @@ describe('live page', () => {
       status: 'idle', config: {}, snapshot: {}, updates: [], error: null
     })
     post.mockReset()
+    query.mockReset().mockResolvedValue(liveInstrumentCatalog)
   })
 
   it('uses a valid and editable initial cash default', async () => {
@@ -59,18 +84,265 @@ describe('live page', () => {
     await flushPromises()
     const input = wrapper.get('#live-initial-cash').element
 
-    expect(input.value).toBe('100000')
+    expect(input.value).toBe('10000')
     expect(input.min).toBe('0')
-    expect(input.step).toBe('0.01')
+    expect(input.step).toBe('100')
     expect(input.validity.valid).toBe(true)
+    input.stepUp()
+    expect(input.value).toBe('10100')
+    input.stepDown()
+    expect(input.value).toBe('10000')
   })
 
-  it('prevents choosing providers without a WebSocket for the selected interval', async () => {
+  it('orders the session fields in the requested row sequence', async () => {
     const wrapper = mount(LivePage, { props: { bootstrap } })
     await flushPromises()
 
-    expect(wrapper.get('option[value="yahoo"]').element.disabled).toBe(true)
-    expect(wrapper.get('option[value="coinbase"]').element.disabled).toBe(true)
-    expect(wrapper.get('option[value="kraken"]').element.disabled).toBe(false)
+    const fields = wrapper.get('.form-grid').element.children
+    const labels = Array.from(fields, field => {
+      if (field.tagName === 'FIELDSET') return field.querySelector('legend').textContent
+      return field.firstElementChild?.tagName === 'SPAN'
+        ? field.firstElementChild.childNodes[0].textContent
+        : field.childNodes[0].textContent
+    })
+
+    expect(labels).toEqual([
+      'Provider',
+      'Interval',
+      'Symbols',
+      'Initial cash',
+      'Base currency',
+      'Strategy',
+      'Commission (%)',
+      'Fixed commission',
+      'History limit',
+      'Slippage (%)',
+      'Allow short positions',
+      'Allow margin',
+      'Trade partial bars'
+    ])
+    expect(fields[1].classList.contains('wide')).toBe(true)
+    expect(fields[2].classList.contains('wide')).toBe(true)
+    expect(fields[5].classList.contains('wide')).toBe(true)
+  })
+
+  it('uses the searchable currency selector with flags', async () => {
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    const trigger = wrapper.get('#live-base-currency')
+    expect(trigger.text()).toContain('EUR')
+    expect(trigger.get('img').attributes('src')).toBe('https://flagcdn.com/eu.svg')
+
+    await trigger.trigger('click')
+    const search = wrapper.get('[aria-label="Search base currencies"]')
+    await search.setValue('euro')
+    await wrapper.get('[role="option"]').trigger('click')
+
+    expect(trigger.text()).toContain('EUR')
+    expect(trigger.get('img').attributes('src')).toBe('https://flagcdn.com/eu.svg')
+  })
+
+  it('uses provider logos and selects the first supported Coinbase interval', async () => {
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    const coinbase = wrapper.get('[aria-label="Coinbase"]')
+
+    expect(wrapper.find('[aria-label="Yahoo, unavailable"]').exists()).toBe(false)
+    expect(coinbase.element.disabled).toBe(false)
+    expect(coinbase.get('img').attributes('src')).toBe('/providers/coinbase.png')
+
+    await coinbase.trigger('click')
+
+    const interval = wrapper.get('select')
+    expect(interval.element.value).toBe('5m')
+    expect(interval.findAll('option').map(option => option.text())).toEqual(['5m'])
+    expect(coinbase.attributes('aria-checked')).toBe('true')
+    expect(query).toHaveBeenLastCalledWith('/api/live/instruments', {
+      provider: 'coinbase',
+      limit: 10000
+    })
+    expect(wrapper.find('.provider-support').exists()).toBe(false)
+    expect(wrapper.get('.safety-panel').text()).not.toContain('Coinbase live candles')
+    expect(wrapper.find('.safety-panel .callout').exists()).toBe(false)
+  })
+
+  it('shows symbol logos in the menu and selected tags', async () => {
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    expect(wrapper.get('.selected-symbol-logo img').attributes('src')).toContain(
+      'img.logokit.com/crypto/BTC'
+    )
+
+    await wrapper.get('#live-symbols').trigger('focus')
+
+    expect(wrapper.findAll('.search-option-logo img').map(image => image.attributes('src'))).toContain(
+      'https://img.logokit.com/crypto/ETH?token=test-token'
+    )
+    expect(wrapper.find('.logo-attribution').exists()).toBe(false)
+  })
+
+  it('searches the selected provider catalog beyond the former static shortlist', async () => {
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    expect(query).toHaveBeenCalledWith('/api/live/instruments', {
+      provider: 'kraken',
+      limit: 10000
+    })
+
+    const search = wrapper.get('#live-symbols')
+    await search.trigger('focus')
+    await search.setValue('cardano')
+
+    const options = wrapper.findAll('.search-menu button')
+    expect(options).toHaveLength(1)
+    expect(options[0].text()).toContain('ADA-USD')
+    expect(options[0].text()).toContain('Cardano')
+  })
+
+  it('plots the WebSocket close price with OHLCV details while monitoring', async () => {
+    api.mockResolvedValue({
+      status: 'running',
+      config: {
+        provider: 'kraken', interval: '1m', symbols: ['BTC-USD'], strategy: '',
+        config: { initial_cash: 10_000, base_currency: 'EUR' }
+      },
+      snapshot: {
+        latest_prices: { 'BTC-USD': 60_000 }, equity: 10_000,
+        portfolio: { positions: {}, cash: { EUR: 10_000 }, orders: [] }
+      },
+      updates: [
+        {
+          market: {
+            symbol: 'BTC-USD', received_ts: 1_700_000_000,
+            open: 59_900, high: 60_100, low: 59_800, close: 60_000,
+            volume: 2.5, is_final: false
+          },
+          fills: [], snapshot: { equity: 10_000 }
+        },
+        {
+          market: {
+            symbol: 'BTC-USD', received_ts: 1_700_000_060,
+            open: 60_000, high: 60_300, low: 59_950, close: 60_250,
+            volume: 3, is_final: true
+          },
+          fills: [], snapshot: { equity: 10_000 }
+        }
+      ],
+      error: null
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    const chart = wrapper.getComponent({ name: 'ChartPanelStub' })
+    const figure = chart.props('figure')
+    expect(chart.props('emptyMessage')).toBe('')
+    expect(figure.data[0].name).toBe('BTC-USD')
+    expect(figure.data[0].y).toEqual([60_000, 60_250])
+    expect(figure.data[0].customdata[1]).toEqual([
+      60_000, 60_300, 59_950, 60_250, 3, 'Closed candle'
+    ])
+    expect(figure.data[0].hovertemplate).toContain('Volume')
+    expect(wrapper.get('.live-chart').text()).toContain('Live market prices')
+    expect(wrapper.get('.live-chart').text()).not.toContain('Live updates')
+    expect(wrapper.findAll('.event-volume').map(value => value.text())).toEqual([
+      'volume 3',
+      'volume 2.5'
+    ])
+    wrapper.unmount()
+  })
+
+  it('plots net profit and loss after a filled strategy order', async () => {
+    api.mockResolvedValue({
+      status: 'running',
+      config: {
+        provider: 'kraken', interval: '1m', symbols: ['BTC-USD'], strategy: 'Momentum',
+        config: { initial_cash: 10_000, base_currency: 'EUR' }
+      },
+      snapshot: {
+        latest_prices: { 'BTC-USD': 110 }, equity: 10_025,
+        portfolio: { positions: { 'BTC-USD': 1 }, cash: { EUR: 9_915 }, orders: [] }
+      },
+      updates: [
+        {
+          market: { symbol: 'BTC-USD', received_ts: 1_700_000_000 },
+          fills: [{ status: 'Filled', order: { symbol: 'BTC-USD' } }],
+          snapshot: { equity: 10_000 }
+        },
+        {
+          market: { symbol: 'BTC-USD', received_ts: 1_700_000_060 },
+          fills: [], snapshot: { equity: 10_025 }
+        }
+      ],
+      error: null
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    const chart = wrapper.getComponent({ name: 'ChartPanelStub' })
+    expect(chart.props('emptyMessage')).toBe('')
+    expect(chart.props('figure').data[0].y).toEqual([0, 25])
+    expect(chart.props('figure').data[0].fill).toBeUndefined()
+    expect(chart.props('figure').layout.yaxis.title).toBe('Net P&L (EUR)')
+    wrapper.unmount()
+  })
+
+  it('renders a multi-symbol live watchlist and explains bounded rejections', async () => {
+    const updates = Array.from({ length: 15 }, (_, index) => ({
+      market: {
+        symbol: 'BTC-USDT',
+        received_ts: 1_700_000_000 + index,
+        close_ts: 1_700_000_060 + index,
+        is_final: true,
+        close: 60_000,
+        volume: 2
+      },
+      fills: [{
+        timestamp: 1_700_000_060 + index,
+        status: 'Rejected',
+        reason: 'insufficient cash',
+        order: { id: `order-${index}`, symbol: 'BTC-USDT' }
+      }],
+      snapshot: { equity: 10_000 }
+    }))
+    api.mockResolvedValue({
+      status: 'running',
+      config: {
+        provider: 'binance',
+        interval: '1m',
+        symbols: ['BTC-USDT', 'ETH-USDT'],
+        strategy: 'Momentum',
+        config: { base_currency: 'EUR' }
+      },
+      snapshot: {
+        latest_prices: { 'BTC-USDT': 60_000 },
+        equity: 10_000,
+        realized_pnl: 0,
+        unrealized_pnl: 0,
+        processed_bars: 15,
+        portfolio: { positions: {}, cash: { EUR: 10_000 }, orders: [] }
+      },
+      updates,
+      error: null
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    const quotes = wrapper.findAll('.quote-row')
+    expect(quotes).toHaveLength(2)
+    expect(quotes[0].get('img').attributes('src')).toContain('img.logokit.com/crypto/BTC')
+    expect(quotes[0].text()).toContain('60,000')
+    expect(quotes[1].get('img').attributes('src')).toContain('img.logokit.com/crypto/ETH')
+    expect(quotes[1].text()).toContain('Waiting for price')
+    expect(wrapper.get('.live-metrics').text()).toContain('€10,000.00')
+
+    const executions = wrapper.findAll('.live-execution-table tbody tr')
+    expect(executions).toHaveLength(12)
+    expect(executions[0].get('.badge').classes()).toContain('error')
+    expect(executions[0].text()).toContain('insufficient cash')
+    wrapper.unmount()
   })
 })

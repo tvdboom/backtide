@@ -54,8 +54,8 @@ tox:
 ty:
     uv run ty check
 
-# Build and serve the docs locally
-docs:
+# Build the current extension before serving its generated API documentation
+docs: build
     $env:PYTHONPATH="."; uv run mkdocs serve
 
 launch:

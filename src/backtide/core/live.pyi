@@ -9,11 +9,11 @@ __all__ = [
     "PaperTradingSnapshot",
     "PaperTradingUpdate",
     "collect_market_updates",
-    "provider_live_support",
+    "list_live_instruments",
 ]
 
 from backtide.core.backtest import Order, OrderStatus, Portfolio
-from backtide.core.data import Currency
+from backtide.core.data import Currency, Instrument
 
 class LiveMarketFeed:
     """Reusable, cancellable exchange market-data collector.
@@ -22,6 +22,41 @@ class LiveMarketFeed:
     retries disconnects with exponential backoff. Call `cancel` safely from
     another Python thread; cancellation latency is at most 250 ms and closes
     the retained socket. A later call requires `reset`.
+
+    Parameters
+    ----------
+    provider : str | Provider
+        Exchange WebSocket provider.
+
+    symbols : list[str]
+        Provider symbols to subscribe to.
+
+    interval : str | Interval, default="1m"
+        Candle interval. Coinbase supports `"5m"` only.
+
+    include_partial : bool, default=True
+        Include updates for candles that have not closed yet.
+
+    reconnect_attempts : int, default=5
+        Maximum connection attempts for a collection batch.
+
+    backoff_seconds : float, default=0.25
+        Initial reconnect delay in seconds.
+
+    See Also
+    --------
+    - backtide.live:collect_market_updates
+    - backtide.live:PaperTradingSession
+
+    Examples
+    --------
+    ```pycon
+    from backtide.live import LiveMarketFeed
+
+    feed = LiveMarketFeed("kraken", ["BTC-USD"], interval="1m")
+    feed.cancel()
+    print(feed.is_cancelled())
+    ```
 
     """
 
@@ -50,13 +85,78 @@ class LiveMarketFeed:
     def __str__(self, /):
         ...
     def cancel(self):
-        """Request cancellation of an in-progress `collect` call."""
-    def collect(self, max_events=1, timeout_seconds=30.0):
-        """Collect up to `max_events`, retrying transient disconnects."""
-    def is_cancelled(self):
-        """Whether cancellation has been requested."""
+        """Request cancellation of an in-progress `collect` call.
+
+        Examples
+        --------
+        ```pycon
+        from backtide.live import LiveMarketFeed
+
+        feed = LiveMarketFeed("kraken", ["BTC-USD"])
+        feed.cancel()
+        print(feed.is_cancelled())
+        ```
+
+        """
+    def collect(self, max_events=1, timeout_seconds=30.0) -> list[MarketUpdate]:
+        """Collect up to `max_events`, retrying transient disconnects.
+
+        Parameters
+        ----------
+        max_events : int, default=1
+            Maximum number of updates to return.
+
+        timeout_seconds : float, default=30
+            Maximum collection time in seconds.
+
+        Returns
+        -------
+        list[[MarketUpdate]]
+            Updates received before the event limit or timeout.
+
+        Examples
+        --------
+        ```pycon
+        from backtide.live import LiveMarketFeed
+
+        feed = LiveMarketFeed("binance", ["BTC-USDT"])
+        updates = feed.collect(max_events=10, timeout_seconds=5)  # norun
+        ```
+
+        """
+    def is_cancelled(self) -> bool:
+        """Whether cancellation has been requested.
+
+        Returns
+        -------
+        bool
+            `True` after `cancel` and `False` after construction or `reset`.
+
+        Examples
+        --------
+        ```pycon
+        from backtide.live import LiveMarketFeed
+
+        feed = LiveMarketFeed("kraken", ["BTC-USD"])
+        print(feed.is_cancelled())
+        ```
+
+        """
     def reset(self):
-        """Clear cancellation before intentionally reusing this feed."""
+        """Clear cancellation before intentionally reusing this feed.
+
+        Examples
+        --------
+        ```pycon
+        from backtide.live import LiveMarketFeed
+
+        feed = LiveMarketFeed("kraken", ["BTC-USD"])
+        feed.cancel()
+        feed.reset()
+        print(feed.is_cancelled())
+        ```
+
+        """
 
 class MarketUpdate:
     """A candle received from a live market-data connection.
@@ -104,6 +204,29 @@ class MarketUpdate:
 
     received_ts : int
         Local receipt Unix timestamp in seconds.
+
+    See Also
+    --------
+    - backtide.live:PaperTradingSession
+
+    Examples
+    --------
+    ```pycon
+    from backtide.live import MarketUpdate
+
+    market = MarketUpdate(
+        symbol="BTC-USD",
+        interval="1m",
+        open_ts=1_700_000_000,
+        close_ts=1_700_000_060,
+        open=100.0,
+        high=102.0,
+        low=99.0,
+        close=101.0,
+        volume=5.0,
+    )
+    print(market.close)
+    ```
 
     """
 
@@ -171,6 +294,24 @@ class PaperFill:
 
     reason : str
         Human-readable matching or rejection reason.
+
+    See Also
+    --------
+    - backtide.live:PaperTradingUpdate
+
+    Examples
+    --------
+    ```pycon
+    from backtide.backtest import Order
+    from backtide.live import MarketUpdate, PaperTradingSession
+
+    market = MarketUpdate(
+        "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+        100.0, 102.0, 99.0, 101.0,
+    )
+    fill = PaperTradingSession().on_bar(market, [Order("BTC-USD", 1.0)]).fills[0]
+    print(fill.fill_price)
+    ```
 
     """
 
@@ -241,6 +382,23 @@ class PaperTradingConfig:
     max_history : int, default=10000
         Maximum bars retained per symbol for strategy evaluation.
 
+    See Also
+    --------
+    - backtide.live:PaperTradingSession
+
+    Examples
+    --------
+    ```pycon
+    from backtide.live import PaperTradingConfig
+
+    config = PaperTradingConfig(
+        initial_cash=25_000,
+        commission_pct=0.1,
+        slippage=0.05,
+    )
+    print(config.initial_cash)
+    ```
+
     """
 
     allow_margin: bool
@@ -289,6 +447,26 @@ class PaperTradingSession:
         resting orders are matched on each processable candle. Explicit orders
         can also be passed to `on_bar`.
 
+    See Also
+    --------
+    - backtide.live:MarketUpdate
+    - backtide.live:PaperTradingConfig
+
+    Examples
+    --------
+    ```pycon
+    from backtide.live import MarketUpdate, PaperTradingSession
+
+    session = PaperTradingSession()
+    update = session.on_bar(
+        MarketUpdate(
+            "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+            100.0, 102.0, 99.0, 101.0, volume=5.0,
+        )
+    )
+    print(update.snapshot.equity)
+    ```
+
     """
 
     def __eq__(self, value, /):
@@ -332,9 +510,40 @@ class PaperTradingSession:
         [PaperTradingUpdate]
             Fills plus a complete mark-to-market account snapshot.
 
+        Examples
+        --------
+        ```pycon
+        from backtide.backtest import Order
+        from backtide.live import MarketUpdate, PaperTradingSession
+
+        session = PaperTradingSession()
+        market = MarketUpdate(
+            "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+            100.0, 102.0, 99.0, 101.0,
+        )
+        update = session.on_bar(market, [Order("BTC-USD", 1.0)])
+        print(update.processed)
+        ```
+
         """
-    def snapshot(self):
-        """Return the current account state without processing a candle."""
+    def snapshot(self) -> PaperTradingSnapshot:
+        """Return the current account state without processing a candle.
+
+        Returns
+        -------
+        [PaperTradingSnapshot]
+            Current cash, positions, prices, and profit-and-loss values.
+
+        Examples
+        --------
+        ```pycon
+        from backtide.live import PaperTradingSession
+
+        snapshot = PaperTradingSession().snapshot()
+        print(snapshot.equity)
+        ```
+
+        """
 
 class PaperTradingSnapshot:
     """Mark-to-market snapshot of a paper-trading account.
@@ -358,6 +567,20 @@ class PaperTradingSnapshot:
 
     processed_bars : int
         Number of updates that triggered matching or strategy evaluation.
+
+    See Also
+    --------
+    - backtide.live:PaperTradingSession
+
+    Examples
+    --------
+    ```pycon
+    from backtide.live import PaperTradingSession
+
+    snapshot = PaperTradingSession().snapshot()
+    print(snapshot.equity)
+    print(snapshot.portfolio.positions)
+    ```
 
     """
 
@@ -413,6 +636,25 @@ class PaperTradingUpdate:
     processed : bool
         Whether this update was new, valid, and eligible for trading.
 
+    See Also
+    --------
+    - backtide.live:MarketUpdate
+    - backtide.live:PaperTradingSession
+
+    Examples
+    --------
+    ```pycon
+    from backtide.live import MarketUpdate, PaperTradingSession
+
+    market = MarketUpdate(
+        "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+        100.0, 102.0, 99.0, 101.0,
+    )
+    update = PaperTradingSession().on_bar(market)
+    print(update.processed)
+    print(update.snapshot.equity)
+    ```
+
     """
 
     fills: list[PaperFill]
@@ -449,22 +691,95 @@ class PaperTradingUpdate:
 def collect_market_updates(
     provider,
     symbols,
-    interval=...,
+    interval='1m',
     max_events=1,
     timeout_seconds=30.0,
     include_partial=True,
-):
+) -> list[MarketUpdate]:
     """Collect a finite batch from an exchange WebSocket.
 
-    Yahoo Finance is intentionally rejected because it has no official live
-    market-data WebSocket. A timeout returns the updates collected so far.
+    A timeout returns the updates collected so far.
+
+    !!! warning "Yahoo Finance is not supported"
+        Yahoo Finance is intentionally rejected because it does not provide an
+        official live market-data WebSocket. Choose Binance, Coinbase, or Kraken.
+
+    Parameters
+    ----------
+    provider : str | [Provider]
+        Public WebSocket source. Use `"binance"`, `"coinbase"`, or `"kraken"`.
+        `"yahoo"` is accepted by historical-data APIs but rejected here.
+
+    symbols : list[str]
+        One or more canonical market symbols to subscribe to, such as
+        `"BTC-USDT"` for Binance or `"BTC-USD"` for Coinbase and Kraken.
+
+    interval : str | [Interval], default="1m"
+        Duration represented by each candle. Accepted strings are `"1m"`,
+        `"5m"`, `"15m"`, `"30m"`, `"1h"`, `"4h"`, `"1d"`, and `"1w"` where
+        supported by the provider. Coinbase live collection supports `"5m"` only.
+
+    max_events : int, default=1
+        Maximum number of updates to return across all subscribed symbols.
+
+    timeout_seconds : float, default=30
+        Maximum number of seconds to wait for the batch. When it expires, the
+        function returns any updates already received, including an empty list.
+
+    include_partial : bool, default=True
+        Whether to include in-progress candle revisions. Set to `False` to
+        receive only candles the provider has marked as final.
+
+    Returns
+    -------
+    list[[MarketUpdate]]
+        Updates received before the event limit or timeout.
+
+    See Also
+    --------
+    - backtide.live:LiveMarketFeed
+    - backtide.live:PaperTradingSession
+
+    Examples
+    --------
+    ```pycon
+    from backtide.live import collect_market_updates
+
+    updates = collect_market_updates(  # norun
+        "binance",
+        ["BTC-USDT"],
+        interval="1m",
+        max_events=10,
+        timeout_seconds=5,
+    )
+    ```
 
     """
 
-def provider_live_support(provider, interval=...):
-    """Report live WebSocket support without opening a connection.
+def list_live_instruments(provider, limit=10000) -> list[Instrument]:
+    """List the spot instruments available from a live WebSocket provider.
 
-    Returns `(supported, explanation)`. Coinbase supports five-minute candles
-    only; Yahoo has no supported WebSocket feed.
+    Parameters
+    ----------
+    provider : str | [Provider]
+        Live provider whose complete spot catalog should be returned. Yahoo
+        Finance is rejected because it has no supported live WebSocket.
+
+    limit : int, default=10000
+        Maximum number of instruments to return.
+
+    Returns
+    -------
+    list[[Instrument]]
+        Canonical symbols and metadata reported by the selected provider.
+
+    Examples
+    --------
+    ```pycon
+    from backtide.live import list_live_instruments
+
+    instruments = list_live_instruments("kraken", limit=100)
+    print(instruments[0].symbol)
+    ```
 
     """

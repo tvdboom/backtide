@@ -119,7 +119,7 @@ nav:
         - Application: user_guide/application.md
         - Data: user_guide/data.md
         - Experiment: user_guide/experiment.md
-        - Live and paper trading: user_guide/live_trading.md
+        - Paper trading: user_guide/live_trading.md
         - Strategies: user_guide/strategies.md
         - Indicators: user_guide/indicators.md
         - Metrics: user_guide/metrics.md
@@ -131,6 +131,7 @@ nav:
           - download: cli/download.md
           - launch: cli/launch.md
           - run-experiment: cli/run_experiment.md
+          - start-live-session: cli/start_live_session.md
     - API:
         - config:
             - get_config: api/config/get_config.md
@@ -165,8 +166,10 @@ nav:
         - backtest:
             - run_experiment: api/backtest/run_experiment.md
         - live:
+            - LiveMarketFeed: api/live/livemarketfeed.md
             - collect_market_updates: api/live/collect_market_updates.md
-            - provider_live_support: api/live/provider_live_support.md
+            - list_live_instruments: api/live/list_live_instruments.md
+            - PaperTradingSession: api/live/papertradingsession.md
         - storage:
             - delete_symbols: api/storage/delete_symbols.md
             - query_bars: api/storage/query_bars.md
@@ -239,11 +242,9 @@ nav:
                 - BaseMetric: api/models/metrics/basemetric.md
                 - MetricDefinition: api/models/metrics/metricdefinition.md
             - live:
-                - LiveMarketFeed: api/models/live/livemarketfeed.md
                 - MarketUpdate: api/models/live/marketupdate.md
                 - PaperFill: api/models/live/paperfill.md
                 - PaperTradingConfig: api/models/live/papertradingconfig.md
-                - PaperTradingSession: api/models/live/papertradingsession.md
                 - PaperTradingSnapshot: api/models/live/papertradingsnapshot.md
                 - PaperTradingUpdate: api/models/live/papertradingupdate.md
             - sizers:

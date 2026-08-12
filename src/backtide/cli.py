@@ -7,6 +7,8 @@ Description: Entry point for the CLI application.
 
 import json
 from pathlib import Path
+import tomllib
+from typing import Any
 
 import click
 import yaml
@@ -16,6 +18,7 @@ from backtide.backtest import run_experiment as run_backtest
 from backtide.core.config import get_config
 from backtide.core.utils import init_logging
 from backtide.data import download_bars, resolve_profiles
+from backtide.live import LiveMarketFeed, PaperTradingConfig, PaperTradingSession
 
 
 @click.group()
@@ -319,6 +322,184 @@ def run_experiment(config: Path, log_level: str, *, verbose: bool):
         for w in result.warnings:
             click.echo(f"   - {w}", err=True)
         raise SystemExit(1)
+
+
+def _read_live_session_config(path: Path) -> dict[str, Any]:
+    """Read a live-session configuration mapping from a supported file."""
+    text = path.read_text(encoding="utf-8")
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".toml":
+            data = tomllib.loads(text)
+        elif suffix == ".json":
+            data = json.loads(text)
+        elif suffix in (".yaml", ".yml"):
+            data = yaml.safe_load(text)
+        else:
+            raise click.UsageError(
+                f"Unsupported config extension {suffix!r}. Use .toml, .yaml/.yml or .json."
+            )
+    except (json.JSONDecodeError, tomllib.TOMLDecodeError, yaml.YAMLError) as exc:
+        raise click.UsageError(f"Invalid live-session configuration: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise click.UsageError("The live-session configuration must be a mapping.")
+    return data
+
+
+def _load_live_strategy(name: Any, cfg: Any) -> Any:
+    """Load an optional saved strategy for a CLI live session."""
+    if name is None:
+        return None
+    if not isinstance(name, str) or not name.strip():
+        raise click.UsageError("strategy must be the name of a saved strategy.")
+
+    from backtide.strategies.utils import _load_stored_strategies
+
+    strategies = _load_stored_strategies(cfg)
+    if name not in strategies:
+        raise click.UsageError(f"Saved strategy {name!r} was not found.")
+    return strategies[name]
+
+
+@main.command(name="start-live-session")
+@click.argument(
+    "config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--log_level",
+    "-l",
+    help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
+)
+def start_live_session(config: Path, log_level: str | None) -> None:
+    """Start a WebSocket-backed paper-trading session from a configuration file.
+
+    Reads a live-session configuration from a `.toml`, `.yaml`/`.yml`, or
+    `.json` file, connects to the selected public exchange WebSocket, and feeds
+    normalized candles into a local [PaperTradingSession]. The command runs
+    until interrupted with Ctrl+C; no real orders are submitted.
+
+    Read more in the [paper-trading guide][paper-trading].
+
+    Parameters
+    ----------
+    config : Path
+        Path to a live-session configuration. Top-level fields are `provider`,
+        `symbols`, `interval`, optional saved `strategy`, `batch_size`, and
+        `timeout_seconds`. Put [PaperTradingConfig] fields under `paper`.
+
+    --log_level, -l : str, default="warn"
+        Minimum log level to emit. Choose from: `error`, `warn`, `info` or
+        `debug`.
+
+    See Also
+    --------
+    - backtide.live:LiveMarketFeed
+    - backtide.live:PaperTradingSession
+    - backtide.cli:run_experiment
+
+    Examples
+    --------
+    Create `live.toml`:
+
+    ```toml
+    provider = "kraken"
+    symbols = ["BTC-USD"]
+    interval = "1m"
+    strategy = "my-saved-strategy"
+
+    [paper]
+    initial_cash = 25000
+    commission_pct = 0.1
+    slippage = 0.05
+    ```
+
+    Start the session and press Ctrl+C to stop it:
+
+    ```console
+    backtide start-live-session live.toml
+    ```
+
+    """
+    cfg = get_config()
+    init_logging(log_level or cfg.general.log_level)
+    values = _read_live_session_config(config)
+
+    allowed = {
+        "provider",
+        "symbols",
+        "interval",
+        "strategy",
+        "paper",
+        "batch_size",
+        "timeout_seconds",
+    }
+    if unexpected := sorted(values.keys() - allowed):
+        raise click.UsageError(f"Unknown live-session field(s): {', '.join(unexpected)}.")
+
+    provider = values.get("provider")
+    symbols = values.get("symbols")
+    interval = values.get("interval", "1m")
+    paper = values.get("paper", {})
+    if not isinstance(provider, str) or not provider.strip():
+        raise click.UsageError("provider must be a non-empty string.")
+    if (
+        not isinstance(symbols, list)
+        or not symbols
+        or not all(isinstance(symbol, str) and symbol.strip() for symbol in symbols)
+    ):
+        raise click.UsageError("symbols must be a non-empty list of symbol strings.")
+    if not isinstance(interval, str) or not interval.strip():
+        raise click.UsageError("interval must be a non-empty string.")
+    if not isinstance(paper, dict):
+        raise click.UsageError("paper must be a mapping of PaperTradingConfig fields.")
+
+    try:
+        batch_size = int(values.get("batch_size", 10))
+        timeout_seconds = float(values.get("timeout_seconds", 5.0))
+    except (TypeError, ValueError) as exc:
+        raise click.UsageError("batch_size and timeout_seconds must be numeric.") from exc
+    if batch_size <= 0 or timeout_seconds <= 0:
+        raise click.UsageError("batch_size and timeout_seconds must be positive.")
+
+    feed = None
+    try:
+        trading_config = PaperTradingConfig(**paper)
+        strategy = _load_live_strategy(values.get("strategy"), cfg)
+        feed = LiveMarketFeed(provider, symbols, interval, include_partial=True)
+        session = PaperTradingSession(trading_config, strategy)
+        click.echo(
+            f"Starting live paper session for {', '.join(symbols)} on "
+            f"{provider} ({interval}). Press Ctrl+C to stop."
+        )
+
+        try:
+            while True:
+                for market in feed.collect(
+                    max_events=batch_size,
+                    timeout_seconds=timeout_seconds,
+                ):
+                    update = session.on_bar(market)
+                    if update.processed:
+                        click.echo(
+                            f"{market.symbol} {market.interval} close={market.close:.8g} "
+                            f"equity={update.snapshot.equity:.8g} fills={len(update.fills)}"
+                        )
+        except KeyboardInterrupt:
+            click.echo("\nStopping live paper session...")
+
+        snapshot = session.snapshot()
+        click.echo(
+            f"Stopped - processed {snapshot.processed_bars} market "
+            f"update{'s' if snapshot.processed_bars != 1 else ''}; "
+            f"final equity={snapshot.equity:.8g}."
+        )
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        if feed is not None:
+            feed.cancel()
 
 
 if __name__ == "__main__":

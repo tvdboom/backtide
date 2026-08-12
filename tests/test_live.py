@@ -5,16 +5,19 @@ Description: Tests for live market data and paper trading.
 
 """
 
+import inspect
+
 import pytest
 
 from backtide.backtest import Order, OrderStatus
 from backtide.data import Currency
+import backtide.live as live
 from backtide.live import (
     LiveMarketFeed,
     MarketUpdate,
     PaperTradingConfig,
     PaperTradingSession,
-    provider_live_support,
+    collect_market_updates,
 )
 
 
@@ -38,21 +41,40 @@ def market(close: float, timestamp: int = 1_700_000_000, *, is_final: bool = Tru
 class TestProviderSupport:
     """Tests for provider capability reporting."""
 
-    def test_yahoo_has_explicit_websocket_limitation(self):
-        """Test that Yahoo is rejected with an actionable explanation."""
-        supported, explanation = provider_live_support("yahoo", "1m")
-        assert not supported
-        assert "does not expose" in explanation
+    def test_capability_helper_is_not_public(self):
+        """Test that provider capability discovery stays an application detail."""
+        assert not hasattr(live, "provider_live_support")
 
-    def test_coinbase_requires_five_minute_candles(self):
-        """Test the Coinbase public candle interval restriction."""
-        assert provider_live_support("coinbase", "5m")[0]
-        assert not provider_live_support("coinbase", "1m")[0]
+    def test_collector_signature_has_concrete_interval_default(self):
+        """Test the public collector signature never exposes an opaque ellipsis."""
+        signature = inspect.signature(collect_market_updates)
+
+        assert signature.parameters["interval"].default == "1m"
+
+    def test_collector_docstring_contains_api_reference_sections(self):
+        """Test the collector exposes parameters and an example to AutoDocs."""
+        docstring = inspect.getdoc(collect_market_updates)
+
+        assert docstring is not None
+        assert "Parameters\n----------" in docstring
+        assert "provider : str | [Provider]" in docstring
+        assert "include_partial : bool, default=True" in docstring
+        assert "Examples\n--------" in docstring
+        assert "updates = collect_market_updates(" in docstring
 
     def test_feed_validates_before_connecting(self):
         """Test invalid providers without making a network request."""
         with pytest.raises(ValueError, match="does not expose"):
             LiveMarketFeed("yahoo", ["AAPL"])
+
+    def test_coinbase_accepts_only_five_minute_candles(self):
+        """Test the Coinbase candle restriction through the public feed API."""
+        with pytest.raises(ValueError, match="five-minute candles only"):
+            LiveMarketFeed("coinbase", ["BTC-USD"], "1m")
+
+        feed = LiveMarketFeed("coinbase", ["BTC-USD"], "5m")
+
+        assert not feed.is_cancelled()
 
 
 class TestPaperTradingSession:

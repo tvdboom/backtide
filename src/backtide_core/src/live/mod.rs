@@ -1,7 +1,7 @@
 //! Live market data and deterministic paper trading.
 
 use crate::live::interface::{
-    collect_market_updates, provider_live_support, LiveMarketFeed, PaperTradingSession,
+    collect_market_updates, list_live_instruments, LiveMarketFeed, PaperTradingSession,
 };
 use crate::live::models::*;
 use pyo3::prelude::*;
@@ -24,7 +24,7 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PaperTradingUpdate>()?;
 
     m.add_function(wrap_pyfunction!(collect_market_updates, &m)?)?;
-    m.add_function(wrap_pyfunction!(provider_live_support, &m)?)?;
+    m.add_function(wrap_pyfunction!(list_live_instruments, &m)?)?;
 
     parent.add_submodule(&m)?;
     parent.py().import("sys")?.getattr("modules")?.set_item("backtide.core.live", &m)?;

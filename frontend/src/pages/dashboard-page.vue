@@ -36,7 +36,7 @@
         <button v-for="experiment in data?.experiments" :key="experiment.id" class="activity-row" @click="openExperiment(experiment)">
           <span class="experiment-avatar" aria-hidden="true">{{ experiment.icon || '🧪' }}</span>
           <span><strong>{{ experiment.name }}</strong><small>{{ time(experiment.started_at) }}</small></span>
-          <span class="sharpe-value"><small>Sharpe</small><strong :class="sharpeTone(experiment.best_sharpe)">{{ sharpe(experiment.best_sharpe) }}</strong></span>
+          <span class="primary-metric-value"><small>{{ experiment.primary_metric_name || 'Sharpe' }}</small><strong :class="metricTone(primaryMetricValue(experiment))">{{ formatResultMetric(primaryMetricValue(experiment), experiment.primary_metric_percentage) }}</strong></span>
           <span class="badge" :class="String(experiment.status).toLowerCase()">{{ experiment.status }}</span>
           <ChevronRight :size="17" />
         </button>
@@ -63,7 +63,7 @@
 import { ArrowUpRight, Beaker, ChevronRight, Database, FlaskConical, Radio, Rows3, Shapes, TriangleAlert, WalletCards } from 'lucide-vue-next'
 import { computed, onActivated, onMounted, ref } from 'vue'
 import { api } from '../api'
-import { formatConfiguredDateTime, instrumentLogoUrl } from '../state'
+import { formatConfiguredDateTime, formatResultMetric, instrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
@@ -79,12 +79,8 @@ const metrics = computed(() => [
 ])
 function format(value) { return new Intl.NumberFormat('en', { notation: Number(value) > 99999 ? 'compact' : 'standard' }).format(value || 0) }
 function time(value) { return formatConfiguredDateTime(value, props.bootstrap?.display, 'Recently') }
-function sharpe(value) {
-  if (value === null || value === undefined || value === '') return '—'
-  const number = Number(value)
-  return Number.isFinite(number) ? number.toFixed(2) : '—'
-}
-function sharpeTone(value) {
+function primaryMetricValue(experiment) { return experiment.primary_metric_value ?? experiment.best_sharpe }
+function metricTone(value) {
   if (value === null || value === undefined || value === '') return ''
   const number = Number(value)
   return Number.isFinite(number) ? (number > 0 ? 'positive' : number < 0 ? 'negative' : '') : ''

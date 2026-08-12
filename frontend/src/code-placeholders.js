@@ -81,6 +81,11 @@ export function metricCodePlaceholder(dataframeClass = 'pd.DataFrame') {
 
 
 class MyMetric(BaseMetric):
+    """Describe what this metric measures."""
+
+    percentage = False
+    higher_is_better = True
+
     def compute(self, equity_curve, trades):
         """Compute the metric value.
 

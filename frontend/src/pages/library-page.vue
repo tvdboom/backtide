@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <section class="page-intro">
-      <div><span class="eyebrow">Reusable logic</span><h2>{{ title }}</h2><p>Save built-in presets or bring your own Python implementation.</p></div>
+      <div><h2>{{ title }}</h2><p>Save built-in presets or bring your own Python implementation.</p></div>
       <button class="primary" @click="openAdd"><Plus :size="16" /> Add {{ singular.toLowerCase() }}</button>
     </section>
     <section class="toolbar panel compact">

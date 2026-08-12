@@ -58,6 +58,13 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                         catalog=self._first(query, "source") == "catalog",
                     )
                 )
+            elif path == "/api/live/instruments":
+                self._json(
+                    self.services.live_instruments(
+                        self._first(query, "provider") or "kraken",
+                        int(self._first(query, "limit") or 10_000),
+                    )
+                )
             elif path == "/api/bars":
                 self._json(
                     self.services.bars(
@@ -70,7 +77,27 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/storage":
                 self._json(self.services.storage())
             elif path == "/api/experiments":
-                self._json(self.services.experiments(self._first(query, "search")))
+                self._json(
+                    self.services.experiments(
+                        self._first(query, "search"),
+                        int(self._first(query, "limit") or 100),
+                        int(self._first(query, "offset") or 0),
+                    )
+                )
+            elif path.startswith("/api/experiments/") and path.endswith("/logs"):
+                experiment_id = unquote(path[len("/api/experiments/") : -len("/logs")])
+                filename, body = self.services.experiment_log(experiment_id)
+                self._download(filename, body)
+            elif path.startswith("/api/experiments/") and path.endswith("/orders"):
+                experiment_id = unquote(path[len("/api/experiments/") : -len("/orders")])
+                self._json(
+                    self.services.experiment_orders(
+                        experiment_id,
+                        self._first(query, "strategy_id"),
+                        int(self._first(query, "offset") or 0),
+                        int(self._first(query, "limit") or 100),
+                    )
+                )
             elif path.startswith("/api/experiments/"):
                 self._json(self.services.experiment(unquote(path.rsplit("/", 1)[1])))
             elif path == "/api/jobs":
@@ -227,6 +254,17 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _download(self, filename: str, body: bytes) -> None:
+        """Return a complete plain-text artifact as a browser download."""
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()

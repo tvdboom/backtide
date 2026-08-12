@@ -18,7 +18,7 @@ vi.mock('./pages/storage-page.vue', () => ({ default: { name: 'StoragePage', tem
 
 describe('App theme control', () => {
   beforeEach(() => {
-    api.mockClear()
+    api.mockReset().mockImplementation(() => new Promise(() => {}))
     localStorage.clear()
     location.hash = '#home'
     window.scrollTo = vi.fn()
@@ -53,6 +53,22 @@ describe('App theme control', () => {
     await downloadButton.trigger('click')
 
     expect(wrapper.get('[aria-label="Download state"]').element.value).toBe('INGA.AS')
+    wrapper.unmount()
+  })
+
+  it('shows an active live session in the top bar and opens paper trading', async () => {
+    api.mockImplementation(path => Promise.resolve(path === '/api/live' ? { status: 'running' } : {}))
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('Local engine')
+    const liveSession = wrapper.get('[aria-label="Open active paper trading session"]')
+    expect(liveSession.text()).toContain('Session live')
+    expect(liveSession.get('span').classes()).toContain('online')
+
+    await liveSession.trigger('click')
+
+    expect(location.hash).toBe('#live')
     wrapper.unmount()
   })
 })

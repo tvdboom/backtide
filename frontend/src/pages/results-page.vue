@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <section class="page-intro results-page-intro">
-      <div><span class="eyebrow">Backtest output</span><h2>Experiment results</h2><p>Compare the complete experiment first, then inspect metrics, trades, and execution for each strategy.</p></div>
+      <div><h2>Experiment results</h2><p>Compare the complete experiment first, then inspect metrics, trades, and execution for each strategy.</p></div>
       <button class="primary" @click="$emit('navigate', 'experiment')"><Plus :size="16" /> New experiment</button>
     </section>
     <section v-if="activeJobs.length" class="panel running-banner">
@@ -14,7 +14,9 @@
         <label class="results-status-filter"><span>Status</span><select v-model="statusFilter"><option>All</option><option>Success</option><option>Error</option></select></label>
         <span>{{ visibleExperiments.length }} experiment{{ visibleExperiments.length === 1 ? '' : 's' }}</span>
       </div>
-      <div v-if="visibleExperiments.length" class="experiment-result-list">
+      <div v-if="experimentsLoading" class="panel loading-screen results-list-loading" role="status"><span class="spinner"/> Loading experiments…</div>
+      <div v-else-if="experimentsError && !experiments.length" class="panel empty-state large error-state"><TriangleAlert :size="34"/><h3>Could not load experiments</h3><p>{{ experimentsError }}</p><button class="secondary" @click="load()">Retry</button></div>
+      <div v-else-if="visibleExperiments.length" class="experiment-result-list">
         <article v-for="item in visibleExperiments" :key="item.id" class="experiment-result-card panel" :class="{ expanded: expandedId === item.id }">
           <header class="experiment-result-summary">
             <div class="experiment-result-identity">
@@ -24,7 +26,7 @@
                 <div v-if="tags(item.tags).length" class="experiment-result-tags"><span v-for="tag in tags(item.tags)" :key="tag" class="result-tag">{{ tag }}</span></div>
                 <div class="experiment-result-meta">
                   <span><CalendarDays :size="14" />{{ date(item.started_at) }}</span>
-                  <span><Medal :size="14" />Best {{ item.primary_metric_name || 'Sharpe' }} <strong :class="tone(item.primary_metric_value ?? item.best_sharpe)">{{ formatResultMetric(item.primary_metric_value ?? item.best_sharpe, item.primary_metric_percentage) }}</strong></span>
+                  <span><Medal :size="14" />{{ item.primary_metric_name || 'Sharpe' }} <strong :class="tone(item.primary_metric_value ?? item.best_sharpe)">{{ formatResultMetric(item.primary_metric_value ?? item.best_sharpe, item.primary_metric_percentage) }}</strong></span>
                   <span><BrainCircuit :size="14" />{{ item.n_strategies || item.runs?.length || 0 }} {{ (item.n_strategies || item.runs?.length) === 1 ? 'strategy' : 'strategies' }}</span>
                 </div>
               </div>
@@ -48,6 +50,9 @@
         </article>
       </div>
       <div v-else class="panel empty-state large"><FlaskConical/><h3>No completed experiments</h3><p>Run an experiment to see strategy metrics here.</p></div>
+      <div v-if="!experimentsLoading && experimentsLoadingMore" class="table-load-state" role="status"><span class="spinner small"/> Loading more experiments…</div>
+      <div v-else-if="!experimentsLoading && experimentsError && experiments.length" class="table-load-state error-state"><span>{{ experimentsError }}</span><button class="text-button" type="button" @click="loadMoreExperiments">Retry</button></div>
+      <div v-else-if="!experimentsLoading && experimentsHasMore" ref="loadMoreSentinel" class="results-load-sentinel" aria-hidden="true" />
     </section>
     <section v-else class="result-detail-page">
         <button type="button" class="text-button results-back" @click="backToOverview"><ArrowLeft :size="16" /> Back to experiments</button>
@@ -122,9 +127,11 @@
             <div class="result-plot-description"><p>{{ activeStrategyTab.description }}</p></div>
             <div class="result-plot-stage" :class="{ 'has-options': isStrategyPlot && strategyTab === 'price' }">
               <ChartPanel v-if="isStrategyPlot" :figure="strategyFigure" :loading="strategyLoading" :error="strategyError" />
-              <div v-else class="data-table-wrap result-table" :class="{ 'result-orders-table': strategyTab === 'orders' }">
+              <div v-else class="data-table-wrap result-table" :class="{ 'result-orders-table': strategyTab === 'orders' }" @scroll.passive="loadOrdersOnScroll">
                 <table class="data-table"><thead><tr><th v-for="column in tableColumns" :key="column" :class="tableColumnClass(column)">{{ label(column) }}</th></tr></thead><tbody><tr v-for="(row, index) in tableRows" :key="index"><td v-for="column in tableColumns" :key="column" :class="tableCellClass(row, column)"><span v-if="strategyTab === 'orders' && column === 'symbol'" class="order-symbol-cell"><span class="order-symbol-logo"><img v-if="orderLogo(row) && !failedOrderLogos.has(row.symbol)" :src="orderLogo(row)" alt="" @error="markOrderLogoFailed(row.symbol)"/><span v-else aria-hidden="true">{{ String(row.symbol || '?').slice(0, 1) }}</span></span><strong>{{ row.symbol }}</strong></span><template v-else>{{ cell(row[column], column) }}</template></td></tr></tbody></table>
-                <div v-if="!tableRows.length" class="empty-state"><p>No {{ strategyTabLabel.toLowerCase() }} for this run.</p></div>
+                <div v-if="!tableRows.length && !(strategyTab === 'orders' && (ordersLoading || ordersError))" class="empty-state"><p>No {{ strategyTabLabel.toLowerCase() }} for this run.</p></div>
+                <div v-if="strategyTab === 'orders' && ordersLoading" class="table-load-state" role="status"><span class="spinner small"/> Loading more orders…</div>
+                <div v-else-if="strategyTab === 'orders' && ordersError" class="table-load-state error-state"><span>{{ ordersError }}</span><button class="text-button" type="button" @click="loadMoreOrders">Retry</button></div>
               </div>
               <aside v-if="isStrategyPlot && strategyTab === 'price'" class="result-plot-options" aria-label="Plot options">
                 <div class="result-options-heading"><SlidersHorizontal :size="16"/><span>Plot options</span></div>
@@ -136,7 +143,7 @@
         </template>
     </section>
     <div v-if="documentView" class="modal-layer" @mousedown.self="documentView = ''">
-      <article class="modal panel document-modal"><div class="panel-header"><div><span class="eyebrow">Experiment artifact</span><h3>{{ documentView === 'config' ? 'Saved configuration' : 'Engine logs' }}</h3></div><button class="icon-button" @click="documentView = ''"><X/></button></div><div v-if="documentView === 'logs' && detail.logs === ''" class="document-empty"><ScrollText :size="26"/><strong>Log file is empty</strong><span>This experiment completed without writing any log entries.</span></div><template v-else-if="documentView === 'logs'"><div v-if="logPreview.truncated" class="document-note">Showing the most recent log output, limited to 1,000 lines.</div><pre>{{ logPreview.text }}</pre></template><pre v-else>{{ detail.config }}</pre></article>
+      <article class="modal panel document-modal"><div class="panel-header"><div><span class="eyebrow">Experiment artifact</span><h3>{{ documentView === 'config' ? 'Saved configuration' : 'Engine logs' }}</h3></div><div class="document-modal-actions"><a v-if="documentView === 'logs'" class="secondary" :href="fullLogUrl" download><Download :size="15"/> Download full log</a><button class="icon-button" aria-label="Close experiment artifact" @click="documentView = ''"><X/></button></div></div><div v-if="documentView === 'logs' && detail.logs === ''" class="document-empty"><ScrollText :size="26"/><strong>Log file is empty</strong><span>This experiment completed without writing any log entries.</span></div><template v-else-if="documentView === 'logs'"><div v-if="logPreview.truncated" class="document-note">Showing the most recent log output, limited to 1,000 lines. Download the full log for the complete output.</div><pre>{{ logPreview.text }}</pre></template><pre v-else>{{ detail.config }}</pre></article>
     </div>
     <ConfirmationModal
       :open="Boolean(pendingDelete)"
@@ -150,16 +157,22 @@
 </template>
 
 <script setup>
-import { Activity, ArrowLeft, ArrowRightLeft, BarChart3, BrainCircuit, CalendarDays, ChartLine, ChartNoAxesCombined, ChevronDown, CircleDollarSign, Clock3, CopyPlus, FileChartColumn, FileCode2, FlaskConical, Gauge, Layers3, ListChecks, Medal, Plus, ReceiptText, Scale, ScrollText, Search, SlidersHorizontal, Square, TableProperties, Timer, Trash2, TriangleAlert, WalletCards, X } from 'lucide-vue-next'
+import { Activity, ArrowLeft, ArrowRightLeft, BarChart3, BrainCircuit, CalendarDays, ChartLine, ChartNoAxesCombined, ChevronDown, CircleDollarSign, Clock3, CopyPlus, Download, FileChartColumn, FileCode2, FlaskConical, Gauge, Layers3, ListChecks, Medal, Plus, ReceiptText, Scale, ScrollText, Search, SlidersHorizontal, Square, TableProperties, Timer, Trash2, TriangleAlert, WalletCards, X } from 'lucide-vue-next'
 import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, post, query, remove } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import ConfirmationModal from '../components/confirmation-modal.vue'
-import { formatConfiguredDate, formatConfiguredDateTime, formatIntervalLabel, formatResultMetric, selectedInstrumentLogoUrl } from '../state'
+import { formatConfiguredDate, formatConfiguredDateTime, formatIntervalLabel, formatResultMetric, instrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
 const experiments = ref([]), jobs = ref([]), detail = ref(null), selectedId = ref(''), expandedId = ref(''), search = ref(''), statusFilter = ref('All'), loading = ref(false), strategy = ref(0), documentView = ref('')
+const experimentsLoading = ref(true)
+const experimentsLoadingMore = ref(false)
+const experimentsHasMore = ref(true)
+const experimentsError = ref('')
+const experimentOffset = ref(0)
+const loadMoreSentinel = ref(null)
 const detailError = ref('')
 const deleting = ref(false)
 const pendingDelete = ref(null)
@@ -168,6 +181,11 @@ const strategyTab = ref('metrics'), strategyFigure = ref(null), strategyLoading 
 const overviewOptions = reactive({ normalize: false, drawdown: true, window: 30, bins: 40, unit: 'auto' })
 const strategyOptions = reactive({ symbol: '' })
 const failedOrderLogos = ref(new Set())
+const orderPages = ref({})
+const orderLoadingKeys = reactive(new Set())
+const orderErrors = ref({})
+const orderBatchSize = 100
+const experimentBatchSize = 10
 const overviewTabs = [
   { id: 'pnl', label: 'PnL', icon: CircleDollarSign, description: 'Cumulative profit and loss over time for each strategy.' },
   { id: 'cash', label: 'Cash', icon: WalletCards, description: 'Cash balance timeline by strategy and settlement currency.' },
@@ -186,14 +204,21 @@ const strategyTabs = [
   { id: 'orders', label: 'Orders', icon: ReceiptText, description: 'Submitted orders and execution outcomes.' }
 ]
 const strategyPlotIds = new Set(['mae_mfe', 'position_size', 'price'])
-let pollTimer, searchTimer
+let pollTimer, searchTimer, experimentObserver, experimentLoadVersion = 0
 let activatedOnce = false
 const activeJobs = computed(() => jobs.value.filter(job => job.kind === 'experiment' && ['queued', 'running'].includes(job.status)))
 const visibleExperiments = computed(() => statusFilter.value === 'All'
   ? experiments.value
   : experiments.value.filter(item => String(item.status).toLowerCase() === statusFilter.value.toLowerCase()))
 const activeRun = computed(() => detail.value?.runs?.[strategy.value])
+const activeOrderKey = computed(() => activeRun.value ? `${selectedId.value}:${activeRun.value.strategy_id}` : '')
+const activeOrderPage = computed(() => orderPages.value[activeOrderKey.value] || {
+  orders: [], total: Number(activeRun.value?.order_count || 0), hasMore: true, initialized: false
+})
+const ordersLoading = computed(() => orderLoadingKeys.has(activeOrderKey.value))
+const ordersError = computed(() => orderErrors.value[activeOrderKey.value] || '')
 const experimentDescription = computed(() => String(detail.value?.experiment?.description || '').trim())
+const fullLogUrl = computed(() => `/api/experiments/${encodeURIComponent(selectedId.value)}/logs`)
 const isStrategyPlot = computed(() => strategyPlotIds.has(strategyTab.value))
 const hasOverviewOptions = computed(() => ['pnl', 'pnl_histogram', 'rolling_returns', 'rolling_sharpe', 'trade_duration'].includes(overviewTab.value))
 const activeOverviewTab = computed(() => overviewTabs.find(item => item.id === overviewTab.value) || overviewTabs[0])
@@ -217,7 +242,7 @@ const experimentPrimaryMetrics = computed(() => {
   const experiment = detail.value?.experiment || {}
   const primary = experiment.primary_metric_value ?? experiment.best_sharpe
   return [
-    { label: `Best ${experiment.primary_metric_name || 'Sharpe'}`, value: formatResultMetric(primary, experiment.primary_metric_percentage), tone: tone(primary), icon: Medal },
+    { label: experiment.primary_metric_name || 'Sharpe', value: formatResultMetric(primary, experiment.primary_metric_percentage), tone: tone(primary), icon: Medal },
     { label: 'Started at', value: dateTime(experiment.started_at), tone: '', icon: CalendarDays },
     { label: 'Duration', value: duration(experiment.started_at, experiment.finished_at), tone: '', icon: Clock3 },
     { label: 'Status', value: experiment.status || 'Unknown', tone: statusTone(experiment.status), icon: Activity }
@@ -245,8 +270,7 @@ const headlineMetrics = computed(() => {
     })
 })
 const orderColumns = ['symbol', 'datetime', 'type', 'side', 'qty', 'price', 'pnl', 'commission', 'status']
-const orderRows = computed(() => [...(activeRun.value?.orders || [])]
-  .sort((left, right) => Number(right.timestamp || 0) - Number(left.timestamp || 0))
+const orderRows = computed(() => activeOrderPage.value.orders
   .map((record) => {
     const order = record.order || {}
     const quantity = order.quantity == null ? Number.NaN : Number(order.quantity)
@@ -350,7 +374,7 @@ function cell(value, column = '') {
 }
 function enumLabel(value) { return String(value || '—').replace(/([a-z])([A-Z])/g, '$1 $2') }
 function orderDate(value) { return value || null }
-function orderLogo(row) { return row.symbol === '—' ? '' : selectedInstrumentLogoUrl(row.symbol, detail.value?.config_metadata?.instrument_type) }
+function orderLogo(row) { return row.symbol === '—' ? '' : instrumentLogoUrl(row.symbol, detail.value?.config_metadata?.instrument_type, props.bootstrap?.display?.logokit_api_key) }
 function markOrderLogoFailed(symbol) { failedOrderLogos.value = new Set(failedOrderLogos.value).add(symbol) }
 function tableColumnClass(column) { return ['qty', 'price', 'pnl', 'commission'].includes(column) ? 'number' : '' }
 function tableCellClass(row, column) {
@@ -361,14 +385,49 @@ function tableCellClass(row, column) {
     column === 'status' && String(row.status).toLowerCase().includes('pending') ? 'warning order-status' : column === 'status' ? 'order-status' : ''
   ]
 }
-async function load() {
-  experiments.value = await query('/api/experiments', { search: search.value })
-  const requested = sessionStorage.getItem('backtide:result-id')
-  sessionStorage.removeItem('backtide:result-id')
-  if (!selectedId.value && requested && experiments.value.some(item => item.id === requested)) {
-    open(requested)
+async function load({ append = false } = {}) {
+  if (append && (experimentsLoading.value || experimentsLoadingMore.value || !experimentsHasMore.value)) return
+  const version = append ? experimentLoadVersion : ++experimentLoadVersion
+  const offset = append ? experimentOffset.value : 0
+  if (append) experimentsLoadingMore.value = true
+  else {
+    experimentsLoading.value = true
+    experimentsLoadingMore.value = false
+    experimentsHasMore.value = true
+    experimentsError.value = ''
+    experimentOffset.value = 0
+  }
+  try {
+    const batch = await query('/api/experiments', {
+      search: search.value,
+      offset,
+      limit: experimentBatchSize
+    })
+    if (version !== experimentLoadVersion) return
+    experiments.value = append
+      ? [...new Map([...experiments.value, ...batch].map(item => [item.id, item])).values()]
+      : batch
+    experimentOffset.value = offset + batch.length
+    experimentsHasMore.value = batch.length === experimentBatchSize
+    experimentsError.value = ''
+    if (!append) {
+      const requested = sessionStorage.getItem('backtide:result-id')
+      sessionStorage.removeItem('backtide:result-id')
+      if (!selectedId.value && requested) open(requested)
+    }
+  } catch (error) {
+    if (version === experimentLoadVersion) {
+      experimentsError.value = error.message
+      emit('toast', error.message, 'error')
+    }
+  } finally {
+    if (version === experimentLoadVersion) {
+      experimentsLoading.value = false
+      experimentsLoadingMore.value = false
+    }
   }
 }
+function loadMoreExperiments() { return load({ append: true }) }
 function debouncedLoad() { clearTimeout(searchTimer); searchTimer = setTimeout(load, 250) }
 function toggleBreakdown(id) { expandedId.value = expandedId.value === id ? '' : id }
 function openDocument(view) { documentView.value = view }
@@ -380,6 +439,9 @@ async function open(id) {
   strategyFigure.value = null
   detailError.value = ''
   strategy.value = 0
+  orderPages.value = {}
+  orderErrors.value = {}
+  orderLoadingKeys.clear()
   try {
     detail.value = await api(`/api/experiments/${id}`)
     strategyOptions.symbol = tradedSymbols.value[0] || ''
@@ -399,6 +461,45 @@ function backToOverview() {
   overviewFigure.value = null
   strategyFigure.value = null
   documentView.value = ''
+  orderPages.value = {}
+  orderErrors.value = {}
+  orderLoadingKeys.clear()
+}
+async function loadMoreOrders() {
+  const key = activeOrderKey.value
+  const run = activeRun.value
+  if (!key || !run || orderLoadingKeys.has(key)) return
+  const current = orderPages.value[key] || { orders: [], hasMore: true, initialized: false }
+  if (current.initialized && !current.hasMore) return
+  orderLoadingKeys.add(key)
+  orderErrors.value = { ...orderErrors.value, [key]: '' }
+  try {
+    const result = await query(`/api/experiments/${encodeURIComponent(selectedId.value)}/orders`, {
+      strategy_id: run.strategy_id,
+      offset: current.orders.length,
+      limit: orderBatchSize
+    })
+    orderPages.value = {
+      ...orderPages.value,
+      [key]: {
+        orders: [...current.orders, ...(result.orders || [])],
+        total: Number(result.total || 0),
+        hasMore: Boolean(result.has_more),
+        initialized: true
+      }
+    }
+  } catch (error) {
+    orderErrors.value = { ...orderErrors.value, [key]: error.message }
+  } finally {
+    orderLoadingKeys.delete(key)
+  }
+}
+function loadOrdersOnScroll(event) {
+  if (strategyTab.value !== 'orders') return
+  const element = event.currentTarget
+  if (element.scrollTop + element.clientHeight >= element.scrollHeight - 48) {
+    void loadMoreOrders()
+  }
 }
 async function loadOverviewPlot() {
   if (!activeRun.value) return
@@ -445,11 +546,27 @@ async function destroy() {
 async function abort() { await post('/api/experiments/abort'); emit('toast', 'Abort requested.') }
 async function pollJobs() { const previous = activeJobs.value.length; jobs.value = await api('/api/jobs'); if (previous && !activeJobs.value.length) await load(); pollTimer = setTimeout(pollJobs, 1500) }
 watch(overviewTab, loadOverviewPlot)
-watch([strategyTab, strategy], () => { strategyOptions.symbol = tradedSymbols.value[0] || ''; loadStrategyPlot() })
-onMounted(() => { load(); pollJobs() })
+watch([strategyTab, strategy], () => {
+  strategyOptions.symbol = tradedSymbols.value[0] || ''
+  loadStrategyPlot()
+  if (strategyTab.value === 'orders') void loadMoreOrders()
+})
+watch(loadMoreSentinel, (element) => {
+  experimentObserver?.disconnect()
+  if (element) experimentObserver?.observe(element)
+})
+onMounted(() => {
+  if ('IntersectionObserver' in globalThis) {
+    experimentObserver = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) void loadMoreExperiments()
+    }, { rootMargin: '240px 0px' })
+  }
+  load()
+  pollJobs()
+})
 onActivated(() => {
   if (activatedOnce) load()
   activatedOnce = true
 })
-onBeforeUnmount(() => { clearTimeout(pollTimer); clearTimeout(searchTimer) })
+onBeforeUnmount(() => { clearTimeout(pollTimer); clearTimeout(searchTimer); experimentObserver?.disconnect() })
 </script>

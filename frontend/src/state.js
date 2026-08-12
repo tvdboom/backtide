@@ -76,12 +76,27 @@ export function instrumentLogoUrl(symbol, instrumentType, apiKey) {
   return `https://img.logokit.com/${domain}/${encodeURIComponent(value)}?token=${encodeURIComponent(apiKey)}`
 }
 
-export function selectedInstrumentLogoUrl(symbol, instrumentType) {
-  if (!symbol) return ''
-  const crypto = String(instrumentType).toLowerCase().includes('crypto')
-  const domain = crypto ? 'crypto' : 'symbol'
-  const value = crypto ? String(symbol).split('-')[0] : symbol
-  return `https://assets.parqet.com/logos/${domain}/${encodeURIComponent(value)}?format=png&size=64`
+const benchmarkByCurrency = {
+  AUD: 'VAS.AX', BRL: 'BOVA11.SA', CAD: 'XIC.TO', CHF: 'CSSPX.SW',
+  CNY: '510300.SS', DKK: 'DKIGI.CO', EUR: 'EXW1.DE', GBP: 'ISF.L',
+  HKD: '2800.HK', IDR: 'XIIT.JK', ILS: 'TA35.TA', INR: 'NIFTYBEES.NS',
+  JPY: '1306.T', KRW: '069500.KS', MXN: 'NAFTRAC.MX', MYR: 'FBMKLCI-EA.KL',
+  NOK: 'OBXEDNB.OL', NZD: 'FNZ.NZ', PLN: 'ETFW20L.WA', SEK: 'XACT-OMXS30.ST',
+  SGD: 'ES3.SI', THB: 'TDEX.BK', TRY: 'DJIST.IS', TWD: '0050.TW',
+  USD: 'SPY', ZAR: 'STX40.JO'
+}
+
+export function defaultExperimentBenchmark(baseCurrency, instrumentType, availableSymbols = []) {
+  const type = String(instrumentType || '').toLowerCase()
+  const currency = String(baseCurrency || 'USD').toUpperCase()
+  if (type.includes('forex')) return null
+  if (type.includes('crypto')) {
+    const preferred = `BTC-${currency}`
+    return availableSymbols.some(symbol => String(symbol).toUpperCase() === preferred)
+      ? preferred
+      : 'BTC-USD'
+  }
+  return benchmarkByCurrency[currency] || 'SPY'
 }
 
 export function paperEquitySeries(updates) {
