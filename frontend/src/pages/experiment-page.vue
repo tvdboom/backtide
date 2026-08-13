@@ -46,8 +46,12 @@
         </div>
         <div class="form-grid two">
           <label class="wide symbol-select-field">Symbols<FieldInfo text="Choose the instruments whose historical bars will be used in the experiment." /><SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /></label>
-          <label>Interval<FieldInfo text="Set the duration represented by each historical market-data bar." /><select id="experiment-interval" v-model="config.data.interval"><option v-for="item in enums.intervals" :key="item" :value="optionValue('interval', item)">{{ item }}</option></select></label>
-          <label class="toggle-label"><span>Full available history</span><FieldInfo text="Use every historical bar available from the selected provider." /><input v-model="config.data.full_history" type="checkbox" class="toggle" /></label>
+          <div class="field-label interval-picker-field">
+            <span>Interval</span>
+            <FieldInfo text="Set the duration represented by each historical market-data bar." />
+            <IntervalPicker v-model="config.data.interval" :options="enums.intervals" :values="intervalValues" input-id="experiment-interval" label="Experiment interval" />
+          </div>
+          <ToggleField v-model="config.data.full_history" label="Full available history" description="Use the provider's full available range." help="Use every historical bar available from the selected provider." />
           <label v-if="!config.data.full_history">Start date<FieldInfo text="Set the first calendar date included in the experiment." /><input id="experiment-start-date" v-model="config.data.start_date" type="date" /></label>
           <label v-if="!config.data.full_history">End date<FieldInfo text="Set the last calendar date included in the experiment." /><input id="experiment-end-date" v-model="config.data.end_date" type="date" /></label>
         </div>
@@ -57,7 +61,7 @@
         <div class="section-copy"><h3>Starting portfolio</h3><p>Set the capital base and any positions held before the first bar.</p></div>
         <div class="portfolio-basics">
           <label>Initial cash<FieldInfo text="Set the cash balance available to each strategy when the simulation starts." /><input id="experiment-initial-cash" v-model.number="config.portfolio.initial_cash" type="number" min="0" step="100" /></label>
-          <div class="field-label">
+          <div class="field-label currency-picker-field">
             <span>Base currency</span>
             <FieldInfo text="Choose the currency used to value the portfolio and report results." />
             <CurrencySelect
@@ -133,7 +137,7 @@
           <fieldset class="settings-group">
             <legend>Order handling</legend>
             <div class="form-grid two">
-              <label class="toggle-label"><span>Partial fills</span><FieldInfo text="Permit an order to fill only the quantity supported by available market volume." /><input v-model="config.exchange.partial_fills" type="checkbox" class="toggle" /></label>
+              <ToggleField v-model="config.exchange.partial_fills" label="Partial fills" description="Limit fills to available bar volume." help="Permit an order to fill only the quantity supported by available market volume." />
               <label>Allowed order types<FieldInfo text="Choose which simulated order instructions strategies may submit." /><SearchSelect v-model="config.exchange.allowed_order_types" :options="enums.order_types" :descriptions="orderTypeDescriptions" plain-options input-id="experiment-order-types" label="Allowed order types" /></label>
             </div>
           </fieldset>
@@ -147,13 +151,13 @@
             <legend>Margin</legend>
             <p>Control leverage, collateral requirements, and margin-limit behavior.</p>
             <div class="form-grid three">
-              <label class="toggle-label"><span>Margin trading</span><FieldInfo text="Allow simulated positions to use borrowed funds within the configured margin limits." /><input v-model="config.exchange.allow_margin" type="checkbox" class="toggle" /></label>
+              <ToggleField v-model="config.exchange.allow_margin" label="Margin trading" description="Allow positions to use borrowed funds." help="Allow simulated positions to use borrowed funds within the configured margin limits." />
               <template v-if="config.exchange.allow_margin">
                 <label>Maximum leverage<FieldInfo text="Limit gross exposure to this multiple of portfolio equity." /><input id="experiment-max-leverage" v-model.number="config.exchange.max_leverage" type="number" min="1" step="0.1" /></label>
                 <label>Initial margin (%)<FieldInfo text="Require this percentage of a new leveraged position as opening collateral." /><input v-model.number="config.exchange.initial_margin" type="number" min="0" max="100" step="1" /></label>
                 <label>Maintenance margin (%)<FieldInfo text="Require this collateral percentage to keep a leveraged position open." /><input v-model.number="config.exchange.maintenance_margin" type="number" min="0" max="100" step="1" /></label>
                 <label>Margin interest (% annual)<FieldInfo text="Charge this annual rate on simulated borrowed cash." /><input v-model.number="config.exchange.margin_interest" type="number" min="0" step="0.1" /></label>
-                <label class="toggle-label"><span>Raise on margin limit</span><FieldInfo text="Stop the experiment with an error when an order exceeds a margin limit." /><input v-model="config.exchange.raise_on_margin_limit" type="checkbox" class="toggle" /></label>
+                <ToggleField v-model="config.exchange.raise_on_margin_limit" label="Raise on margin limit" description="Stop the run when a margin limit is hit." help="Stop the experiment with an error when an order exceeds a margin limit." />
               </template>
             </div>
           </fieldset>
@@ -161,10 +165,10 @@
             <legend>Short selling</legend>
             <p>Choose whether short positions are allowed and how violations are handled.</p>
             <div class="form-grid three">
-              <label class="toggle-label"><span>Short selling</span><FieldInfo text="Allow strategies to sell assets they do not currently hold." /><input v-model="config.exchange.allow_short_selling" type="checkbox" class="toggle" /></label>
+              <ToggleField v-model="config.exchange.allow_short_selling" label="Short selling" description="Allow selling assets not currently held." help="Allow strategies to sell assets they do not currently hold." />
               <template v-if="config.exchange.allow_short_selling">
                 <label>Borrow rate (% annual)<FieldInfo text="Charge this annual rate on the value of simulated short positions." /><input v-model.number="config.exchange.borrow_rate" type="number" min="0" step="0.1" /></label>
-                <label class="toggle-label"><span>Raise on short violation</span><FieldInfo text="Stop the experiment with an error when a strategy submits a disallowed short order." /><input v-model="config.exchange.raise_on_short_violation" type="checkbox" class="toggle" /></label>
+                <ToggleField v-model="config.exchange.raise_on_short_violation" label="Raise on short violation" description="Stop the run on a disallowed short." help="Stop the experiment with an error when a strategy submits a disallowed short order." />
               </template>
             </div>
           </fieldset>
@@ -189,8 +193,8 @@
           <div class="form-grid two">
             <label>Warm-up bars<FieldInfo text="Process this many bars before strategy orders are allowed, giving indicators time to initialize." /><input id="experiment-warmup" v-model.number="config.engine.warmup_period" type="number" min="0" /></label>
             <label>Risk-free rate (%)<FieldInfo text="Set the annual reference return used by risk-adjusted metrics such as Sharpe ratio." /><input v-model.number="config.engine.risk_free_rate" type="number" step="0.1" /></label>
-            <label class="toggle-label"><span>Trade on close</span><FieldInfo text="Fill market orders using the current bar's closing price instead of the next bar." /><input v-model="config.engine.trade_on_close" type="checkbox" class="toggle" /></label>
-            <label class="toggle-label"><span>Exclusive orders</span><FieldInfo text="Allow only one active simulated order for each symbol at a time." /><input v-model="config.engine.exclusive_orders" type="checkbox" class="toggle" /></label>
+            <ToggleField v-model="config.engine.trade_on_close" label="Trade on close" description="Fill market orders at the current close." help="Fill market orders using the current bar's closing price instead of the next bar." />
+            <ToggleField v-model="config.engine.exclusive_orders" label="Exclusive orders" description="Keep one active order per symbol." help="Allow only one active simulated order for each symbol at a time." />
             <label class="wide">Empty-bar policy<FieldInfo text="Choose how the engine handles a missing bar for a symbol at a simulation timestamp." /><select v-model="config.engine.empty_bar_policy"><option v-for="item in enums.empty_bar_policies" :key="item" :value="item">{{ enumLabel(item) }}</option></select></label>
           </div>
         </fieldset>
@@ -232,8 +236,10 @@ import BenchmarkSelect from '../components/benchmark-select.vue'
 import CurrencySelect from '../components/currency-select.vue'
 import FieldInfo from '../components/field-info.vue'
 import InstrumentSelect from '../components/instrument-select.vue'
+import IntervalPicker from '../components/interval-picker.vue'
 import LibraryAssetIcon from '../components/library-asset-icon.vue'
 import SearchSelect from '../components/search-select.vue'
+import ToggleField from '../components/toggle-field.vue'
 import {
   cloneApiState,
   consumeExperimentDraft,
@@ -263,6 +269,9 @@ const config = reactive(cloneApiState(savedDraft || props.bootstrap.defaults))
 if (!config.metrics) config.metrics = { metrics: ['total_return', 'final_equity', 'pnl', 'n_trades', 'win_rate', 'cagr', 'ann_volatility', 'sharpe', 'sortino', 'max_dd', 'excess_return', 'alpha'], main_metric: 'sharpe' }
 if (!config.general.icon) config.general.icon = experimentIcons[0].value
 const optionValue = experimentOptionValue
+const intervalValues = Object.fromEntries(
+  enums.intervals.map(item => [item, optionValue('interval', item)])
+)
 const tab = ref(0)
 const running = ref(false)
 const issue = ref(null)

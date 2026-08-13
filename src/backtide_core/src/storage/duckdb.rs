@@ -15,6 +15,17 @@ use std::fs::create_dir_all;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+const TABLE_SCHEMAS: &[&str] = &[
+    include_str!("../../database/instruments.sql"),
+    include_str!("../../database/bars.sql"),
+    include_str!("../../database/dividends.sql"),
+    include_str!("../../database/experiments.sql"),
+    include_str!("../../database/experiment_strategies.sql"),
+    include_str!("../../database/experiment_equity.sql"),
+    include_str!("../../database/experiment_orders.sql"),
+    include_str!("../../database/experiment_trades.sql"),
+];
+
 pub struct DuckDb {
     /// Connection to the database.
     conn: Mutex<Connection>,
@@ -71,111 +82,13 @@ impl DuckDb {
 }
 
 impl Storage for DuckDb {
-    /// Initialize all tables in the database.
+    /// Create every missing table from its canonical schema file.
     fn init(&self) -> StorageResult<()> {
         let conn = self.conn.lock().unwrap();
 
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS instruments (
-                symbol            VARCHAR NOT NULL,
-                provider          VARCHAR NOT NULL,
-                instrument_type   VARCHAR NOT NULL,
-                name              VARCHAR,
-                base              VARCHAR,
-                quote             VARCHAR,
-                exchange          VARCHAR,
-                UNIQUE (symbol, provider)
-            );
-
-            CREATE TABLE IF NOT EXISTS bars (
-                symbol            VARCHAR NOT NULL,
-                interval          VARCHAR NOT NULL,
-                provider          VARCHAR NOT NULL,
-                open_ts           BIGINT NOT NULL,
-                close_ts          BIGINT NOT NULL,
-                open_ts_exchange  BIGINT NOT NULL,
-                open              DOUBLE NOT NULL,
-                high              DOUBLE NOT NULL,
-                low               DOUBLE NOT NULL,
-                close             DOUBLE NOT NULL,
-                adj_close         DOUBLE NOT NULL,
-                volume            DOUBLE NOT NULL,
-                n_trades          INTEGER,
-                UNIQUE (symbol, provider, interval, open_ts)
-            );
-
-            CREATE TABLE IF NOT EXISTS dividends (
-                symbol            VARCHAR NOT NULL,
-                provider          VARCHAR NOT NULL,
-                ex_date           BIGINT NOT NULL,
-                amount            DOUBLE NOT NULL,
-                UNIQUE (symbol, provider, ex_date)
-            );
-
-            CREATE TABLE IF NOT EXISTS experiments (
-                id                VARCHAR PRIMARY KEY,
-                name              VARCHAR NOT NULL,
-                icon              VARCHAR NOT NULL,
-                tags              VARCHAR NOT NULL,
-                description       VARCHAR NOT NULL,
-                config_toml       VARCHAR NOT NULL,
-                started_at        BIGINT NOT NULL,
-                finished_at       BIGINT NOT NULL,
-                status            VARCHAR NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS experiment_strategies (
-                id                VARCHAR NOT NULL,
-                experiment_id     VARCHAR NOT NULL,
-                strategy_id       VARCHAR NOT NULL,
-                strategy_name     VARCHAR NOT NULL,
-                metrics           VARCHAR NOT NULL,
-                base_currency     VARCHAR,
-                error             VARCHAR,
-                is_benchmark      BOOLEAN NOT NULL DEFAULT FALSE,
-                UNIQUE (experiment_id, strategy_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS experiment_equity (
-                run_id            VARCHAR NOT NULL,
-                ts                BIGINT NOT NULL,
-                equity            DOUBLE NOT NULL,
-                cash              VARCHAR NOT NULL,
-                drawdown          DOUBLE NOT NULL,
-                UNIQUE (run_id, ts)
-            );
-
-            CREATE TABLE IF NOT EXISTS experiment_orders (
-                run_id            VARCHAR NOT NULL,
-                order_id          VARCHAR NOT NULL,
-                ts                BIGINT NOT NULL,
-                symbol            VARCHAR NOT NULL,
-                order_type        VARCHAR NOT NULL,
-                quantity          DOUBLE NOT NULL,
-                price             DOUBLE,
-                limit_price       DOUBLE,
-                status            VARCHAR NOT NULL,
-                fill_price        DOUBLE,
-                reason            VARCHAR NOT NULL,
-                commission        DOUBLE NOT NULL DEFAULT 0,
-                pnl               DOUBLE,
-                UNIQUE (run_id, order_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS experiment_trades (
-                run_id            VARCHAR NOT NULL,
-                symbol            VARCHAR NOT NULL,
-                quantity          DOUBLE NOT NULL,
-                entry_ts          BIGINT NOT NULL,
-                exit_ts           BIGINT NOT NULL,
-                entry_price       DOUBLE NOT NULL,
-                exit_price        DOUBLE NOT NULL,
-                pnl               DOUBLE NOT NULL,
-                UNIQUE (run_id, symbol, entry_ts, exit_ts)
-            );
-        ",
-        )?;
+        for schema in TABLE_SCHEMAS {
+            conn.execute_batch(schema)?;
+        }
 
         Ok(())
     }
@@ -1255,10 +1168,52 @@ mod tests {
     // ── init ──────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_init_creates_tables() {
+    fn test_init_creates_all_schema_tables() {
         let (_dir, db) = make_db();
-        // init() already called in make_db; calling again is idempotent
+
+        let conn = db.conn.lock().unwrap();
+        for table in [
+            "instruments",
+            "bars",
+            "dividends",
+            "experiments",
+            "experiment_strategies",
+            "experiment_equity",
+            "experiment_orders",
+            "experiment_trades",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_schema = 'main' AND table_name = ?",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "missing table: {table}");
+        }
+    }
+
+    #[test]
+    fn test_init_preserves_existing_rows() {
+        let (_dir, db) = make_db();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO instruments (symbol, provider, instrument_type)
+                 VALUES ('AAPL', 'yahoo', 'stocks')",
+                [],
+            )
+            .unwrap();
+        }
+
         db.init().unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM instruments", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]

@@ -40,6 +40,7 @@ Node.js, or pnpm. Node/pnpm are development-only tools for rebuilding the SPA.
 |   |   |-- config.py           Configuration re-exports
 |   |   `-- cli.py              `backtide` Click commands
 |   `-- backtide_core/          Rust crate compiled as `backtide.core`
+|       |-- database/           Canonical DuckDB table schemas, one SQL file per table
 |       |-- src/
 |       |   |-- backtest/       Historical simulation engine, orders, FX, margin, models
 |       |   |-- live/           Paper engine, live models, WebSocket providers, PyO3 API
@@ -93,6 +94,20 @@ exceptions: they are generated, but shipped in wheels and therefore must be kept
 - Paper trading is simulation only. Never add broker order submission, credentials, or claims of
   guaranteed execution. Live providers normalize incoming messages before the paper engine sees
   them, and disconnect/cancel paths must release tasks and sockets deterministically.
+
+## Database schema discipline
+
+- Keep the canonical DuckDB table definitions in `src/backtide_core/database/`, with exactly one
+  `.sql` file per table. Embed and execute every schema file from `DuckDb::init`; do not duplicate
+  table definitions in Rust strings.
+- Every table schema must use `CREATE TABLE IF NOT EXISTS`. Initialization creates missing tables
+  and assumes every existing table already has the one current, correct schema. It must not drop,
+  replace, truncate, alter, migrate, or validate existing tables.
+- Never add database migrations, migration frameworks, migration or schema-version tables,
+  startup compatibility transforms, or support for historical schemas. Schema changes describe
+  only the complete layout of a newly created database.
+- Tests and development fixtures must use a newly created database when they need a changed
+  schema. Normal application startup must preserve all data in an existing database.
 
 ## Python style
 

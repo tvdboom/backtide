@@ -89,7 +89,7 @@ describe('App theme control', () => {
     wrapper.unmount()
   })
 
-  it('keeps a completed replay accessible from the top bar', async () => {
+  it('keeps a replay accessible from the top bar', async () => {
     api.mockImplementation(path => Promise.resolve(path === '/api/live'
       ? { status: 'stopped', config: { mode: 'replay' } }
       : {}))
@@ -97,7 +97,8 @@ describe('App theme control', () => {
     await flushPromises()
 
     const replay = wrapper.get('[aria-label="Open active live trading session"]')
-    expect(replay.text()).toContain('Replay complete')
+    expect(replay.text()).toContain('Replay')
+    expect(replay.text()).not.toContain('complete')
     expect(replay.get('span').classes()).not.toContain('online')
     wrapper.unmount()
   })

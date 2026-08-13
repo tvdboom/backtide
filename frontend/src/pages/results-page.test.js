@@ -293,6 +293,48 @@ describe('results page', () => {
     expect(wrapper.get('.result-orders-table').text()).toContain('11/08/2026 19:05')
   })
 
+  it('renders trades with symbol logos, numeric alignment, and PnL tones', async () => {
+    api.mockImplementation(path => path === '/api/jobs' ? [] : {
+      ...detail,
+      config_metadata: { ...detail.config_metadata, instrument_type: 'cryptocurrencies' },
+      runs: [{
+        ...detail.runs[0],
+        trades: [
+          {
+            symbol: 'BTC-USD', quantity: 2.3893, entry_ts: 1509325200,
+            entry_price: 4181.0695, exit_ts: 1510462800, exit_price: 6241.9275, pnl: 4909.1829
+          },
+          {
+            symbol: 'BTC-USD', quantity: 1.7657, entry_ts: 1515214800,
+            entry_price: 16968.8702, exit_ts: 1515560400, exit_price: 14393.7995, pnl: -4572.231
+          }
+        ]
+      }]
+    })
+    await mountAndOpen({ display: { logokit_api_key: 'test-token' } })
+
+    const tradesTab = wrapper.findAll('.strategy-plot-tabs button').find(button => button.text() === 'Trades')
+    await tradesTab.trigger('click')
+
+    const table = wrapper.get('.result-trades-table')
+    expect(table.classes()).toContain('result-record-table')
+    expect(table.findAll('th').map(header => header.text())).toEqual([
+      'Symbol', 'Quantity', 'Entry ts', 'Entry price', 'Exit ts', 'Exit price', 'PnL'
+    ])
+    expect(table.findAll('th')[1].classes()).toContain('number')
+    expect(table.findAll('th')[3].classes()).toContain('number')
+    expect(table.findAll('th')[5].classes()).toContain('number')
+
+    const rows = table.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].get('.order-symbol-cell').text()).toBe('BTC-USD')
+    expect(rows[0].get('.order-symbol-logo img').attributes('src')).toBe(
+      'https://img.logokit.com/crypto/BTC?token=test-token'
+    )
+    expect(rows[0].findAll('td')[6].classes()).toContain('positive')
+    expect(rows[1].findAll('td')[6].classes()).toContain('negative')
+  })
+
   it('renders orders as the legacy formatted table without nested JSON', async () => {
     mockOrderBatches([
       {
@@ -481,6 +523,17 @@ describe('results page', () => {
     expect(workspace.get('.result-plot-stage').element.children[1].classList).toContain('result-plot-options')
     expect(workspace.get('.result-plot-options').text()).toContain('Normalize')
     expect(workspace.findAll('.result-plot-tabs button svg').length).toBeGreaterThan(0)
+
+    const normalize = workspace.findAll('.toggle-label')[0]
+    expect(normalize.get('.toggle-description').text()).toContain('starting equity')
+    expect(normalize.get('.field-info').exists()).toBe(true)
+    post.mockClear()
+    await normalize.get('.toggle').setValue(true)
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith('/api/results/plot', expect.objectContaining({
+      options: expect.objectContaining({ normalize: true })
+    }))
   })
 
   it('shows experiment details while plots are still loading', async () => {
@@ -517,7 +570,7 @@ describe('results page', () => {
     expect(wrapper.get('.experiment-result-card').exists()).toBe(true)
   })
 
-  it('prefills paper trading from the selected experiment', async () => {
+  it('opens Live trading with settings from the selected experiment', async () => {
     const draft = {
       provider: 'kraken',
       symbols: ['BTC-USD'],
@@ -531,9 +584,9 @@ describe('results page', () => {
     })
     await mountAndOpen()
 
-    const paperButton = wrapper.findAll('.result-actions .secondary')
-      .find(button => button.text().includes('Paper trade'))
-    await paperButton.trigger('click')
+    const liveButton = wrapper.findAll('.result-actions .secondary')
+      .find(button => button.text().includes('Live trading'))
+    await liveButton.trigger('click')
     await flushPromises()
 
     expect(api).toHaveBeenCalledWith('/api/experiments/experiment-1/paper-config')

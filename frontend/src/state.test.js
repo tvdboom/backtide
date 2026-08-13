@@ -9,6 +9,7 @@ import {
   formatConfiguredDate,
   formatConfiguredDateTime,
   formatConfiguredTime,
+  formatConfiguredTimeWithSeconds,
   formatDaySpan,
   formatIntervalLabel,
   formatResultMetric,
@@ -127,6 +128,15 @@ describe('result and route state', () => {
 
     expect(formatConfiguredDateTime(timestamp, display)).toBe('11-08-2026 19:05')
     expect(formatConfiguredTime(timestamp, { time_format: 'hh:mm a', timezone: 'UTC' })).toBe('07:05 pm')
+    expect(formatConfiguredTimeWithSeconds(timestamp, display)).toBe('19:05:07')
+    expect(formatConfiguredTimeWithSeconds(
+      timestamp,
+      { time_format: 'hh:mm a', timezone: 'UTC' }
+    )).toBe('07:05:07 pm')
+    expect(formatConfiguredTimeWithSeconds(
+      '2026-08-11T19:05:07.123Z',
+      display
+    )).toBe('19:05:07.123')
     expect(configuredPlotlyDateTimeFormat(display)).toBe('%d-%m-%Y %H:%M')
   })
 

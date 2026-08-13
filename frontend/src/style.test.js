@@ -37,6 +37,18 @@ describe('experiment selectors', () => {
     expect(declaration('.segmented button:hover')).toContain('background:')
   })
 
+  it('presents intervals as compact selectable pills', () => {
+    expect(declaration('.interval-picker-field')).toContain('width: fit-content')
+    expect(declaration('.interval-picker-field')).toContain('max-width: 100%')
+    expect(declaration('.interval-picker')).toContain('width: fit-content')
+    expect(declaration('.interval-picker')).toContain('max-width: 100%')
+    expect(declaration('.interval-picker')).toContain('flex-wrap: wrap')
+    expect(declaration('.interval-picker button')).toContain('border-radius: 999px')
+    expect(declaration('.interval-picker button.selected')).toContain(
+      'background: var(--surface-active)'
+    )
+  })
+
   it('keeps the experiment name compact beside its icon picker', () => {
     expect(declaration('.experiment-identity-grid')).toContain('2.4fr')
     expect(declaration('.experiment-identity-grid')).toContain('190px')
@@ -46,6 +58,10 @@ describe('experiment selectors', () => {
     expect(declaration('.download-page')).toContain('1080px')
     expect(declaration('.symbol-select-field .tag-field')).toContain('min-height: 52px')
     expect(declaration('.symbol-select-field .selected-symbol-logo')).toContain('width: 25px')
+  })
+
+  it('separates the download asset-type control from the symbols field', () => {
+    expect(declaration('.download-page .wide-control')).toContain('margin-bottom: 18px')
   })
 
   it('keeps the benchmark selector compact on desktop', () => {
@@ -70,10 +86,13 @@ describe('dashboard activity', () => {
 })
 
 describe('paper trading setup', () => {
-  it('matches toggle rows to the standard control height', () => {
-    expect(declaration('.toggle-label')).toContain('min-height: 42px')
-    expect(declaration('.toggle-label')).toContain('height: 42px')
-    expect(declaration('.toggle-label .field-info')).toContain('right: 52px')
+  it('matches toggle fields to standard input geometry', () => {
+    expect(declaration('.toggle-label')).toContain('width: 100%')
+    expect(declaration('.toggle-control')).toContain('width: 100%')
+    expect(declaration('.toggle-control')).toContain('min-height: 42px')
+    expect(declaration('.toggle-control')).toContain('height: 42px')
+    expect(declaration('.toggle-title')).toContain('padding-right: 24px')
+    expect(declaration('.toggle-description')).toContain('-webkit-line-clamp: 2')
   })
 
   it('shows accessible field and action popovers on hover or focus', () => {
@@ -83,24 +102,76 @@ describe('paper trading setup', () => {
     expect(styles).toContain('.action-help:focus-within .action-popover')
   })
 
-  it('keeps the interval control to one half of the two-column form', () => {
-    expect(declaration('.live-interval-field')).toContain('grid-column: span 1')
+  it('keeps every live interval on one full-width row', () => {
+    expect(declaration('.live-interval-field')).toContain('grid-column: 1 / -1')
+    expect(declaration('.live-interval-field .interval-picker')).toContain('flex-wrap: nowrap')
+    expect(declaration('.live-interval-field .interval-picker')).toContain('overflow-x: auto')
   })
 
-  it('matches the cash and base-currency control dimensions', () => {
+  it('keeps the base-currency control compact beside initial cash', () => {
+    expect(declaration('.currency-picker-field')).toContain('width: min(100%, 172px)')
     expect(declaration('.live-cash-field input')).toContain('height: 42px')
-    expect(declaration('.live-base-currency .currency-select')).toContain('width: 100%')
+    expect(declaration('.live-base-currency .currency-select')).toContain('172px')
     expect(declaration('.live-base-currency .currency-trigger')).toContain('min-height: 42px')
     expect(declaration('.live-base-currency .currency-trigger')).toContain('height: 42px')
   })
 
-  it('uses stable market-feed columns for close and volume values', () => {
-    expect(declaration('.event-log > div')).toContain(
-      '80px 65px 90px minmax(130px, 1fr) minmax(130px, 1fr) minmax(70px, 1fr)'
+  it('uses labeled, responsive market-feed columns for OHLCV values', () => {
+    expect(declaration('.event-feed')).toContain('container-type: inline-size')
+    expect(declaration('.event-log-header, .event-log-row')).toContain(
+      'grid-template-columns: repeat(9, minmax(0, 1fr))'
     )
-    expect(declaration('.event-close, .event-volume, .event-fills')).toContain(
+    expect(styles).toContain('grid-template-columns: repeat(6, minmax(0, 1fr))')
+    expect(styles).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))')
+    expect(declaration('.event-open, .event-high, .event-low, .event-close, .event-volume, .event-fills')).toContain(
       'white-space: nowrap'
     )
+    expect(declaration('.event-symbol')).toContain('display: flex')
+    expect(declaration('.event-symbol-logo')).toContain('width: 20px')
+    expect(styles).toContain('@container (max-width: 900px)')
+    expect(styles).toContain('@container (max-width: 620px)')
+  })
+
+  it('keeps strategy telemetry compact and the strategy switcher attached to the chart', () => {
+    expect(declaration('.live-observability')).toContain('align-items: start')
+    expect(declaration('.live-observability .config-summary')).toContain('display: grid')
+    expect(declaration('.live-observability .config-summary')).toContain(
+      'grid-template-columns: repeat(2, minmax(0, 1fr))'
+    )
+    expect(declaration('.live-observability .config-summary > div')).toContain(
+      'background: var(--surface-muted)'
+    )
+    expect(declaration('.live-observability .config-summary dd')).toContain('margin: 5px 0 0')
+    expect(declaration('.live-strategy-switcher')).toContain('border-top: 1px solid var(--line)')
+    expect(declaration('.live-strategy-switcher')).toContain('margin: 0')
+  })
+
+  it('keeps live session actions aligned and readable at narrow widths', () => {
+    expect(declaration('.session-actions')).toContain('justify-content: flex-end')
+    expect(declaration('.session-actions button, .session-actions .status-pill'))
+      .toContain('white-space: nowrap')
+    expect(styles).toContain('.session-actions .status-pill { min-height: 40px')
+    expect(styles).toContain(
+      '.live-intro .session-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));'
+    )
+    expect(styles).toContain('@media (max-width: 480px)')
+  })
+})
+
+describe('session history', () => {
+  it('keeps column positions fixed while replay rows expand', () => {
+    expect(declaration('.session-history-table')).toContain('table-layout: fixed')
+    expect(declaration('.session-history-table')).toContain('min-width: 940px')
+    expect(declaration('.session-history-table th:nth-child(1)')).toContain('width: 22%')
+    expect(declaration('.session-history-table th:nth-child(6)')).toContain('width: 10%')
+  })
+
+  it('keeps strategy names inside their column and exposes overflow details', () => {
+    expect(declaration('.session-strategy-summary')).toContain('min-width: 0')
+    expect(declaration('.session-strategy-visible')).toContain('-webkit-line-clamp: 2')
+    expect(declaration('.session-strategy-overflow')).toContain('border-radius: 999px')
+    expect(declaration('.session-strategy-tooltip')).toContain('position: fixed')
+    expect(styles).toContain('.session-strategy-overflow:focus-visible')
   })
 })
 
@@ -114,6 +185,7 @@ describe('experiment result summaries', () => {
   it('keeps tags subordinate to the title and presents breakdown metrics without tiles', () => {
     expect(declaration('.experiment-result-identity h3')).toContain('font-size: 22px')
     expect(declaration('.experiment-result-summary')).toContain('min-height: 124px')
+    expect(declaration('.experiment-card-actions')).toContain('align-self: flex-start')
     expect(declaration('.experiment-result-tags')).toContain('margin-top: 12px')
     expect(declaration('.experiment-result-meta')).toContain('margin-top: 16px')
     expect(declaration('.experiment-result-meta')).toContain('font-size: 14px')
@@ -142,10 +214,10 @@ describe('experiment result summaries', () => {
     expect(declaration('.modal.document-modal')).toContain('width: min(1140px, 94vw)')
   })
 
-  it('keeps long order histories in a bounded table with visible headings', () => {
-    expect(declaration('.result-orders-table')).toContain('max-height: 560px')
-    expect(declaration('.result-orders-table')).toContain('overflow: auto')
-    expect(declaration('.result-orders-table .data-table th')).toContain('position: sticky')
+  it('keeps trade and order histories in a bounded table with visible headings', () => {
+    expect(declaration('.result-record-table')).toContain('max-height: 560px')
+    expect(declaration('.result-record-table')).toContain('overflow: auto')
+    expect(declaration('.result-record-table .data-table th')).toContain('position: sticky')
   })
 })
 

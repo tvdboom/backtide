@@ -36,18 +36,18 @@ Start the packaged web application as usual:
 backtide launch
 ```
 
-Open **Paper trading** under **Trading**. The setup is divided into five focused steps:
+Open **Live trading** under **Trading**. The setup is divided into seven focused steps:
 
-1. **Market** selects the provider, interval, symbols, historical warm-up, and bounded
-   strategy history.
-2. **Strategy & monitoring** selects zero or more strategies, optional dashboard
-   indicators, live-compatible metrics, and partial-candle behavior. Strategy-required
-   indicators are always included automatically.
-3. **Account & execution** configures starting cash, fees, slippage, allowed order
-   types, and optional candle-volume participation.
-4. **Risk** configures short selling, position concentration, drawdown halts, leverage,
+1. **Market data** selects the provider, interval, and symbols.
+2. **Portfolio** configures starting cash and the reporting currency.
+3. **Strategy** selects one or more strategies and optional dashboard indicators.
+4. **Metrics** selects live-compatible performance measures.
+5. **Execution** configures fees, slippage, allowed order types, and optional
+   candle-volume participation.
+6. **Risk** configures short selling, position concentration, drawdown halts, leverage,
    initial and maintenance margin, margin interest, and short borrow cost.
-5. **Review** summarizes the complete session before connection.
+7. **Engine** configures the risk-free rate, historical warm-up, bounded strategy
+   history, and partial-candle behavior.
 
 While a session is active, the dashboard shows account performance, exposure, leverage,
 buying power, drawdown, costs, selected metrics, latest indicator values, fills, prices,
@@ -64,13 +64,13 @@ Every session is persisted beneath the configured Backtide storage directory. Th
 **Session history** page lists completed sessions and can replay their recorded normalized
 market events through a new paper engine. Browser event buffers remain bounded, while the
 on-disk journal retains the complete recorded session. The table shows both the start and finish
-timestamps. **Live paper** means the journal came from a real-time provider feed; **Replay** means
-the same normalized events were subsequently processed from disk. Both modes use simulated fills
-and never submit broker orders. Replays preserve event ordering and reuse the saved session
-settings, but process the journal as quickly as the engine allows rather than reconnecting to the
-provider or waiting for the original wall-clock intervals. Use **Go live** instead to reconnect to
-the provider immediately with the session's saved market, strategy, account, execution, and risk
-settings.
+timestamps. Original sessions remain at the top level; use the replay-count control to expand
+replays beneath the session that supplied their recorded events. Replays preserve event ordering
+and reuse the saved session settings, but process the journal as quickly as the engine allows
+rather than reconnecting to the provider or waiting for the original wall-clock intervals. Both
+session types use simulated fills and never submit broker orders. Use **Go live** instead to
+reconnect to the provider immediately with the session's saved market, strategy, account,
+execution, and risk settings.
 
 ### Margin behavior
 

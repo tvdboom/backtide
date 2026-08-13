@@ -110,7 +110,7 @@ export function formatResultMetric(raw, percent = false) {
   const numeric = Number(raw)
   if (!Number.isFinite(numeric)) return '—'
   if (percent) return `${(numeric * (Math.abs(numeric) <= 2 ? 100 : 1)).toFixed(2)}%`
-  return numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  return numeric.toLocaleString('en', { maximumFractionDigits: 2 })
 }
 
 export function formatDaySpan(value) {
@@ -176,7 +176,7 @@ function dateParts(value, display = {}) {
     const year = Number(plainDate[1])
     const month = Number(plainDate[2])
     const day = Number(plainDate[3])
-    return { year, month, day, weekday: new Date(Date.UTC(year, month - 1, day)).getUTCDay(), hour: 0, minute: 0, second: 0 }
+    return { year, month, day, weekday: new Date(Date.UTC(year, month - 1, day)).getUTCDay(), hour: 0, minute: 0, second: 0, millisecond: 0 }
   }
   const date = parsedDate(value)
   if (!date) return null
@@ -197,7 +197,8 @@ function dateParts(value, display = {}) {
       const weekday = WEEKDAYS.indexOf(values.weekday)
       return {
         year: Number(values.year), month: Number(values.month), day: Number(values.day),
-        weekday, hour: Number(values.hour), minute: Number(values.minute), second: Number(values.second)
+        weekday, hour: Number(values.hour), minute: Number(values.minute),
+        second: Number(values.second), millisecond: date.getMilliseconds()
       }
     } catch {
       // Fall through to the local timezone when a configured timezone is invalid.
@@ -205,7 +206,8 @@ function dateParts(value, display = {}) {
   }
   return {
     year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate(),
-    weekday: date.getDay(), hour: date.getHours(), minute: date.getMinutes(), second: date.getSeconds()
+    weekday: date.getDay(), hour: date.getHours(), minute: date.getMinutes(),
+    second: date.getSeconds(), millisecond: date.getMilliseconds()
   }
 }
 
@@ -222,11 +224,12 @@ function renderDate(parts, format) {
 function renderTime(parts, format) {
   const hour12 = parts.hour % 12 || 12
   const replacements = {
+    SSS: String(parts.millisecond || 0).padStart(3, '0'),
     HH: pad(parts.hour), H: String(parts.hour), hh: pad(hour12), h: String(hour12),
     MM: pad(parts.minute), M: String(parts.minute), mm: pad(parts.minute), m: String(parts.minute),
     ss: pad(parts.second), s: String(parts.second), A: parts.hour < 12 ? 'AM' : 'PM', a: parts.hour < 12 ? 'am' : 'pm'
   }
-  return format.replace(/HH|hh|MM|mm|ss|H|h|M|m|s|A|a/g, token => replacements[token])
+  return format.replace(/SSS|HH|hh|MM|mm|ss|H|h|M|m|s|A|a/g, token => replacements[token])
 }
 
 export function formatConfiguredDate(value, display = {}, fallback = '—') {
@@ -237,6 +240,17 @@ export function formatConfiguredDate(value, display = {}, fallback = '—') {
 export function formatConfiguredTime(value, display = {}, fallback = '—') {
   const parts = dateParts(value, display)
   return parts ? renderTime(parts, configuredTimeFormat(display)) : fallback
+}
+
+export function formatConfiguredTimeWithSeconds(value, display = {}, fallback = '—') {
+  const parts = dateParts(value, display)
+  if (!parts) return fallback
+  const format = configuredTimeFormat(display)
+  const meridiem = format.match(/(\s*[Aa])$/)?.[1] || ''
+  let base = meridiem ? format.slice(0, -meridiem.length) : format
+  if (!/s/.test(base)) base = `${base}:ss`
+  if (parts.millisecond && !/S/.test(base)) base = `${base}.SSS`
+  return renderTime(parts, `${base}${meridiem}`)
 }
 
 export function formatConfiguredDateTime(value, display = {}, fallback = '—') {

@@ -10,7 +10,7 @@ Research covers experiment configuration, historical simulation, stored results,
 | `backtide.analysis` | Statistics plus price, P&L, risk, rolling, seasonality, and trade plots |
 | `backtide.storage` | Stored experiment and strategy-run queries used for later analysis |
 
-Use a completed experiment's **Paper trade** action to translate compatible settings into the
+Use a completed experiment's **Live trading** action to translate compatible settings into the
 Trading setup wizard. Historical ranges and benchmark execution are intentionally not promoted.
 
 ## Local application integration

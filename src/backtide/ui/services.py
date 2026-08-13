@@ -221,18 +221,21 @@ class BacktideServices:
         }
 
     def dashboard(self) -> dict[str, Any]:
-        """Return recent experiments and local storage statistics."""
+        """Return recent workspace activity and local storage statistics."""
         from backtide.storage import query_bars_summary, query_experiments
 
         experiments = self.experiments(limit=6)
+        sessions = self.live_sessions()
         storage = dataframe_records(query_bars_summary())
         symbols = {row.get("symbol") for row in storage if row.get("symbol")}
         bars = sum(int(row.get("n_rows") or row.get("rows") or 0) for row in storage)
         return {
             "experiments": experiments,
+            "sessions": sessions[:6],
             "storage": storage[:8],
             "metrics": {
                 "experiments": len(dataframe_records(query_experiments())),
+                "sessions": len(sessions),
                 "symbols": len(symbols),
                 "bars": bars,
                 "series": len(storage),
@@ -1266,7 +1269,7 @@ class BacktideServices:
         return manager.cancel_all() if manager else {"status": "idle"}
 
     def paper_config_from_experiment(self, experiment_id: str) -> dict[str, Any]:
-        """Translate compatible experiment settings into a paper-session draft."""
+        """Translate compatible experiment settings into a live-session draft."""
         from backtide.backtest import ExperimentConfig
         from backtide.config import get_config
 
@@ -1282,6 +1285,16 @@ class BacktideServices:
         metrics = config.get("metrics", {})
         exchange = config.get("exchange", {})
         engine = config.get("engine", {})
+        benchmark = str(strategy.get("benchmark") or "").strip()
+        strategy_names = [
+            str(name).strip() for name in strategy.get("strategies", []) if str(name).strip()
+        ]
+        first_strategy = next((name for name in strategy_names if name != benchmark), None)
+        commission_type = re.sub(
+            r"[^a-z]", "", str(exchange.get("commission_type") or "Percentage").lower()
+        )
+        uses_percentage_commission = "percentage" in commission_type
+        uses_fixed_commission = "fixed" in commission_type
         provider = str(data.get("provider") or "kraken").lower()
         if provider == "yahoo":
             provider = "kraken"
@@ -1302,14 +1315,18 @@ class BacktideServices:
             "provider": provider,
             "interval": interval,
             "symbols": data.get("symbols", []),
-            "strategies": strategy.get("strategies", []),
+            "strategies": [first_strategy] if first_strategy else [],
             "indicators": indicators.get("indicators", []),
             "warmup_bars": int(engine.get("warmup_period") or 0),
             "config": {
                 "initial_cash": portfolio.get("initial_cash", 10_000),
                 "base_currency": portfolio.get("base_currency", "USD"),
-                "commission_pct": exchange.get("commission_pct", 0.1),
-                "commission_fixed": exchange.get("commission_fixed", 0.0),
+                "commission_pct": (
+                    exchange.get("commission_pct", 0.1) if uses_percentage_commission else 0.0
+                ),
+                "commission_fixed": (
+                    exchange.get("commission_fixed", 0.0) if uses_fixed_commission else 0.0
+                ),
                 "slippage": exchange.get("slippage", 0.05),
                 "allow_short": exchange.get("allow_short_selling", False),
                 "allow_margin": exchange.get("allow_margin", False),

@@ -50,7 +50,7 @@ the app can start jobs and modify the configured local Backtide store.
 | **Research** | Experiments | Configure data, portfolios, reusable assets, execution assumptions, risk, and engine behavior. |
 | **Research** | Results | Compare completed runs and inspect metrics, equity, trades, orders, configuration, and logs. |
 | **Research** | Analysis | Build interactive price, return, correlation, seasonality, volatility, volume, and dividend plots. |
-| **Trading** | Paper trading | Configure and run live-data strategies with local simulated execution. See [Paper trading]. |
+| **Trading** | Live trading | Configure and run live-data strategies with local simulated execution. See [Paper trading]. |
 | **Trading** | Session history | Inspect persisted journals and replay a prior session through a fresh paper engine. |
 | **Library** | Strategies | Create and manage strategies used by research and paper trading. |
 | **Library** | Indicators | Manage strategy dependencies and optional research/live monitoring indicators. |

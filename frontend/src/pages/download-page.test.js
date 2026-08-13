@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import IntervalPicker from '../components/interval-picker.vue'
 import SearchSelect from '../components/search-select.vue'
 import DownloadPage from './download-page.vue'
 
@@ -84,7 +85,11 @@ describe('download page', () => {
     await flushPromises()
 
     const selectors = wrapper.findAllComponents(SearchSelect)
-    expect(selectors[1].props('plainOptions')).toBe(true)
+    expect(selectors).toHaveLength(1)
+    expect(wrapper.getComponent(IntervalPicker).props()).toMatchObject({
+      modelValue: ['1d'],
+      multiple: true
+    })
 
     await selectors[0].get('input').trigger('focus')
     await selectors[0].get('.search-menu button').trigger('click')
@@ -153,9 +158,8 @@ describe('download page', () => {
     const symbolSelect = wrapper.findAllComponents(SearchSelect)[0]
     await symbolSelect.get('input').trigger('focus')
     await symbolSelect.get('.search-menu button').trigger('click')
-    const intervalSelect = wrapper.findAllComponents(SearchSelect)[1]
-    await intervalSelect.get('input').trigger('focus')
-    await intervalSelect.get('.search-menu button').trigger('click')
+    const intervalSelect = wrapper.getComponent(IntervalPicker)
+    await intervalSelect.findAll('button')[1].trigger('click')
     await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
 
@@ -178,6 +182,23 @@ describe('download page', () => {
     await wrapper.get('.job-card button').trigger('click')
     expect(wrapper.emitted('navigate')).toEqual([['analysis']])
     expect(JSON.parse(sessionStorage.getItem('backtide:analysis-symbols'))).toEqual(['AAPL'])
+  })
+
+  it('keeps at least one download interval selected', async () => {
+    const wrapper = mount(DownloadPage, { props: { bootstrap } })
+    await flushPromises()
+    const intervalSelect = wrapper.getComponent(IntervalPicker)
+    const intervalButtons = intervalSelect.findAll('button')
+
+    await intervalButtons[0].trigger('click')
+    expect(intervalSelect.props('modelValue')).toEqual(['1d'])
+
+    await intervalButtons[1].trigger('click')
+    await intervalButtons[0].trigger('click')
+    await intervalButtons[1].trigger('click')
+
+    expect(intervalSelect.props('modelValue')).toEqual(['1w'])
+    expect(intervalSelect.findAll('[aria-pressed="true"]')).toHaveLength(1)
   })
 
   it('matches the experiment instrument tabs and clears search when the type changes', async () => {

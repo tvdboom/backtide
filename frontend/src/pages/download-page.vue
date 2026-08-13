@@ -5,8 +5,11 @@
       <div class="segmented wide-control"><button v-for="type in enums.instrument_types" :key="type" type="button" :class="{ active: form.instrument_type === optionValue('instrument_type', type) }" @click="setType(type)"><component :is="instrumentTypeIcon(type)" :size="16" />{{ type }}</button></div>
       <div class="form-grid two">
         <label class="wide symbol-select-field">Symbols<SearchSelect :key="form.instrument_type" v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" :loading="loadingInstruments" allow-custom input-id="download-symbols" label="Download symbols" placeholder="Search symbols or company names…" /></label>
-        <label class="wide">Intervals<SearchSelect v-model="form.intervals" :options="enums.intervals" plain-options placeholder="Choose intervals…" /></label>
-        <label class="toggle-label"><span>Full available history<small>Provider limits still apply by interval.</small></span><input v-model="form.full_history" type="checkbox" class="toggle" /></label>
+        <div class="field-label wide">
+          <span>Intervals</span>
+          <IntervalPicker v-model="form.intervals" :options="enums.intervals" multiple input-id="download-intervals" label="Download intervals" />
+        </div>
+        <ToggleField v-model="form.full_history" label="Full available history" description="Provider limits still apply by interval." help="Download every historical bar available from the selected provider." />
         <span />
         <label v-if="!form.full_history">Start date<input v-model="form.start" type="date" :min="plan?.available_start" :max="plan?.available_end" /></label>
         <label v-if="!form.full_history">End date<input v-model="form.end" type="date" :min="form.start || plan?.available_start" :max="plan?.available_end" /></label>
@@ -70,7 +73,9 @@
 import { ArrowLeftRight, ArrowRight, BarChart3, Bitcoin, ChartCandlestick, ChevronDown, CircleCheck, Clock3, CloudDownload, Download, HardDriveDownload, Landmark, Rows3, TriangleAlert } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, post, query } from '../api'
+import IntervalPicker from '../components/interval-picker.vue'
 import SearchSelect from '../components/search-select.vue'
+import ToggleField from '../components/toggle-field.vue'
 import { experimentOptionValue, formatConfiguredDate, formatDaySpan, instrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })

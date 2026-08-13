@@ -221,7 +221,7 @@ function setLiveStatus(value) {
   liveSessionRunning.value = running
   liveSessionVisible.value = running || replay
   liveSessionLabel.value = replay
-    ? running ? 'Replay running' : value?.status === 'error' ? 'Replay failed' : 'Replay complete'
+    ? running ? 'Replay running' : value?.status === 'error' ? 'Replay failed' : 'Replay'
     : value?.status === 'paused' ? 'Session paused' : 'Session live'
 }
 

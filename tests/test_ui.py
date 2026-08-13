@@ -615,8 +615,8 @@ class TestServiceCommands:
         assert target.read_bytes() == b"previous"
         assert list(folder.glob("*.tmp")) == []
 
-    def test_experiment_configuration_prefills_the_paper_wizard(self, monkeypatch, tmp_path):
-        """Compatible research settings are promoted with live-safe defaults."""
+    def test_experiment_configuration_prefills_live_trading(self, monkeypatch, tmp_path):
+        """Compatible research settings and the first non-benchmark strategy are promoted."""
         from backtide.backtest import ExperimentConfig
         import backtide.config
 
@@ -624,11 +624,32 @@ class TestServiceCommands:
             {
                 "data": {"symbols": ["BTC-USD"], "interval": "FiveMinutes"},
                 "portfolio": {"initial_cash": 25_000, "base_currency": "EUR"},
-                "strategy": {"strategies": ["Momentum"]},
+                "strategy": {
+                    "benchmark": "Benchmark strategy",
+                    "strategies": ["Benchmark strategy", "Momentum", "Mean reversion"],
+                },
                 "indicators": {"indicators": ["Fast SMA"]},
-                "metrics": {"metrics": ["total_return", "sharpe", "alpha"]},
+                "metrics": {
+                    "metrics": ["total_return", "sharpe", "alpha"],
+                    "main_metric": "sharpe",
+                },
                 "engine": {"warmup_period": 120, "risk_free_rate": 2.5},
-                "exchange": {"allow_margin": True, "max_leverage": 3.0},
+                "exchange": {
+                    "commission_type": "PercentagePlusFixed",
+                    "commission_pct": 0.25,
+                    "commission_fixed": 1.5,
+                    "slippage": 0.15,
+                    "allowed_order_types": ["Market", "Limit"],
+                    "partial_fills": True,
+                    "allow_margin": True,
+                    "max_leverage": 3.0,
+                    "initial_margin": 40.0,
+                    "maintenance_margin": 20.0,
+                    "margin_interest": 4.0,
+                    "allow_short_selling": True,
+                    "borrow_rate": 2.0,
+                    "max_position_size": 35,
+                },
             }
         )
         folder = tmp_path / "experiments" / "experiment-1"
@@ -648,10 +669,54 @@ class TestServiceCommands:
         assert result["strategies"] == ["Momentum"]
         assert result["indicators"] == ["Fast SMA"]
         assert result["warmup_bars"] == 120
-        assert result["config"]["initial_cash"] == 25_000
-        assert result["config"]["allow_margin"] is True
-        assert result["config"]["max_leverage"] == 3.0
-        assert result["config"]["metrics"] == ["total_return", "sharpe"]
+        assert result["config"] == {
+            "initial_cash": 25_000,
+            "base_currency": "EUR",
+            "commission_pct": 0.25,
+            "commission_fixed": 1.5,
+            "slippage": 0.15,
+            "allow_short": True,
+            "allow_margin": True,
+            "max_leverage": 3.0,
+            "initial_margin": 40.0,
+            "maintenance_margin": 20.0,
+            "margin_interest": 4.0,
+            "borrow_rate": 2.0,
+            "max_position_size": 35,
+            "allowed_order_types": ["Market", "Limit"],
+            "partial_fills": True,
+            "metrics": ["total_return", "sharpe"],
+            "risk_free_rate": 2.5,
+        }
+
+    def test_fixed_experiment_commission_disables_live_percentage_fee(self, monkeypatch, tmp_path):
+        """Fixed-only experiments do not acquire an extra percentage fee in live trading."""
+        from backtide.backtest import ExperimentConfig
+        import backtide.config
+
+        experiment = ExperimentConfig.from_dict(
+            {
+                "metrics": {"metrics": ["sharpe"], "main_metric": "sharpe"},
+                "exchange": {
+                    "commission_type": "Fixed",
+                    "commission_pct": 0.25,
+                    "commission_fixed": 1.5,
+                },
+            }
+        )
+        folder = tmp_path / "experiments" / "experiment-1"
+        folder.mkdir(parents=True)
+        (folder / "config.toml").write_text(experiment.to_toml(), encoding="utf-8")
+        monkeypatch.setattr(
+            backtide.config,
+            "get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path)),
+        )
+
+        result = BacktideServices().paper_config_from_experiment("experiment-1")
+
+        assert result["config"]["commission_pct"] == 0.0
+        assert result["config"]["commission_fixed"] == 1.5
 
     def test_download_converts_browser_dates_before_dispatch(self, monkeypatch):
         """Download jobs pass inclusive UTC seconds to the data API."""
@@ -1010,8 +1075,9 @@ end_date = "2024-03-01"
         assert body.decode() == full_log
 
     def test_dashboard_uses_enriched_recent_experiment_metrics(self, monkeypatch):
-        """Dashboard activity keeps the configured primary metric name and value."""
+        """Dashboard activity includes recent experiments and persisted live sessions."""
         recent = [{"id": "exp-1", "primary_metric_name": "CAGR", "primary_metric_value": 0.2}]
+        sessions = [{"id": f"session-{index}"} for index in range(8)]
         captured = {}
         services = BacktideServices()
 
@@ -1020,6 +1086,7 @@ end_date = "2024-03-01"
             return recent
 
         monkeypatch.setattr(services, "experiments", experiments)
+        monkeypatch.setattr(services, "live_sessions", lambda: sessions)
         monkeypatch.setitem(
             sys.modules,
             "backtide.storage",
@@ -1033,6 +1100,8 @@ end_date = "2024-03-01"
 
         assert captured == {"search": None, "limit": 6}
         assert result["experiments"] == recent
+        assert result["sessions"] == sessions[:6]
+        assert result["metrics"]["sessions"] == 8
 
     def test_experiment_summaries_include_lightweight_strategy_metrics(self, monkeypatch):
         """Result cards include per-strategy metrics without loading equity curves."""
@@ -1685,7 +1754,67 @@ class TestLiveTradingManager:
         assert status["status"] == "error"
         assert status["error"] == "mock socket disconnected"
 
-    def test_combines_independent_strategy_accounts_with_fill_attribution(self, tmp_path):
+    def test_worker_initialization_failure_updates_the_running_manifest(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """A feed that fails in the worker cannot leave a running history entry."""
+        failed = threading.Event()
+
+        class Feed:
+            creations = 0
+
+            def __init__(self, _provider, _symbols, _interval, *, include_partial=True):
+                self.include_partial = include_partial
+                Feed.creations += 1
+                if Feed.creations == 2:
+                    failed.set()
+                    raise RuntimeError("mock connection failed")
+
+            def cancel(self):
+                return None
+
+        class Session:
+            def __init__(self, _config, _strategy):
+                pass
+
+            @staticmethod
+            def snapshot():
+                return None
+
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.live",
+            SimpleNamespace(
+                LiveMarketFeed=Feed,
+                PaperTradingConfig=lambda **_values: object(),
+                PaperTradingSession=Session,
+            ),
+        )
+        manager = LiveTradingManager(tmp_path)
+
+        manager.start({"provider": "binance", "symbols": ["BTC-USDT"]})
+        assert failed.wait(timeout=1.0)
+        thread = manager._thread
+        assert thread is not None
+        thread.join(timeout=1.0)
+
+        status = manager.status()
+        assert status["status"] == "error"
+        assert status["error"] == "mock connection failed"
+        assert manager._session_id is not None
+        manifest = json.loads(
+            (tmp_path / manager._session_id / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["status"] == "error"
+        assert manifest["finished_at"] is not None
+
+    def test_combines_independent_strategy_accounts_with_fill_attribution(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
         """Multiple strategies keep separate accounts and expose attributed fills."""
         market = SimpleNamespace(
             symbol="BTC-USD",
@@ -1768,6 +1897,11 @@ class TestLiveTradingManager:
             "Mean reversion": Session("mean", 990.0),
         }
         manager._session = manager._sessions["Momentum"]
+        monkeypatch.setattr(
+            manager,
+            "_now",
+            lambda: "2026-08-13T10:12:58.123456+00:00",
+        )
         manager._prepare_session()
 
         manager._process_market(market)
@@ -1779,6 +1913,73 @@ class TestLiveTradingManager:
             "Momentum",
             "Mean reversion",
         }
+        assert status["updates"][0]["received_at"] == "2026-08-13T10:12:58.123456+00:00"
+
+    def test_native_order_values_are_json_safe_in_session_journal(self, tmp_path):
+        """Native order enums and resting orders are normalized before persistence."""
+        from backtide.backtest import Order, OrderStatus, OrderType
+
+        market = SimpleNamespace(
+            symbol="BTC-USD",
+            interval="1m",
+            open_ts=1_700_000_000,
+            close_ts=1_700_000_060,
+            open=100.0,
+            high=102.0,
+            low=99.0,
+            close=101.0,
+            volume=10.0,
+            n_trades=1,
+            is_final=True,
+            provider="mock",
+            received_ts=1_700_000_061,
+        )
+        order = Order("BTC-USD", 1.0, OrderType.Limit, price=100.0)
+        snapshot = SimpleNamespace(
+            latest_prices={"BTC-USD": 101.0},
+            equity=1_001.0,
+            realized_pnl=1.0,
+            unrealized_pnl=0.0,
+            processed_bars=1,
+            portfolio=SimpleNamespace(
+                cash={"USD": 900.0},
+                positions={"BTC-USD": 1.0},
+                orders=[order],
+            ),
+        )
+        update = SimpleNamespace(
+            market=market,
+            fills=[
+                SimpleNamespace(
+                    order=order,
+                    timestamp=market.close_ts,
+                    status=OrderStatus.Filled,
+                    fill_price=100.0,
+                    commission=0.1,
+                    realized_pnl=0.0,
+                    reason="test fill",
+                )
+            ],
+            orders_submitted=1,
+            processed=True,
+            snapshot=snapshot,
+            indicators={},
+        )
+        manager = LiveTradingManager(tmp_path)
+        manager._prepare_session()
+
+        serialized = manager._serialize_update(update)
+        manager._append_event(serialized)
+
+        assert manager._session_id is not None
+        persisted = json.loads(
+            (tmp_path / manager._session_id / "events.jsonl").read_text(encoding="utf-8")
+        )
+        assert persisted["fills"][0]["status"] == str(OrderStatus.Filled)
+        assert persisted["fills"][0]["order"]["order_type"] == str(OrderType.Limit)
+        assert persisted["snapshot"]["portfolio"]["orders"][0]["order_type"] == str(
+            OrderType.Limit
+        )
 
     def test_persists_and_reads_a_replayable_session_journal(self, tmp_path):
         """Session manifests and exact market events survive manager recreation."""
@@ -1801,6 +2002,68 @@ class TestLiveTradingManager:
         assert sessions[0]["id"] == manager._session_id
         assert restored["status"] == "stopped"
         assert restored["updates"] == [update]
+
+    @pytest.mark.parametrize("status", ["running", "paused"])
+    def test_session_history_closes_orphaned_active_manifests(
+        self,
+        monkeypatch,
+        tmp_path,
+        status,
+    ):
+        """History repairs active states that have no live worker in this process."""
+        session_id = "0123456789abcdef"
+        folder = tmp_path / session_id
+        folder.mkdir()
+        manifest_path = folder / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "id": session_id,
+                    "status": status,
+                    "started_at": "2026-08-13T10:00:00+00:00",
+                    "finished_at": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        manager = LiveTradingManager(tmp_path)
+        monkeypatch.setattr(manager, "_now", lambda: "2026-08-13T10:30:00+00:00")
+
+        sessions = manager.sessions()
+
+        assert sessions[0]["status"] == "stopped"
+        assert sessions[0]["finished_at"] == "2026-08-13T10:30:00+00:00"
+        persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert persisted["status"] == "stopped"
+        assert persisted["finished_at"] == "2026-08-13T10:30:00+00:00"
+
+    def test_session_history_preserves_the_current_active_manifest(self, tmp_path):
+        """The worker-owned manifest remains active and offers an Open action."""
+        session_id = "0123456789abcdef"
+        folder = tmp_path / session_id
+        folder.mkdir()
+        manifest_path = folder / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "id": session_id,
+                    "status": "running",
+                    "started_at": "2026-08-13T10:00:00+00:00",
+                    "finished_at": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        manager = LiveTradingManager(tmp_path)
+        manager._session_id = session_id
+        manager._thread = SimpleNamespace(is_alive=lambda: True)
+
+        sessions = manager.sessions()
+
+        assert sessions[0]["status"] == "running"
+        assert sessions[0]["finished_at"] is None
+        persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert persisted["status"] == "running"
 
     def test_pause_and_resume_update_observable_state(self, tmp_path):
         """Pause control is reflected in health without discarding the session."""

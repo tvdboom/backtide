@@ -153,7 +153,7 @@ impl Engine {
             providers.insert(instrument_type, p);
         }
 
-        // Initialize the database and create all required tables
+        // Initialize the database and create all missing tables.
         let db = DuckDb::new(&config.data.storage_path)?;
         db.init()?;
 

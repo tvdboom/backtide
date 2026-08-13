@@ -39,12 +39,22 @@
             </label>
           </div>
           <label v-if="editor === 'builtin'">Type<select v-model="draft.type" @change="resetParameters"><option v-for="item in catalog.builtin" :key="item.type" :value="item.type">{{ item.name }}</option></select></label>
-          <label v-for="parameter in selectedBuiltin?.parameters || []" v-if="editor === 'builtin'" :key="parameter.name">
-            {{ parameter.label }}
-            <input v-if="parameter.kind === 'number'" v-model.number="draft.params[parameter.name]" type="number" :required="parameter.required" step="any" />
-            <span v-else-if="parameter.kind === 'boolean'" class="toggle-label"><span>Enabled</span><input v-model="draft.params[parameter.name]" type="checkbox" class="toggle" /></span>
-            <input v-else v-model="draft.params[parameter.name]" :required="parameter.required" />
-          </label>
+          <template v-if="editor === 'builtin'">
+            <template v-for="parameter in selectedBuiltin?.parameters || []" :key="parameter.name">
+              <ToggleField
+                v-if="parameter.kind === 'boolean'"
+                v-model="draft.params[parameter.name]"
+                :label="parameter.label"
+                description="Turn this option on or off."
+                :help="`Enable or disable the ${parameter.label.toLowerCase()} option.`"
+              />
+              <label v-else>
+                {{ parameter.label }}
+                <input v-if="parameter.kind === 'number'" v-model.number="draft.params[parameter.name]" type="number" :required="parameter.required" step="any" />
+                <input v-else v-model="draft.params[parameter.name]" :required="parameter.required" />
+              </label>
+            </template>
+          </template>
           <label v-if="editor === 'custom'" class="wide">Python source<PythonEditor v-model="draft.code" /></label>
         </div>
         <div v-if="editor === 'builtin' && selectedBuiltin" class="callout library-editor-callout"><Info :size="18" /><span><strong>{{ selectedBuiltin.name }}</strong><br>{{ selectedBuiltin.description }}</span></div>
@@ -70,6 +80,7 @@ import { indicatorCodePlaceholder, metricCodePlaceholder, sizerCodePlaceholder, 
 import ConfirmationModal from '../components/confirmation-modal.vue'
 import LibraryAssetIcon from '../components/library-asset-icon.vue'
 import PythonEditor from '../components/python-editor.vue'
+import ToggleField from '../components/toggle-field.vue'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['toast'])

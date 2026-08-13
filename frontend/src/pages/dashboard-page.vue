@@ -3,10 +3,10 @@
     <section class="hero-card">
       <div>
         <h2>Test the idea.<br><em>Trade the evidence.</em></h2>
-        <p>Build strategies, study market behavior, and move into paper trading from one focused workspace.</p>
+        <p>Build strategies, study market behavior, and move into live trading from one focused workspace.</p>
         <div class="hero-actions">
           <button class="primary" @click="$emit('navigate', 'experiment')"><Beaker :size="17" /> New experiment</button>
-          <button class="secondary" @click="$emit('navigate', 'live')"><Radio :size="17" /> Start paper trading</button>
+          <button class="secondary" @click="$emit('navigate', 'live')"><Radio :size="17" /> Start live trading</button>
         </div>
       </div>
       <div class="market-visual" aria-hidden="true">
@@ -21,7 +21,7 @@
 
     <div v-if="loadError" class="callout download-plan-error"><TriangleAlert :size="18" /><span>{{ loadError }}</span><button class="secondary" @click="load">Retry</button></div>
 
-    <section class="metric-grid">
+    <section class="metric-grid dashboard-metrics">
       <article v-for="metric in metrics" :key="metric.label" class="metric-card">
         <div class="metric-icon"><component :is="metric.icon" :size="19" /></div>
         <span>{{ metric.label }}</span><strong>{{ metric.value }}</strong><small>{{ metric.note }}</small>
@@ -56,11 +56,25 @@
         </button>
       </article>
     </section>
+
+    <section class="panel dashboard-live-panel">
+      <div class="panel-header"><div><span class="eyebrow">Live trading</span><h3>Recent live sessions</h3></div><button class="text-button" @click="$emit('navigate', 'live-history')">View all <ArrowUpRight :size="15" /></button></div>
+      <div v-if="loading" class="empty-state" role="status"><span class="spinner" /><p>Loading recent live sessions…</p></div>
+      <div v-else-if="!loadError && !data?.sessions?.length" class="empty-state"><History/><p>No live sessions yet.</p><button class="secondary" @click="$emit('navigate', 'live')">Start your first</button></div>
+      <button v-for="session in data?.sessions" :key="session.id" class="activity-row live-session-row" type="button" @click="$emit('navigate', 'live-history')">
+        <span class="live-session-avatar" aria-hidden="true"><Radio :size="17" /></span>
+        <span><strong>{{ sessionSymbols(session) }}</strong><small>{{ time(session.started_at) }}</small></span>
+        <span class="session-context"><small>{{ sessionMode(session) }}</small><strong>{{ sessionStrategies(session) }}</strong></span>
+        <span class="primary-metric-value"><small>Final equity</small><strong>{{ sessionEquity(session) }}</strong></span>
+        <span class="badge" :class="sessionStatusTone(session.status)">{{ session.status }}</span>
+        <ChevronRight :size="17" />
+      </button>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { ArrowUpRight, Beaker, ChevronRight, Database, FlaskConical, Radio, Rows3, Shapes, TriangleAlert, WalletCards } from 'lucide-vue-next'
+import { ArrowUpRight, Beaker, ChevronRight, Database, FlaskConical, History, Radio, Rows3, Shapes, TriangleAlert, WalletCards } from 'lucide-vue-next'
 import { computed, onActivated, onMounted, ref } from 'vue'
 import { api } from '../api'
 import { formatConfiguredDateTime, formatResultMetric, instrumentLogoUrl } from '../state'
@@ -73,12 +87,37 @@ const loadError = ref('')
 let activatedOnce = false
 const metrics = computed(() => [
   { label: 'Experiments', value: loading.value || loadError.value ? '—' : format(data.value?.metrics?.experiments), note: 'stored locally', icon: FlaskConical },
+  { label: 'Live sessions', value: loading.value || loadError.value ? '—' : format(data.value?.metrics?.sessions), note: 'stored locally', icon: History },
   { label: 'Instruments', value: loading.value || loadError.value ? '—' : format(data.value?.metrics?.symbols), note: 'ready to analyze', icon: WalletCards },
   { label: 'Market bars', value: loading.value || loadError.value ? '—' : format(data.value?.metrics?.bars), note: 'across all intervals', icon: Rows3 },
   { label: 'Data series', value: loading.value || loadError.value ? '—' : format(data.value?.metrics?.series), note: 'provider feeds', icon: Shapes }
 ])
 function format(value) { return new Intl.NumberFormat('en', { notation: Number(value) > 99999 ? 'compact' : 'standard' }).format(value || 0) }
 function time(value) { return formatConfiguredDateTime(value, props.bootstrap?.display, 'Recently') }
+function sessionSymbols(session) {
+  const symbols = session.config?.symbols || []
+  return symbols.length ? symbols.join(', ') : session.config?.mode === 'replay' ? 'Replay session' : 'Live session'
+}
+function sessionMode(session) { return session.config?.mode === 'replay' ? 'Replay' : 'Live paper' }
+function sessionStrategies(session) {
+  const strategies = session.config?.strategies?.length
+    ? session.config.strategies
+    : session.config?.strategy ? [session.config.strategy] : []
+  return strategies.join(', ') || 'Monitor only'
+}
+function sessionEquity(session) {
+  if (sessionStrategies(session) === 'Monitor only') return '—'
+  return new Intl.NumberFormat('en', {
+    style: 'currency',
+    currency: session.config?.config?.base_currency || 'USD',
+    maximumFractionDigits: 2
+  }).format(Number(session.snapshot?.equity) || 0)
+}
+function sessionStatusTone(status) {
+  if (status === 'error') return 'error'
+  if (status === 'running' || status === 'paused') return 'running'
+  return 'neutral'
+}
 function primaryMetricValue(experiment) { return experiment.primary_metric_value ?? experiment.best_sharpe }
 function metricTone(value) {
   if (value === null || value === undefined || value === '') return ''

@@ -70,7 +70,7 @@
               </div>
               <div class="result-actions">
                 <button class="secondary" :disabled="!detail.config" @click="reuseSetup"><CopyPlus :size="15"/> Reuse setup</button>
-                <button class="secondary" :disabled="!detail.config" @click="paperTrade"><Activity :size="15"/> Paper trade</button>
+                <button class="secondary" :disabled="!detail.config" @click="openLiveTrading"><Activity :size="15"/> Live trading</button>
                 <button class="secondary" :disabled="!detail.config" @click="openDocument('config')"><FileCode2 :size="15"/> Config</button>
                 <button class="secondary" :disabled="detail.logs == null" @click="openDocument('logs')"><ScrollText :size="15"/> Logs</button>
                 <button class="icon-button danger" aria-label="Delete experiment" @click="requestDelete()"><Trash2 :size="17"/></button>
@@ -106,8 +106,8 @@
               <ChartPanel :figure="overviewFigure" :loading="overviewLoading" :error="overviewError" />
               <aside v-if="hasOverviewOptions" class="result-plot-options" aria-label="Plot options">
                 <div class="result-options-heading"><SlidersHorizontal :size="16"/><span>Plot options</span></div>
-                <label v-if="overviewTab === 'pnl'" class="toggle-label"><span>Normalize</span><input v-model="overviewOptions.normalize" class="toggle" type="checkbox" @change="loadOverviewPlot"/></label>
-                <label v-if="overviewTab === 'pnl'" class="toggle-label"><span>Show drawdown</span><input v-model="overviewOptions.drawdown" class="toggle" type="checkbox" @change="loadOverviewPlot"/></label>
+                <ToggleField v-if="overviewTab === 'pnl'" v-model="overviewOptions.normalize" label="Normalize" description="Show P&amp;L relative to starting equity." help="Display cumulative profit and loss as a percentage of starting equity." @change="loadOverviewPlot" />
+                <ToggleField v-if="overviewTab === 'pnl'" v-model="overviewOptions.drawdown" label="Show drawdown" description="Add portfolio drawdown to the chart." help="Overlay portfolio drawdown alongside cumulative profit and loss." @change="loadOverviewPlot" />
                 <label v-if="['rolling_returns', 'rolling_sharpe'].includes(overviewTab)">Window<input v-model.number="overviewOptions.window" type="number" min="2" max="365" @change="loadOverviewPlot"/><small>Number of bars in the rolling window.</small></label>
                 <label v-if="['pnl_histogram', 'trade_duration'].includes(overviewTab)">Bins<input v-model.number="overviewOptions.bins" type="number" min="5" max="100" @change="loadOverviewPlot"/><small>Number of histogram bins.</small></label>
                 <label v-if="overviewTab === 'trade_duration'">Unit<select v-model="overviewOptions.unit" @change="loadOverviewPlot"><option>auto</option><option>minutes</option><option>hours</option><option>days</option></select><small>Time unit on the horizontal axis.</small></label>
@@ -128,8 +128,8 @@
             <div class="result-plot-description"><p>{{ activeStrategyTab.description }}</p></div>
             <div class="result-plot-stage" :class="{ 'has-options': isStrategyPlot && strategyTab === 'price' }">
               <ChartPanel v-if="isStrategyPlot" :figure="strategyFigure" :loading="strategyLoading" :error="strategyError" />
-              <div v-else class="data-table-wrap result-table" :class="{ 'result-orders-table': strategyTab === 'orders' }" @scroll.passive="loadOrdersOnScroll">
-                <table class="data-table"><thead><tr><th v-for="column in tableColumns" :key="column" :class="tableColumnClass(column)">{{ label(column) }}</th></tr></thead><tbody><tr v-for="(row, index) in tableRows" :key="index"><td v-for="column in tableColumns" :key="column" :class="tableCellClass(row, column)"><span v-if="strategyTab === 'orders' && column === 'symbol'" class="order-symbol-cell"><span class="order-symbol-logo"><img v-if="orderLogo(row) && !failedOrderLogos.has(row.symbol)" :src="orderLogo(row)" alt="" @error="markOrderLogoFailed(row.symbol)"/><span v-else aria-hidden="true">{{ String(row.symbol || '?').slice(0, 1) }}</span></span><strong>{{ row.symbol }}</strong></span><template v-else>{{ cell(row[column], column) }}</template></td></tr></tbody></table>
+              <div v-else class="data-table-wrap result-table" :class="{ 'result-record-table': isRecordTable, 'result-trades-table': strategyTab === 'trades', 'result-orders-table': strategyTab === 'orders' }" @scroll.passive="loadOrdersOnScroll">
+                <table class="data-table"><thead><tr><th v-for="column in tableColumns" :key="column" :class="tableColumnClass(column)">{{ label(column) }}</th></tr></thead><tbody><tr v-for="(row, index) in tableRows" :key="index"><td v-for="column in tableColumns" :key="column" :class="tableCellClass(row, column)"><span v-if="isRecordTable && column === 'symbol'" class="order-symbol-cell"><span class="order-symbol-logo"><img v-if="symbolLogo(row) && !failedSymbolLogos.has(row.symbol)" :src="symbolLogo(row)" alt="" @error="markSymbolLogoFailed(row.symbol)"/><span v-else aria-hidden="true">{{ String(row.symbol || '?').slice(0, 1) }}</span></span><strong>{{ row.symbol }}</strong></span><template v-else>{{ cell(row[column], column) }}</template></td></tr></tbody></table>
                 <div v-if="!tableRows.length && !(strategyTab === 'orders' && (ordersLoading || ordersError))" class="empty-state"><p>No {{ strategyTabLabel.toLowerCase() }} for this run.</p></div>
                 <div v-if="strategyTab === 'orders' && ordersLoading" class="table-load-state" role="status"><span class="spinner small"/> Loading more orders…</div>
                 <div v-else-if="strategyTab === 'orders' && ordersError" class="table-load-state error-state"><span>{{ ordersError }}</span><button class="text-button" type="button" @click="loadMoreOrders">Retry</button></div>
@@ -163,6 +163,7 @@ import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch
 import { api, post, query, remove } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import ConfirmationModal from '../components/confirmation-modal.vue'
+import ToggleField from '../components/toggle-field.vue'
 import { formatConfiguredDate, formatConfiguredDateTime, formatIntervalLabel, formatResultMetric, instrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })
@@ -181,7 +182,7 @@ const overviewTab = ref('pnl'), overviewFigure = ref(null), overviewLoading = re
 const strategyTab = ref('metrics'), strategyFigure = ref(null), strategyLoading = ref(false), strategyError = ref('')
 const overviewOptions = reactive({ normalize: false, drawdown: true, window: 30, bins: 40, unit: 'auto' })
 const strategyOptions = reactive({ symbol: '' })
-const failedOrderLogos = ref(new Set())
+const failedSymbolLogos = ref(new Set())
 const orderPages = ref({})
 const orderLoadingKeys = reactive(new Set())
 const orderErrors = ref({})
@@ -221,6 +222,7 @@ const ordersError = computed(() => orderErrors.value[activeOrderKey.value] || ''
 const experimentDescription = computed(() => String(detail.value?.experiment?.description || '').trim())
 const fullLogUrl = computed(() => `/api/experiments/${encodeURIComponent(selectedId.value)}/logs`)
 const isStrategyPlot = computed(() => strategyPlotIds.has(strategyTab.value))
+const isRecordTable = computed(() => ['trades', 'orders'].includes(strategyTab.value))
 const hasOverviewOptions = computed(() => ['pnl', 'pnl_histogram', 'rolling_returns', 'rolling_sharpe', 'trade_duration'].includes(overviewTab.value))
 const activeOverviewTab = computed(() => overviewTabs.find(item => item.id === overviewTab.value) || overviewTabs[0])
 const activeStrategyTab = computed(() => strategyTabs.find(item => item.id === strategyTab.value) || strategyTabs[0])
@@ -375,14 +377,14 @@ function cell(value, column = '') {
 }
 function enumLabel(value) { return String(value || '—').replace(/([a-z])([A-Z])/g, '$1 $2') }
 function orderDate(value) { return value || null }
-function orderLogo(row) { return row.symbol === '—' ? '' : instrumentLogoUrl(row.symbol, detail.value?.config_metadata?.instrument_type, props.bootstrap?.display?.logokit_api_key) }
-function markOrderLogoFailed(symbol) { failedOrderLogos.value = new Set(failedOrderLogos.value).add(symbol) }
-function tableColumnClass(column) { return ['qty', 'price', 'pnl', 'commission'].includes(column) ? 'number' : '' }
+function symbolLogo(row) { return row.symbol === '—' ? '' : instrumentLogoUrl(row.symbol, detail.value?.config_metadata?.instrument_type, props.bootstrap?.display?.logokit_api_key) }
+function markSymbolLogoFailed(symbol) { failedSymbolLogos.value = new Set(failedSymbolLogos.value).add(symbol) }
+function tableColumnClass(column) { return ['quantity', 'qty', 'price', 'pnl', 'commission'].includes(column) || column.endsWith('_price') ? 'number' : '' }
 function tableCellClass(row, column) {
   return [
     tableColumnClass(column),
     column === 'side' ? (row.side === 'Buy' ? 'positive order-side' : row.side === 'Sell' ? 'negative order-side' : 'order-side') : '',
-    column === 'pnl' ? tone(row.pnlRaw) : '',
+    column === 'pnl' ? tone(row.pnlRaw ?? row.pnl) : '',
     column === 'status' && String(row.status).toLowerCase().includes('pending') ? 'warning order-status' : column === 'status' ? 'order-status' : ''
   ]
 }
@@ -527,7 +529,7 @@ async function reuseSetup() {
     emit('navigate', 'experiment')
   } catch (error) { emit('toast', error.message, 'error') }
 }
-async function paperTrade() {
+async function openLiveTrading() {
   try {
     const config = await api(`/api/experiments/${encodeURIComponent(selectedId.value)}/paper-config`)
     sessionStorage.setItem('backtide:paper-config', JSON.stringify(config))

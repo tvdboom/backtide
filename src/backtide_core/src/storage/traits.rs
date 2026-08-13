@@ -9,7 +9,7 @@ use std::collections::HashMap;
 /// Abstraction over a storage solution.
 #[async_trait]
 pub trait Storage: Send + Sync {
-    /// Initialize all tables in the database.
+    /// Create every missing table in the database.
     fn init(&self) -> StorageResult<()>;
 
     /// Get the (min_ts, max_ts) of stored bars.

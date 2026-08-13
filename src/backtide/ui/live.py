@@ -144,7 +144,10 @@ class LiveTradingManager:
                             break
                         market_values = event.get("market") or {}
                         market = MarketUpdate(**market_values)
-                        self._process_market(market)
+                        source_received_at = event.get("received_at")
+                        if source_received_at is None:
+                            source_received_at = market_values.get("received_ts")
+                        self._process_market(market, received_at=source_received_at)
                 except Exception as exc:  # noqa: BLE001
                     with self._lock:
                         self._error = str(exc)
@@ -243,11 +246,20 @@ class LiveTradingManager:
         root = self._storage_root()
         if not root.exists():
             return records
-        for manifest in root.glob("*/manifest.json"):
-            try:
-                records.append(json.loads(manifest.read_text(encoding="utf-8")))
-            except (OSError, json.JSONDecodeError):
-                continue
+        with self._lock:
+            active_session_id = (
+                self._session_id
+                if self._thread and self._thread.is_alive() and not self._stop.is_set()
+                else None
+            )
+            for manifest in root.glob("*/manifest.json"):
+                try:
+                    record = json.loads(manifest.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                records.append(
+                    self._reconcile_persisted_status(record, manifest, active_session_id)
+                )
         return sorted(records, key=lambda item: str(item.get("started_at", "")), reverse=True)
 
     def session(self, session_id: str) -> dict[str, Any]:
@@ -258,7 +270,17 @@ class LiveTradingManager:
         manifest = folder / "manifest.json"
         if not manifest.is_file():
             raise APIError(f"Paper session {session_id!r} was not found.", 404)
-        result = json.loads(manifest.read_text(encoding="utf-8"))
+        with self._lock:
+            active_session_id = (
+                self._session_id
+                if self._thread and self._thread.is_alive() and not self._stop.is_set()
+                else None
+            )
+            result = self._reconcile_persisted_status(
+                json.loads(manifest.read_text(encoding="utf-8")),
+                manifest,
+                active_session_id,
+            )
         updates = []
         journal = folder / "events.jsonl"
         if journal.is_file():
@@ -269,6 +291,30 @@ class LiveTradingManager:
                     continue
         result["updates"] = updates
         return result
+
+    def _reconcile_persisted_status(
+        self,
+        record: dict[str, Any],
+        manifest: Path,
+        active_session_id: str | None,
+    ) -> dict[str, Any]:
+        """Close a manifest that claims activity without a matching worker."""
+        if record.get("status") not in {"running", "paused"}:
+            return record
+        if record.get("id") == active_session_id:
+            return record
+
+        record = {**record, "status": "stopped"}
+        record["finished_at"] = record.get("finished_at") or self._now()
+        try:
+            manifest.write_text(
+                json.dumps(_clean(record), indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except OSError:
+            # The history response must still reflect reality if repair cannot be persisted.
+            pass
+        return record
 
     def _prepare_session(self) -> None:
         self._updates.clear()
@@ -286,28 +332,31 @@ class LiveTradingManager:
     def _run(self) -> None:
         from backtide.live import LiveMarketFeed
 
-        self._feed = LiveMarketFeed(
-            self._config["provider"],
-            self._config["symbols"],
-            self._config["interval"],
-            include_partial=True,
-        )
-        while not self._stop.is_set():
-            try:
+        try:
+            self._feed = LiveMarketFeed(
+                self._config["provider"],
+                self._config["symbols"],
+                self._config["interval"],
+                include_partial=True,
+            )
+            while not self._stop.is_set():
                 markets = self._feed.collect(max_events=10, timeout_seconds=5.0)
                 for market in markets:
                     if self._stop.is_set():
                         break
                     self._process_market(market)
-            except Exception as exc:  # noqa: BLE001
-                with self._lock:
-                    self._error = str(exc)
-                self._stop.set()
-        self._feed = None
-        self._persist_manifest("error" if self._error else "stopped")
+        except Exception as exc:  # noqa: BLE001
+            with self._lock:
+                self._error = str(exc)
+            self._stop.set()
+        finally:
+            self._feed = None
+            self._persist_manifest("error" if self._error else "stopped")
 
-    def _process_market(self, market: Any) -> None:
-        self._last_message_at = self._now()
+    def _process_market(self, market: Any, *, received_at: Any | None = None) -> None:
+        """Process an update while preserving its precise replay receipt time."""
+        processed_at = self._now()
+        self._last_message_at = processed_at
         self._received_events += 1
         if self._paused.is_set():
             return
@@ -316,6 +365,7 @@ class LiveTradingManager:
             orders = self._control_orders(session)
             results[name] = session.on_bar(market, orders or None)
         update = self._serialize_combined_update(market, results)
+        update["received_at"] = processed_at if received_at is None else received_at
         with self._lock:
             self._updates.append(update)
             self._append_event(update)
@@ -477,9 +527,13 @@ class LiveTradingManager:
             ),
         )
         portfolio = getattr(snapshot, "portfolio", None)
-        output["portfolio"] = (
-            public_attributes(portfolio, ("cash", "positions", "orders")) if portfolio else {}
-        )
+        if portfolio:
+            output["portfolio"] = public_attributes(portfolio, ("cash", "positions"))
+            output["portfolio"]["orders"] = [
+                cls._serialize_order(order) for order in getattr(portfolio, "orders", [])
+            ]
+        else:
+            output["portfolio"] = {}
         return _clean(output)
 
     @classmethod
@@ -546,12 +600,22 @@ class LiveTradingManager:
                 fill,
                 ("timestamp", "status", "fill_price", "commission", "realized_pnl", "reason"),
             )
-            row["order"] = public_attributes(
-                fill.order,
-                ("id", "symbol", "order_type", "quantity", "price", "limit_price"),
-            )
+            if row.get("status") is not None:
+                row["status"] = str(row["status"])
+            row["order"] = LiveTradingManager._serialize_order(fill.order)
             fills.append(_clean(row))
         return fills
+
+    @staticmethod
+    def _serialize_order(order: Any) -> dict[str, Any]:
+        """Convert a native order and its enum type into journal-safe values."""
+        row = public_attributes(
+            order,
+            ("id", "symbol", "order_type", "quantity", "price", "limit_price"),
+        )
+        if row.get("order_type") is not None:
+            row["order_type"] = str(row["order_type"])
+        return row
 
     @staticmethod
     def _aggregate_snapshots(snapshots: dict[str, dict[str, Any]]) -> dict[str, Any]:

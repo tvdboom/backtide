@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import IntervalPicker from '../components/interval-picker.vue'
 import ExperimentPage from './experiment-page.vue'
 
 const { post, query } = vi.hoisted(() => ({ post: vi.fn(), query: vi.fn() }))
@@ -87,7 +88,9 @@ describe('experiment page', () => {
       )
       expect(settings.length).toBeGreaterThan(0)
       expect(settings.every(setting => setting.find('.field-info').exists())).toBe(true)
-      expect(wrapper.findAll('.toggle-label small')).toHaveLength(0)
+      expect(wrapper.findAll('.toggle-label').every(toggle =>
+        toggle.get('.toggle-description').text().length > 0
+      )).toBe(true)
     }
   })
 
@@ -121,8 +124,17 @@ describe('experiment page', () => {
     await wrapper.findAll('.tabs button')[1].trigger('click')
     expect(wrapper.get('.segmented button').classes()).toContain('active')
     expect(wrapper.findAll('.segmented button svg')).toHaveLength(4)
-    expect(wrapper.get('select').element.value).toBe('OneDay')
-    expect(wrapper.get('select').find('option:checked').text()).toBe('1d')
+    const interval = wrapper.getComponent(IntervalPicker)
+    expect(interval.props('modelValue')).toBe('OneDay')
+    expect(interval.get('[aria-checked="true"]').text()).toBe('1d')
+    expect(interval.element.parentElement.classList).toContain('interval-picker-field')
+
+    await interval.findAll('button')[1].trigger('click')
+    expect(interval.props('modelValue')).toBe('FiveMinutes')
+    expect(interval.findAll('[aria-checked="true"]')).toHaveLength(1)
+
+    await wrapper.findAll('.tabs button')[2].trigger('click')
+    expect(wrapper.get('.currency-picker-field').exists()).toBe(true)
 
     await wrapper.findAll('.tabs button')[5].trigger('click')
     expect(wrapper.get('select').element.value).toBe('Percentage')

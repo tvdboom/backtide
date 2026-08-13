@@ -2,6 +2,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, nextTick, ref } from 'vue'
+import IntervalPicker from '../components/interval-picker.vue'
 import LivePage from './live-page.vue'
 
 const { api, post, query } = vi.hoisted(() => ({
@@ -94,6 +95,7 @@ const completedReplay = {
 
 describe('live page', () => {
   beforeEach(() => {
+    sessionStorage.clear()
     api.mockReset().mockResolvedValue({
       status: 'idle', config: {}, snapshot: {}, updates: [], error: null
     })
@@ -104,6 +106,7 @@ describe('live page', () => {
   it('uses a valid and editable initial cash default', async () => {
     const wrapper = mount(LivePage, { props: { bootstrap } })
     await flushPromises()
+    await wrapper.findAll('.live-form-tabs button')[1].trigger('click')
     const input = wrapper.get('#live-initial-cash').element
 
     expect(input.value).toBe('10000')
@@ -119,7 +122,11 @@ describe('live page', () => {
   it('keeps percentage limits valid at their one-hundred-percent defaults', async () => {
     const wrapper = mount(LivePage, { props: { bootstrap } })
     await flushPromises()
-    const percentageLimits = wrapper.findAll('input[min="0.01"][max="100"]')
+    const tabs = wrapper.findAll('.live-form-tabs button')
+    await tabs[4].trigger('click')
+    const percentageLimits = [wrapper.get('input[min="0.01"][max="100"]')]
+    await tabs[5].trigger('click')
+    percentageLimits.push(wrapper.get('input[min="0.01"][max="100"]'))
 
     expect(percentageLimits).toHaveLength(2)
     for (const input of percentageLimits) {
@@ -135,12 +142,14 @@ describe('live page', () => {
 
     expect(wrapper.findAll('.live-form-tabs button').map(button => button.text())).toEqual([
       '1Market data',
-      '2Strategy & metrics',
-      '3Portfolio & execution',
-      '4Risk'
+      '2Portfolio',
+      '3Strategy',
+      '4Metrics',
+      '5Execution',
+      '6Risk',
+      '7Engine'
     ])
-    const visibleLabels = () => Array.from(wrapper.get('.form-grid').element.children)
-      .filter(field => field.style.display !== 'none')
+    const visibleLabels = () => Array.from(wrapper.get('.form-section .form-grid').element.children)
       .map(field => {
         const heading = field.tagName === 'FIELDSET' ? field.querySelector('legend') : field
         const directText = [...heading.childNodes].find(node =>
@@ -153,19 +162,82 @@ describe('live page', () => {
     expect(visibleLabels()).toEqual([
       'Provider',
       'Symbols',
-      'Interval',
-      'Warm-up bars',
-      'History limit'
+      'Interval'
     ])
-    expect(wrapper.get('.live-interval-field').classes()).not.toContain('wide')
+    expect(wrapper.get('.live-interval-field').classes()).toContain('wide')
+    expect(wrapper.get('.live-interval-field').classes()).toContain('interval-picker-field')
+
     await wrapper.findAll('.live-form-tabs button')[1].trigger('click')
+    expect(wrapper.get('.section-copy h3').text()).toBe('Starting portfolio')
+    expect(wrapper.get('.live-portfolio-basics').exists()).toBe(true)
+    expect(wrapper.get('.live-base-currency').classes()).toContain('currency-picker-field')
+
+    await wrapper.findAll('.live-form-tabs button')[2].trigger('click')
     expect(visibleLabels()).toEqual([
       'Strategies',
-      'Indicators',
-      'Metrics',
+      'Indicators'
+    ])
+
+    await wrapper.findAll('.live-form-tabs button')[3].trigger('click')
+    expect(visibleLabels()).toEqual([
+      'Metrics'
+    ])
+
+    await wrapper.findAll('.live-form-tabs button')[6].trigger('click')
+    expect(visibleLabels()).toEqual([
+      'Warm-up bars',
       'Risk-free rate (%)',
+      'History limit',
       'Trade partial bars'
     ])
+  })
+
+  it('shows library icons for live strategies and indicators', async () => {
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.strategies.saved = [
+      { name: 'Momentum', builtin: true },
+      { name: 'Custom strategy', builtin: false }
+    ]
+    pageBootstrap.indicators = { saved: [
+      { name: 'Simple Moving Average', builtin: true },
+      { name: 'Custom indicator', builtin: false }
+    ] }
+    const wrapper = mount(LivePage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.live-form-tabs button')[2].trigger('click')
+
+    const strategyInput = wrapper.get('#live-strategies')
+    await strategyInput.trigger('focus')
+    const strategyIcons = strategyInput.element.closest('.search-select')
+      .querySelectorAll('.search-option-logo svg')
+    expect(strategyIcons[0].classList).toContain('lucide-bot-icon')
+    expect(strategyIcons[1].classList).toContain('lucide-square-code-icon')
+
+    const indicatorInput = wrapper.get('#live-indicators')
+    expect(indicatorInput.attributes('placeholder')).toBe('Select optional indicators...')
+    await indicatorInput.trigger('focus')
+    const indicatorIcons = indicatorInput.element.closest('.search-select')
+      .querySelectorAll('.search-option-logo svg')
+    expect(indicatorIcons[0].classList).toContain('lucide-shapes-icon')
+    expect(indicatorIcons[1].classList).toContain('lucide-braces-icon')
+  })
+
+  it('keeps selected strategies when the help text below the selector is clicked', async () => {
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.strategies.saved = [{ name: 'Momentum', builtin: true }]
+    const wrapper = mount(LivePage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.live-form-tabs button')[2].trigger('click')
+
+    await wrapper.get('#live-strategies').trigger('focus')
+    await wrapper.get('.search-menu button').trigger('click')
+    expect(wrapper.get('.tag').text()).toContain('Momentum')
+
+    const strategyField = wrapper.get('#live-strategies').element.closest('.field-label')
+    strategyField.lastElementChild.click()
+    await nextTick()
+
+    expect(wrapper.get('.tag').text()).toContain('Momentum')
   })
 
   it('can start from every setup step with sensible defaults', async () => {
@@ -174,6 +246,7 @@ describe('live page', () => {
     const tabs = wrapper.findAll('.live-form-tabs button')
 
     expect(wrapper.get('.live-button').element.disabled).toBe(false)
+    await tabs[1].trigger('click')
     expect(wrapper.get('#live-initial-cash').element.value).toBe('10000')
     for (const tab of tabs) {
       await tab.trigger('click')
@@ -186,13 +259,22 @@ describe('live page', () => {
     const wrapper = mount(LivePage, { props: { bootstrap } })
     await flushPromises()
 
-    const settings = [...wrapper.get('.form-grid').element.children]
-    expect(settings.length).toBeGreaterThan(20)
-    expect(settings.every(setting => setting.querySelector('.field-info'))).toBe(true)
-    expect(wrapper.findAll('.toggle-label small')).toHaveLength(0)
+    let settingCount = 0
+    for (const tab of wrapper.findAll('.live-form-tabs button')) {
+      await tab.trigger('click')
+      const settings = wrapper.findAll(
+        '.form-section label, .form-section .field-label, .form-section .provider-field'
+      )
+      settingCount += settings.length
+      expect(settings.every(setting => setting.find('.field-info').exists())).toBe(true)
+      expect(wrapper.findAll('.toggle-label').every(toggle =>
+        toggle.get('.toggle-description').text().length > 0
+      )).toBe(true)
+    }
+    expect(settingCount).toBeGreaterThan(20)
   })
 
-  it('refreshes a cached page and opens a completed replay instead of setup', async () => {
+  it('refreshes a cached page and opens a replay instead of setup', async () => {
     api.mockReset()
       .mockResolvedValueOnce({
         status: 'idle', config: {}, snapshot: {}, updates: [], error: null
@@ -218,8 +300,112 @@ describe('live page', () => {
     expect(wrapper.find('.live-setup').exists()).toBe(false)
     expect(wrapper.find('.live-dashboard').exists()).toBe(true)
     expect(wrapper.text()).toContain('Live market prices')
-    expect(wrapper.get('.session-actions').text()).toContain('Replay complete')
+    expect(wrapper.get('.session-actions').text()).toContain('Replay')
+    expect(wrapper.get('.session-actions').text()).not.toContain('complete')
     expect(wrapper.get('.session-actions').text()).not.toContain('Stop')
+    wrapper.unmount()
+  })
+
+  it('applies every experiment prefill when a cached Live trading page is reopened', async () => {
+    post.mockResolvedValue({
+      status: 'running', config: {}, snapshot: {}, strategies: {}, updates: [], health: {}, error: null
+    })
+    const show = ref(true)
+    const Host = defineComponent({
+      components: { LivePage },
+      setup: () => ({ bootstrap, show }),
+      template: '<KeepAlive><LivePage v-if="show" :bootstrap="bootstrap" /></KeepAlive>'
+    })
+    const wrapper = mount(Host)
+    await flushPromises()
+
+    await wrapper.findAll('.live-form-tabs button')[4].trigger('click')
+    const partialFills = wrapper.findAll('label')
+      .find(label => label.text().includes('Volume-constrained fills'))
+    await partialFills.get('input').setValue(true)
+    const volumeParticipation = wrapper.findAll('label')
+      .find(label => label.text().includes('Max volume participation'))
+    await volumeParticipation.get('input').setValue(25)
+    await wrapper.findAll('.live-form-tabs button')[5].trigger('click')
+    const maxDrawdown = wrapper.findAll('label')
+      .find(label => label.text().includes('Maximum drawdown halt'))
+    await maxDrawdown.get('input').setValue(20)
+    await wrapper.findAll('.live-form-tabs button')[6].trigger('click')
+    const historyLimit = wrapper.findAll('label')
+      .find(label => label.text().includes('History limit'))
+    await historyLimit.get('input').setValue(500)
+    const partialBars = wrapper.findAll('label')
+      .find(label => label.text().includes('Trade partial bars'))
+    await partialBars.get('input').setValue(true)
+
+    show.value = false
+    await nextTick()
+    sessionStorage.setItem('backtide:paper-config', JSON.stringify({
+      provider: 'binance',
+      interval: '5m',
+      symbols: ['DOGE-USDT'],
+      strategies: ['Momentum'],
+      indicators: ['Fast SMA'],
+      warmup_bars: 120,
+      config: {
+        initial_cash: 25_000,
+        base_currency: 'USD',
+        commission_pct: 0.25,
+        commission_fixed: 1.5,
+        slippage: 0.15,
+        allow_short: true,
+        allow_margin: true,
+        max_leverage: 3,
+        initial_margin: 40,
+        maintenance_margin: 20,
+        margin_interest: 4,
+        borrow_rate: 2,
+        max_position_size: 35,
+        allowed_order_types: ['Market', 'Limit'],
+        partial_fills: true,
+        metrics: ['total_return', 'sharpe'],
+        risk_free_rate: 2.5
+      }
+    }))
+
+    show.value = true
+    await nextTick()
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith('/api/live', expect.objectContaining({
+      provider: 'binance',
+      interval: '5m',
+      symbols: ['DOGE-USDT'],
+      strategies: ['Momentum'],
+      indicators: ['Fast SMA'],
+      warmup_bars: 120,
+      config: expect.objectContaining({
+        initial_cash: 25_000,
+        base_currency: 'USD',
+        commission_pct: 0.25,
+        commission_fixed: 1.5,
+        slippage: 0.15,
+        allow_short: true,
+        allow_margin: true,
+        max_leverage: 3,
+        initial_margin: 40,
+        maintenance_margin: 20,
+        margin_interest: 4,
+        borrow_rate: 2,
+        max_position_size: 35,
+        allowed_order_types: ['Market', 'Limit'],
+        partial_fills: true,
+        max_volume_participation: 100,
+        max_drawdown: 0,
+        max_history: 10000,
+        trade_on_partial: false,
+        metrics: ['total_return', 'sharpe'],
+        risk_free_rate: 2.5
+      })
+    }))
+    expect(sessionStorage.getItem('backtide:paper-config')).toBeNull()
     wrapper.unmount()
   })
 
@@ -262,6 +448,7 @@ describe('live page', () => {
   it('uses the searchable currency selector with flags', async () => {
     const wrapper = mount(LivePage, { props: { bootstrap } })
     await flushPromises()
+    await wrapper.findAll('.live-form-tabs button')[1].trigger('click')
 
     const trigger = wrapper.get('#live-base-currency')
     expect(trigger.text()).toContain('EUR')
@@ -288,9 +475,10 @@ describe('live page', () => {
 
     await coinbase.trigger('click')
 
-    const interval = wrapper.get('select')
-    expect(interval.element.value).toBe('5m')
-    expect(interval.findAll('option').map(option => option.text())).toEqual(['5m'])
+    const interval = wrapper.getComponent(IntervalPicker)
+    expect(interval.props('modelValue')).toBe('5m')
+    expect(interval.findAll('button').map(button => button.text())).toEqual(['5m'])
+    expect(interval.get('[aria-checked="true"]').text()).toBe('5m')
     expect(coinbase.attributes('aria-checked')).toBe('true')
     expect(query).toHaveBeenLastCalledWith('/api/live/instruments', {
       provider: 'coinbase',
@@ -299,6 +487,25 @@ describe('live page', () => {
     expect(wrapper.find('.provider-support').exists()).toBe(false)
     expect(wrapper.get('.safety-panel').text()).not.toContain('Coinbase live candles')
     expect(wrapper.find('.safety-panel .callout').exists()).toBe(false)
+  })
+
+  it('describes order types without decorative initials or repeated selected details', async () => {
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[4].trigger('click')
+
+    const marketTag = wrapper.findAll('.tag')[0]
+    expect(marketTag.text().replace('×', '').trim()).toBe('Market')
+    expect(marketTag.find('.tag-copy').exists()).toBe(false)
+    expect(marketTag.find('.selected-symbol-logo').exists()).toBe(false)
+
+    await marketTag.get('button').trigger('click')
+    await wrapper.get('#live-order-types').trigger('focus')
+
+    const option = wrapper.get('.search-menu button')
+    expect(option.get('strong').text()).toBe('Market')
+    expect(option.get('small').text()).toBe('Execute at the best available market price.')
+    expect(option.find('.search-option-logo').exists()).toBe(false)
   })
 
   it('shows symbol logos in the menu and selected tags', async () => {
@@ -349,6 +556,7 @@ describe('live page', () => {
       },
       updates: [
         {
+          received_at: '2023-11-14T22:13:20.125Z',
           market: {
             symbol: 'BTC-USD', received_ts: 1_700_000_000,
             open: 59_900, high: 60_100, low: 59_800, close: 60_000,
@@ -357,6 +565,7 @@ describe('live page', () => {
           fills: [], snapshot: { equity: 10_000 }
         },
         {
+          received_at: '2023-11-14T22:14:20.987Z',
           market: {
             symbol: 'BTC-USD', received_ts: 1_700_000_060,
             open: 60_000, high: 60_300, low: 59_950, close: 60_250,
@@ -367,7 +576,18 @@ describe('live page', () => {
       ],
       error: null
     })
-    const wrapper = mount(LivePage, { props: { bootstrap } })
+    const wrapper = mount(LivePage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          display: {
+            ...bootstrap.display,
+            datetime_format: 'YYYY-MM-DD HH:mm',
+            timezone: 'UTC'
+          }
+        }
+      }
+    })
     await flushPromises()
 
     const chart = wrapper.getComponent({ name: 'ChartPanelStub' })
@@ -393,10 +613,154 @@ describe('live page', () => {
     expect(wrapper.text()).not.toContain('Open positions')
     expect(wrapper.text()).not.toContain('Positions & cash')
     expect(wrapper.text()).not.toContain('Recent order outcomes')
-    expect(wrapper.findAll('.event-volume').map(value => value.text())).toEqual([
-      'volume 3',
-      'volume 2.5'
+    expect(wrapper.findAll('.event-log-header [role="columnheader"]').map(value => value.text()))
+      .toEqual(['Time', 'Status', 'Symbol', 'Open', 'High', 'Low', 'Close', 'Volume', 'Fills'])
+    expect(wrapper.findAll('.event-log-row time').map(value => value.text())).toEqual([
+      '22:14:20.987',
+      '22:13:20.125'
     ])
+    expect(wrapper.findAll('.event-open').slice(1).map(value => value.text())).toEqual([
+      '60000',
+      '59900'
+    ])
+    expect(wrapper.findAll('.event-high').slice(1).map(value => value.text())).toEqual([
+      '60300',
+      '60100'
+    ])
+    expect(wrapper.findAll('.event-low').slice(1).map(value => value.text())).toEqual([
+      '59950',
+      '59800'
+    ])
+    expect(wrapper.findAll('.event-close').slice(1).map(value => value.text())).toEqual([
+      '60250',
+      '60000'
+    ])
+    expect(wrapper.findAll('.event-volume').map(value => value.text())).toEqual([
+      'Volume',
+      '3',
+      '2.5'
+    ])
+    expect(wrapper.findAll('.event-symbol img')).toHaveLength(2)
+    expect(wrapper.get('.event-symbol img').attributes('src')).toContain('/crypto/BTC')
+    wrapper.unmount()
+  })
+
+  it('switches strategy-specific live details from tabs beneath the chart', async () => {
+    const pageBootstrap = {
+      ...bootstrap,
+      metrics: {
+        builtin: [
+          { key: 'total_return', name: 'Total return', percentage: true },
+          { key: 'final_equity', name: 'Final equity', percentage: false }
+        ]
+      }
+    }
+    api.mockResolvedValue({
+      status: 'running',
+      config: {
+        provider: 'kraken',
+        interval: '1m',
+        symbols: ['BTC-USD', 'ETH-USD'],
+        strategies: ['Buy & Hold', 'BB Mean Reversion'],
+        config: {
+          initial_cash: 10_000,
+          base_currency: 'EUR',
+          metrics: ['total_return', 'final_equity']
+        }
+      },
+      snapshot: {
+        latest_prices: { 'BTC-USD': 110, 'ETH-USD': 220 },
+        equity: 22_300,
+        portfolio: { positions: { 'BTC-USD': 1, 'ETH-USD': 2 }, cash: { EUR: 19_000 } }
+      },
+      strategies: {
+        'Buy & Hold': {
+          equity: 10_100,
+          realized_pnl: 100,
+          unrealized_pnl: 0,
+          processed_bars: 2,
+          gross_exposure: 110,
+          net_exposure: 110,
+          leverage: 0.01,
+          buying_power: 9_990,
+          drawdown: 0,
+          total_costs: 1,
+          metrics: { final_equity: 10_100, total_return: 0.01 },
+          portfolio: { positions: { 'BTC-USD': 1 }, cash: { EUR: 9_990 } }
+        },
+        'BB Mean Reversion': {
+          equity: 12_200,
+          realized_pnl: 2_200,
+          unrealized_pnl: 0,
+          processed_bars: 2,
+          gross_exposure: 440,
+          net_exposure: 440,
+          leverage: 0.04,
+          buying_power: 11_760,
+          drawdown: 0,
+          total_costs: 2,
+          metrics: { final_equity: 12_200, total_return: 0.22 },
+          portfolio: { positions: { 'ETH-USD': 2 }, cash: { EUR: 11_760 } }
+        }
+      },
+      updates: [
+        {
+          market: { symbol: 'BTC-USD', received_ts: 1_700_000_000 },
+          strategies: {
+            'Buy & Hold': {
+              fills: [{ status: 'Filled', order: { symbol: 'BTC-USD' } }],
+              indicators: {},
+              snapshot: { equity: 10_000 }
+            },
+            'BB Mean Reversion': {
+              fills: [{ status: 'Filled', order: { symbol: 'ETH-USD' } }],
+              indicators: {},
+              snapshot: { equity: 10_000 }
+            }
+          }
+        },
+        {
+          market: { symbol: 'BTC-USD', received_ts: 1_700_000_060 },
+          strategies: {
+            'Buy & Hold': { fills: [], indicators: {}, snapshot: { equity: 10_100 } },
+            'BB Mean Reversion': { fills: [], indicators: {}, snapshot: { equity: 12_200 } }
+          }
+        }
+      ],
+      error: null
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('.live-strategy-switcher [role="tab"]')
+    expect(tabs.map(tab => tab.text())).toEqual(['Buy & Hold', 'BB Mean Reversion'])
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('.live-metrics').element.compareDocumentPosition(
+      wrapper.get('.live-dashboard').element
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.get('.live-chart .chart-stub').element.compareDocumentPosition(
+      wrapper.get('.live-strategy-switcher').element
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.get('.live-metrics').text()).toContain('10,100.00')
+    expect(wrapper.get('.live-observability').text()).toContain('1.00%')
+    expect(wrapper.get('.live-observability').text()).not.toContain('22.00%')
+    expect(wrapper.findAll('.live-observability article')[1].findAll('dt').map(item => item.text()))
+      .toEqual(['Total return', 'Final equity'])
+    expect(wrapper.getComponent({ name: 'ChartPanelStub' }).props('figure').data[0].y)
+      .toEqual([0, 100])
+    expect(wrapper.get('.live-tables').text()).toContain('BTC-USD')
+    expect(wrapper.get('.live-tables').text()).not.toContain('ETH-USD')
+
+    await tabs[1].trigger('click')
+
+    expect(tabs[1].attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('.live-metrics').text()).toContain('12,200.00')
+    expect(wrapper.get('.live-observability').text()).toContain('22.00%')
+    expect(wrapper.get('.live-observability').text()).not.toContain('1.00%')
+    expect(wrapper.getComponent({ name: 'ChartPanelStub' }).props('figure').data[0].y)
+      .toEqual([0, 2_200])
+    expect(wrapper.get('.live-tables').text()).toContain('ETH-USD')
+    expect(wrapper.get('.live-tables').text()).not.toContain('BTC-USD')
     wrapper.unmount()
   })
 

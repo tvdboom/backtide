@@ -81,6 +81,25 @@ describe('library page', () => {
     expect(wrapper.get('.custom-source-row input[required]').attributes('maxlength')).toBe('20')
   })
 
+  it('uses the shared titled toggle field for boolean constructor options', async () => {
+    location.hash = '#strategies'
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.strategies.builtin[0].parameters = [{
+      name: 'enabled', label: 'Enabled', kind: 'boolean', default: true, required: false
+    }]
+    api.mockResolvedValue(pageBootstrap.strategies)
+    const wrapper = mount(LibraryPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+
+    await wrapper.get('.page-intro .primary').trigger('click')
+
+    const field = wrapper.get('.toggle-label')
+    expect(field.get('.toggle-title').text()).toBe('Enabled')
+    expect(field.get('.field-info').exists()).toBe(true)
+    expect(field.get('.toggle-description').text()).toBe('Turn this option on or off.')
+    expect(field.get('.toggle').element.checked).toBe(true)
+  })
+
   it('refreshes indicators after rendering bootstrap data', async () => {
     location.hash = '#indicators'
     api.mockResolvedValue({
