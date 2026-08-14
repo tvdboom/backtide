@@ -259,6 +259,30 @@ export function formatConfiguredDateTime(value, display = {}, fallback = '—') 
   return `${renderDate(parts, configuredDateFormat(display))} ${renderTime(parts, configuredTimeFormat(display))}`
 }
 
+export function formatConfiguredCurrency(
+  value,
+  currency = 'USD',
+  display = {},
+  maximumFractionDigits = 2
+) {
+  const parsed = Number(value)
+  const amount = Number.isFinite(parsed) ? parsed : 0
+  const code = currency || 'USD'
+  const symbol = new Intl.NumberFormat('en', {
+    style: 'currency',
+    currency: code,
+    currencyDisplay: 'narrowSymbol'
+  }).formatToParts(0).find(part => part.type === 'currency')?.value || code
+  const sign = amount < 0 ? '-' : ''
+  const number = Math.abs(amount).toLocaleString('en', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits
+  })
+  return display?.currency_prefix === false
+    ? `${sign}${number} ${symbol}`
+    : `${sign}${symbol}${number}`
+}
+
 export function configuredPlotlyDateTimeFormat(display = {}) {
   const dateTokens = {
     YYYY: '%Y', YY: '%y', MMMM: '%B', MMM: '%b', MM: '%m', M: '%-m',

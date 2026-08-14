@@ -492,6 +492,7 @@ class TestServiceCommands:
             general=SimpleNamespace(base_currency="EUR"),
             data=SimpleNamespace(dataframe_library=SimpleNamespace(class_name="DataFrame")),
             display=SimpleNamespace(
+                currency_prefix=False,
                 logokit_api_key=None,
                 timezone="UTC",
                 date_format="YYYY-MM-DD",
@@ -509,6 +510,7 @@ class TestServiceCommands:
         result = services.bootstrap()
 
         assert result["defaults"]["portfolio"]["base_currency"] == "EUR"
+        assert result["display"]["currency_prefix"] is False
 
     def test_sizer_catalog_describes_required_numeric_parameters(self, monkeypatch, tmp_path):
         """Built-in sizers are cataloged without constructing missing required arguments."""
@@ -583,26 +585,28 @@ class TestServiceCommands:
 
     def test_sizer_loader_removes_empty_failed_saves(self, tmp_path):
         """An empty artifact from an interrupted save is cleaned without deserialization."""
+        from backtide.config import Config, DataConfig
         from backtide.sizers.utils import _load_stored_sizers
 
         folder = tmp_path / "sizers"
         folder.mkdir()
         failed = folder / "Equal weights.pkl"
         failed.touch()
-        cfg = SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path))
+        cfg = Config(data=DataConfig(storage_path=str(tmp_path)))
 
         assert _load_stored_sizers(cfg) == {}
         assert not failed.exists()
 
     def test_sizer_save_failure_preserves_the_previous_file(self, monkeypatch, tmp_path):
         """Atomic sizer writes never truncate an existing reusable preset."""
+        from backtide.config import Config, DataConfig
         from backtide.sizers import FixedFractional, utils
 
         folder = tmp_path / "sizers"
         folder.mkdir()
         target = folder / "Allocation.pkl"
         target.write_bytes(b"previous")
-        cfg = SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path))
+        cfg = Config(data=DataConfig(storage_path=str(tmp_path)))
 
         def fail_dump(_value, _stream):
             raise TypeError("simulated pickle failure")
@@ -1543,6 +1547,228 @@ class TestLiveTradingManager:
         """Stopping before start leaves the manager in an idle state."""
         assert LiveTradingManager().stop()["status"] == "idle"
 
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [("max", 0.0), (1, 1.0), ("2", 2.0), (10.0, 10.0)],
+    )
+    def test_replay_speed_accepts_real_time_multipliers(self, value, expected):
+        """Replay speed accepts bounded multipliers and an unlimited mode."""
+        assert LiveTradingManager._playback_speed(value) == expected
+
+    @pytest.mark.parametrize("value", [0, -1, 101, "slow"])
+    def test_replay_speed_rejects_invalid_values(self, value):
+        """Replay speed rejects values that cannot produce safe bounded waits."""
+        with pytest.raises(APIError, match=r"between 0\.1x and 100x"):
+            LiveTradingManager._playback_speed(value)
+
+    def test_replay_pause_blocks_without_consuming_the_next_event(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Paused playback waits instead of dropping recorded market events."""
+        delay_started = threading.Event()
+        release_delay = threading.Event()
+        second_processed = threading.Event()
+        replay_delays = []
+
+        class Config:
+            def __init__(self, initial_cash=10_000.0):
+                self.initial_cash = initial_cash
+
+        class Market:
+            def __init__(self, **values):
+                self.__dict__.update(values)
+
+        class Session:
+            calls = 0
+
+            def __init__(self, _config, _strategy):
+                pass
+
+            @classmethod
+            def on_bar(cls, market, _orders):
+                cls.calls += 1
+                if cls.calls == 2:
+                    second_processed.set()
+                return SimpleNamespace(
+                    market=market,
+                    fills=[],
+                    orders_submitted=0,
+                    processed=True,
+                    snapshot=None,
+                    indicators={},
+                )
+
+            @staticmethod
+            def snapshot():
+                return None
+
+        session_id = "0123456789abcdef"
+        folder = tmp_path / session_id
+        folder.mkdir()
+        (folder / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": session_id,
+                    "config": {
+                        "mode": "paper",
+                        "provider": "mock",
+                        "interval": "1m",
+                        "symbols": ["BTC-USD"],
+                        "strategies": [],
+                        "warmup_bars": 0,
+                        "config": {"initial_cash": 10_000.0},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        markets = [
+            {
+                "symbol": "BTC-USD",
+                "interval": "1m",
+                "open_ts": timestamp,
+                "close_ts": timestamp + 1,
+                "open": 100.0,
+                "high": 100.0,
+                "low": 100.0,
+                "close": 100.0,
+                "volume": 1.0,
+                "n_trades": 1,
+                "is_final": True,
+                "provider": "mock",
+                "received_ts": timestamp + 1,
+            }
+            for timestamp in (1_700_000_000, 1_700_000_001)
+        ]
+        (folder / "events.jsonl").write_text(
+            "\n".join(
+                json.dumps({"market": market, "received_at": market["received_ts"]})
+                for market in markets
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.live",
+            SimpleNamespace(
+                MarketUpdate=Market,
+                PaperTradingConfig=Config,
+                PaperTradingSession=Session,
+            ),
+        )
+        manager = LiveTradingManager(tmp_path)
+
+        def wait_for_delay(seconds):
+            replay_delays.append(seconds)
+            delay_started.set()
+            return release_delay.wait(timeout=1.0)
+
+        monkeypatch.setattr(manager, "_wait_replay_delay", wait_for_delay)
+
+        manager.replay(session_id, 1)
+        assert delay_started.wait(timeout=1.0)
+        assert manager._replay_processed_events == 1
+
+        manager.pause()
+        release_delay.set()
+        assert not second_processed.wait(timeout=0.1)
+
+        manager.resume()
+        assert second_processed.wait(timeout=1.0)
+        assert manager._thread is not None
+        manager._thread.join(timeout=1.0)
+        assert manager._replay_processed_events == 2
+        assert replay_delays == [1.0]
+
+    def test_replay_restores_recorded_warmup_without_querying_storage(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Replay initializes strategies from the exact persisted warm-up stream."""
+        warmed = []
+
+        class Config:
+            def __init__(self, initial_cash=10_000.0):
+                self.initial_cash = initial_cash
+
+        class Market:
+            def __init__(self, **values):
+                self.__dict__.update(values)
+
+        class Session:
+            def __init__(self, _config, _strategy):
+                pass
+
+            @staticmethod
+            def warm_up(markets):
+                warmed.extend(markets)
+
+            @staticmethod
+            def snapshot():
+                return None
+
+        session_id = "0123456789abcdef"
+        folder = tmp_path / session_id
+        folder.mkdir()
+        (folder / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": session_id,
+                    "config": {
+                        "mode": "paper",
+                        "provider": "mock",
+                        "interval": "1m",
+                        "symbols": ["BTC-USD"],
+                        "strategies": [],
+                        "warmup_bars": 1,
+                        "config": {"initial_cash": 10_000.0},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        warmup = {
+            "symbol": "BTC-USD",
+            "interval": "1m",
+            "open_ts": 1_700_000_000,
+            "close_ts": 1_700_000_060,
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.5,
+            "volume": 10.0,
+            "n_trades": 2,
+            "is_final": True,
+            "provider": "mock",
+            "received_ts": 1_700_000_060,
+        }
+        (folder / "warmup.jsonl").write_text(
+            json.dumps(warmup) + "\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.live",
+            SimpleNamespace(
+                MarketUpdate=Market,
+                PaperTradingConfig=Config,
+                PaperTradingSession=Session,
+            ),
+        )
+        manager = LiveTradingManager(tmp_path)
+
+        manager.replay(session_id)
+        assert manager._thread is not None
+        manager._thread.join(timeout=1.0)
+
+        assert [market.symbol for market in warmed] == ["BTC-USD"]
+        assert manager._warmup_loaded == 1
+        assert manager.status()["replay"]["warmup_source"] == "recorded"
+
     def test_replay_ignores_config_fields_unsupported_by_the_loaded_engine(
         self,
         monkeypatch,
@@ -1701,6 +1927,65 @@ class TestLiveTradingManager:
         assert len(instances) == 2
         assert instances[0].canceled.is_set()
         assert instances[1].canceled.is_set()
+
+    def test_conversion_updates_seed_accounts_before_target_processing(self, tmp_path):
+        """Conversion legs are observed before a foreign-quoted target reaches a strategy."""
+        processed = []
+        rates = []
+
+        class Session:
+            @staticmethod
+            def set_exchange_rate(base, quote, rate, timestamp):
+                rates.append((base, quote, rate, timestamp))
+
+            @staticmethod
+            def on_bar(value, _orders):
+                processed.append(value.symbol)
+                return SimpleNamespace(
+                    market=value,
+                    fills=[],
+                    orders_submitted=0,
+                    processed=True,
+                    snapshot=None,
+                    indicators={},
+                )
+
+            @staticmethod
+            def snapshot():
+                return None
+
+        def update(symbol, close):
+            return SimpleNamespace(
+                symbol=symbol,
+                quote_currency=symbol.rsplit("-", 1)[-1],
+                interval="1m",
+                open_ts=1_700_000_000,
+                close_ts=1_700_000_060,
+                open=close,
+                high=close,
+                low=close,
+                close=close,
+                volume=1.0,
+                n_trades=1,
+                is_final=True,
+                provider="mock",
+                received_ts=1_700_000_061,
+            )
+
+        manager = LiveTradingManager(tmp_path)
+        manager._sessions = {"Monitor": Session()}
+        manager._session = manager._sessions["Monitor"]
+        manager._config = {"symbols": ["AAVE-ETH"]}
+        manager._conversion_legs = {"ETH-EUR": ("ETH", "EUR")}
+        manager._prepare_session()
+
+        manager._process_market(update("AAVE-ETH", 0.04653))
+        manager._process_market(update("ETH-EUR", 4_000.0))
+        manager._process_market(update("AAVE-ETH", 0.04653))
+
+        assert rates == [("ETH", "EUR", 4_000.0, 1_700_000_060)]
+        assert processed == ["AAVE-ETH"]
+        assert manager.status()["updates"][0]["exchange_rates"]["ETH-EUR"]["rate"] == 4_000.0
 
     def test_mock_feed_failure_sets_terminal_error(self, monkeypatch, tmp_path):
         """A mocked WebSocket failure stops the worker and exposes its message."""
@@ -1913,7 +2198,90 @@ class TestLiveTradingManager:
             "Momentum",
             "Mean reversion",
         }
+        assert set(status["recent_order_outcomes"]) == {"Momentum", "Mean reversion"}
+        assert status["recent_order_outcomes"]["Momentum"][0]["order"]["id"] == ("momentum-order")
         assert status["updates"][0]["received_at"] == "2026-08-13T10:12:58.123456+00:00"
+
+    def test_recent_order_outcomes_survive_market_update_eviction(self, tmp_path):
+        """Completed orders remain visible independently of buffered market updates."""
+        market = SimpleNamespace(
+            symbol="BTC-USD",
+            interval="1m",
+            open_ts=1_700_000_000,
+            close_ts=1_700_000_060,
+            open=100.0,
+            high=100.0,
+            low=100.0,
+            close=100.0,
+            volume=10.0,
+            n_trades=1,
+            is_final=True,
+            provider="mock",
+            received_ts=1_700_000_061,
+        )
+        snapshot = SimpleNamespace(
+            latest_prices={"BTC-USD": 100.0},
+            equity=1_000.0,
+            realized_pnl=0.0,
+            unrealized_pnl=0.0,
+            processed_bars=1,
+            portfolio=SimpleNamespace(cash={"USD": 900.0}, positions={"BTC-USD": 1.0}, orders=[]),
+        )
+
+        class Session:
+            calls = 0
+
+            @classmethod
+            def on_bar(cls, _market, _orders):
+                cls.calls += 1
+                fills = []
+                if cls.calls == 1:
+                    fills = [
+                        SimpleNamespace(
+                            order=SimpleNamespace(
+                                id="buy-order",
+                                symbol="BTC-USD",
+                                order_type="Market",
+                                quantity=1.0,
+                                price=None,
+                                limit_price=None,
+                            ),
+                            timestamp=market.close_ts,
+                            status="Filled",
+                            fill_price=100.0,
+                            commission=0.0,
+                            realized_pnl=0.0,
+                            reason="test fill",
+                        )
+                    ]
+                return SimpleNamespace(
+                    market=market,
+                    fills=fills,
+                    orders_submitted=len(fills),
+                    processed=True,
+                    snapshot=snapshot,
+                    indicators={},
+                )
+
+            @staticmethod
+            def snapshot():
+                return snapshot
+
+        manager = LiveTradingManager(tmp_path)
+        manager._sessions = {"Buy & Hold": Session()}
+        manager._session = manager._sessions["Buy & Hold"]
+        manager._prepare_session()
+
+        for _ in range(501):
+            manager._process_market(market)
+
+        status = manager.status()
+
+        assert len(status["updates"]) == 500
+        assert all(not update["fills"] for update in status["updates"])
+        outcomes = status["recent_order_outcomes"]["Buy & Hold"]
+        assert len(outcomes) == 1
+        assert outcomes[0]["order"]["id"] == "buy-order"
 
     def test_native_order_values_are_json_safe_in_session_journal(self, tmp_path):
         """Native order enums and resting orders are normalized before persistence."""
@@ -1994,6 +2362,15 @@ class TestLiveTradingManager:
         }
 
         manager._append_event(update)
+        manager._persist_warmup(
+            [
+                SimpleNamespace(
+                    symbol="BTC-USD",
+                    close=99.0,
+                    close_ts=1_700_000_000,
+                )
+            ]
+        )
         manager._persist_manifest("stopped")
 
         sessions = LiveTradingManager(tmp_path).sessions()
@@ -2002,6 +2379,7 @@ class TestLiveTradingManager:
         assert sessions[0]["id"] == manager._session_id
         assert restored["status"] == "stopped"
         assert restored["updates"] == [update]
+        assert restored["warmup"][0]["symbol"] == "BTC-USD"
 
     @pytest.mark.parametrize("status", ["running", "paused"])
     def test_session_history_closes_orphaned_active_manifests(
@@ -2056,7 +2434,7 @@ class TestLiveTradingManager:
         )
         manager = LiveTradingManager(tmp_path)
         manager._session_id = session_id
-        manager._thread = SimpleNamespace(is_alive=lambda: True)
+        manager._thread = threading.current_thread()
 
         sessions = manager.sessions()
 

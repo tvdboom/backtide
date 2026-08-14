@@ -1,5 +1,6 @@
 //! Deterministic paper-broker execution and portfolio accounting.
 
+use crate::backtest::fx::FxTable;
 use crate::backtest::models::{
     EquitySample, Order, OrderId, OrderStatus, OrderType, Portfolio, SizerSlot, Trade,
 };
@@ -23,6 +24,9 @@ pub struct PaperBroker {
     config: PaperTradingConfig,
     portfolio: Portfolio,
     latest_prices: HashMap<String, f64>,
+    latest_price_timestamps: HashMap<String, i64>,
+    quote_currencies: HashMap<String, String>,
+    fx: FxTable,
     average_cost: HashMap<String, f64>,
     trail_state: HashMap<OrderId, (f64, f64)>,
     known_order_ids: HashSet<OrderId>,
@@ -45,6 +49,7 @@ impl PaperBroker {
     pub fn new(config: PaperTradingConfig) -> Result<Self, String> {
         validate_config(&config)?;
         let initial_cash = config.initial_cash;
+        let base_currency = config.base_currency.to_string();
         let mut portfolio = Portfolio::default();
         portfolio.cash.clear();
         portfolio.cash.insert(config.base_currency, config.initial_cash);
@@ -53,6 +58,9 @@ impl PaperBroker {
             config,
             portfolio,
             latest_prices: HashMap::new(),
+            latest_price_timestamps: HashMap::new(),
+            quote_currencies: HashMap::new(),
+            fx: FxTable::new(base_currency),
             average_cost: HashMap::new(),
             trail_state: HashMap::new(),
             known_order_ids: HashSet::new(),
@@ -74,6 +82,31 @@ impl PaperBroker {
     /// Read the current portfolio without cloning it.
     pub fn portfolio(&self) -> &Portfolio {
         &self.portfolio
+    }
+
+    /// Record a timestamped conversion rate for live account valuation.
+    pub fn set_exchange_rate(
+        &mut self,
+        from_currency: &str,
+        to_currency: &str,
+        rate: f64,
+        timestamp: i64,
+    ) -> Result<(), String> {
+        let from = from_currency.trim().to_uppercase();
+        let to = to_currency.trim().to_uppercase();
+        if from.is_empty() || to.is_empty() {
+            return Err("exchange-rate currencies must be non-empty".to_owned());
+        }
+        if !rate.is_finite() || rate <= 0.0 {
+            return Err("exchange rate must be finite and positive".to_owned());
+        }
+        self.fx.add_rate(&from, &to, timestamp, rate, self.config.max_history);
+        Ok(())
+    }
+
+    /// Whether a conversion path is available at `timestamp`.
+    pub fn has_exchange_rate(&self, from_currency: &str, timestamp: i64) -> bool {
+        self.fx.rate(from_currency, &self.config.base_currency.to_string(), timestamp).is_some()
     }
 
     /// Process one market update and any orders produced from that update.
@@ -110,6 +143,11 @@ impl PaperBroker {
         let valid_market = structurally_valid && !is_stale;
         if valid_market {
             self.latest_prices.insert(market.symbol.clone(), market.close);
+            self.latest_price_timestamps.insert(market.symbol.clone(), market.close_ts as i64);
+            if let Some(quote_currency) = market.quote_currency.as_deref() {
+                self.quote_currencies
+                    .insert(market.symbol.clone(), quote_currency.trim().to_uppercase());
+            }
             self.last_seen_open_ts.insert(market.symbol.clone(), market.open_ts);
         }
 
@@ -155,17 +193,22 @@ impl PaperBroker {
         let mut unrealized_pnl = 0.0;
 
         for (symbol, quantity) in &self.portfolio.positions {
-            let Some(price) = self.latest_prices.get(symbol) else {
+            let (Some(price), Some(timestamp)) =
+                (self.latest_prices.get(symbol), self.latest_price_timestamps.get(symbol))
+            else {
                 continue;
             };
-            market_value += quantity * price;
-            gross_exposure += quantity.abs() * price;
+            let Some(account_price) = self.account_price(symbol, *price, *timestamp) else {
+                continue;
+            };
+            market_value += quantity * account_price;
+            gross_exposure += quantity.abs() * account_price;
 
             if let Some(cost) = self.average_cost.get(symbol) {
                 unrealized_pnl += if *quantity >= 0.0 {
-                    (price - cost) * quantity
+                    (account_price - cost) * quantity
                 } else {
-                    (cost - price) * quantity.abs()
+                    (cost - account_price) * quantity.abs()
                 };
             }
         }
@@ -271,9 +314,31 @@ impl PaperBroker {
             .positions
             .iter()
             .filter_map(|(symbol, quantity)| {
-                self.latest_prices.get(symbol).map(|price| quantity.abs() * price)
+                let price = self.latest_prices.get(symbol)?;
+                let timestamp = self.latest_price_timestamps.get(symbol)?;
+                self.account_price(symbol, *price, *timestamp)
+                    .map(|account_price| quantity.abs() * account_price)
             })
             .sum()
+    }
+
+    fn quote_currency(&self, symbol: &str) -> String {
+        self.quote_currencies
+            .get(symbol)
+            .cloned()
+            .unwrap_or_else(|| self.config.base_currency.to_string())
+    }
+
+    fn account_price(&self, symbol: &str, quote_price: f64, timestamp: i64) -> Option<f64> {
+        let quote_currency = self.quote_currency(symbol);
+        self.fx
+            .convert(
+                quote_price,
+                &quote_currency,
+                &self.config.base_currency.to_string(),
+                timestamp,
+            )
+            .filter(|price| price.is_finite() && *price > 0.0)
     }
 
     fn accrue_financing(&mut self, timestamp: i64) {
@@ -293,7 +358,9 @@ impl PaperBroker {
             .iter()
             .filter(|(_, quantity)| **quantity < 0.0)
             .filter_map(|(symbol, quantity)| {
-                self.latest_prices.get(symbol).map(|price| quantity.abs() * price)
+                let price = self.latest_prices.get(symbol)?;
+                self.account_price(symbol, *price, timestamp)
+                    .map(|account_price| quantity.abs() * account_price)
             })
             .sum();
         let cost = borrowed * self.config.margin_interest / 100.0 * year_fraction
@@ -492,8 +559,33 @@ impl PaperBroker {
         fit_buy_to_cash: bool,
         available_volume: Option<f64>,
     ) -> (PaperFill, Option<Order>) {
+        if !raw_price.is_finite() || raw_price <= 0.0 {
+            return (
+                rejected_fill(order, timestamp, "invalid fill price or quantity".to_owned()),
+                None,
+            );
+        }
+        let quote_currency = self.quote_currency(&order.symbol);
+        let base_currency = self.config.base_currency.to_string();
+        let Some(quote_to_base_rate) = self
+            .fx
+            .rate(&quote_currency, &base_currency, timestamp)
+            .filter(|rate| rate.is_finite() && *rate > 0.0)
+        else {
+            return (
+                rejected_fill(
+                    order,
+                    timestamp,
+                    format!(
+                        "missing {quote_currency}/{base_currency} conversion rate for live accounting"
+                    ),
+                ),
+                None,
+            );
+        };
+
         if let Some(sizer) = order.sizer.take() {
-            let equity = self.snapshot().equity;
+            let equity = self.snapshot().equity / quote_to_base_rate;
             let stop_distance = order.price.and_then(|price| {
                 let distance = (raw_price - price).abs();
                 (distance > 0.0).then_some(distance)
@@ -540,11 +632,7 @@ impl PaperBroker {
             }
         }
 
-        if !raw_price.is_finite()
-            || raw_price <= 0.0
-            || !order.quantity.is_finite()
-            || is_negligible(order.quantity)
-        {
+        if !order.quantity.is_finite() || is_negligible(order.quantity) {
             return (
                 rejected_fill(order, timestamp, "invalid fill price or quantity".to_owned()),
                 None,
@@ -552,6 +640,7 @@ impl PaperBroker {
         }
 
         let fill_price = apply_slippage(raw_price, order.quantity, self.config.slippage, limit_cap);
+        let account_fill_price = fill_price * quote_to_base_rate;
         let old_quantity = self.portfolio.positions.amount(&order.symbol);
         let mut new_quantity = old_quantity + order.quantity;
 
@@ -559,18 +648,18 @@ impl PaperBroker {
             return (rejected_fill(order, timestamp, "short selling is disabled".to_owned()), None);
         }
 
-        let mut notional = fill_price * order.quantity.abs();
+        let mut notional = account_fill_price * order.quantity.abs();
         let mut commission =
             notional * self.config.commission_pct / 100.0 + self.config.commission_fixed;
         let cash = self.portfolio.cash.amount(&self.config.base_currency);
-        let mut next_cash = cash - order.quantity * fill_price - commission;
+        let mut next_cash = cash - order.quantity * account_fill_price - commission;
         if fit_buy_to_cash
             && order.quantity > 0.0
             && !self.config.allow_margin
-            && next_cash < 0.0
-            && is_significant(next_cash)
+            && cash_deficit_is_significant(next_cash, cash)
         {
-            let price_with_variable_fee = fill_price * (1.0 + self.config.commission_pct / 100.0);
+            let price_with_variable_fee =
+                account_fill_price * (1.0 + self.config.commission_pct / 100.0);
             let available_cash = cash - self.config.commission_fixed;
             let affordable_quantity = available_cash / price_with_variable_fee;
             if affordable_quantity.is_finite()
@@ -578,7 +667,7 @@ impl PaperBroker {
                 && is_significant(affordable_quantity)
             {
                 order.quantity = order.quantity.min(affordable_quantity);
-                notional = fill_price * order.quantity;
+                notional = account_fill_price * order.quantity;
                 commission =
                     notional * self.config.commission_pct / 100.0 + self.config.commission_fixed;
                 next_cash = cash - notional - commission;
@@ -607,7 +696,7 @@ impl PaperBroker {
                     None,
                 );
             }
-            let position_notional = new_quantity.abs() * fill_price;
+            let position_notional = new_quantity.abs() * account_fill_price;
             let position_cap = equity * self.config.max_position_size / 100.0;
             if position_notional > position_cap && is_significant(position_notional - position_cap)
             {
@@ -623,7 +712,7 @@ impl PaperBroker {
                     None,
                 );
             }
-            let current_symbol_notional = old_quantity.abs() * fill_price;
+            let current_symbol_notional = old_quantity.abs() * account_fill_price;
             let proposed_gross =
                 self.current_gross_exposure() - current_symbol_notional + position_notional;
             let leverage_cap = self.effective_leverage_cap();
@@ -640,7 +729,7 @@ impl PaperBroker {
                 );
             }
         }
-        if !self.config.allow_margin && next_cash < 0.0 && is_significant(next_cash) {
+        if !self.config.allow_margin && cash_deficit_is_significant(next_cash, cash) {
             return (rejected_fill(order, timestamp, "insufficient cash".to_owned()), None);
         }
 
@@ -653,14 +742,7 @@ impl PaperBroker {
                 None
             };
 
-        self.portfolio.cash.insert(
-            self.config.base_currency,
-            if is_negligible(next_cash) {
-                0.0
-            } else {
-                next_cash
-            },
-        );
+        self.portfolio.cash.insert(self.config.base_currency, normalize_cash(next_cash, cash));
         if is_negligible(new_quantity) {
             self.portfolio.positions.remove(&order.symbol);
         } else {
@@ -671,7 +753,7 @@ impl PaperBroker {
             &order.symbol,
             old_quantity,
             order.quantity,
-            fill_price,
+            account_fill_price,
             commission,
             timestamp,
         );
@@ -746,6 +828,22 @@ impl PaperBroker {
 
         self.realized_pnl += realized;
         realized
+    }
+}
+
+fn cash_tolerance(reference: f64) -> f64 {
+    f64::EPSILON * reference.abs().max(1.0) * 16.0
+}
+
+fn cash_deficit_is_significant(next_cash: f64, reference: f64) -> bool {
+    next_cash < -cash_tolerance(reference)
+}
+
+fn normalize_cash(next_cash: f64, reference: f64) -> f64 {
+    if next_cash.abs() <= cash_tolerance(reference) {
+        0.0
+    } else {
+        next_cash
     }
 }
 
@@ -852,6 +950,7 @@ mod tests {
         MarketUpdate {
             provider: "mock".to_owned(),
             symbol: "BTC-USD".to_owned(),
+            quote_currency: Some("USD".to_owned()),
             interval: "1m".to_owned(),
             open_ts: timestamp,
             close_ts: timestamp + 60,

@@ -172,6 +172,11 @@ class MarketUpdate:
     symbol : str
         Canonical provider-independent symbol.
 
+    quote_currency : str | None
+        Currency in which OHLC prices are denominated. Live providers populate
+        this value; `None` preserves base-currency accounting for synthetic and
+        backwards-compatible manually constructed updates.
+
     interval : str
         Canonical interval string.
 
@@ -240,6 +245,7 @@ class MarketUpdate:
     open: float
     open_ts: int
     provider: str
+    quote_currency: str | None
     received_ts: int
     symbol: str
     volume: float
@@ -578,6 +584,29 @@ class PaperTradingSession:
         update = session.on_bar(market, [Order("BTC-USD", 1.0)])
         print(update.processed)
         ```
+
+        """
+    def set_exchange_rate(self, from_currency, to_currency, rate, timestamp=0):
+        """Record a currency-conversion rate for live account valuation.
+
+        Parameters
+        ----------
+        from_currency : str
+            Currency being converted, such as `"ETH"`.
+
+        to_currency : str
+            Currency received, such as `"EUR"`.
+
+        rate : float
+            Positive units of `to_currency` per unit of `from_currency`.
+
+        timestamp : int, default=0
+            Unix timestamp in seconds at which the rate was observed.
+
+        Raises
+        ------
+        ValueError
+            If either currency is empty or `rate` is not finite and positive.
 
         """
     def snapshot(self) -> PaperTradingSnapshot:

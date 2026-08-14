@@ -207,6 +207,7 @@ class BacktideServices:
                 "currencies": self._currency_options(Currency),
             },
             "display": {
+                "currency_prefix": bool(cfg.display.currency_prefix),
                 "dataframe_class": cfg.data.dataframe_library.class_name,
                 "logokit_api_key": getattr(cfg.display, "logokit_api_key", None),
                 "timezone": str(cfg.display.timezone),
@@ -1246,7 +1247,10 @@ class BacktideServices:
         manager = getattr(self, "_live_manager", None)
         if manager is None:
             manager = self._live_manager = LiveTradingManager()
-        return manager.replay(str(payload.get("session_id") or ""))
+        return manager.replay(
+            str(payload.get("session_id") or ""),
+            payload.get("speed", "max"),
+        )
 
     def pause_live(self) -> dict[str, Any]:
         """Pause the active paper strategy without closing its feed."""

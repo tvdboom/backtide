@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import StrategySummary from './strategy-summary.vue'
 
 describe('strategy summary', () => {
   afterEach(() => {
     document.body.innerHTML = ''
+    vi.unstubAllGlobals()
   })
 
   it('shows two names and reveals the remaining names from the overflow pill', async () => {
@@ -46,6 +47,32 @@ describe('strategy summary', () => {
 
     expect(wrapper.get('.session-strategy-visible').text()).toBe('Momentum, Buy & Hold')
     expect(wrapper.find('.session-strategy-overflow').exists()).toBe(false)
+  })
+
+  it('moves the second strategy into the overflow pill when both names do not fit', async () => {
+    let resize
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback) { resize = callback }
+      observe() {}
+      disconnect() {}
+    })
+    const wrapper = mount(StrategySummary, {
+      props: { names: ['Buy & Hold', 'AlphaRSI Pro'] }
+    })
+    await flushPromises()
+    const visible = wrapper.get('.session-strategy-visible')
+    Object.defineProperties(visible.element, {
+      clientWidth: { configurable: true, value: 100 },
+      scrollWidth: { configurable: true, value: 180 }
+    })
+
+    resize()
+    await flushPromises()
+
+    expect(visible.text()).toBe('Buy & Hold')
+    expect(wrapper.get('.session-strategy-overflow').text()).toBe('+1')
+    expect(wrapper.get('.session-strategy-overflow').attributes('aria-label'))
+      .toBe('1 more strategy')
   })
 
   it('labels sessions without strategies as monitor-only', () => {

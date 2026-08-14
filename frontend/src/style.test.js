@@ -95,11 +95,26 @@ describe('paper trading setup', () => {
     expect(declaration('.toggle-description')).toContain('-webkit-line-clamp: 2')
   })
 
-  it('shows accessible field and action popovers on hover or focus', () => {
+  it('shows accessible field and action popovers on hover or keyboard focus', () => {
     expect(declaration('.field-info-popover, .action-popover')).toContain('visibility: hidden')
     expect(styles).toContain('.field-info:hover .field-info-popover')
     expect(styles).toContain('.field-info:focus-visible .field-info-popover')
-    expect(styles).toContain('.action-help:focus-within .action-popover')
+    expect(styles).toContain('.action-help .secondary:focus-visible + .action-popover')
+    expect(styles).not.toContain('.action-help:focus-within .action-popover')
+  })
+
+  it('gives recent live-session financial values dedicated columns', () => {
+    expect(declaration('.live-session-row')).toContain(
+      'grid-template-columns: 38px minmax(190px, 1.35fr) minmax(180px, 1.15fr) minmax(120px, .85fr) minmax(110px, .75fr) 80px 17px'
+    )
+    expect(declaration('.session-financial')).toContain('margin-right: 0')
+  })
+
+  it('reveals execution reasons only from the status badge', () => {
+    expect(declaration('.execution-status-tooltip')).toContain('visibility: hidden')
+    expect(declaration('.execution-status-tooltip')).toContain('opacity: 0')
+    expect(styles).toContain('.execution-status .badge:hover + .execution-status-tooltip')
+    expect(styles).toContain('.execution-status .badge:focus-visible + .execution-status-tooltip')
   })
 
   it('keeps every live interval on one full-width row', () => {
@@ -142,6 +157,10 @@ describe('paper trading setup', () => {
       'background: var(--surface-muted)'
     )
     expect(declaration('.live-observability .config-summary dd')).toContain('margin: 5px 0 0')
+    expect(declaration('.live-observability .risk-metric')).toContain('position: relative')
+    expect(declaration('.live-observability .risk-metric')).toContain('padding-right: 42px')
+    expect(declaration('.live-observability .risk-metric-help')).toContain('top: 10px')
+    expect(declaration('.live-observability .risk-metric-help')).toContain('right: 10px')
     expect(declaration('.live-strategy-switcher')).toContain('border-top: 1px solid var(--line)')
     expect(declaration('.live-strategy-switcher')).toContain('margin: 0')
   })
@@ -161,14 +180,19 @@ describe('paper trading setup', () => {
 describe('session history', () => {
   it('keeps column positions fixed while replay rows expand', () => {
     expect(declaration('.session-history-table')).toContain('table-layout: fixed')
-    expect(declaration('.session-history-table')).toContain('min-width: 940px')
-    expect(declaration('.session-history-table th:nth-child(1)')).toContain('width: 22%')
-    expect(declaration('.session-history-table th:nth-child(6)')).toContain('width: 10%')
+    expect(declaration('.session-history-table')).toContain('min-width: 1240px')
+    expect(declaration('.session-history-table th:nth-child(1)')).toContain('width: 15%')
+    expect(declaration('.session-history-table th:nth-child(7)')).toContain('width: 240px')
+    expect(declaration('.session-history-table td:last-child')).toContain('overflow: hidden')
+    expect(declaration('.session-history-actions .compact-button')).toContain('max-width: 100%')
+    expect(declaration('.session-history-actions .compact-button')).toContain('padding-inline: 12px')
   })
 
   it('keeps strategy names inside their column and exposes overflow details', () => {
     expect(declaration('.session-strategy-summary')).toContain('min-width: 0')
-    expect(declaration('.session-strategy-visible')).toContain('-webkit-line-clamp: 2')
+    expect(declaration('.session-strategy-summary')).toContain('display: inline-flex')
+    expect(declaration('.session-strategy-visible')).toContain('white-space: nowrap')
+    expect(declaration('.session-strategy-visible')).toContain('text-overflow: ellipsis')
     expect(declaration('.session-strategy-overflow')).toContain('border-radius: 999px')
     expect(declaration('.session-strategy-tooltip')).toContain('position: fixed')
     expect(styles).toContain('.session-strategy-overflow:focus-visible')

@@ -17,6 +17,11 @@ use serde::{Deserialize, Serialize};
 /// symbol : str
 ///     Canonical provider-independent symbol.
 ///
+/// quote_currency : str | None
+///     Currency in which OHLC prices are denominated. Live providers populate
+///     this value; `None` preserves base-currency accounting for synthetic and
+///     backwards-compatible manually constructed updates.
+///
 /// interval : str
 ///     Canonical interval string.
 ///
@@ -80,6 +85,9 @@ pub struct MarketUpdate {
 
     /// Canonical provider-independent symbol (for example, `"BTC-USD"`).
     pub symbol: String,
+
+    /// Currency in which OHLC prices are denominated.
+    pub quote_currency: Option<String>,
 
     /// Canonical interval string (for example, `"1m"`).
     pub interval: String,
@@ -163,6 +171,7 @@ impl MarketUpdate {
         is_final=true,
         provider: "str"="mock",
         received_ts=0,
+        quote_currency=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -179,10 +188,12 @@ impl MarketUpdate {
         is_final: bool,
         provider: &str,
         received_ts: i64,
+        quote_currency: Option<String>,
     ) -> Self {
         Self {
             provider: provider.to_owned(),
             symbol,
+            quote_currency,
             interval,
             open_ts,
             close_ts,

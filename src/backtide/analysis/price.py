@@ -210,7 +210,7 @@ def plot_price(
 
         if ind_dict:
             for name, ind in ind_dict.items():
-                values = _to_pandas(ind.compute(subset))  # ty: ignore[unresolved-attribute]
+                values = _to_pandas(ind.compute(subset))
 
                 if values.shape[1] == 1:
                     fig.add_trace(

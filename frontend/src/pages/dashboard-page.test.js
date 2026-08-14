@@ -119,7 +119,7 @@ describe('dashboard page', () => {
           mode: 'paper',
           symbols: ['BTC-USD'],
           strategies: ['Momentum'],
-          config: { base_currency: 'USD' }
+          config: { base_currency: 'EUR', initial_cash: 10000 }
         },
         snapshot: { equity: 10125 }
       }],
@@ -132,6 +132,7 @@ describe('dashboard page', () => {
             date_format: 'DD-MM-YYYY',
             datetime_format: 'DD-MM-YYYY HH:MM',
             timezone: 'UTC',
+            currency_prefix: false,
             logokit_api_key: null
           }
         }
@@ -144,7 +145,10 @@ describe('dashboard page', () => {
     expect(sessionMetric.text()).toContain('12')
     expect(wrapper.get('.live-session-row').text()).toContain('BTC-USD')
     expect(wrapper.get('.live-session-row').text()).toContain('Momentum')
-    expect(wrapper.get('.live-session-row').text()).toContain('$10,125.00')
+    expect(wrapper.findAll('.live-session-row .primary-metric-value small').map(item => item.text()))
+      .toEqual(['Starting equity', 'Final P&L'])
+    expect(wrapper.findAll('.live-session-row .primary-metric-value strong').map(item => item.text()))
+      .toEqual(['10,000.00 €', '125.00 €'])
     expect(wrapper.get('.live-session-row').text()).toContain('12-08-2026 12:00')
 
     await wrapper.get('.live-session-row').trigger('click')

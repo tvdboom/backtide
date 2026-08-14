@@ -1,6 +1,6 @@
 <template>
-  <span v-if="names.length" class="session-strategy-summary">
-    <span class="session-strategy-visible">{{ visibleNames.join(', ') }}</span>
+  <span v-if="names.length" ref="summary" class="session-strategy-summary">
+    <span ref="visible" class="session-strategy-visible">{{ visibleNames.join(', ') }}</span>
     <span
       v-if="hiddenNames.length"
       ref="trigger"
@@ -36,12 +36,14 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, useId } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 
 const props = defineProps({
   names: { type: Array, default: () => [] }
 })
 
+const summary = ref(null)
+const visible = ref(null)
 const trigger = ref(null)
 const tooltip = ref(null)
 const hovered = ref(false)
@@ -49,13 +51,24 @@ const focused = ref(false)
 const tooltipPlacement = ref('above')
 const tooltipStyle = ref({})
 const tooltipId = `strategy-summary-${useId()}`
-const visibleNames = computed(() => props.names.slice(0, 2))
-const hiddenNames = computed(() => props.names.slice(2))
+const visibleCount = ref(Math.min(props.names.length, 2))
+const visibleNames = computed(() => props.names.slice(0, visibleCount.value))
+const hiddenNames = computed(() => props.names.slice(visibleCount.value))
 const tooltipVisible = computed(() => hiddenNames.value.length && (hovered.value || focused.value))
 const moreStrategiesLabel = computed(() => {
   const count = hiddenNames.value.length
   return `${count} more ${count === 1 ? 'strategy' : 'strategies'}`
 })
+let resizeObserver
+let measurement = 0
+
+async function fitVisibleNames() {
+  const currentMeasurement = ++measurement
+  visibleCount.value = Math.min(props.names.length, 2)
+  await nextTick()
+  if (currentMeasurement !== measurement || props.names.length < 2 || !visible.value) return
+  if (visible.value.scrollWidth > visible.value.clientWidth + 1) visibleCount.value = 1
+}
 
 async function positionTooltip() {
   await nextTick()
@@ -95,4 +108,19 @@ function showFromFocus() {
 function hideFromFocus() {
   focused.value = false
 }
+
+watch(() => props.names, fitVisibleNames, { deep: true })
+onMounted(() => {
+  fitVisibleNames()
+  if (typeof ResizeObserver === 'function') {
+    resizeObserver = new ResizeObserver(fitVisibleNames)
+    resizeObserver.observe(summary.value)
+  } else {
+    addEventListener('resize', fitVisibleNames)
+  }
+})
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  removeEventListener('resize', fitVisibleNames)
+})
 </script>

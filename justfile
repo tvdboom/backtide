@@ -54,14 +54,15 @@ tox:
 ty:
     uv run ty check
 
-# Build the current extension before serving its generated API documentation
-docs: build
-    $env:PYTHONPATH="."; uv run mkdocs serve
+# Build and serve the documentation without replacing a running development install
+docs:
+    uv run --isolated --no-editable --no-default-groups --group docs python scripts/generate_stubs.py
+    $env:PYTHONPATH="."; uv run --isolated --no-editable --no-default-groups --group docs mkdocs serve
 
 launch:
-    # Launch the installed development build without an implicit maturin rebuild.
+    # Launch the checkout while keeping Rust rebuilds explicit.
     # Run `just build` explicitly after changing Rust code.
-    uv run --no-sync backtide launch
+    $env:PYTHONPATH=(Resolve-Path "src").Path; uv run --no-sync backtide launch
 
 # Install frontend development dependencies (not required by package users)
 frontend-sync:

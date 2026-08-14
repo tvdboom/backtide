@@ -64,8 +64,9 @@
       <button v-for="session in data?.sessions" :key="session.id" class="activity-row live-session-row" type="button" @click="$emit('navigate', 'live-history')">
         <span class="live-session-avatar" aria-hidden="true"><Radio :size="17" /></span>
         <span><strong>{{ sessionSymbols(session) }}</strong><small>{{ time(session.started_at) }}</small></span>
-        <span class="session-context"><small>{{ sessionMode(session) }}</small><strong>{{ sessionStrategies(session) }}</strong></span>
-        <span class="primary-metric-value"><small>Final equity</small><strong>{{ sessionEquity(session) }}</strong></span>
+        <span class="session-context"><small>{{ sessionMode(session) }}</small><StrategySummary :names="sessionStrategyNames(session)" /></span>
+        <span class="primary-metric-value session-financial"><small>Starting equity</small><strong>{{ sessionStartingEquity(session) }}</strong></span>
+        <span class="primary-metric-value session-financial"><small>Final P&amp;L</small><strong :class="metricTone(sessionFinalPnlAmount(session))">{{ sessionFinalPnl(session) }}</strong></span>
         <span class="badge" :class="sessionStatusTone(session.status)">{{ session.status }}</span>
         <ChevronRight :size="17" />
       </button>
@@ -77,7 +78,8 @@
 import { ArrowUpRight, Beaker, ChevronRight, Database, FlaskConical, History, Radio, Rows3, Shapes, TriangleAlert, WalletCards } from 'lucide-vue-next'
 import { computed, onActivated, onMounted, ref } from 'vue'
 import { api } from '../api'
-import { formatConfiguredDateTime, formatResultMetric, instrumentLogoUrl } from '../state'
+import StrategySummary from '../components/strategy-summary.vue'
+import { formatConfiguredCurrency, formatConfiguredDateTime, formatResultMetric, instrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
@@ -99,19 +101,35 @@ function sessionSymbols(session) {
   return symbols.length ? symbols.join(', ') : session.config?.mode === 'replay' ? 'Replay session' : 'Live session'
 }
 function sessionMode(session) { return session.config?.mode === 'replay' ? 'Replay' : 'Live paper' }
-function sessionStrategies(session) {
-  const strategies = session.config?.strategies?.length
+function sessionStrategyNames(session) {
+  return session.config?.strategies?.length
     ? session.config.strategies
     : session.config?.strategy ? [session.config.strategy] : []
-  return strategies.join(', ') || 'Monitor only'
 }
-function sessionEquity(session) {
-  if (sessionStrategies(session) === 'Monitor only') return '—'
-  return new Intl.NumberFormat('en', {
-    style: 'currency',
-    currency: session.config?.config?.base_currency || 'USD',
-    maximumFractionDigits: 2
-  }).format(Number(session.snapshot?.equity) || 0)
+function sessionStartingEquityAmount(session) {
+  const strategyCount = sessionStrategyNames(session).length
+  const initialCash = Number(session.config?.config?.initial_cash)
+  return strategyCount && Number.isFinite(initialCash) ? strategyCount * initialCash : null
+}
+function sessionMoney(session, value) {
+  return formatConfiguredCurrency(
+    value,
+    session.config?.config?.base_currency || 'USD',
+    props.bootstrap?.display
+  )
+}
+function sessionStartingEquity(session) {
+  const value = sessionStartingEquityAmount(session)
+  return value === null ? '—' : sessionMoney(session, value)
+}
+function sessionFinalPnlAmount(session) {
+  const starting = sessionStartingEquityAmount(session)
+  const finalEquity = Number(session.snapshot?.equity)
+  return starting === null || !Number.isFinite(finalEquity) ? null : finalEquity - starting
+}
+function sessionFinalPnl(session) {
+  const value = sessionFinalPnlAmount(session)
+  return value === null ? '—' : sessionMoney(session, value)
 }
 function sessionStatusTone(status) {
   if (status === 'error') return 'error'

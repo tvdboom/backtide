@@ -9,7 +9,16 @@
         <span v-if="activeSession && hasStrategy" class="action-help"><button class="secondary" @click="cancelAll">Cancel orders</button><span class="action-popover" role="tooltip">Cancel every open simulated order before the next market update.</span></span>
         <span v-if="activeSession && hasStrategy" class="action-help"><button class="secondary" @click="flatten">Flatten</button><span class="action-popover" role="tooltip">Close all simulated positions on the next market update.</span></span>
         <button v-if="activeSession" class="danger secondary" @click="stop"><Square :size="15"/> Stop</button>
+        <template v-else>
+          <button class="primary" @click="newConfiguration"><Plus :size="16"/> New configuration</button>
+          <button class="secondary" @click="openSessionHistory"><History :size="16"/> Session history</button>
+        </template>
       </div>
+    </section>
+
+    <section v-if="state.config?.mode === 'replay'" class="panel replay-playback-panel">
+      <div><span class="eyebrow">Recorded playback</span><h3>{{ replaySpeedLabel }}</h3><p>{{ replayWarmupLabel }}</p></div>
+      <div class="replay-progress"><div class="replay-progress-track" role="progressbar" aria-label="Replay progress" :aria-valuemin="0" :aria-valuemax="replayStatus.total_events || 0" :aria-valuenow="replayStatus.processed_events || 0"><span :style="{ width: `${replayProgress}%` }"/></div><small>{{ replayStatus.processed_events || 0 }} / {{ replayStatus.total_events || 0 }} events · {{ replayProgress.toFixed(1) }}% · {{ replayDurationLabel }}</small></div>
     </section>
 
     <section v-if="!sessionVisible" class="live-setup">
@@ -116,7 +125,7 @@
             </fieldset>
             <fieldset class="settings-group">
               <legend>Margin</legend>
-              <div class="form-grid three">
+              <div class="form-grid two">
                 <ToggleField v-model="form.config.allow_margin" label="Margin trading" description="Allow positions to use borrowed funds." help="Allow the simulated account to borrow funds up to the leverage limit." />
                 <template v-if="form.config.allow_margin">
                   <label>Maximum leverage<FieldInfo text="Limit total simulated exposure to this multiple of account equity." /><input v-model.number="form.config.max_leverage" type="number" min="1" step="0.1"/></label>
@@ -151,11 +160,12 @@
     <template v-else>
       <section v-if="hasStrategy" class="metric-grid live-metrics">
         <article class="metric-card"><span>Equity</span><strong>{{ money(activeStrategySnapshot.equity) }}</strong><small>{{ activeStrategySnapshot.processed_bars || 0 }} bars processed</small></article>
-        <article class="metric-card"><span>Realized P&amp;L</span><strong :class="tone(activeStrategySnapshot.realized_pnl)">{{ money(activeStrategySnapshot.realized_pnl) }}</strong><small>closed positions</small></article>
+        <article class="metric-card"><span>Realized P&amp;L</span><strong :class="tone(activeStrategySnapshot.realized_pnl)">{{ money(activeStrategySnapshot.realized_pnl) }}</strong><small>net of commissions and financing</small></article>
         <article class="metric-card"><span>Unrealized P&amp;L</span><strong :class="tone(activeStrategySnapshot.unrealized_pnl)">{{ money(activeStrategySnapshot.unrealized_pnl) }}</strong><small>open positions</small></article>
         <article class="metric-card"><span>Open positions</span><strong>{{ Object.keys(activeStrategySnapshot.portfolio?.positions || {}).length }}</strong><small>{{ state.config.provider }} · {{ state.config.interval }}</small></article>
       </section>
-      <section class="live-dashboard">
+      <section class="live-dashboard" :class="{ 'has-portfolio': hasStrategy }">
+        <article v-if="hasStrategy" class="panel table-panel live-portfolio-panel"><div class="panel-header"><div><span class="eyebrow">Portfolio</span><h3>Positions &amp; cash</h3></div></div><div class="data-table-wrap"><table class="data-table"><thead><tr><th>Asset</th><th class="number">Amount</th></tr></thead><tbody><tr v-for="(quantity, symbol) in activeStrategySnapshot.portfolio?.positions" :key="symbol"><td><span class="live-asset-cell"><img v-if="symbolLogo(symbol)" :src="symbolLogo(symbol)" class="order-symbol-logo" alt="" @error="markSymbolLogoFailed(symbol)"/><span v-else class="order-symbol-logo" aria-hidden="true">{{ symbol.slice(0, 1) }}</span><strong>{{ symbol }}</strong></span></td><td class="number">{{ positionAmount(quantity) }}</td></tr><tr v-for="(amount, currency) in activeStrategySnapshot.portfolio?.cash" :key="currency"><td>{{ currency }} cash</td><td class="number">{{ money(amount) }}</td></tr></tbody></table></div></article>
         <article class="panel live-chart">
           <div class="panel-header"><div><span class="eyebrow">{{ liveChartEyebrow }}</span><h3>{{ liveChartTitle }}</h3></div></div>
           <ChartPanel :figure="liveFigure" :empty-message="liveChartMessage" />
@@ -175,16 +185,35 @@
           <div v-if="!watchlist.length" class="empty-state compact"><p>Waiting for the first market update…</p></div>
         </article>
       </section>
+      <section v-if="hasStrategy" class="live-tables">
+        <article class="panel table-panel execution-panel">
+          <div class="panel-header"><div><span class="eyebrow">Execution</span><h3>Recent orders</h3></div><small>Up to 12 latest</small></div>
+          <div class="data-table-wrap live-execution-table">
+            <table class="data-table">
+              <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th class="number">Quantity</th><th class="number">Fill price</th><th class="number">P&amp;L</th><th class="number">Commission</th><th>Status</th></tr></thead>
+              <tbody>
+                <tr v-for="(fill, index) in fills" :key="fillKey(fill, index)">
+                  <td><time class="execution-time">{{ fillTime(fill) }}</time></td>
+                  <td><span class="execution-symbol"><span class="live-asset-cell"><img v-if="symbolLogo(fill.order?.symbol)" :src="symbolLogo(fill.order?.symbol)" class="order-symbol-logo" alt="" @error="markSymbolLogoFailed(fill.order?.symbol)"/><span v-else class="order-symbol-logo" aria-hidden="true">{{ String(fill.order?.symbol || '?').slice(0, 1) }}</span><strong>{{ fill.order?.symbol || '—' }}</strong></span></span></td>
+                  <td class="order-side" :class="fillSideClass(fill)">{{ fillSide(fill) }}</td>
+                  <td>{{ fillOrderType(fill) }}</td>
+                  <td class="number">{{ fillQuantity(fill) }}</td>
+                  <td class="number">{{ fill.fill_price == null ? '—' : price(fill.fill_price) }}</td>
+                  <td class="number" :class="tone(realizedTradePnl(fill))">{{ realizedTradePnl(fill) == null ? '—' : money(realizedTradePnl(fill)) }}</td>
+                  <td class="number">{{ fill.commission == null ? '—' : money(fill.commission) }}</td>
+                  <td><span class="execution-status"><span class="badge" :class="fillStatusClass(fill.status)" :tabindex="fill.reason ? 0 : undefined" :aria-describedby="fill.reason ? `fill-reason-${index}` : undefined">{{ fill.status }}</span><span v-if="fill.reason" :id="`fill-reason-${index}`" class="execution-status-tooltip" role="tooltip">{{ fill.reason }}</span></span></td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="!fills.length" class="empty-state compact"><p>{{ executionEmptyMessage }}</p></div>
+          </div>
+        </article>
+      </section>
       <section v-if="hasStrategy" class="split-grid live-observability">
         <article class="panel">
           <div class="panel-header"><div><span class="eyebrow">Risk telemetry</span><h3>Exposure &amp; controls</h3></div><span v-if="activeStrategySnapshot.trading_halted" class="badge error">HALTED</span></div>
           <dl class="config-summary">
-            <div><dt>Gross exposure</dt><dd>{{ money(activeStrategySnapshot.gross_exposure) }}</dd></div>
-            <div><dt>Net exposure</dt><dd>{{ money(activeStrategySnapshot.net_exposure) }}</dd></div>
-            <div><dt>Leverage</dt><dd>{{ Number(activeStrategySnapshot.leverage || 0).toFixed(2) }}x</dd></div>
-            <div><dt>Buying power</dt><dd>{{ money(activeStrategySnapshot.buying_power) }}</dd></div>
-            <div><dt>Drawdown</dt><dd>{{ percent(activeStrategySnapshot.drawdown) }}</dd></div>
-            <div><dt>Total costs</dt><dd>{{ money(activeStrategySnapshot.total_costs) }}</dd></div>
+            <div v-for="item in riskMetrics" :key="item.key" class="risk-metric" :data-risk-metric="item.key"><FieldInfo class="risk-metric-help" :text="item.help"/><dt><component :is="item.icon" :size="15" aria-hidden="true"/><span>{{ item.label }}</span></dt><dd>{{ item.value }}</dd></div>
           </dl>
           <p v-if="activeStrategySnapshot.halt_reason" class="negative">{{ activeStrategySnapshot.halt_reason }}</p>
         </article>
@@ -196,10 +225,6 @@
           </dl>
           <p v-if="!liveMetrics.length && !latestIndicators.length">Waiting for enough completed bars...</p>
         </article>
-      </section>
-      <section v-if="hasStrategy" class="split-grid live-tables">
-        <article class="panel table-panel"><div class="panel-header"><div><span class="eyebrow">Portfolio</span><h3>Positions &amp; cash</h3></div></div><div class="data-table-wrap"><table class="data-table"><thead><tr><th>Asset</th><th class="number">Amount</th></tr></thead><tbody><tr v-for="(quantity, symbol) in activeStrategySnapshot.portfolio?.positions" :key="symbol"><td><span class="live-asset-cell"><img v-if="symbolLogo(symbol)" :src="symbolLogo(symbol)" class="order-symbol-logo" alt="" @error="markSymbolLogoFailed(symbol)"/><span v-else class="order-symbol-logo" aria-hidden="true">{{ symbol.slice(0, 1) }}</span><strong>{{ symbol }}</strong></span></td><td class="number">{{ quantity }}</td></tr><tr v-for="(amount, currency) in activeStrategySnapshot.portfolio?.cash" :key="currency"><td>{{ currency }} cash</td><td class="number">{{ money(amount) }}</td></tr></tbody></table></div></article>
-        <article class="panel table-panel execution-panel"><div class="panel-header"><div><span class="eyebrow">Execution</span><h3>Recent order outcomes</h3></div><small>Up to 12 latest</small></div><div class="data-table-wrap live-execution-table"><table class="data-table"><thead><tr><th>Symbol</th><th>Status</th><th class="number">Fill</th><th class="number">P&amp;L</th></tr></thead><tbody><tr v-for="(fill, index) in fills" :key="fillKey(fill, index)"><td><span class="execution-symbol"><span class="live-asset-cell"><img v-if="symbolLogo(fill.order?.symbol)" :src="symbolLogo(fill.order?.symbol)" class="order-symbol-logo" alt="" @error="markSymbolLogoFailed(fill.order?.symbol)"/><span v-else class="order-symbol-logo" aria-hidden="true">{{ String(fill.order?.symbol || '?').slice(0, 1) }}</span><strong>{{ fill.order?.symbol || '—' }}</strong></span><small v-if="fill.reason" class="execution-reason">{{ fill.reason }}</small></span></td><td><span class="badge" :class="fillStatusClass(fill.status)">{{ fill.status }}</span></td><td class="number">{{ fill.fill_price == null ? '—' : price(fill.fill_price) }}</td><td class="number" :class="tone(fill.realized_pnl)">{{ fill.realized_pnl == null ? '—' : money(fill.realized_pnl) }}</td></tr></tbody></table><div v-if="!fills.length" class="empty-state compact"><p>{{ hasStrategy ? 'Waiting for strategy orders…' : 'Monitoring only · no strategy selected.' }}</p></div></div></article>
       </section>
       <article class="panel event-feed">
         <div class="panel-header"><div><span class="eyebrow">Live diagnostics</span><h3>Market event feed</h3></div><span>{{ updates.length }} buffered · {{ state.health?.received_events || 0 }} received · {{ state.health?.warmup_bars_loaded || 0 }} warmed</span></div>
@@ -241,7 +266,28 @@
 </template>
 
 <script setup>
-import { Bot, Braces, ChevronLeft, ChevronRight, Pause, Play, Radio, Shapes, ShieldCheck, Square, SquareCode, TriangleAlert } from 'lucide-vue-next'
+import {
+  Bot,
+  Braces,
+  ChartNoAxesCombined,
+  ChevronLeft,
+  ChevronRight,
+  Gauge,
+  History,
+  Pause,
+  Play,
+  Plus,
+  Radio,
+  ReceiptText,
+  Scale,
+  Shapes,
+  ShieldCheck,
+  Square,
+  SquareCode,
+  TrendingDown,
+  TriangleAlert,
+  WalletCards
+} from 'lucide-vue-next'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from 'vue'
 import { api, post, query } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
@@ -250,11 +296,20 @@ import FieldInfo from '../components/field-info.vue'
 import IntervalPicker from '../components/interval-picker.vue'
 import SearchSelect from '../components/search-select.vue'
 import ToggleField from '../components/toggle-field.vue'
-import { configuredPlotlyDateTimeFormat, flattenFills, formatConfiguredTimeWithSeconds, instrumentLogoUrl, paperEquitySeries } from '../state'
+import { configuredPlotlyDateTimeFormat, flattenFills, formatConfiguredCurrency, formatConfiguredTimeWithSeconds, instrumentLogoUrl, paperEquitySeries } from '../state'
 
 const props = defineProps({ bootstrap: Object })
-const emit = defineEmits(['toast', 'live-status'])
+const emit = defineEmits(['toast', 'live-status', 'navigate'])
 const providers = ['kraken', 'binance', 'coinbase']
+const currencyMetrics = new Set([
+  'pnl',
+  'final_equity',
+  'expectancy',
+  'avg_win',
+  'avg_loss',
+  'best_trade',
+  'worst_trade'
+])
 const intervals = props.bootstrap.enums.intervals
 const state = reactive({ status: 'idle', config: {}, snapshot: {}, updates: [], health: {}, error: null })
 const portfolioDefaults = props.bootstrap.defaults?.portfolio || {}
@@ -291,6 +346,7 @@ const orderTypeDescriptions = computed(() => Object.fromEntries(orderTypes.map(i
   }[String(item).replaceAll(/[^a-z]/gi, '').toLowerCase()] || 'Control how and when an order may be filled.'
 ])))
 const starting = ref(false)
+const dismissedSessionId = ref(null)
 const failedSymbolLogos = ref(new Set())
 const liveInstruments = ref([])
 const loadingLiveSymbols = ref(false)
@@ -316,12 +372,20 @@ let timer
 let liveCatalogRequest = 0
 const snapshot = computed(() => state.snapshot || {})
 const activeSession = computed(() => ['running', 'paused'].includes(state.status))
-const sessionVisible = computed(() => activeSession.value || state.config?.mode === 'replay')
+const currentSessionId = computed(() => state.id ?? '__session_without_id__')
+const sessionVisible = computed(() =>
+  state.status !== 'idle'
+  && Boolean(Object.keys(state.config || {}).length)
+  && dismissedSessionId.value !== currentSessionId.value)
 const sessionStatusLabel = computed(() => {
   if (state.config?.mode === 'replay') {
-    return activeSession.value ? 'Replay running' : state.status === 'error' ? 'Replay failed' : 'Replay'
+    if (state.status === 'paused') return 'Replay paused'
+    if (state.status === 'running') return 'Replay running'
+    return state.status === 'error' ? 'Replay failed' : 'Replay stopped'
   }
-  return state.status === 'paused' ? 'Session paused' : 'Session live'
+  if (state.status === 'paused') return 'Session paused'
+  if (state.status === 'running') return 'Session live'
+  return state.status === 'error' ? 'Session failed' : 'Session stopped'
 })
 const updates = computed(() => state.updates || [])
 const selectedStrategyName = ref('')
@@ -339,6 +403,38 @@ const activeStrategyName = computed(() =>
     : strategyNames.value[0] || '')
 const activeStrategySnapshot = computed(() =>
   state.strategies?.[activeStrategyName.value] || snapshot.value)
+const riskMetrics = computed(() => [
+  {
+    key: 'gross-exposure', label: 'Gross exposure', icon: ChartNoAxesCombined,
+    value: money(activeStrategySnapshot.value.gross_exposure),
+    help: 'Total market value of all open positions, adding long and short positions without offsetting them.'
+  },
+  {
+    key: 'net-exposure', label: 'Net exposure', icon: Scale,
+    value: money(activeStrategySnapshot.value.net_exposure),
+    help: 'Signed market value of open positions: long exposure minus short exposure.'
+  },
+  {
+    key: 'leverage', label: 'Leverage', icon: Gauge,
+    value: `${Number(activeStrategySnapshot.value.leverage || 0).toFixed(2)}x`,
+    help: 'Gross exposure divided by account equity. 1.00x means gross positions equal current equity.'
+  },
+  {
+    key: 'buying-power', label: 'Buying power', icon: WalletCards,
+    value: money(activeStrategySnapshot.value.buying_power),
+    help: 'Additional gross exposure available before reaching configured leverage or margin limits.'
+  },
+  {
+    key: 'drawdown', label: 'Drawdown', icon: TrendingDown,
+    value: percent(activeStrategySnapshot.value.drawdown),
+    help: 'Percentage change from the highest equity reached. A negative value shows how far equity is below its peak.'
+  },
+  {
+    key: 'total-costs', label: 'Total costs', icon: ReceiptText,
+    value: money(activeStrategySnapshot.value.total_costs),
+    help: 'Cumulative simulated commissions and financing costs charged during this session.'
+  }
+])
 const strategyUpdates = computed(() => updates.value.map(update => {
   const strategyUpdate = update.strategies?.[activeStrategyName.value]
   if (!strategyUpdate) return update
@@ -378,10 +474,44 @@ const liveMetrics = computed(() => {
       value
     }))
 })
-const fills = computed(() => flattenFills(strategyUpdates.value, 12))
+const fills = computed(() =>
+  state.recent_order_outcomes?.[activeStrategyName.value]
+  ?? flattenFills(strategyUpdates.value, 12))
+const executionEmptyMessage = computed(() => {
+  if (!hasStrategy.value) return 'Monitoring only · no strategy selected.'
+  if (Object.keys(activeStrategySnapshot.value.portfolio?.positions || {}).length) {
+    return 'No recent orders. Older completed orders can leave this bounded list while positions remain open.'
+  }
+  return 'Waiting for strategy orders…'
+})
+const replayStatus = computed(() => state.replay || state.health?.replay || {})
+const replayProgress = computed(() => Math.min(100, Math.max(
+  0,
+  Number(replayStatus.value.progress || 0) * 100
+)))
+const replaySpeedLabel = computed(() => Number(replayStatus.value.speed) > 0
+  ? `${Number(replayStatus.value.speed)}× playback`
+  : 'Maximum-speed playback')
+const replayWarmupLabel = computed(() => {
+  const count = Number(replayStatus.value.warmup_bars_loaded || 0)
+  if (replayStatus.value.warmup_source === 'recorded') {
+    return `Restored the original ${count} warm-up bars.`
+  }
+  if (replayStatus.value.warmup_source === 'storage') {
+    return `Loaded ${count} warm-up bars from current local storage.`
+  }
+  return 'No recorded warm-up data was available for this session.'
+})
+const replayDurationLabel = computed(() => {
+  const seconds = Number(replayStatus.value.source_duration_seconds || 0)
+  if (seconds < 60) return `${seconds.toFixed(1)}s recorded time`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = Math.round(seconds % 60)
+  return `${minutes}m ${remainder}s recorded time`
+})
 const initialEquity = computed(() =>
   Number(state.config?.config?.initial_cash ?? form.config.initial_cash) || 0)
-const baseCurrency = computed(() => activeSession.value
+const baseCurrency = computed(() => sessionVisible.value
   ? state.config?.config?.base_currency || form.config.base_currency
   : form.config.base_currency)
 const watchlist = computed(() => {
@@ -596,11 +726,51 @@ function fillStatusClass(status) {
   return 'neutral'
 }
 function fillKey(fill, index) { return `${fill.order?.id || ''}:${fill.timestamp}:${fill.status}:${index}` }
-function money(value) { return new Intl.NumberFormat('en', { style: 'currency', currency: baseCurrency.value || 'USD', maximumFractionDigits: 2 }).format(Number(value) || 0) }
+function fillTime(fill) {
+  return formatConfiguredTimeWithSeconds(fill.timestamp, props.bootstrap?.display)
+}
+function fillSide(fill) {
+  if (fill.order?.quantity == null) return '—'
+  const quantity = Number(fill.order?.quantity)
+  return quantity > 0 ? 'Buy' : quantity < 0 ? 'Sell' : '—'
+}
+function fillSideClass(fill) {
+  const side = fillSide(fill)
+  return side === 'Buy' ? 'positive' : side === 'Sell' ? 'negative' : ''
+}
+function fillQuantity(fill) {
+  if (fill.order?.quantity == null) return '—'
+  const quantity = Number(fill.order?.quantity)
+  return Number.isFinite(quantity) ? positionAmount(Math.abs(quantity)) : '—'
+}
+function fillOrderType(fill) {
+  const value = String(fill.order?.order_type || '').trim()
+  return value ? title(value.replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ')) : '—'
+}
+function realizedTradePnl(fill) {
+  if (fill.realized_pnl == null) return null
+  const pnl = Number(fill.realized_pnl)
+  const commission = Number(fill.commission)
+  if (!Number.isFinite(pnl)) return null
+  return pnl + (Number.isFinite(commission) ? commission : 0)
+}
+function money(value, maximumFractionDigits = 2) {
+  return formatConfiguredCurrency(
+    value,
+    baseCurrency.value || 'USD',
+    props.bootstrap.display,
+    maximumFractionDigits
+  )
+}
+function positionAmount(value) { return Number(value).toLocaleString('en', { maximumFractionDigits: 8 }) }
 function price(value) { return Number(value).toLocaleString('en', { maximumFractionDigits: 6 }) }
 function percent(value) { return `${(Number(value) * 100 || 0).toFixed(2)}%` }
 function metricName(key) { return liveMetricCatalog.value.find(item => item.key === key)?.name || String(key).replaceAll('_', ' ') }
-function metricValue(key, value) { return liveMetricCatalog.value.find(item => item.key === key)?.percentage ? percent(value) : Number(value).toLocaleString('en', { maximumFractionDigits: 4 }) }
+function metricValue(key, value) {
+  if (liveMetricCatalog.value.find(item => item.key === key)?.percentage) return percent(value)
+  if (currencyMetrics.has(key)) return money(value, 4)
+  return Number(value).toLocaleString('en', { maximumFractionDigits: 4 })
+}
 const tone = value => Number(value) > 0 ? 'positive' : Number(value) < 0 ? 'negative' : ''
 function eventTime(update) {
   const value = update?.received_at ?? update?.market?.received_ts ?? update?.market?.close_ts
@@ -608,6 +778,14 @@ function eventTime(update) {
 }
 async function start() { starting.value = true; try { updateState(await post('/api/live', form)); emit('toast', 'Live trading session started.'); poll() } catch (error) { emit('toast', error.message, 'error') } finally { starting.value = false } }
 async function stop() { try { updateState(await post('/api/live/stop')); clearTimeout(timer); emit('toast', 'Live trading session stopped.') } catch (error) { emit('toast', error.message, 'error') } }
+function newConfiguration() {
+  dismissedSessionId.value = currentSessionId.value
+  Object.assign(form, defaultLiveForm())
+  setupTab.value = 0
+  selectedStrategyName.value = ''
+  loadLiveInstruments()
+}
+function openSessionHistory() { emit('navigate', 'live-history') }
 async function pause() { try { updateState(await post('/api/live/pause')); emit('toast', 'Strategy evaluation paused.') } catch (error) { emit('toast', error.message, 'error') } }
 async function resume() { try { updateState(await post('/api/live/resume')); emit('toast', 'Strategy evaluation resumed.'); poll() } catch (error) { emit('toast', error.message, 'error') } }
 async function flatten() { try { updateState(await post('/api/live/flatten')); emit('toast', 'Positions will flatten on the next market update.', 'warning') } catch (error) { emit('toast', error.message, 'error') } }

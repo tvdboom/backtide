@@ -17,6 +17,8 @@ from backtide.storage import (
     query_strategy_runs,
 )
 
+_MISSING_SYMBOL = "__definitely_not_a_real_symbol__"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # query_bars
 # ─────────────────────────────────────────────────────────────────────────────
@@ -31,7 +33,7 @@ class TestQueryBars:
 
     def test_empty_filter_returns_empty(self):
         """Filtering by a non-existent symbol yields an empty DataFrame."""
-        result = query_bars(symbol="__definitely_not_a_real_symbol__")
+        result = query_bars(symbol=_MISSING_SYMBOL)
         assert len(result) == 0
 
     def test_expected_columns(self):
@@ -68,7 +70,7 @@ class TestQueryDividends:
 
     def test_empty_filter_returns_empty(self):
         """Filtering by a non-existent symbol yields an empty DataFrame."""
-        assert len(query_dividends(symbol="__definitely_not_a_real_symbol__")) == 0
+        assert len(query_dividends(symbol=_MISSING_SYMBOL)) == 0
 
     def test_expected_columns(self):
         """The DataFrame has the expected column names even when empty."""
@@ -121,23 +123,26 @@ class TestDeleteSymbols:
 
     def test_returns_int(self):
         """delete_symbols returns an integer count."""
-        assert isinstance(delete_symbols("AAPL"), int)
+        assert isinstance(delete_symbols(_MISSING_SYMBOL), int)
 
-    def test_empty_database_returns_zero(self):
-        """Deleting from an empty database returns 0."""
-        assert delete_symbols("AAPL") == 0
+    def test_missing_symbol_returns_zero(self):
+        """Deleting a symbol that is not stored returns 0."""
+        assert delete_symbols(_MISSING_SYMBOL) == 0
 
     def test_with_interval(self):
         """The interval parameter is accepted."""
-        assert isinstance(delete_symbols("AAPL", interval="1d"), int)
+        assert isinstance(delete_symbols(_MISSING_SYMBOL, interval="1d"), int)
 
     def test_with_provider(self):
         """The provider parameter is accepted."""
-        assert isinstance(delete_symbols("AAPL", provider="yahoo"), int)
+        assert isinstance(delete_symbols(_MISSING_SYMBOL, provider="yahoo"), int)
 
     def test_all_filters(self):
         """All optional filters can be combined."""
-        assert isinstance(delete_symbols("AAPL", interval="1d", provider="yahoo"), int)
+        assert isinstance(
+            delete_symbols(_MISSING_SYMBOL, interval="1d", provider="yahoo"),
+            int,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

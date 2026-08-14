@@ -65,12 +65,19 @@ Every session is persisted beneath the configured Backtide storage directory. Th
 market events through a new paper engine. Browser event buffers remain bounded, while the
 on-disk journal retains the complete recorded session. The table shows both the start and finish
 timestamps. Original sessions remain at the top level; use the replay-count control to expand
-replays beneath the session that supplied their recorded events. Replays preserve event ordering
-and reuse the saved session settings, but process the journal as quickly as the engine allows
-rather than reconnecting to the provider or waiting for the original wall-clock intervals. Both
-session types use simulated fills and never submit broker orders. Use **Go live** instead to
-reconnect to the provider immediately with the session's saved market, strategy, account,
-execution, and risk settings.
+replays beneath the session that supplied their recorded events. Choose 1x, 2x, 5x, 10x, or
+maximum playback speed before starting. Timed modes reproduce the delays between recorded event
+timestamps, and replay pause/resume stops the playback clock without discarding events. The live
+page shows event progress, recorded duration, selected speed, and warm-up provenance.
+
+New live sessions persist the exact normalized warm-up stream alongside their event journal, so a
+replay can restore the original strategy and indicator history without querying current market
+storage. Legacy sessions created before warm-up capture fall back to the currently stored bars and
+identify that fallback in the playback details. Expanding a session's replay count shows an
+original-versus-replay final P&L comparison, including the P&L difference, speed, and warm-up
+source. Both session types use simulated fills and never submit broker orders. Use **Go live**
+instead to reconnect to the provider immediately with the session's saved market, strategy,
+account, execution, and risk settings.
 
 ### Margin behavior
 

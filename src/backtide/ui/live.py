@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import UTC, datetime
+import importlib
 import inspect
 import json
 from pathlib import Path
 import re
 import threading
+import time
 from typing import Any
 import uuid
 
@@ -33,6 +35,7 @@ class LiveTradingManager:
         self._sessions: dict[str, Any] = {}
         self._config: dict[str, Any] = {}
         self._updates: deque[dict[str, Any]] = deque(maxlen=500)
+        self._recent_order_outcomes: dict[str, deque[dict[str, Any]]] = {}
         self._error: str | None = None
         self._session_id: str | None = None
         self._started_at: str | None = None
@@ -41,6 +44,14 @@ class LiveTradingManager:
         self._warmup_loaded = 0
         self._flatten_requested = False
         self._cancel_requested = False
+        self._target_quotes: dict[str, str] = {}
+        self._conversion_legs: dict[str, tuple[str, str]] = {}
+        self._exchange_rates: dict[str, dict[str, Any]] = {}
+        self._replay_speed = 0.0
+        self._replay_total_events = 0
+        self._replay_processed_events = 0
+        self._replay_source_duration = 0.0
+        self._replay_warmup_source = "none"
         self._configured_storage_root = storage_root
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -62,6 +73,22 @@ class LiveTradingManager:
                 PaperTradingConfig,
                 payload.get("config") or {},
             )
+            base_currency = str(config_values.get("base_currency", "USD")).upper()
+            inferred_quotes = {symbol: symbol.rsplit("-", 1)[-1].upper() for symbol in symbols}
+            self._target_quotes = inferred_quotes
+            self._conversion_legs = {}
+            if any(quote != base_currency for quote in inferred_quotes.values()):
+                live_module = importlib.import_module("backtide.live")
+                planner = getattr(live_module, "_live_currency_plan", None)
+                if planner is not None:
+                    try:
+                        self._target_quotes, self._conversion_legs = planner(
+                            provider,
+                            symbols,
+                            base_currency,
+                        )
+                    except (RuntimeError, TypeError, ValueError) as exc:
+                        raise APIError(str(exc)) from exc
             strategy_names = self._strategy_names(payload)
             strategy_objects = self._load_strategies(strategy_names)
             indicators = self._load_indicators(payload.get("indicators") or [])
@@ -87,11 +114,16 @@ class LiveTradingManager:
                 "strategies": strategy_names,
                 "indicators": [str(name) for name in payload.get("indicators") or []],
                 "config": config_values,
+                "target_quotes": self._target_quotes,
+                "conversion_legs": {
+                    symbol: {"base": base, "quote": quote}
+                    for symbol, (base, quote) in self._conversion_legs.items()
+                },
                 "warmup_bars": max(0, int(payload.get("warmup_bars", 0))),
             }
             self._prepare_session()
             try:
-                self._warmup_loaded = self._warm_up_sessions()
+                self._warmup_loaded = self._warm_up_sessions(persist=True)
                 self._persist_manifest("running")
             except (OSError, RuntimeError, TypeError, ValueError) as exc:
                 self._session = None
@@ -105,13 +137,18 @@ class LiveTradingManager:
             self._thread.start()
         return self.status()
 
-    def replay(self, session_id: str) -> dict[str, Any]:
+    def replay(
+        self,
+        session_id: str,
+        playback_speed: float | str = "max",
+    ) -> dict[str, Any]:
         """Replay recorded market events through a fresh paper engine."""
         from backtide.live import MarketUpdate, PaperTradingConfig, PaperTradingSession
 
         record = self.session(session_id)
         config = record.get("config") or {}
         events = record.get("updates") or []
+        speed = self._playback_speed(playback_speed)
         with self._lock:
             self._ensure_idle()
             config_values = self._supported_config_values(
@@ -134,20 +171,72 @@ class LiveTradingManager:
                 self._sessions.clear()
                 raise APIError(str(exc)) from exc
             self._session = next(iter(self._sessions.values()))
-            self._config = {**config, "mode": "replay", "source_session_id": session_id}
+            self._config = {
+                **config,
+                "mode": "replay",
+                "source_session_id": session_id,
+                "playback_speed": speed,
+            }
+            self._target_quotes = {
+                str(symbol): str(quote)
+                for symbol, quote in (config.get("target_quotes") or {}).items()
+            }
+            self._conversion_legs = {
+                str(symbol): (str(value["base"]), str(value["quote"]))
+                for symbol, value in (config.get("conversion_legs") or {}).items()
+            }
             self._prepare_session()
+            self._replay_speed = speed
+            self._replay_total_events = len(events)
+            self._replay_source_duration = self._event_span(events)
+            recorded_warmup = [MarketUpdate(**values) for values in record.get("warmup") or []]
+            if recorded_warmup:
+                self._replay_warmup_source = "recorded"
+                self._warmup_loaded = self._warm_up_sessions(
+                    markets=recorded_warmup,
+                    persist=True,
+                )
+            elif int(config.get("warmup_bars") or 0) > 0:
+                self._replay_warmup_source = "storage"
+                self._warmup_loaded = self._warm_up_sessions(persist=True)
+                if not self._warmup_loaded:
+                    self._replay_warmup_source = "unavailable"
 
             def runner() -> None:
                 try:
-                    for event in events:
-                        if self._stop.is_set():
+                    previous_timestamp = None
+                    for index, event in enumerate(events):
+                        if not self._wait_until_replay_resumed():
+                            break
+                        event_timestamp = self._event_timestamp(event)
+                        if (
+                            previous_timestamp is not None
+                            and event_timestamp is not None
+                            and speed > 0.0
+                            and not self._wait_replay_delay(
+                                max(0.0, event_timestamp - previous_timestamp) / speed
+                            )
+                        ):
+                            break
+                        if not self._wait_until_replay_resumed():
                             break
                         market_values = event.get("market") or {}
                         market = MarketUpdate(**market_values)
                         source_received_at = event.get("received_at")
                         if source_received_at is None:
                             source_received_at = market_values.get("received_ts")
+                        for symbol, rate in (event.get("exchange_rates") or {}).items():
+                            self._record_exchange_rate(
+                                str(symbol),
+                                str(rate["base"]),
+                                str(rate["quote"]),
+                                float(rate["rate"]),
+                                int(rate["timestamp"]),
+                            )
                         self._process_market(market, received_at=source_received_at)
+                        self._replay_processed_events = index + 1
+                        if event_timestamp is not None:
+                            previous_timestamp = event_timestamp
                 except Exception as exc:  # noqa: BLE001
                     with self._lock:
                         self._error = str(exc)
@@ -230,6 +319,10 @@ class LiveTradingManager:
                 "snapshot": snapshot,
                 "strategies": snapshots,
                 "updates": list(self._updates),
+                "recent_order_outcomes": {
+                    name: list(reversed(outcomes))
+                    for name, outcomes in self._recent_order_outcomes.items()
+                },
                 "health": {
                     "started_at": self._started_at,
                     "last_message_at": self._last_message_at,
@@ -237,6 +330,7 @@ class LiveTradingManager:
                     "warmup_bars_loaded": self._warmup_loaded,
                     "paused": self._paused.is_set(),
                 },
+                "replay": self._replay_status() if self._config.get("mode") == "replay" else None,
                 "error": self._error,
             }
 
@@ -290,6 +384,7 @@ class LiveTradingManager:
                 except json.JSONDecodeError:
                     continue
         result["updates"] = updates
+        result["warmup"] = self._read_json_lines(folder / "warmup.jsonl")
         return result
 
     def _reconcile_persisted_status(
@@ -318,6 +413,7 @@ class LiveTradingManager:
 
     def _prepare_session(self) -> None:
         self._updates.clear()
+        self._recent_order_outcomes.clear()
         self._error = None
         self._stop.clear()
         self._paused.clear()
@@ -328,6 +424,12 @@ class LiveTradingManager:
         self._warmup_loaded = 0
         self._flatten_requested = False
         self._cancel_requested = False
+        self._exchange_rates.clear()
+        self._replay_speed = 0.0
+        self._replay_total_events = 0
+        self._replay_processed_events = 0
+        self._replay_source_duration = 0.0
+        self._replay_warmup_source = "none"
 
     def _run(self) -> None:
         from backtide.live import LiveMarketFeed
@@ -335,7 +437,7 @@ class LiveTradingManager:
         try:
             self._feed = LiveMarketFeed(
                 self._config["provider"],
-                self._config["symbols"],
+                [*self._config["symbols"], *self._conversion_legs],
                 self._config["interval"],
                 include_partial=True,
             )
@@ -358,19 +460,56 @@ class LiveTradingManager:
         processed_at = self._now()
         self._last_message_at = processed_at
         self._received_events += 1
-        if self._paused.is_set():
+        conversion_leg = self._conversion_legs.get(str(market.symbol))
+        if conversion_leg is not None:
+            self._record_exchange_rate(
+                str(market.symbol),
+                conversion_leg[0],
+                conversion_leg[1],
+                float(market.close),
+                int(market.close_ts),
+            )
+            if str(market.symbol) not in self._config.get("symbols", []):
+                return
+        if set(self._conversion_legs) - set(self._exchange_rates):
+            return
+        if self._paused.is_set() and self._config.get("mode") != "replay":
             return
         results = {}
         for name, session in self._sessions.items():
             orders = self._control_orders(session)
             results[name] = session.on_bar(market, orders or None)
         update = self._serialize_combined_update(market, results)
+        update["exchange_rates"] = dict(self._exchange_rates)
         update["received_at"] = processed_at if received_at is None else received_at
         with self._lock:
             self._updates.append(update)
+            for name, strategy_update in update.get("strategies", {}).items():
+                outcomes = self._recent_order_outcomes.setdefault(name, deque(maxlen=12))
+                outcomes.extend(strategy_update.get("fills") or [])
             self._append_event(update)
         self._flatten_requested = False
         self._cancel_requested = False
+
+    def _record_exchange_rate(
+        self,
+        symbol: str,
+        base: str,
+        quote: str,
+        rate: float,
+        timestamp: int,
+    ) -> None:
+        """Record one provider conversion leg in every independent account."""
+        for session in self._sessions.values():
+            setter = getattr(session, "set_exchange_rate", None)
+            if setter is not None:
+                setter(base, quote, rate, timestamp)
+        self._exchange_rates[symbol] = {
+            "base": base,
+            "quote": quote,
+            "rate": rate,
+            "timestamp": timestamp,
+        }
 
     def _control_orders(self, session: Any) -> list[Any]:
         if not self._flatten_requested and not self._cancel_requested:
@@ -398,45 +537,143 @@ class LiveTradingManager:
             )
         return orders
 
-    def _warm_up_sessions(self) -> int:
+    def _warm_up_sessions(
+        self,
+        *,
+        markets: list[Any] | None = None,
+        persist: bool = False,
+    ) -> int:
         limit = int(self._config.get("warmup_bars") or 0)
-        if limit <= 0 or not any(
+        if (markets is None and limit <= 0) or not any(
             hasattr(session, "warm_up") for session in self._sessions.values()
         ):
             return 0
         from backtide.live import MarketUpdate
-        from backtide.storage import query_bars
 
-        rows = dataframe_records(
-            query_bars(
-                self._config["symbols"],
-                self._config["interval"],
-                self._config["provider"],
-                limit=limit * len(self._config["symbols"]),
+        if markets is None:
+            from backtide.storage import query_bars
+
+            requested_symbols = [*self._config["symbols"], *self._conversion_legs]
+            rows = dataframe_records(
+                query_bars(
+                    requested_symbols,
+                    self._config["interval"],
+                    self._config["provider"],
+                    limit=limit * len(requested_symbols),
+                )
             )
-        )
-        markets = [
-            MarketUpdate(
-                symbol=str(row["symbol"]),
-                interval=str(row.get("interval") or self._config["interval"]),
-                open_ts=int(row["open_ts"]),
-                close_ts=int(row["close_ts"]),
-                open=float(row["open"]),
-                high=float(row["high"]),
-                low=float(row["low"]),
-                close=float(row.get("adj_close") or row["close"]),
-                volume=float(row.get("volume") or 0.0),
-                n_trades=row.get("n_trades"),
-                is_final=True,
-                provider=str(row.get("provider") or self._config["provider"]),
-                received_ts=int(row["close_ts"]),
+            markets = [
+                MarketUpdate(
+                    symbol=str(row["symbol"]),
+                    interval=str(row.get("interval") or self._config["interval"]),
+                    open_ts=int(row["open_ts"]),
+                    close_ts=int(row["close_ts"]),
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row.get("adj_close") or row["close"]),
+                    volume=float(row.get("volume") or 0.0),
+                    n_trades=row.get("n_trades"),
+                    is_final=True,
+                    provider=str(row.get("provider") or self._config["provider"]),
+                    received_ts=int(row["close_ts"]),
+                    quote_currency=self._target_quotes.get(str(row["symbol"])),
+                )
+                for row in sorted(rows, key=lambda value: int(value.get("open_ts") or 0))
+            ]
+        if persist:
+            self._persist_warmup(markets)
+        strategy_markets = []
+        for market in markets:
+            conversion_leg = self._conversion_legs.get(str(market.symbol))
+            if conversion_leg is None:
+                strategy_markets.append(market)
+                continue
+            self._record_exchange_rate(
+                str(market.symbol),
+                conversion_leg[0],
+                conversion_leg[1],
+                float(market.close),
+                int(market.close_ts),
             )
-            for row in sorted(rows, key=lambda value: int(value.get("open_ts") or 0))
-        ]
         for session in self._sessions.values():
             if hasattr(session, "warm_up"):
-                session.warm_up(markets)
-        return len(markets)
+                session.warm_up(strategy_markets)
+        return len(strategy_markets)
+
+    @staticmethod
+    def _playback_speed(value: float | str) -> float:
+        """Return a bounded replay speed where zero means maximum speed."""
+        if isinstance(value, str) and value.strip().lower() in {"max", "maximum", "instant"}:
+            return 0.0
+        try:
+            speed = float(value)
+        except (TypeError, ValueError) as exc:
+            raise APIError("Replay speed must be between 0.1x and 100x, or 'max'.", 400) from exc
+        if not 0.1 <= speed <= 100.0:
+            raise APIError("Replay speed must be between 0.1x and 100x, or 'max'.", 400)
+        return speed
+
+    @staticmethod
+    def _event_timestamp(event: dict[str, Any]) -> float | None:
+        """Return one recorded event timestamp in epoch seconds."""
+        value = event.get("received_at")
+        if value is None:
+            market = event.get("market") or {}
+            value = market.get("received_ts", market.get("close_ts"))
+        if isinstance(value, (int, float)):
+            timestamp = float(value)
+            return timestamp / 1_000.0 if timestamp > 10_000_000_000 else timestamp
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return None
+        return None
+
+    @classmethod
+    def _event_span(cls, events: list[dict[str, Any]]) -> float:
+        """Return elapsed recorded time between the first and last valid event."""
+        timestamps = [
+            value for event in events if (value := cls._event_timestamp(event)) is not None
+        ]
+        return max(0.0, timestamps[-1] - timestamps[0]) if len(timestamps) > 1 else 0.0
+
+    def _wait_until_replay_resumed(self) -> bool:
+        """Wait without consuming replay events while playback is paused."""
+        while self._paused.is_set() and not self._stop.is_set():
+            self._stop.wait(0.05)
+        return not self._stop.is_set()
+
+    def _wait_replay_delay(self, seconds: float) -> bool:
+        """Wait for replay time while excluding time spent paused."""
+        remaining = seconds
+        previous = time.monotonic()
+        while remaining > 0.0 and not self._stop.is_set():
+            if self._paused.is_set():
+                if not self._wait_until_replay_resumed():
+                    return False
+                previous = time.monotonic()
+                continue
+            self._stop.wait(min(remaining, 0.05))
+            current = time.monotonic()
+            remaining -= current - previous
+            previous = current
+        return not self._stop.is_set()
+
+    def _replay_status(self) -> dict[str, Any]:
+        """Return playback progress and reproducibility details."""
+        total = self._replay_total_events
+        processed = self._replay_processed_events
+        return {
+            "speed": self._replay_speed,
+            "processed_events": processed,
+            "total_events": total,
+            "progress": processed / total if total else 1.0,
+            "source_duration_seconds": self._replay_source_duration,
+            "warmup_source": self._replay_warmup_source,
+            "warmup_bars_loaded": self._warmup_loaded,
+        }
 
     @staticmethod
     def _symbols(values: Any) -> list[str]:
@@ -576,6 +813,7 @@ class LiveTradingManager:
                 market,
                 (
                     "symbol",
+                    "quote_currency",
                     "interval",
                     "open_ts",
                     "close_ts",
@@ -680,6 +918,7 @@ class LiveTradingManager:
                 "last_message_at": self._last_message_at,
                 "received_events": self._received_events,
                 "warmup_bars_loaded": self._warmup_loaded,
+                "replay": self._replay_status() if self._config.get("mode") == "replay" else None,
             },
             "error": self._error,
         }
@@ -695,6 +934,33 @@ class LiveTradingManager:
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / "events.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(_clean(update), separators=(",", ":")) + "\n")
+
+    def _persist_warmup(self, markets: list[Any]) -> None:
+        """Persist the exact warm-up stream used to initialize a live session."""
+        if not self._session_id:
+            return
+        folder = self._storage_root() / self._session_id
+        folder.mkdir(parents=True, exist_ok=True)
+        with (folder / "warmup.jsonl").open("w", encoding="utf-8") as stream:
+            for market in markets:
+                stream.write(
+                    json.dumps(self._serialize_market(market), separators=(",", ":")) + "\n"
+                )
+
+    @staticmethod
+    def _read_json_lines(path: Path) -> list[dict[str, Any]]:
+        """Read valid JSON objects from a persisted line-delimited journal."""
+        if not path.is_file():
+            return []
+        values = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                values.append(value)
+        return values
 
     @staticmethod
     def _now() -> str:

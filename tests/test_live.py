@@ -6,6 +6,7 @@ Description: Tests for live market data and paper trading.
 """
 
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
@@ -124,6 +125,28 @@ class TestProviderSupport:
 
         with pytest.raises(ValueError, match="max_events must be positive"):
             feed.collect(max_events=0)
+
+    def test_currency_plan_resolves_crypto_quote_through_available_pairs(self, monkeypatch):
+        """Test a live quote reaches the account currency through provider instruments."""
+        instruments = [
+            SimpleNamespace(symbol="AAVE-ETH", base="AAVE", quote="ETH"),
+            SimpleNamespace(symbol="ETH-USDT", base="ETH", quote="USDT"),
+            SimpleNamespace(symbol="EUR-USDT", base="EUR", quote="USDT"),
+        ]
+
+        def list_instruments(_provider, limit):
+            del limit
+            return instruments
+
+        monkeypatch.setattr(live, "list_live_instruments", list_instruments)
+
+        quotes, legs = live._live_currency_plan("binance", ["AAVE-ETH"], "EUR")
+
+        assert quotes == {"AAVE-ETH": "ETH"}
+        assert legs == {
+            "ETH-USDT": ("ETH", "USDT"),
+            "EUR-USDT": ("EUR", "USDT"),
+        }
 
 
 class TestPaperTradingSession:

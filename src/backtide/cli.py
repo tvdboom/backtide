@@ -18,7 +18,12 @@ from backtide.backtest import run_experiment as run_backtest
 from backtide.core.config import get_config
 from backtide.core.utils import init_logging
 from backtide.data import download_bars, resolve_profiles
-from backtide.live import LiveMarketFeed, PaperTradingConfig, PaperTradingSession
+from backtide.live import (
+    LiveMarketFeed,
+    PaperTradingConfig,
+    PaperTradingSession,
+    _live_currency_plan,
+)
 
 
 @click.group()
@@ -468,7 +473,20 @@ def start_live_session(config: Path, log_level: str | None) -> None:
         trading_config = PaperTradingConfig(**paper)
         strategy = _load_live_strategy(values.get("strategy"), cfg)
         feed = LiveMarketFeed(provider, symbols, interval, include_partial=True)
+        base_currency = str(paper.get("base_currency", "USD")).upper()
+        inferred_quotes = {symbol: symbol.rsplit("-", 1)[-1].upper() for symbol in symbols}
+        conversion_legs: dict[str, tuple[str, str]] = {}
+        if any(quote != base_currency for quote in inferred_quotes.values()):
+            feed.cancel()
+            _, conversion_legs = _live_currency_plan(provider, symbols, base_currency)
+            feed = LiveMarketFeed(
+                provider,
+                [*symbols, *conversion_legs],
+                interval,
+                include_partial=True,
+            )
         session = PaperTradingSession(trading_config, strategy)
+        observed_conversion_legs: set[str] = set()
         click.echo(
             f"Starting live paper session for {', '.join(symbols)} on "
             f"{provider} ({interval}). Press Ctrl+C to stop."
@@ -480,6 +498,14 @@ def start_live_session(config: Path, log_level: str | None) -> None:
                     max_events=batch_size,
                     timeout_seconds=timeout_seconds,
                 ):
+                    if market.symbol in conversion_legs:
+                        base, quote = conversion_legs[market.symbol]
+                        session.set_exchange_rate(base, quote, market.close, market.close_ts)
+                        observed_conversion_legs.add(market.symbol)
+                        if market.symbol not in symbols:
+                            continue
+                    if set(conversion_legs) - observed_conversion_legs:
+                        continue
                     update = session.on_bar(market)
                     if update.processed:
                         click.echo(

@@ -36,7 +36,7 @@ const bootstrap = {
       { code: 'USD', name: 'United States Dollar', country_code: 'us', flag: '🇺🇸' }
     ]
   },
-  display: { logokit_api_key: 'test-token' },
+  display: { currency_prefix: true, logokit_api_key: 'test-token' },
   live: {
     providers: {
       kraken: {
@@ -183,6 +183,12 @@ describe('live page', () => {
       'Metrics'
     ])
 
+    await wrapper.findAll('.live-form-tabs button')[5].trigger('click')
+    expect(wrapper.findAll('.settings-group .form-grid').map(grid => grid.classes())).toEqual([
+      ['form-grid', 'two'],
+      ['form-grid', 'two']
+    ])
+
     await wrapper.findAll('.live-form-tabs button')[6].trigger('click')
     expect(visibleLabels()).toEqual([
       'Warm-up bars',
@@ -303,6 +309,57 @@ describe('live page', () => {
     expect(wrapper.get('.session-actions').text()).toContain('Replay')
     expect(wrapper.get('.session-actions').text()).not.toContain('complete')
     expect(wrapper.get('.session-actions').text()).not.toContain('Stop')
+    expect(wrapper.get('.session-actions').text()).toContain('New configuration')
+    expect(wrapper.get('.session-actions').text()).toContain('Session history')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['live session', 'paper'],
+    ['replay', 'replay']
+  ])('keeps a stopped %s visible until a new configuration is requested', async (_, mode) => {
+    const running = {
+      id: `${mode}-session`,
+      status: 'running',
+      config: {
+        mode,
+        provider: 'kraken',
+        interval: '1m',
+        symbols: ['BTC-USD'],
+        strategies: [],
+        config: { initial_cash: 10_000, base_currency: 'EUR' }
+      },
+      snapshot: {
+        latest_prices: { 'BTC-USD': 60_000 },
+        equity: 10_000,
+        portfolio: { positions: {}, cash: { EUR: 10_000 }, orders: [] }
+      },
+      updates: [],
+      error: null
+    }
+    api.mockResolvedValue(running)
+    post.mockResolvedValue({ ...running, status: 'stopped' })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    await wrapper.get('.danger.secondary').trigger('click')
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith('/api/live/stop')
+    expect(wrapper.find('.live-setup').exists()).toBe(false)
+    expect(wrapper.find('.live-dashboard').exists()).toBe(true)
+    expect(wrapper.get('.session-actions').text())
+      .toContain(mode === 'replay' ? 'Replay stopped' : 'Session stopped')
+    expect(wrapper.findAll('.session-actions button').map(button => button.text()))
+      .toEqual(['New configuration', 'Session history'])
+
+    await wrapper.get('.session-actions .secondary').trigger('click')
+    expect(wrapper.emitted('navigate')[0]).toEqual(['live-history'])
+
+    await wrapper.get('.session-actions .primary').trigger('click')
+    expect(wrapper.find('.live-dashboard').exists()).toBe(false)
+    expect(wrapper.find('.live-setup').exists()).toBe(true)
+    expect(wrapper.findAll('.live-form-tabs button')[0].classes()).toContain('active')
     wrapper.unmount()
   })
 
@@ -738,29 +795,55 @@ describe('live page', () => {
     expect(wrapper.get('.live-metrics').element.compareDocumentPosition(
       wrapper.get('.live-dashboard').element
     ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.get('.live-portfolio-panel').element.compareDocumentPosition(
+      wrapper.get('.live-chart').element
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(wrapper.get('.live-chart .chart-stub').element.compareDocumentPosition(
       wrapper.get('.live-strategy-switcher').element
     ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(wrapper.get('.live-metrics').text()).toContain('10,100.00')
+    expect(wrapper.get('.live-metrics').text()).toContain('€10,100.00')
     expect(wrapper.get('.live-observability').text()).toContain('1.00%')
     expect(wrapper.get('.live-observability').text()).not.toContain('22.00%')
+    const riskMetrics = wrapper.findAll('[data-risk-metric]')
+    expect(riskMetrics.map(item => item.attributes('data-risk-metric'))).toEqual([
+      'gross-exposure',
+      'net-exposure',
+      'leverage',
+      'buying-power',
+      'drawdown',
+      'total-costs'
+    ])
+    expect(riskMetrics.every(item => item.find('dt svg').exists())).toBe(true)
+    expect(riskMetrics.every(item => item.find('.risk-metric-help').exists())).toBe(true)
+    expect(riskMetrics.map(item => item.get('.risk-metric-help').attributes('aria-label')))
+      .toEqual([
+        'About this setting: Total market value of all open positions, adding long and short positions without offsetting them.',
+        'About this setting: Signed market value of open positions: long exposure minus short exposure.',
+        'About this setting: Gross exposure divided by account equity. 1.00x means gross positions equal current equity.',
+        'About this setting: Additional gross exposure available before reaching configured leverage or margin limits.',
+        'About this setting: Percentage change from the highest equity reached. A negative value shows how far equity is below its peak.',
+        'About this setting: Cumulative simulated commissions and financing costs charged during this session.'
+      ])
     expect(wrapper.findAll('.live-observability article')[1].findAll('dt').map(item => item.text()))
       .toEqual(['Total return', 'Final equity'])
+    expect(wrapper.get('.live-tables').element.compareDocumentPosition(
+      wrapper.get('.live-observability').element
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(wrapper.getComponent({ name: 'ChartPanelStub' }).props('figure').data[0].y)
       .toEqual([0, 100])
-    expect(wrapper.get('.live-tables').text()).toContain('BTC-USD')
-    expect(wrapper.get('.live-tables').text()).not.toContain('ETH-USD')
+    expect(wrapper.get('.live-portfolio-panel').text()).toContain('BTC-USD')
+    expect(wrapper.get('.live-portfolio-panel').text()).not.toContain('ETH-USD')
 
     await tabs[1].trigger('click')
 
     expect(tabs[1].attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('.live-metrics').text()).toContain('12,200.00')
+    expect(wrapper.get('.live-metrics').text()).toContain('€12,200.00')
     expect(wrapper.get('.live-observability').text()).toContain('22.00%')
     expect(wrapper.get('.live-observability').text()).not.toContain('1.00%')
     expect(wrapper.getComponent({ name: 'ChartPanelStub' }).props('figure').data[0].y)
       .toEqual([0, 2_200])
-    expect(wrapper.get('.live-tables').text()).toContain('ETH-USD')
-    expect(wrapper.get('.live-tables').text()).not.toContain('BTC-USD')
+    expect(wrapper.get('.live-portfolio-panel').text()).toContain('ETH-USD')
+    expect(wrapper.get('.live-portfolio-panel').text()).not.toContain('BTC-USD')
     wrapper.unmount()
   })
 
@@ -797,14 +880,198 @@ describe('live page', () => {
     expect(chart.props('figure').data[0].fill).toBeUndefined()
     expect(chart.props('figure').layout.yaxis.title).toBe('Net P&L (EUR)')
     expect(wrapper.get('.live-metrics').text()).toContain('Equity')
-    expect(wrapper.get('.live-tables').text()).toContain('Positions & cash')
-    expect(wrapper.get('.live-tables').text()).toContain('Recent order outcomes')
+    expect(wrapper.get('.live-portfolio-panel').text()).toContain('Positions & cash')
+    expect(wrapper.get('.live-tables').text()).toContain('Recent orders')
+    expect(wrapper.findAll('.live-tables > article')).toHaveLength(1)
     expect(wrapper.text()).toContain('Cancel orders')
     expect(wrapper.text()).toContain('Flatten')
     expect(wrapper.findAll('.action-popover').map(item => item.text())).toEqual([
       'Cancel every open simulated order before the next market update.',
       'Close all simulated positions on the next market update.'
     ])
+    wrapper.unmount()
+  })
+
+  it('shows replay speed, warm-up restoration, and playback progress', async () => {
+    api.mockResolvedValue({
+      ...completedReplay,
+      status: 'running',
+      config: { ...completedReplay.config, playback_speed: 2 },
+      replay: {
+        speed: 2,
+        processed_events: 25,
+        total_events: 100,
+        progress: 0.25,
+        source_duration_seconds: 185,
+        warmup_source: 'recorded',
+        warmup_bars_loaded: 500
+      }
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    expect(wrapper.get('.replay-playback-panel').text()).toContain('2× playback')
+    expect(wrapper.get('.replay-playback-panel').text())
+      .toContain('Restored the original 500 warm-up bars.')
+    expect(wrapper.get('.replay-progress').text())
+      .toContain('25 / 100 events · 25.0% · 3m 5s recorded time')
+    expect(wrapper.get('.replay-progress-track').attributes('aria-valuenow')).toBe('25')
+    expect(wrapper.get('.replay-progress-track span').attributes('style')).toContain('25%')
+    wrapper.unmount()
+  })
+
+  it('places base-currency units after monetary metrics when configured', async () => {
+    api.mockResolvedValue({
+      status: 'running',
+      config: {
+        provider: 'kraken', interval: '1m', symbols: ['BTC-USD'],
+        strategies: ['Buy & Hold'],
+        config: {
+          initial_cash: 10_000,
+          base_currency: 'EUR',
+          metrics: ['total_return', 'pnl', 'final_equity', 'sharpe']
+        }
+      },
+      snapshot: { equity: 9_984.2214, portfolio: { positions: {}, cash: { EUR: 9_984.2214 } } },
+      strategies: {
+        'Buy & Hold': {
+          equity: 9_984.2214,
+          metrics: {
+            total_return: -0.0016,
+            pnl: -15.7786,
+            final_equity: 9_984.2214,
+            sharpe: -46.1945
+          },
+          portfolio: { positions: {}, cash: { EUR: 9_984.2214 }, orders: [] }
+        }
+      },
+      updates: [],
+      error: null
+    })
+    const wrapper = mount(LivePage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          display: { ...bootstrap.display, currency_prefix: false },
+          metrics: {
+            builtin: [
+              { key: 'total_return', name: 'Total return', percentage: true },
+              { key: 'pnl', name: 'Profit and loss', percentage: false },
+              { key: 'final_equity', name: 'Final equity', percentage: false },
+              { key: 'sharpe', name: 'Sharpe ratio', percentage: false }
+            ]
+          }
+        }
+      }
+    })
+    await flushPromises()
+
+    const values = wrapper.findAll('.live-observability article')[1]
+      .findAll('dd').map(item => item.text())
+    expect(values).toEqual(['-0.16%', '-15.7786 €', '9,984.2214 €', '-46.1945'])
+    wrapper.unmount()
+  })
+
+  it('formats position quantities to at most eight decimal places', async () => {
+    api.mockResolvedValue({
+      status: 'running',
+      config: {
+        provider: 'binance', interval: '1m', symbols: ['AAVE-ETH'], strategy: 'Buy & Hold',
+        config: { initial_cash: 10_000, base_currency: 'EUR' }
+      },
+      snapshot: {
+        equity: 10_000,
+        portfolio: { positions: { 'AAVE-ETH': 132.63135111647918 }, cash: { EUR: 0 } }
+      },
+      updates: [],
+      error: null
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    expect(wrapper.get('.live-portfolio-panel').text()).toContain('132.63135112')
+    expect(wrapper.get('.live-portfolio-panel').text()).not.toContain('132.63135111647918')
+    expect(wrapper.get('.execution-panel').text()).toContain(
+      'Older completed orders can leave this bounded list while positions remain open.'
+    )
+    wrapper.unmount()
+  })
+
+  it('shows dedicated recent order outcomes after their market updates age out', async () => {
+    api.mockResolvedValue({
+      status: 'running',
+      config: {
+        provider: 'kraken', interval: '1m', symbols: ['BTC-USD'],
+        strategies: ['Buy & Hold'], config: { initial_cash: 10_000, base_currency: 'EUR' }
+      },
+      snapshot: { equity: 10_000, portfolio: { positions: { 'BTC-USD': 0.15 }, cash: { EUR: 500 } } },
+      strategies: {
+        'Buy & Hold': {
+          equity: 10_000,
+          portfolio: { positions: { 'BTC-USD': 0.15 }, cash: { EUR: 500 }, orders: [] }
+        }
+      },
+      updates: Array.from({ length: 500 }, () => ({
+        market: { symbol: 'BTC-USD', received_ts: 1_700_000_000 },
+        strategies: { 'Buy & Hold': { fills: [], indicators: {}, snapshot: { equity: 10_000 } } }
+      })),
+      recent_order_outcomes: {
+        'Buy & Hold': [{
+          timestamp: 1_700_000_060,
+          status: 'Filled',
+          fill_price: 62_820.68,
+          commission: 4.34,
+          realized_pnl: -4.34,
+          reason: 'live market fill',
+          order: {
+            id: 'buy-order', symbol: 'BTC-USD', quantity: 0.15, order_type: 'Market'
+          }
+        }, {
+          timestamp: 1_700_000_120,
+          status: 'Filled',
+          fill_price: 62_900,
+          commission: 0,
+          realized_pnl: 12,
+          order: {
+            id: 'profit-order', symbol: 'BTC-USD', quantity: -0.05, order_type: 'Market'
+          }
+        }, {
+          timestamp: 1_700_000_180,
+          status: 'Filled',
+          fill_price: 62_700,
+          commission: 0,
+          realized_pnl: -8,
+          order: {
+            id: 'loss-order', symbol: 'BTC-USD', quantity: -0.05, order_type: 'Market'
+          }
+        }]
+      },
+      error: null
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    const execution = wrapper.get('.execution-panel')
+    expect(wrapper.get('.live-metrics').text()).toContain('net of commissions and financing')
+    expect(execution.findAll('th').map(column => column.text())).toEqual([
+      'Time', 'Symbol', 'Side', 'Type', 'Quantity', 'Fill price', 'P&L', 'Commission',
+      'Status'
+    ])
+    expect(execution.get('.execution-time').text()).not.toBe('—')
+    expect(execution.get('.order-side').text()).toBe('Buy')
+    expect(execution.get('.order-side').classes()).toContain('positive')
+    expect(execution.get('tbody').text()).toContain('BTC-USD')
+    expect(execution.get('tbody').text()).toContain('0.15')
+    expect(execution.get('tbody').text()).toContain('Market')
+    expect(execution.get('tbody').text()).toContain('62,820.68')
+    expect(execution.get('tbody').text()).toContain('€4.34')
+    expect(execution.get('tbody').text()).toContain('€0.00')
+    const pnlCells = execution.findAll('tbody tr').map(row => row.findAll('td')[6])
+    expect(pnlCells[0].classes()).not.toContain('positive')
+    expect(pnlCells[0].classes()).not.toContain('negative')
+    expect(pnlCells[1].classes()).toContain('positive')
+    expect(pnlCells[2].classes()).toContain('negative')
+    expect(wrapper.find('.execution-panel .empty-state').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -859,8 +1126,13 @@ describe('live page', () => {
 
     const executions = wrapper.findAll('.live-execution-table tbody tr')
     expect(executions).toHaveLength(12)
-    expect(executions[0].get('.badge').classes()).toContain('error')
-    expect(executions[0].text()).toContain('insufficient cash')
+    const status = executions[0].get('.badge')
+    const tooltip = executions[0].get('[role="tooltip"]')
+    expect(status.classes()).toContain('error')
+    expect(status.attributes('tabindex')).toBe('0')
+    expect(status.attributes('aria-describedby')).toBe(tooltip.attributes('id'))
+    expect(tooltip.text()).toBe('insufficient cash')
+    expect(executions[0].find('.execution-reason').exists()).toBe(false)
     wrapper.unmount()
   })
 })

@@ -11,14 +11,14 @@
 //! The table supports:
 //!   - Direct lookups for any pair recorded as a leg.
 //!   - Inverse rates for free (1 / rate).
-//!   - One-hop triangulation through the portfolio base currency.
+//!   - Deterministic graph traversal across available conversion legs.
 
 use crate::backtest::models::ConversionPeriod;
 use crate::constants::{Cash, CashAmount, MIN_POSITION};
 use crate::data::models::Currency;
 use chrono::{DateTime, Datelike, Utc};
 use itertools::Itertools;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// In-memory FX table: `from -> to -> sorted (timestamp, rate)`.
 #[derive(Debug, Default, Clone)]
@@ -48,6 +48,22 @@ impl FxTable {
         let v = self.pairs.entry(from.to_owned()).or_default().entry(to.to_owned()).or_default();
         v.extend(series);
         v.sort_by_key(|x| x.0);
+    }
+
+    /// Record one rate while bounding retained history for a long-running live session.
+    pub fn add_rate(&mut self, from: &str, to: &str, timestamp: i64, rate: f64, limit: usize) {
+        if !rate.is_finite() || rate <= 0.0 || limit == 0 {
+            return;
+        }
+        let rates =
+            self.pairs.entry(from.to_owned()).or_default().entry(to.to_owned()).or_default();
+        match rates.binary_search_by_key(&timestamp, |sample| sample.0) {
+            Ok(index) => rates[index] = (timestamp, rate),
+            Err(index) => rates.insert(index, (timestamp, rate)),
+        }
+        if rates.len() > limit {
+            rates.drain(..rates.len() - limit);
+        }
     }
 
     /// Forward-fill lookup: latest rate at-or-before `ts` for `from -> to`.
@@ -91,16 +107,56 @@ impl FxTable {
             return Some(amount * r);
         }
 
-        // Triangulate via base currency.
-        let r1 = self.rate_direct(from, &self.base, ts)?;
-        let r2 = self.rate_direct(&self.base, to, ts)?;
-        Some(amount * r1 * r2)
+        // Prefer the configured base as the first triangulation hop because
+        // backtest conversion legs are normally resolved around that node.
+        if let (Some(r1), Some(r2)) =
+            (self.rate_direct(from, &self.base, ts), self.rate_direct(&self.base, to, ts))
+        {
+            return Some(amount * r1 * r2);
+        }
+
+        self.rate_via_graph(from, to, ts).map(|rate| amount * rate)
     }
 
     /// Spot rate for 1 unit `from -> to` at `ts`. Returns `None` if no
     /// path can be resolved at `ts` (including forward-fill).
     pub fn rate(&self, from: &str, to: &str, ts: i64) -> Option<f64> {
         self.convert(1.0, from, to, ts)
+    }
+
+    fn rate_via_graph(&self, from: &str, to: &str, ts: i64) -> Option<f64> {
+        let mut visited = HashSet::from([from.to_owned()]);
+        let mut queue = VecDeque::from([(from.to_owned(), 1.0)]);
+
+        while let Some((currency, accumulated)) = queue.pop_front() {
+            let mut neighbors = Vec::new();
+            for (source, targets) in &self.pairs {
+                for target in targets.keys() {
+                    if source == &currency {
+                        if let Some(rate) = self.rate_direct(source, target, ts) {
+                            neighbors.push((target.clone(), rate));
+                        }
+                    } else if target == &currency {
+                        if let Some(rate) = self.rate_direct(target, source, ts) {
+                            neighbors.push((source.clone(), rate));
+                        }
+                    }
+                }
+            }
+            neighbors.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+
+            for (neighbor, rate) in neighbors {
+                if !visited.insert(neighbor.clone()) {
+                    continue;
+                }
+                let converted = accumulated * rate;
+                if neighbor == to {
+                    return Some(converted);
+                }
+                queue.push_back((neighbor, converted));
+            }
+        }
+        None
     }
 }
 
@@ -336,8 +392,8 @@ mod tests {
         // EUR -> USD = 1.10, CNY -> USD = 0.14 (so CNY -> EUR = 0.14 / 1.10)
         fx.add_series("EUR", "USD", vec![(0, 1.10)]);
         fx.add_series("CNY", "USD", vec![(0, 0.14)]);
-        // FxTable only triangulates through its configured base in one hop.
-        assert_eq!(fx.rate("CNY", "EUR", 0), None);
+        let rate = fx.rate("CNY", "EUR", 0).unwrap();
+        assert!((rate - 0.14 / 1.10).abs() < MIN_POSITION);
     }
 
     #[test]
@@ -406,6 +462,19 @@ mod tests {
         assert_eq!(fx.rate("EUR", "USD", 10), Some(1.10));
         assert_eq!(fx.rate("EUR", "USD", 25), Some(1.20));
         assert_eq!(fx.rate("EUR", "USD", 30), Some(1.30));
+    }
+
+    #[test]
+    fn add_rate_replaces_timestamp_and_bounds_history() {
+        let mut fx = FxTable::new("EUR");
+        fx.add_rate("ETH", "EUR", 10, 2_000.0, 2);
+        fx.add_rate("ETH", "EUR", 10, 2_100.0, 2);
+        fx.add_rate("ETH", "EUR", 20, 2_200.0, 2);
+        fx.add_rate("ETH", "EUR", 30, 2_300.0, 2);
+
+        assert_eq!(fx.rate("ETH", "EUR", 10), Some(2_200.0));
+        assert_eq!(fx.rate("ETH", "EUR", 20), Some(2_200.0));
+        assert_eq!(fx.rate("ETH", "EUR", 30), Some(2_300.0));
     }
 
     #[test]
@@ -489,6 +558,8 @@ mod tests {
         assert!((usdt_usd - 1.0).abs() < MIN_POSITION);
         let usd_chf = fx.rate("USD", "CHF", 0).unwrap();
         assert!((usd_chf - 0.90).abs() < MIN_POSITION);
+        let eth_chf = fx.rate("ETH", "CHF", 0).unwrap();
+        assert!((eth_chf - 2_700.0).abs() < MIN_POSITION);
     }
 
     #[test]

@@ -344,6 +344,44 @@ impl PaperTradingSession {
         })
     }
 
+    /// Record a currency-conversion rate for live account valuation.
+    ///
+    /// Parameters
+    /// ----------
+    /// from_currency : str
+    ///     Currency being converted, such as `"ETH"`.
+    ///
+    /// to_currency : str
+    ///     Currency received, such as `"EUR"`.
+    ///
+    /// rate : float
+    ///     Positive units of `to_currency` per unit of `from_currency`.
+    ///
+    /// timestamp : int, default=0
+    ///     Unix timestamp in seconds at which the rate was observed.
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If either currency is empty or `rate` is not finite and positive.
+    #[pyo3(signature = (
+        from_currency: "str",
+        to_currency: "str",
+        rate: "float",
+        timestamp: "int"=0,
+    ))]
+    fn set_exchange_rate(
+        &mut self,
+        from_currency: &str,
+        to_currency: &str,
+        rate: f64,
+        timestamp: i64,
+    ) -> PyResult<()> {
+        self.broker
+            .set_exchange_rate(from_currency, to_currency, rate, timestamp)
+            .map_err(PyValueError::new_err)
+    }
+
     /// Process a live or replayed candle.
     ///
     /// Parameters
@@ -1074,6 +1112,7 @@ mod tests {
         MarketUpdate {
             provider: "mock".to_owned(),
             symbol: "BTC-USDT".to_owned(),
+            quote_currency: None,
             interval: "1m".to_owned(),
             open_ts: timestamp,
             close_ts: timestamp + 60,
@@ -1442,6 +1481,7 @@ mod tests {
             let market = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
+                quote_currency: Some("USD".to_owned()),
                 interval: "1m".to_owned(),
                 open_ts: 1_000,
                 close_ts: 1_060,
@@ -1479,6 +1519,7 @@ mod tests {
             let market = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
+                quote_currency: Some("USD".to_owned()),
                 interval: "1m".to_owned(),
                 open_ts: 1_000,
                 close_ts: 1_060,
@@ -1512,12 +1553,63 @@ mod tests {
     }
 
     #[test]
+    fn crypto_quote_is_converted_and_exact_cash_fit_is_filled() {
+        Python::attach(|py| {
+            let strategy = Py::new(py, BuyAndHold::new(Some("AAVE-ETH".to_owned())))?.into_any();
+            let config = PaperTradingConfig {
+                initial_cash: 10_000.0,
+                base_currency: Currency::EUR,
+                commission_pct: 0.05,
+                slippage: 0.01,
+                ..PaperTradingConfig::default()
+            };
+            let mut session = PaperTradingSession::new(py, Some(config), Some(strategy), None)?;
+            session.set_exchange_rate("ETH", "EUR", 4_000.0, 1_060)?;
+            let market = MarketUpdate {
+                provider: "mock".to_owned(),
+                symbol: "AAVE-ETH".to_owned(),
+                quote_currency: Some("ETH".to_owned()),
+                interval: "1m".to_owned(),
+                open_ts: 1_000,
+                close_ts: 1_060,
+                open: 0.04653,
+                high: 0.04653,
+                low: 0.04653,
+                close: 0.04653,
+                volume: 1_000_000.0,
+                n_trades: Some(1),
+                is_final: true,
+                received_ts: 1_060,
+            };
+
+            let first = session.on_bar(py, market.clone(), None)?;
+
+            assert_eq!(first.fills[0].status, OrderStatus::Filled);
+            assert!(first.fills[0].order.quantity > 50.0);
+            assert!(first.fills[0].order.quantity < 60.0);
+            assert_eq!(first.snapshot.portfolio.cash[&Currency::EUR], 0.0);
+            assert!(first.fills[0].reason.contains("quantity reduced"));
+
+            let mut next = market;
+            next.open_ts = 1_060;
+            next.close_ts = 1_120;
+            next.received_ts = 1_120;
+            let second = session.on_bar(py, next, None)?;
+            assert_eq!(second.orders_submitted, 0);
+            assert!(second.fills.is_empty());
+            PyResult::Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn history_replaces_partial_and_ignores_stale_bars() {
         Python::attach(|py| {
             let mut session = PaperTradingSession::new(py, None, None, None)?;
             let mut current = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
+                quote_currency: Some("USD".to_owned()),
                 interval: "1m".to_owned(),
                 open_ts: 1_000,
                 close_ts: 1_060,
@@ -1539,6 +1631,7 @@ mod tests {
             let stale = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
+                quote_currency: Some("USD".to_owned()),
                 interval: "1m".to_owned(),
                 open_ts: 900,
                 close_ts: 960,

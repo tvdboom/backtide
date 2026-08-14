@@ -126,6 +126,7 @@ impl ExchangeMarketDataStream {
                 continue;
             };
             update.symbol.clone_from(canonical);
+            update.quote_currency = canonical.rsplit_once('-').map(|(_, quote)| quote.to_owned());
             queue_chronological_update(&mut self.queued, &mut self.partial, update);
         }
     }
@@ -298,6 +299,7 @@ fn parse_binance(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>,
     Ok(vec![MarketUpdate {
         provider: "binance".to_owned(),
         symbol,
+        quote_currency: None,
         interval: interval.to_string(),
         open_ts: millis_to_seconds(required_u64(kline, "t")?),
         close_ts: millis_to_seconds(required_u64(kline, "T")?),
@@ -327,6 +329,7 @@ fn parse_coinbase(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>
         let update = MarketUpdate {
             provider: "coinbase".to_owned(),
             symbol: required_string(candle, "product_id")?,
+            quote_currency: None,
             interval: interval.to_string(),
             open_ts,
             close_ts: open_ts + interval.minutes() * 60,
@@ -372,6 +375,7 @@ fn parse_kraken(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>, 
         let update = MarketUpdate {
             provider: "kraken".to_owned(),
             symbol: required_string(candle, "symbol")?.replace('/', "-"),
+            quote_currency: None,
             interval: interval.to_string(),
             open_ts,
             close_ts: open_ts + interval.minutes() * 60,
@@ -492,6 +496,7 @@ mod tests {
         MarketUpdate {
             provider: "mock".to_owned(),
             symbol: "BTC-USD".to_owned(),
+            quote_currency: Some("USD".to_owned()),
             interval: "5m".to_owned(),
             open_ts,
             close_ts: open_ts + 300,
@@ -534,6 +539,7 @@ mod tests {
         let expected = MarketUpdate {
             provider: "mock".to_owned(),
             symbol: "BTC-USD".to_owned(),
+            quote_currency: Some("USD".to_owned()),
             interval: "1m".to_owned(),
             open_ts: 1,
             close_ts: 61,
@@ -653,6 +659,7 @@ mod tests {
         let update = stream.next_update().await.unwrap().unwrap();
 
         assert_eq!(update.symbol, "BTC-USDT");
+        assert_eq!(update.quote_currency.as_deref(), Some("USDT"));
         assert_eq!(update.open_ts, 1_700_000_060);
         assert!(update.is_final);
         server.await.unwrap();

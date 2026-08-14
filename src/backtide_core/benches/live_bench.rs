@@ -13,6 +13,7 @@ fn market(timestamp: u64) -> MarketUpdate {
     MarketUpdate {
         provider: "mock".to_owned(),
         symbol: "BTC-USD".to_owned(),
+        quote_currency: Some("USD".to_owned()),
         interval: "1m".to_owned(),
         open_ts: timestamp,
         close_ts: timestamp + 60,

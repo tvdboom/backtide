@@ -7,6 +7,7 @@ import {
   experimentOptionValue,
   flattenFills,
   formatConfiguredDate,
+  formatConfiguredCurrency,
   formatConfiguredDateTime,
   formatConfiguredTime,
   formatConfiguredTimeWithSeconds,
@@ -138,6 +139,12 @@ describe('result and route state', () => {
       display
     )).toBe('19:05:07.123')
     expect(configuredPlotlyDateTimeFormat(display)).toBe('%d-%m-%Y %H:%M')
+  })
+
+  it('places the configured currency symbol before or after monetary values', () => {
+    expect(formatConfiguredCurrency(-15.7786, 'EUR', {}, 4)).toBe('-€15.7786')
+    expect(formatConfiguredCurrency(-15.7786, 'EUR', { currency_prefix: false }, 4))
+      .toBe('-15.7786 €')
   })
 
   it('restores the original benchmark defaults for each experiment context', () => {

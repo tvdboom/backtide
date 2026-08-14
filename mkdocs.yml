@@ -134,14 +134,10 @@ nav:
             - Market data: user_guide/data.md
             - Storage: user_guide/storage.md
     - CLI:
-          - Overview:
-              - launch: cli/launch.md
-          - Research:
-              - run-experiment: cli/run_experiment.md
-          - Trading:
-              - start-live-session: cli/start_live_session.md
-          - Data:
-              - download: cli/download.md
+          - launch: cli/launch.md
+          - run-experiment: cli/run_experiment.md
+          - start-live-session: cli/start_live_session.md
+          - download: cli/download.md
     - API:
         - Overview:
             - Product map: api/product_map.md

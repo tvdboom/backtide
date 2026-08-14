@@ -37,7 +37,7 @@ application integration points; Python users should normally prefer the public A
 | `GET` | `/api/live/instruments` | Search a provider's live instrument catalog. |
 | `GET` | `/api/live/sessions` | List persisted paper sessions. |
 | `GET` | `/api/live/sessions/{id}` | Read a session and its event journal. |
-| `POST` | `/api/live/replay` | Replay a persisted journal through a fresh paper engine. |
+| `POST` | `/api/live/replay` | Replay a persisted journal at `speed` (`0.1`-`100` or `"max"`) through a fresh paper engine. |
 
 ## Library endpoints
 
