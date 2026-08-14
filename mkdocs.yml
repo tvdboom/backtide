@@ -29,7 +29,7 @@ theme:
         - search.suggest
     palette:
         # Light mode
-        - amber: "(prefers-color-scheme: light)"
+        - media: "(prefers-color-scheme: light)"
           scheme: default
           primary: blue
           accent: blue

@@ -74,35 +74,49 @@ use std::collections::HashMap;
 pub struct PaperTradingSnapshot {
     /// Cash, positions, and currently resting orders.
     pub portfolio: Portfolio,
+
     /// Latest valid close per canonical symbol.
     pub latest_prices: HashMap<String, f64>,
+
     /// Cash plus positions marked to `latest_prices`.
     pub equity: f64,
+
     /// Cumulative realized PnL net of commissions.
     pub realized_pnl: f64,
+
     /// Open-position PnL marked to `latest_prices`.
     pub unrealized_pnl: f64,
+
     /// Number of market updates that triggered matching or strategy evaluation.
     pub processed_bars: u64,
+
     /// Sum of absolute marked position values.
     pub gross_exposure: f64,
+
     /// Signed marked value of all positions.
     pub net_exposure: f64,
+
     /// Gross exposure divided by equity.
     pub leverage: f64,
+
     /// Remaining gross exposure capacity under the configured leverage cap.
     pub buying_power: f64,
+
     /// Fractional decline from peak equity.
     pub drawdown: f64,
+
     /// Highest equity observed during the session.
     pub peak_equity: f64,
+
     /// Cumulative commissions and financing costs.
     pub total_costs: f64,
+
     /// Whether exposure-increasing orders are currently halted by a risk control.
     pub trading_halted: bool,
+
     /// Human-readable reason for the active trading halt.
     pub halt_reason: Option<String>,
+
     /// Live-compatible performance metrics.
     pub metrics: HashMap<String, f64>,
 }
-

@@ -50,17 +50,22 @@ use pyo3::prelude::*;
 pub struct PaperFill {
     /// Submitted order after any sizer resolution.
     pub order: Order,
+
     /// Fill, cancellation, or rejection Unix timestamp in seconds.
     pub timestamp: i64,
+
     /// Terminal order status.
     pub status: OrderStatus,
+
     /// Executed quote-currency price, or `None` when not filled.
     pub fill_price: Option<f64>,
+
     /// Fee charged in the paper account's base currency.
     pub commission: f64,
+
     /// Change in realized PnL from this fill, net of its commission.
     pub realized_pnl: Option<f64>,
+
     /// Human-readable matching or rejection reason.
     pub reason: String,
 }
-

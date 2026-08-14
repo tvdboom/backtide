@@ -1210,9 +1210,8 @@ mod tests {
         db.init().unwrap();
 
         let conn = db.conn.lock().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM instruments", [], |row| row.get(0))
-            .unwrap();
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM instruments", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 1);
     }
 

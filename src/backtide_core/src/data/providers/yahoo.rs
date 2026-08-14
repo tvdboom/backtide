@@ -972,6 +972,7 @@ struct ChartEvents {
 struct ChartDividend {
     /// Ex-dividend date as a Unix timestamp (seconds).
     date: i64,
+
     /// Dividend amount per share.
     amount: f64,
 }

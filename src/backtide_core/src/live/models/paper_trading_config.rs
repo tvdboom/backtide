@@ -97,44 +97,64 @@ use serde::{Deserialize, Serialize};
 pub struct PaperTradingConfig {
     /// Starting balance in the base currency.
     pub initial_cash: f64,
+
     /// Currency used for cash and mark-to-market accounting.
     pub base_currency: Currency,
+
     /// Variable fee in percentage points (for example, `0.1` means 0.1%).
     pub commission_pct: f64,
+
     /// Fixed fee in the base currency charged per fill.
     pub commission_fixed: f64,
+
     /// Adverse fill adjustment in percentage points.
     pub slippage: f64,
+
     /// Whether an order may create a negative position.
     pub allow_short: bool,
+
     /// Whether an order may create a negative cash balance.
     pub allow_margin: bool,
+
     /// Whether incomplete candle updates may trigger orders.
     pub trade_on_partial: bool,
+
     /// Maximum number of candles retained per symbol.
     pub max_history: usize,
+
     /// Maximum gross-exposure-to-equity ratio when margin is enabled.
     pub max_leverage: f64,
+
     /// Equity percentage required to open or increase exposure.
     pub initial_margin: f64,
+
     /// Equity percentage required to maintain open exposure.
     pub maintenance_margin: f64,
+
     /// Annual percentage charged on negative cash.
     pub margin_interest: f64,
+
     /// Annual percentage charged on short notional.
     pub borrow_rate: f64,
+
     /// Per-symbol absolute notional cap as a percentage of equity.
     pub max_position_size: f64,
+
     /// Drawdown percentage that halts exposure-increasing orders; zero disables it.
     pub max_drawdown: f64,
+
     /// Order types accepted by the paper broker.
     pub allowed_order_types: Vec<OrderType>,
+
     /// Whether candle volume constrains fill quantity.
     pub partial_fills: bool,
+
     /// Maximum percentage of candle volume available to one fill.
     pub max_volume_participation: f64,
+
     /// Built-in metric keys maintained during the session.
     pub metrics: Vec<String>,
+
     /// Annual risk-free rate used by risk-adjusted metrics.
     pub risk_free_rate: f64,
 }
@@ -272,4 +292,3 @@ impl PaperTradingConfig {
         )
     }
 }
-

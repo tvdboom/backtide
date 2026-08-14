@@ -11,4 +11,3 @@ pub use paper_fill::PaperFill;
 pub use paper_trading_config::PaperTradingConfig;
 pub use paper_trading_snapshot::PaperTradingSnapshot;
 pub use paper_trading_update::PaperTradingUpdate;
-

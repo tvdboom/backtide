@@ -1,3 +1,181 @@
+/* Keep the documentation palette in sync with the Backtide application UI. */
+[data-md-color-scheme="default"] {
+    --backtide-bg: #f4f7fb;
+    --backtide-body-glow: rgb(38 132 255 / 8%);
+    --backtide-surface: #fff;
+    --backtide-surface-2: #f0f4f9;
+    --backtide-surface-3: #e6edf6;
+    --backtide-surface-input: #fff;
+    --backtide-header-bg: rgb(244 247 251 / 94%);
+    --backtide-line: #dce4ef;
+    --backtide-line-strong: #c7d3e1;
+    --backtide-muted: #64748b;
+    --backtide-muted-faint: #7b899d;
+    --backtide-text: #172033;
+    --backtide-text-strong: #101827;
+    --backtide-text-soft: #46566c;
+    --backtide-blue: #176fd1;
+    --backtide-blue-2: #1d6fca;
+    --backtide-code-bg: #f7f9fc;
+    --backtide-code-text: #1e293b;
+    --backtide-shadow: 0 18px 55px rgb(38 52 70 / 10%);
+    --md-primary-fg-color: var(--backtide-blue);
+    --md-primary-fg-color--light: var(--backtide-blue-2);
+    --md-primary-fg-color--dark: var(--backtide-blue);
+    --md-primary-bg-color: var(--backtide-text-strong);
+    --md-primary-bg-color--light: var(--backtide-muted);
+    --md-accent-fg-color: var(--backtide-blue);
+    --md-accent-fg-color--transparent: rgb(38 132 255 / 10%);
+    --md-accent-bg-color: var(--backtide-surface);
+    --md-accent-bg-color--light: var(--backtide-surface-2);
+    --md-default-fg-color: var(--backtide-text);
+    --md-default-fg-color--light: var(--backtide-muted);
+    --md-default-fg-color--lighter: var(--backtide-muted-faint);
+    --md-default-fg-color--lightest: var(--backtide-line);
+    --md-default-bg-color: var(--backtide-bg);
+    --md-default-bg-color--light: var(--backtide-surface);
+    --md-default-bg-color--lighter: var(--backtide-surface-2);
+    --md-default-bg-color--lightest: var(--backtide-surface-3);
+    --md-code-fg-color: var(--backtide-code-text);
+    --md-code-bg-color: var(--backtide-code-bg);
+    --md-code-bg-color--light: var(--backtide-surface-2);
+    --md-code-bg-color--lighter: var(--backtide-surface-3);
+    --md-code-hl-color: #2684ff;
+    --md-code-hl-color--light: rgb(38 132 255 / 10%);
+    --md-typeset-color: var(--backtide-text);
+    --md-typeset-a-color: var(--backtide-blue);
+    --md-typeset-kbd-color: var(--backtide-surface-2);
+    --md-typeset-kbd-accent-color: var(--backtide-surface);
+    --md-typeset-kbd-border-color: var(--backtide-line-strong);
+    --md-typeset-mark-color: rgb(246 189 85 / 34%);
+    --md-typeset-table-color: var(--backtide-line);
+    --md-typeset-table-color--light: rgb(38 132 255 / 3.5%);
+    --md-admonition-fg-color: var(--backtide-text);
+    --md-admonition-bg-color: var(--backtide-surface);
+    --md-footer-fg-color: var(--backtide-text);
+    --md-footer-fg-color--light: var(--backtide-muted);
+    --md-footer-fg-color--lighter: var(--backtide-muted-faint);
+    --md-footer-bg-color: var(--backtide-surface-2);
+    --md-footer-bg-color--dark: var(--backtide-surface-3);
+    --md-shadow-z1: 0 0.2rem 0.5rem rgb(38 52 70 / 5%), 0 0 0.05rem rgb(38 52 70 / 10%);
+    --md-shadow-z2: 0 0.2rem 0.5rem rgb(38 52 70 / 10%), 0 0 0.05rem rgb(38 52 70 / 16%);
+    --md-shadow-z3: var(--backtide-shadow);
+}
+
+[data-md-color-scheme="slate"] {
+    --backtide-bg: #080d19;
+    --backtide-body-glow: rgb(38 132 255 / 10%);
+    --backtide-surface: #0e1627;
+    --backtide-surface-2: #121d31;
+    --backtide-surface-3: #17243b;
+    --backtide-surface-input: #0a1220;
+    --backtide-header-bg: rgb(8 13 25 / 92%);
+    --backtide-line: #1c2940;
+    --backtide-line-strong: #293b5c;
+    --backtide-muted: #8290aa;
+    --backtide-muted-faint: #53617a;
+    --backtide-text: #e9effa;
+    --backtide-text-strong: #f5f8ff;
+    --backtide-text-soft: #aab8cf;
+    --backtide-blue: #2684ff;
+    --backtide-blue-2: #5ba1ff;
+    --backtide-code-bg: #080e19;
+    --backtide-code-text: #dce7f8;
+    --backtide-shadow: 0 18px 55px rgb(0 0 0 / 24%);
+    --md-primary-fg-color: var(--backtide-blue);
+    --md-primary-fg-color--light: var(--backtide-blue-2);
+    --md-primary-fg-color--dark: var(--backtide-blue);
+    --md-primary-bg-color: var(--backtide-text-strong);
+    --md-primary-bg-color--light: var(--backtide-muted);
+    --md-accent-fg-color: var(--backtide-blue-2);
+    --md-accent-fg-color--transparent: rgb(38 132 255 / 12%);
+    --md-accent-bg-color: var(--backtide-surface);
+    --md-accent-bg-color--light: var(--backtide-surface-2);
+    --md-default-fg-color: var(--backtide-text);
+    --md-default-fg-color--light: var(--backtide-muted);
+    --md-default-fg-color--lighter: var(--backtide-muted-faint);
+    --md-default-fg-color--lightest: var(--backtide-line);
+    --md-default-bg-color: var(--backtide-bg);
+    --md-default-bg-color--light: var(--backtide-surface);
+    --md-default-bg-color--lighter: var(--backtide-surface-2);
+    --md-default-bg-color--lightest: var(--backtide-surface-3);
+    --md-code-fg-color: var(--backtide-code-text);
+    --md-code-bg-color: var(--backtide-code-bg);
+    --md-code-bg-color--light: var(--backtide-surface-2);
+    --md-code-bg-color--lighter: var(--backtide-surface-3);
+    --md-code-hl-color: var(--backtide-blue);
+    --md-code-hl-color--light: rgb(38 132 255 / 12%);
+    --md-typeset-color: var(--backtide-text);
+    --md-typeset-a-color: var(--backtide-blue-2);
+    --md-typeset-kbd-color: var(--backtide-surface-3);
+    --md-typeset-kbd-accent-color: var(--backtide-surface-2);
+    --md-typeset-kbd-border-color: var(--backtide-bg);
+    --md-typeset-mark-color: rgb(246 189 85 / 30%);
+    --md-typeset-table-color: var(--backtide-line);
+    --md-typeset-table-color--light: rgb(255 255 255 / 1.5%);
+    --md-admonition-fg-color: var(--backtide-text);
+    --md-admonition-bg-color: var(--backtide-surface);
+    --md-footer-fg-color: var(--backtide-text);
+    --md-footer-fg-color--light: var(--backtide-muted);
+    --md-footer-fg-color--lighter: var(--backtide-muted-faint);
+    --md-footer-bg-color: var(--backtide-surface);
+    --md-footer-bg-color--dark: var(--backtide-bg);
+    --md-shadow-z1: 0 0.2rem 0.5rem rgb(0 0 0 / 14%), 0 0 0.05rem rgb(0 0 0 / 18%);
+    --md-shadow-z2: 0 0.2rem 0.5rem rgb(0 0 0 / 24%), 0 0 0.05rem rgb(0 0 0 / 24%);
+    --md-shadow-z3: var(--backtide-shadow);
+}
+
+body {
+    background: radial-gradient(
+        circle at 75% -20%,
+        var(--backtide-body-glow),
+        transparent 34%
+    ), var(--backtide-bg);
+}
+
+.md-container,
+.md-main {
+    background: transparent;
+}
+
+.md-header {
+    color: var(--backtide-text);
+    background: var(--backtide-header-bg);
+    border-bottom: 1px solid var(--backtide-line);
+    box-shadow: none;
+    backdrop-filter: blur(16px);
+}
+
+.md-tabs {
+    color: var(--backtide-muted);
+    background: var(--backtide-surface);
+    border-bottom: 1px solid var(--backtide-line);
+}
+
+.md-tabs__link--active,
+.md-tabs__link:is(:focus, :hover) {
+    color: var(--backtide-text-strong);
+}
+
+.md-search__form {
+    background: var(--backtide-surface-input);
+    border: 1px solid var(--backtide-line);
+    border-radius: 9px;
+}
+
+.md-search__form:hover {
+    background: var(--backtide-surface-2);
+}
+
+.md-search__input::placeholder {
+    color: var(--backtide-muted);
+}
+
+.md-nav--primary .md-nav__title[for="__drawer"] {
+    color: var(--backtide-text-strong);
+    background: var(--backtide-surface);
+}
+
 /* Reset font weight in header */
 .md-ellipsis {
     font-weight: normal;
@@ -60,16 +238,16 @@
     height: 100px;
 }
 .column .icon a:hover {
-    color: #2094f3;
+    color: var(--backtide-blue);
 }
 .column .icon a:active {
-    color: #2094f3;
+    color: var(--backtide-blue);
 }
 .column .icon a:visited {
-    color: #2094f3;
+    color: var(--backtide-blue);
 }
 .column .icon a:link {
-    color: #2094f3;
+    color: var(--backtide-blue);
 }
 
 
@@ -77,7 +255,9 @@
 .sign {
     font-size: 1.1em;
     overflow-x: auto;
-    background: rgba(0, 0, 0, 0.05);
+    color: var(--backtide-text-soft);
+    background: var(--backtide-surface-2);
+    border: 1px solid var(--backtide-line);
     padding: 1%;
     margin-bottom: 1em;
 }
@@ -86,22 +266,24 @@
 .table_params {
     width: 100%;
     font-size: 0.9em;
-    border: 1px solid #F5F5F5;
+    border: 1px solid var(--backtide-line);
     overflow-wrap: break-word;
     margin-bottom: -1em;
 }
 .td_title {
     width: 15%;
-    background: #F5F5F5;
+    color: var(--backtide-text-soft);
+    background: var(--backtide-surface-2);
     vertical-align: top;
     padding: 1.2em 2% 0 2%;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    border-bottom: 1px solid var(--backtide-line);
 }
 .td_params {
     width: 85%;
-    background: white;
+    color: var(--backtide-text);
+    background: var(--backtide-surface);
     padding: 1.2em 2% 0 2%;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    border-bottom: 1px solid var(--backtide-line);
 }
 .td_params > p {
     margin: 0;
@@ -114,20 +296,6 @@
 }
 .td_params .param li {
     margin-top: -0.3em;
-}
-
-
-[data-md-color-scheme="slate"] .sign {
-    background: #343d55;
-    color: #dfe1f2;
-}
-[data-md-color-scheme="slate"] .td_title {
-    background: #343d55;
-    color: #dfe1f2;
-}
-[data-md-color-scheme="slate"] .td_params {
-    background: #333543;
-    color: #dfe1f2;
 }
 
 /* Change table display for small screens */

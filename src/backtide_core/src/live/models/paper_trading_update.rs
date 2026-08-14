@@ -50,15 +50,19 @@ use std::collections::HashMap;
 pub struct PaperTradingUpdate {
     /// Market update supplied by the caller.
     pub market: MarketUpdate,
+
     /// Orders filled, canceled, or rejected during this transition.
     pub fills: Vec<PaperFill>,
+
     /// Account state after this transition.
     pub snapshot: PaperTradingSnapshot,
+
     /// Number of explicit and strategy orders submitted on this update.
     pub orders_submitted: usize,
+
     /// Whether this update was new, valid, and eligible for trading.
     pub processed: bool,
+
     /// Latest configured indicator outputs by indicator and symbol.
     pub indicators: HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
 }
-

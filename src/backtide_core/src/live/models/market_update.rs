@@ -77,28 +77,40 @@ use serde::{Deserialize, Serialize};
 pub struct MarketUpdate {
     /// Lowercase provider identifier, or `"mock"` for replay data.
     pub provider: String,
+
     /// Canonical provider-independent symbol (for example, `"BTC-USD"`).
     pub symbol: String,
+
     /// Canonical interval string (for example, `"1m"`).
     pub interval: String,
+
     /// Candle-open Unix timestamp in seconds.
     pub open_ts: u64,
+
     /// Candle-close Unix timestamp in seconds.
     pub close_ts: u64,
+
     /// Opening price in quote-currency units.
     pub open: f64,
+
     /// Highest price in quote-currency units.
     pub high: f64,
+
     /// Lowest price in quote-currency units.
     pub low: f64,
+
     /// Latest or final closing price in quote-currency units.
     pub close: f64,
+
     /// Traded volume in base-asset units.
     pub volume: f64,
+
     /// Provider-reported trade count when available.
     pub n_trades: Option<i32>,
+
     /// Whether no further updates are expected for this candle.
     pub is_final: bool,
+
     /// Local receipt Unix timestamp in seconds.
     pub received_ts: i64,
 }
@@ -192,4 +204,3 @@ impl MarketUpdate {
         )
     }
 }
-

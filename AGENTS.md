@@ -161,6 +161,9 @@ Follow `rustfmt.toml`, Cargo lints, and the conventions of the surrounding featu
 - Use standard Rust naming: `snake_case` modules/functions/locals, `UpperCamelCase` types/traits,
   and `SCREAMING_SNAKE_CASE` constants. Keep imports rustfmt-ordered and format match blocks with
   trailing commas.
+- In named structs whose fields each have `///` documentation, put one blank line between fields:
+  after a field and before the next field's documentation. Keep undocumented/internal struct field
+  lists compact; do not add blank lines between those fields.
 - Start substantive modules with `//!` module documentation. Add `///` rustdoc to public types,
   fields, traits, and functions; document units (`seconds`, percentages versus fractions), signs,
   ownership, ordering, empty behavior, and error conditions.
