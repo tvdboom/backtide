@@ -1440,19 +1440,6 @@ fn run_one_strategy(
                             let order_ccy_str_sizer =
                                 quote_ccy.get(o.symbol.as_str()).unwrap_or(&base_ccy_ref);
 
-                            // Compute mark-to-market equity in the same currency
-                            // as the symbol's price.
-                            let eq = compute_portfolio_equity(
-                                &cash,
-                                &positions,
-                                aligned,
-                                bar_index,
-                                &quote_ccy,
-                                order_ccy_str_sizer,
-                                fx,
-                                ts,
-                            );
-
                             // Get the current close price for this symbol.
                             let sym_price = aligned
                                 .get(&o.symbol)
@@ -1471,22 +1458,65 @@ fn run_one_strategy(
 
                             let resolved = match &sizer_slot {
                                 SizerSlot::Builtin(builtin) => {
+                                    let capital = if builtin.uses_cash_capital() {
+                                        compute_portfolio_cash(&cash, order_ccy_str_sizer, fx, ts)
+                                    } else {
+                                        compute_portfolio_equity(
+                                            &cash,
+                                            &positions,
+                                            aligned,
+                                            bar_index,
+                                            &quote_ccy,
+                                            order_ccy_str_sizer,
+                                            fx,
+                                            ts,
+                                        )
+                                    };
                                     // Resolve entirely in Rust — no GIL needed.
                                     builtin
-                                        .calculate(eq, sym_price, stop_distance, None)
+                                        .calculate(capital, sym_price, stop_distance, None)
+                                        .map(|quantity| {
+                                            if builtin.uses_cash_capital()
+                                                && it_map.get(o.symbol.as_str()).is_some_and(
+                                                    |instrument_type| {
+                                                        !instrument_type
+                                                            .allows_fractional_quantities()
+                                                    },
+                                                )
+                                            {
+                                                quantity.abs().floor().copysign(quantity)
+                                            } else {
+                                                quantity
+                                            }
+                                        })
                                         .map_err(|e| {
                                             warn!(strategy=%name, order_id=%o.id, "Builtin sizer failed: {e}");
                                             e
                                         })
                                 },
                                 SizerSlot::Custom(py_sizer) => {
+                                    let equity = compute_portfolio_equity(
+                                        &cash,
+                                        &positions,
+                                        aligned,
+                                        bar_index,
+                                        &quote_ccy,
+                                        order_ccy_str_sizer,
+                                        fx,
+                                        ts,
+                                    );
                                     // Fall back to calling Python's calculate().
                                     Python::attach(|py| -> PyResult<f64> {
                                         py_sizer
                                             .bind(py)
                                             .call_method1(
                                                 "calculate",
-                                                (eq, sym_price, stop_distance, Option::<f64>::None),
+                                                (
+                                                    equity,
+                                                    sym_price,
+                                                    stop_distance,
+                                                    Option::<f64>::None,
+                                                ),
                                             )?
                                             .extract()
                                     })
@@ -2175,6 +2205,43 @@ mod tests {
         // After BuyAndHold buys on bar 1, equity is still ~50k
         let eq = result.equity_curve[0].equity;
         assert!((eq - 50_000.0).abs() < 5_000.0);
+    }
+
+    #[test]
+    fn buy_and_hold_converts_base_cash_before_sizing() {
+        let mut cfg = base_config();
+        cfg.portfolio.initial_cash = 10_000;
+        cfg.portfolio.base_currency = Currency::EUR;
+        cfg.exchange.commission_pct = 0.0;
+        cfg.exchange.slippage = 0.0;
+
+        let timestamp = 1_000_000_000;
+        let next_timestamp = timestamp + 3_600;
+        let aligned = make_aligned(
+            "AAPL",
+            vec![Some(make_bar(timestamp, 100.0)), Some(make_bar(next_timestamp, 100.0))],
+        );
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![timestamp as i64, next_timestamp as i64];
+        let mut fx = FxTable::new("EUR");
+        fx.add_series("USD", "EUR", vec![(timestamp as i64, 0.86)]);
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert_eq!(result.orders[0].status, OrderStatus::Filled);
+        assert_eq!(result.orders[0].order.quantity, 116.0);
+        assert!(result.equity_curve[1].cash.amount(&Currency::EUR) < 100.0);
     }
 
     #[test]

@@ -61,7 +61,7 @@
       <div class="panel-header"><div><span class="eyebrow">Live trading</span><h3>Recent live sessions</h3></div><button class="text-button" @click="$emit('navigate', 'live-history')">View all <ArrowUpRight :size="15" /></button></div>
       <div v-if="loading" class="empty-state" role="status"><span class="spinner" /><p>Loading recent live sessions…</p></div>
       <div v-else-if="!loadError && !data?.sessions?.length" class="empty-state"><History/><p>No live sessions yet.</p><button class="secondary" @click="$emit('navigate', 'live')">Start your first</button></div>
-      <button v-for="session in data?.sessions" :key="session.id" class="activity-row live-session-row" type="button" @click="$emit('navigate', 'live-history')">
+      <button v-for="session in data?.sessions" :key="session.id" class="activity-row live-session-row" type="button" @click="openLiveSession(session)">
         <span class="live-session-avatar" aria-hidden="true"><Radio :size="17" /></span>
         <span><strong>{{ sessionSymbols(session) }}</strong><small>{{ time(session.started_at) }}</small></span>
         <span class="session-context"><small>{{ sessionMode(session) }}</small><StrategySummary :names="sessionStrategyNames(session)" /></span>
@@ -163,6 +163,9 @@ function openExperiment(experiment) {
 function openAnalysis(row) {
   sessionStorage.setItem('backtide:analysis-symbols', JSON.stringify([row.symbol]))
   emit('navigate', 'analysis')
+}
+function openLiveSession(session) {
+  emit('navigate', ['running', 'paused'].includes(session.status) ? 'live' : 'live-history')
 }
 async function load() {
   loading.value = true

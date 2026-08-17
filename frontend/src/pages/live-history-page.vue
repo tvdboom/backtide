@@ -30,14 +30,14 @@
               <td><span class="badge" :class="statusTone(group.session.status)">{{ group.session.status }}</span></td>
               <td class="number">{{ startingEquity(group.session) }}</td>
               <td class="number" :class="finalPnlTone(group.session)">{{ finalPnl(group.session) }}</td>
-              <td><div class="session-history-actions"><button v-if="isActive(group.session)" class="primary compact-button" type="button" @click="openSession"><ExternalLink :size="14"/> Open</button><template v-else><button class="secondary compact-button" type="button" :disabled="isStarting(group.session)" @click="replay(group.session)"><RotateCcw :size="14"/> Replay</button><button class="primary compact-button" type="button" :disabled="isStarting(group.session)" @click="goLive(group.session)"><Radio :size="14"/> Go live</button></template></div></td>
+              <td><div class="session-history-actions"><button v-if="isActive(group.session)" class="primary compact-button" type="button" @click="openSession"><ExternalLink :size="14"/> Open</button><template v-else><button class="secondary compact-button" type="button" :disabled="isStarting(group.session)" @click="replay(group.session)"><RotateCcw :size="14"/> Replay</button><button class="primary compact-button" type="button" :disabled="isStarting(group.session)" @click="goLive(group.session)"><Radio :size="14"/> Go live</button><button type="button" class="icon-button danger" :aria-label="`Delete session from ${dateTime(group.session.started_at)}`" :disabled="isStarting(group.session)" @click="requestDelete(group.session)"><Trash2 :size="16"/></button></template></div></td>
             </tr>
             <template v-if="isExpanded(group.session.id)">
               <tr class="session-comparison-row">
                 <td colspan="7">
                   <div class="session-comparison" aria-label="Original and replay comparison">
                     <div class="session-comparison-item original"><small>Original session</small><span>Final P&amp;L</span><strong>{{ finalPnl(group.session) }}</strong><em>Comparison baseline</em></div>
-                    <div v-for="session in group.replays" :key="`comparison-${session.id}`" class="session-comparison-item"><small>Replay · {{ dateTime(session.started_at) }}</small><span>Final P&amp;L</span><strong :class="finalPnlTone(session)">{{ finalPnl(session) }}</strong><span>P&amp;L difference: <b :class="comparisonTone(session, group.session)">{{ comparisonDelta(session, group.session) }}</b></span><em>{{ replaySpeedDescription(session) }}</em><em :title="warmupExplanation">{{ replayWarmupDescription(session) }}</em></div>
+                    <div v-for="session in group.replays" :key="`comparison-${session.id}`" class="session-comparison-item"><div class="session-comparison-heading"><small>Replay · {{ dateTime(session.started_at) }}</small><span class="session-replay-speed-badge" :title="replaySpeedDescription(session)" :aria-label="replaySpeedDescription(session)">{{ replaySpeedBadge(session) }}</span></div><span>Final P&amp;L</span><strong :class="finalPnlTone(session)">{{ finalPnl(session) }}</strong><span>P&amp;L difference: <b :class="comparisonTone(session, group.session)">{{ comparisonDelta(session, group.session) }}</b></span><em :title="warmupExplanation">{{ replayWarmupDescription(session) }}</em></div>
                   </div>
                 </td>
               </tr>
@@ -53,20 +53,29 @@
                 <td><span class="badge" :class="statusTone(session.status)">{{ session.status }}</span></td>
                 <td class="number">{{ startingEquity(session) }}</td>
                 <td class="number" :class="finalPnlTone(session)">{{ finalPnl(session) }}</td>
-                <td><div class="session-history-actions"><button v-if="isActive(session)" class="primary compact-button" type="button" @click="openSession"><ExternalLink :size="14"/> Open</button><template v-else><button class="secondary compact-button" type="button" :disabled="isStarting(session)" @click="replay(session)"><RotateCcw :size="14"/> Replay</button><button class="primary compact-button" type="button" :disabled="isStarting(session)" @click="goLive(session)"><Radio :size="14"/> Go live</button></template></div></td>
+                <td><div class="session-history-actions"><button v-if="isActive(session)" class="primary compact-button" type="button" @click="openSession"><ExternalLink :size="14"/> Open</button><template v-else><button class="secondary compact-button" type="button" :disabled="isStarting(session)" @click="replay(session)"><RotateCcw :size="14"/> Replay</button><button class="primary compact-button" type="button" :disabled="isStarting(session)" @click="goLive(session)"><Radio :size="14"/> Go live</button><button type="button" class="icon-button danger" :aria-label="`Delete session from ${dateTime(session.started_at)}`" :disabled="isStarting(session)" @click="requestDelete(session)"><Trash2 :size="16"/></button></template></div></td>
               </tr>
             </template>
           </tbody>
         </table>
       </div>
     </section>
+    <ConfirmationModal
+      :open="Boolean(pendingDelete)"
+      :title="pendingDelete ? `Delete session from ${dateTime(pendingDelete.started_at)}?` : ''"
+      message="Are you sure you want to delete this paper-trading session and its recorded events? This action cannot be undone."
+      :busy="deleting"
+      @cancel="pendingDelete = null"
+      @confirm="destroy"
+    />
   </div>
 </template>
 
 <script setup>
-import { ChevronRight, ExternalLink, History, Radio, RefreshCw, RotateCcw } from 'lucide-vue-next'
+import { ChevronRight, ExternalLink, History, Radio, RefreshCw, RotateCcw, Trash2 } from 'lucide-vue-next'
 import { computed, onActivated, onMounted, ref } from 'vue'
-import { api, post } from '../api'
+import { api, post, remove } from '../api'
+import ConfirmationModal from '../components/confirmation-modal.vue'
 import StrategySummary from '../components/strategy-summary.vue'
 import { formatConfiguredCurrency, formatConfiguredDateTime } from '../state'
 
@@ -76,6 +85,8 @@ const sessions = ref([])
 const loading = ref(false)
 const replaying = ref('')
 const startingLive = ref('')
+const deleting = ref(false)
+const pendingDelete = ref(null)
 const replaySpeed = ref('max')
 const expandedSessions = ref(new Set())
 
@@ -164,14 +175,21 @@ function replaySpeedDescription(session) {
   const speed = Number(session.config?.playback_speed)
   return speed > 0 ? `Playback speed: ${speed}×` : 'Playback speed: Maximum'
 }
+function replaySpeedBadge(session) {
+  const speed = Number(session.config?.playback_speed)
+  return speed > 0 ? `${speed}×` : 'Maximum'
+}
 const warmupExplanation = 'Starting price history is loaded before replayed events so strategies and indicators begin with the context they need.'
 function replayWarmupDescription(session) {
   const replay = session.health?.replay
+  if (!replay) return 'Starting price history was not saved for this older session'
   return replay?.warmup_source === 'recorded'
     ? `Starting price history: ${replay.warmup_bars_loaded || 0} saved bars restored`
     : replay?.warmup_source === 'storage'
       ? `Starting price history: ${replay.warmup_bars_loaded || 0} current stored bars used`
-      : 'Starting price history was not saved for this older session'
+      : replay?.warmup_source === 'unavailable'
+        ? 'Starting price history: no matching stored bars were available'
+        : 'Starting price history: none requested'
 }
 function replayCount(count) { return `${count} ${count === 1 ? 'replay' : 'replays'}` }
 function isActive(session) { return ['running', 'paused'].includes(session.status) }
@@ -227,6 +245,24 @@ async function goLive(session) {
     emit('toast', error.message, 'error')
   } finally {
     startingLive.value = ''
+  }
+}
+function requestDelete(session) {
+  pendingDelete.value = { id: session.id, started_at: session.started_at }
+}
+async function destroy() {
+  const target = pendingDelete.value
+  if (!target) return
+  deleting.value = true
+  try {
+    await remove(`/api/live/sessions/${encodeURIComponent(target.id)}`)
+    pendingDelete.value = null
+    emit('toast', 'Session deleted.')
+    await load()
+  } catch (error) {
+    emit('toast', error.message, 'error')
+  } finally {
+    deleting.value = false
   }
 }
 onMounted(load)

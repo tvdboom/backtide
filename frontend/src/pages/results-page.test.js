@@ -477,6 +477,21 @@ describe('results page', () => {
     expect(wrapper.get('.document-empty').text()).toContain('Log file is empty')
   })
 
+  it('downloads the complete saved configuration from its modal', async () => {
+    await mountAndOpen()
+
+    const configButton = wrapper.findAll('.result-actions .secondary')
+      .find(button => button.text().includes('Config'))
+    await configButton.trigger('click')
+
+    const download = wrapper.get('.document-modal-actions a')
+    expect(download.text()).toContain('Download config')
+    expect(download.attributes('download')).toBe('Momentum-study.toml')
+    expect(download.attributes('href')).toBe(
+      `data:application/toml;charset=utf-8,${encodeURIComponent(detail.config)}`
+    )
+  })
+
   it('opens large logs with a bounded 1,000-line preview', async () => {
     const logs = Array.from({ length: 1_500 }, (_, index) => `log line ${index}`).join('\n')
     api.mockImplementation(path => path === '/api/jobs' ? [] : { ...detail, logs })

@@ -112,7 +112,7 @@
         <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, then select the experiment headline.</p></div>
         <div class="form-grid two">
           <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /></div>
-          <label>Main metric<FieldInfo text="Select the headline measure used to rank and summarize experiment results." /><select id="experiment-main-metric" v-model="config.metrics.main_metric"><option v-for="key in config.metrics.metrics" :key="key" :value="key">{{ metricLabel(key) }}</option></select><small>The best value appears in the results overview.</small></label>
+          <label>Main metric<FieldInfo text="Select the headline measure used to rank and summarize experiment results." /><select id="experiment-main-metric" v-model="config.metrics.main_metric"><option v-for="key in mainMetricOptions" :key="key" :value="key">{{ metricLabel(key) }}</option></select><small>The best value appears in the results overview.</small></label>
           <section v-if="selectedMetrics.length" class="selection-insights wide" aria-label="Selected metric details">
             <article v-for="item in selectedMetrics" :key="item.key" class="asset-selection-card compact-card">
               <header><span class="metric-icon"><LibraryAssetIcon kind="metric" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ item.builtin ? 'Built-in' : 'Custom' }}</small></span></header>
@@ -310,7 +310,9 @@ const metricCatalog = computed(() => [
   ...(props.bootstrap.metrics?.builtin || []),
   ...(props.bootstrap.metrics?.saved || [])
 ])
-const metricOptions = computed(() => metricCatalog.value.map(item => item.key))
+const metricOptions = computed(() => metricCatalog.value
+  .filter(item => item.key !== 'alpha' || config.strategy.benchmark)
+  .map(item => item.key))
 const metricOptionDetails = computed(() => Object.fromEntries(metricCatalog.value.map(item => [item.key, item.builtin ? 'Built-in' : 'Custom'])))
 const metricOptionIcons = computed(() => Object.fromEntries(metricCatalog.value.map(item => [item.key, item.builtin ? Sigma : Braces])))
 const strategyOptionDetails = computed(() => Object.fromEntries(
@@ -334,6 +336,9 @@ const selectedIndicators = computed(() => config.indicators.indicators
 const selectedMetrics = computed(() => config.metrics.metrics
   .map(key => metricCatalog.value.find(item => item.key === key))
   .filter(Boolean))
+const mainMetricOptions = computed(() => config.metrics.metrics
+  .filter(key => key !== 'alpha' || config.strategy.benchmark)
+  .sort((left, right) => metricLabel(left).localeCompare(metricLabel(right))))
 const automaticBenchmark = computed(() => defaultExperimentBenchmark(
   config.portfolio.base_currency,
   config.data.instrument_type,
@@ -439,6 +444,7 @@ async function setInstrumentType(type) {
 }
 function applyAutomaticBenchmark() {
   if (benchmarkIsAutomatic.value) config.strategy.benchmark = automaticBenchmark.value
+  removeUnavailableAlpha()
 }
 function resetBenchmarkDefault() {
   benchmarkIsAutomatic.value = true
@@ -447,6 +453,11 @@ function resetBenchmarkDefault() {
 function setBenchmark(value) {
   benchmarkIsAutomatic.value = false
   config.strategy.benchmark = value
+  removeUnavailableAlpha()
+}
+function removeUnavailableAlpha() {
+  if (config.strategy.benchmark || !config.metrics.metrics.includes('alpha')) return
+  config.metrics.metrics = config.metrics.metrics.filter(key => key !== 'alpha')
 }
 function setBaseCurrency(value) {
   config.portfolio.base_currency = value
@@ -580,6 +591,7 @@ async function applyPendingExperimentDraft() {
     .filter(([symbol]) => config.data.symbols.includes(symbol))
     .map(([symbol, quantity]) => ({ symbol, quantity }))
   benchmarkIsAutomatic.value = false
+  removeUnavailableAlpha()
   tab.value = 0
   dismissIssue()
   try {
@@ -619,6 +631,7 @@ async function importConfig(event) {
     benchmarkIsAutomatic.value = false
     Object.assign(config, await post('/api/config/parse', { suffix, text: await file.text() }))
     config.exchange.commission_type = 'PercentagePlusFixed'
+    removeUnavailableAlpha()
     positions.value = Object.entries(config.portfolio.starting_positions || {})
       .filter(([symbol]) => config.data.symbols.includes(symbol))
       .map(([symbol, quantity]) => ({ symbol, quantity }))

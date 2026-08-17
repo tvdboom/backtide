@@ -1,4 +1,4 @@
-use crate::backtest::models::{Order, OrderId, OrderType, Portfolio};
+use crate::backtest::models::{BuiltinSizer, Order, OrderId, OrderType, Portfolio, SizerSlot};
 use crate::config::interface::Config;
 use crate::constants::{PositionAmount, Symbol, MIN_POSITION};
 use crate::data::models::Bar;
@@ -202,6 +202,24 @@ pub fn buy_equal_weight(
         return None;
     }
     buy_with_sizer(symbol, &EqualWeight::new(n_positions as u32), capital, price)
+}
+
+/// Build an equal-weight buy whose quantity is recalculated from available cash at execution.
+///
+/// The provisional quantity lets strategy validation reason about the order before the engine
+/// resolves cash into the instrument's quote currency. Deferring the final calculation keeps
+/// allocations correct when portfolio cash and the traded symbol use different currencies.
+pub fn buy_cash_equal_weight(
+    symbol: &str,
+    n_positions: usize,
+    capital: f64,
+    price: f64,
+) -> Option<Order> {
+    let mut order = buy_equal_weight(symbol, n_positions, capital, price)?;
+    order.sizer = Some(SizerSlot::Builtin(BuiltinSizer::CashEqualWeight(EqualWeight::new(
+        n_positions as u32,
+    ))));
+    Some(order)
 }
 
 /// Build a market sell order to flatten an existing long position. Uses

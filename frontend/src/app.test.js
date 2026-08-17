@@ -79,6 +79,39 @@ describe('App theme control', () => {
     wrapper.unmount()
   })
 
+  it('links every page to its relevant user guide', async () => {
+    api.mockResolvedValue({})
+    const wrapper = mount(App)
+    await flushPromises()
+    expect(wrapper.find('.guide-link').exists()).toBe(false)
+
+    const expectedGuides = {
+      'New experiment': 'experiment',
+      Results: 'plots',
+      Analysis: 'plots',
+      'Live trading': 'live_trading',
+      'Session history': 'live_trading',
+      Strategies: 'strategies',
+      Indicators: 'indicators',
+      Metrics: 'metrics',
+      Sizers: 'sizers',
+      Download: 'data',
+      Storage: 'storage'
+    }
+
+    for (const [label, guide] of Object.entries(expectedGuides)) {
+      const navButton = wrapper.findAll('nav button').find(button => button.text().includes(label))
+      await navButton.trigger('click')
+      const link = wrapper.get('.guide-link')
+      expect(link.attributes('href')).toBe(
+        `https://tvdboom.github.io/backtide/latest/user_guide/${guide}/`
+      )
+      expect(link.attributes('aria-label')).toBe(`Open the ${label} user guide`)
+      expect(link.attributes('target')).toBe('_blank')
+    }
+    wrapper.unmount()
+  })
+
   it('shares newly saved library assets with the experiment builder immediately', async () => {
     api.mockImplementation(path => Promise.resolve(path === '/api/live'
       ? { status: 'stopped' }
@@ -104,9 +137,15 @@ describe('App theme control', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('Local engine')
+    const results = wrapper.findAll('nav button')
+      .find(button => button.text().includes('Results'))
+    await results.trigger('click')
     const liveSession = wrapper.get('[aria-label="Open active live trading session"]')
     expect(liveSession.text()).toContain('Session live')
     expect(liveSession.get('span').classes()).toContain('online')
+    const actions = wrapper.get('.topbar-actions').element.children
+    expect(actions[0]).toBe(liveSession.element)
+    expect(actions[1]).toBe(wrapper.get('.guide-link').element)
 
     await liveSession.trigger('click')
 

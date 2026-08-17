@@ -51,6 +51,17 @@
           >
             <span :class="{ online: liveSessionRunning }" />{{ liveSessionLabel }}
           </button>
+          <a
+            v-if="page !== 'home'"
+            class="guide-link"
+            :href="current.guide"
+            target="_blank"
+            rel="noreferrer"
+            :aria-label="`Open the ${current.label} user guide`"
+          >
+            <BookOpen :size="15" />
+            <span>User guide</span>
+          </a>
           <button
             type="button"
             class="icon-button theme-toggle"
@@ -149,40 +160,41 @@ import StoragePage from './pages/storage-page.vue'
 import { resolvePage } from './state'
 import { applyTheme, persistTheme, resolveTheme } from './theme'
 
+const docsBaseUrl = 'https://tvdboom.github.io/backtide/latest/user_guide'
 const navigation = [
   {
     label: 'Overview',
-    items: [{ id: 'home', label: 'Home', icon: Home, component: markRaw(DashboardPage) }]
+    items: [{ id: 'home', label: 'Home', icon: Home, component: markRaw(DashboardPage), guide: `${docsBaseUrl}/application/` }]
   },
   {
     label: 'Research',
     items: [
-      { id: 'experiment', label: 'New experiment', icon: FlaskConical, component: markRaw(ExperimentPage) },
-      { id: 'results', label: 'Results', icon: Gauge, component: markRaw(ResultsPage) },
-      { id: 'analysis', label: 'Analysis', icon: BarChart3, component: markRaw(AnalysisPage) }
+      { id: 'experiment', label: 'New experiment', icon: FlaskConical, component: markRaw(ExperimentPage), guide: `${docsBaseUrl}/experiment/` },
+      { id: 'results', label: 'Results', icon: Gauge, component: markRaw(ResultsPage), guide: `${docsBaseUrl}/plots/` },
+      { id: 'analysis', label: 'Analysis', icon: BarChart3, component: markRaw(AnalysisPage), guide: `${docsBaseUrl}/plots/` }
     ]
   },
   {
     label: 'Trading',
     items: [
-      { id: 'live', label: 'Live trading', icon: Activity, component: markRaw(LivePage) },
-      { id: 'live-history', label: 'Session history', icon: Gauge, component: markRaw(LiveHistoryPage) }
+      { id: 'live', label: 'Live trading', icon: Activity, component: markRaw(LivePage), guide: `${docsBaseUrl}/live_trading/` },
+      { id: 'live-history', label: 'Session history', icon: Gauge, component: markRaw(LiveHistoryPage), guide: `${docsBaseUrl}/live_trading/` }
     ]
   },
   {
     label: 'Library',
     items: [
-      { id: 'strategies', label: 'Strategies', icon: Bot, component: markRaw(LibraryPage) },
-      { id: 'indicators', label: 'Indicators', icon: Shapes, component: markRaw(LibraryPage) },
-      { id: 'metrics', label: 'Metrics', icon: Sigma, component: markRaw(LibraryPage) },
-      { id: 'sizers', label: 'Sizers', icon: Scale, component: markRaw(LibraryPage) }
+      { id: 'strategies', label: 'Strategies', icon: Bot, component: markRaw(LibraryPage), guide: `${docsBaseUrl}/strategies/` },
+      { id: 'indicators', label: 'Indicators', icon: Shapes, component: markRaw(LibraryPage), guide: `${docsBaseUrl}/indicators/` },
+      { id: 'metrics', label: 'Metrics', icon: Sigma, component: markRaw(LibraryPage), guide: `${docsBaseUrl}/metrics/` },
+      { id: 'sizers', label: 'Sizers', icon: Scale, component: markRaw(LibraryPage), guide: `${docsBaseUrl}/sizers/` }
     ]
   },
   {
     label: 'Data',
     items: [
-      { id: 'download', label: 'Download', icon: CloudDownload, component: markRaw(DownloadPage) },
-      { id: 'storage', label: 'Storage', icon: Database, component: markRaw(StoragePage) }
+      { id: 'download', label: 'Download', icon: CloudDownload, component: markRaw(DownloadPage), guide: `${docsBaseUrl}/data/` },
+      { id: 'storage', label: 'Storage', icon: Database, component: markRaw(StoragePage), guide: `${docsBaseUrl}/storage/` }
     ]
   }
 ]

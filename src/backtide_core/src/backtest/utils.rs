@@ -156,6 +156,15 @@ pub fn compute_invested_equity(
     total
 }
 
+/// Return all available cash converted to the target currency.
+pub fn compute_portfolio_cash(cash: &Cash, target_ccy: &str, fx: &FxTable, ts: i64) -> f64 {
+    cash.iter()
+        .map(|(ccy, amount)| {
+            fx.convert(*amount, &ccy.to_string(), target_ccy, ts).unwrap_or(*amount)
+        })
+        .sum()
+}
+
 /// Return the total portfolio equity (cash + positions) in the target currency.
 pub fn compute_portfolio_equity(
     cash: &Cash,
@@ -167,13 +176,8 @@ pub fn compute_portfolio_equity(
     fx: &FxTable,
     ts: i64,
 ) -> f64 {
-    let mut equity = 0.0_f64;
-
-    for (ccy, amount) in cash {
-        equity += fx.convert(*amount, &ccy.to_string(), target_ccy, ts).unwrap_or(*amount);
-    }
-
-    equity + compute_invested_equity(positions, aligned, bar_index, quote_ccy, target_ccy, fx, ts)
+    compute_portfolio_cash(cash, target_ccy, fx, ts)
+        + compute_invested_equity(positions, aligned, bar_index, quote_ccy, target_ccy, fx, ts)
 }
 
 // ────────────────────────────────────────────────────────────────────────────

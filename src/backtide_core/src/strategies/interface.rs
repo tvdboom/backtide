@@ -556,7 +556,7 @@ impl Strategy for BuyAndHold {
                 Some(b) if b.close.is_finite() && b.close > 0.0 => b.close,
                 _ => return Vec::new(),
             };
-            return buy_equal_weight(target, 1, portfolio_cash(portfolio), px)
+            return buy_cash_equal_weight(target, 1, portfolio_cash(portfolio), px)
                 .map(|o| vec![o])
                 .unwrap_or_default();
         }
@@ -591,7 +591,7 @@ impl Strategy for BuyAndHold {
 
         let mut orders = Vec::new();
         for (sym, px) in needs_entry {
-            if let Some(o) = buy_equal_weight(sym, n_remaining, cash, px) {
+            if let Some(o) = buy_cash_equal_weight(sym, n_remaining, cash, px) {
                 orders.push(o);
             }
         }

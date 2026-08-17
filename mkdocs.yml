@@ -124,7 +124,7 @@ nav:
             - Experiments: user_guide/experiment.md
             - Results and plots: user_guide/plots.md
         - Trading:
-            - Paper trading: user_guide/live_trading.md
+            - Live trading: user_guide/live_trading.md
         - Library:
             - Strategies: user_guide/strategies.md
             - Indicators: user_guide/indicators.md
