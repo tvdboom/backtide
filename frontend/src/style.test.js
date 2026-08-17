@@ -47,6 +47,8 @@ describe('experiment selectors', () => {
     expect(declaration('.interval-picker button.selected')).toContain(
       'background: var(--surface-active)'
     )
+    expect(declaration('.interval-picker button:disabled')).toContain('opacity: .38')
+    expect(declaration('.interval-picker button:disabled')).toContain('cursor: not-allowed')
   })
 
   it('keeps the experiment name compact beside its icon picker', () => {

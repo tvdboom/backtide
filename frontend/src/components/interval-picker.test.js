@@ -49,4 +49,24 @@ describe('interval picker', () => {
     expect(wrapper.props('modelValue')).toEqual(['1w'])
     expect(wrapper.findAll('[aria-pressed="true"]')).toHaveLength(1)
   })
+
+  it('shows disabled intervals without allowing selection', async () => {
+    const wrapper = mount(IntervalPicker, {
+      props: {
+        modelValue: '5m',
+        options: ['1m', '5m'],
+        disabledOptions: ['1m'],
+        'onUpdate:modelValue': value => wrapper.setProps({ modelValue: value })
+      }
+    })
+    const buttons = wrapper.findAll('button')
+
+    expect(buttons.map(button => button.text())).toEqual(['1m', '5m'])
+    expect(buttons[0].element.disabled).toBe(true)
+
+    await buttons[0].trigger('click')
+
+    expect(wrapper.props('modelValue')).toBe('5m')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
 })

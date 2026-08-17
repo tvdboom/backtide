@@ -13,6 +13,7 @@
       :aria-checked="multiple ? undefined : isSelected(option)"
       :aria-pressed="multiple ? isSelected(option) : undefined"
       :class="{ selected: isSelected(option) }"
+      :disabled="isDisabled(option)"
       @click="choose(option)"
     >
       {{ option }}
@@ -25,6 +26,7 @@ const props = defineProps({
   modelValue: { type: [String, Array], default: '' },
   options: { type: Array, default: () => [] },
   values: { type: Object, default: () => ({}) },
+  disabledOptions: { type: Array, default: () => [] },
   multiple: Boolean,
   label: { type: String, default: 'Interval' },
   inputId: { type: String, default: undefined }
@@ -46,7 +48,13 @@ function isSelected(option) {
   return selectedValues().includes(optionValue(option))
 }
 
+function isDisabled(option) {
+  return props.disabledOptions.includes(option)
+    || props.disabledOptions.includes(optionValue(option))
+}
+
 function choose(option) {
+  if (isDisabled(option)) return
   const value = optionValue(option)
   if (!props.multiple) {
     if (props.modelValue !== value) emit('update:modelValue', value)

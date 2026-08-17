@@ -61,7 +61,7 @@
             <div class="field-label interval-picker-field live-interval-field wide">
               <span>Interval</span>
               <FieldInfo text="Set the candle duration used for strategy evaluation and monitoring." />
-              <IntervalPicker v-model="form.interval" :options="providerIntervals" input-id="live-interval" label="Live trading interval" />
+              <IntervalPicker v-model="form.interval" :options="intervals" :disabled-options="disabledProviderIntervals" input-id="live-interval" label="Live trading interval" />
             </div>
           </div>
         </div>
@@ -538,7 +538,9 @@ const watchlist = computed(() => {
   const symbols = state.config?.symbols?.length ? state.config.symbols : Object.keys(prices)
   return [...new Set(symbols)].map(symbol => ({ symbol, price: prices[symbol] }))
 })
-const providerIntervals = computed(() => intervals.filter(interval => available(form.provider, interval)))
+const disabledProviderIntervals = computed(() =>
+  intervals.filter(interval => !available(form.provider, interval))
+)
 const equitySeries = computed(() => paperEquitySeries(strategyUpdates.value).filter(
   item => item.equity !== null && Number.isFinite(Number(item.equity))
 ))

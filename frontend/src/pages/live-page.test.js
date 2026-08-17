@@ -575,7 +575,7 @@ describe('live page', () => {
     expect(trigger.get('img').attributes('src')).toBe('https://flagcdn.com/eu.svg')
   })
 
-  it('uses provider logos and selects the first supported Coinbase interval', async () => {
+  it('uses provider logos and disables unsupported Coinbase intervals', async () => {
     const wrapper = mount(LivePage, { props: { bootstrap } })
     await flushPromises()
 
@@ -589,7 +589,9 @@ describe('live page', () => {
 
     const interval = wrapper.getComponent(IntervalPicker)
     expect(interval.props('modelValue')).toBe('5m')
-    expect(interval.findAll('button').map(button => button.text())).toEqual(['5m'])
+    expect(interval.findAll('button').map(button => button.text())).toEqual(['1m', '5m'])
+    expect(interval.findAll('button')[0].element.disabled).toBe(true)
+    expect(interval.findAll('button')[1].element.disabled).toBe(false)
     expect(interval.get('[aria-checked="true"]').text()).toBe('5m')
     expect(coinbase.attributes('aria-checked')).toBe('true')
     expect(query).toHaveBeenLastCalledWith('/api/live/instruments', {

@@ -334,9 +334,10 @@ input.toggle:checked::after { transform: translateX(16px); background: #fff; }
 .interval-picker-field { width: fit-content; max-width: 100%; }
 .interval-picker { width: fit-content; max-width: 100%; min-height: 42px; padding: 4px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; background: var(--surface-input); border: 1px solid var(--input-line); border-radius: 8px; }
 .interval-picker button { min-width: 42px; min-height: 32px; padding: 0 10px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 999px; font-size: 14px; font-weight: 650; cursor: pointer; transition: color .15s, background .15s, border-color .15s, box-shadow .15s; }
-.interval-picker button:hover { color: var(--blue-2); background: rgb(38 132 255 / 9%); }
+.interval-picker button:not(:disabled):hover { color: var(--blue-2); background: rgb(38 132 255 / 9%); }
 .interval-picker button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 .interval-picker button.selected { color: var(--text-strong); background: var(--surface-active); border-color: rgb(91 161 255 / 34%); box-shadow: 0 2px 7px rgb(0 0 0 / 14%); }
+.interval-picker button:disabled { color: var(--muted); opacity: .38; cursor: not-allowed; }
 .form-footer { display: flex; gap: 10px; align-items: center; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); }
 .form-spacer { flex: 1; }
 .callout { min-height: 58px; padding: 13px; display: flex; gap: 11px; align-items: flex-start; color: var(--muted-strong); background: rgb(38 132 255 / 7%); border: 1px solid rgb(38 132 255 / 16%); border-radius: 8px; font-size: 15px; line-height: 1.5; }

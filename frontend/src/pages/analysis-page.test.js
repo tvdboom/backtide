@@ -148,6 +148,7 @@ describe('analysis page', () => {
     post.mockClear()
 
     await wrapper.findAll('select')[0].setValue('15m')
+    await flushPromises()
     await vi.runAllTimersAsync()
     await flushPromises()
     expect(post).toHaveBeenLastCalledWith('/api/analysis', expect.objectContaining({
@@ -155,6 +156,7 @@ describe('analysis page', () => {
     }))
 
     await wrapper.findAll('select')[1].setValue('open')
+    await flushPromises()
     await vi.runAllTimersAsync()
     await flushPromises()
     expect(post).toHaveBeenLastCalledWith('/api/analysis', expect.objectContaining({
