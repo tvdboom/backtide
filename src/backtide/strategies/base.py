@@ -73,26 +73,37 @@ class BaseStrategy(ABC):
         data: dict[str, pd.DataFrame | pl.DataFrame],
         portfolio: Portfolio,
         state: State,
-        indicators: dict[str, dict[str, pd.DataFrame | pl.DataFrame]] | None,
+        indicators: dict[
+            str,
+            dict[str, pd.Series | pd.DataFrame | pl.Series | pl.DataFrame],
+        ]
+        | None,
     ) -> list[Order]:
         """Evaluate the strategy and return orders.
 
         Parameters
         ----------
-        data : dict[str, pd.DataFrame | pl.DataFrame]
+        data : dict[str, pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str,dict[str,pd.Series | pd.DataFrame | pl.Series | pl.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------

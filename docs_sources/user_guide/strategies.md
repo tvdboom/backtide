@@ -22,12 +22,24 @@ that receives data, state, and indicators, and returns a list of orders:
 When running a backtest, the strategy's `evaluate` method is called on every
 bar. It receives:
 
-- `data` — OHLCV data available up to the current bar.
-- `portfolio` — the current [portfolio] (cash, positions and open orders).
-- `state` — the current [state] (timestamp, bar index, warmup flag, etc...).
-- `indicators` — pre-computed [indicator values][indicators] (only up to the current bar).
+- `data` — `dict[str, pandas.DataFrame | polars.DataFrame]`, keyed by symbol.
+  For example, `data["AAPL"]["close"]` is AAPL's close-price history through
+  the current bar.
+- `portfolio` — [`backtide.backtest.Portfolio`][portfolio], containing the current cash,
+  positions and open orders. For example,
+  `portfolio.positions.get("AAPL", 0.0)` reads AAPL's signed quantity.
+- `state` — [`backtide.backtest.State`][state], containing the timestamp, bar index,
+  total bar count and warmup flag. For example, `state.is_warmup` tells the
+  strategy whether orders are currently suppressed.
+- `indicators` —
+  `dict[str, dict[str, pandas.Series | pandas.DataFrame | polars.Series | polars.DataFrame]] | None`.
+  The outer key is the indicator's deterministic name and the inner key is the
+  symbol. For example, `indicators["SMA_20"]["AAPL"]` is AAPL's visible 20-bar
+  SMA history.
 
 The method should return a list of [orders] to execute on the current bar.
+See [`BaseStrategy.evaluate`](../api/models/strategies/basestrategy.md#basestrategy-evaluate)
+for the complete API contract and per-parameter examples.
 
 <br>
 
@@ -280,6 +292,9 @@ Custom strategies can either compute a numeric quantity for every order or attac
 a [sizer][sizers] directly to an `Order` by passing it as `quantity`. Attached sizers
 are resolved by the engine just before the order is queued. The engine converts
 current portfolio equity into the order instrument's quote currency.
+
+See [Strategy examples](../examples/strategies.md) for more complete,
+copy-ready implementations, including a strategy with an auto-injected indicator.
 
 ### Performance
 

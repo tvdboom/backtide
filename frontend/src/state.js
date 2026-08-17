@@ -61,6 +61,20 @@ export function consumeExperimentDraft(storage) {
   }
 }
 
+const RESULTS_OVERVIEW_KEY = 'backtide:results-overview'
+
+export function requestResultsOverview(storage) {
+  storage.setItem(RESULTS_OVERVIEW_KEY, 'true')
+  storage.removeItem('backtide:result-id')
+}
+
+export function consumeResultsOverviewRequest(storage) {
+  const requested = storage.getItem(RESULTS_OVERVIEW_KEY) === 'true'
+  storage.removeItem(RESULTS_OVERVIEW_KEY)
+  if (requested) storage.removeItem('backtide:result-id')
+  return requested
+}
+
 export function instrumentLogoUrl(symbol, instrumentType, apiKey) {
   if (!symbol || !apiKey) return ''
   const type = String(instrumentType).toLowerCase()
@@ -73,7 +87,8 @@ export function instrumentLogoUrl(symbol, instrumentType, apiKey) {
     : forex && parts.length === 2
       ? `${parts[0]}${parts[1]}:CUR`
       : symbol
-  return `https://img.logokit.com/${domain}/${encodeURIComponent(value)}?token=${encodeURIComponent(apiKey)}`
+  const identifier = encodeURIComponent(value).replace(/%3A/gi, ':')
+  return `https://img.logokit.com/${domain}/${identifier}?token=${encodeURIComponent(apiKey)}`
 }
 
 const benchmarkByCurrency = {

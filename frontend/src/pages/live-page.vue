@@ -3,7 +3,15 @@
     <section class="page-intro live-intro">
       <div><h2>Live trading</h2><p>Apply a saved strategy to live bars with simulated fills and no capital at risk.</p></div>
       <div v-if="sessionVisible" class="session-actions">
-        <span class="status-pill" :class="{ running: activeSession }"><span/> {{ sessionStatusLabel }}</span>
+        <span
+          class="status-pill"
+          :class="{ running: activeSession, failed: sessionFailed }"
+          :tabindex="sessionError ? 0 : undefined"
+          :aria-describedby="sessionError ? 'session-error-tooltip' : undefined"
+        >
+          <span class="status-dot"/> {{ sessionStatusLabel }}
+          <span v-if="sessionError" id="session-error-tooltip" class="session-status-tooltip" role="tooltip">{{ sessionError }}</span>
+        </span>
         <button v-if="state.status === 'paused'" class="secondary" @click="resume"><Play :size="15"/> Resume</button>
         <button v-else-if="activeSession" class="secondary" @click="pause"><Pause :size="15"/> Pause</button>
         <span v-if="activeSession && hasStrategy" class="action-help"><button class="secondary" @click="cancelAll">Cancel orders</button><span class="action-popover" role="tooltip">Cancel every open simulated order before the next market update.</span></span>
@@ -49,7 +57,7 @@
                 </button>
               </div>
             </fieldset>
-            <label class="wide symbol-select-field">Symbols<FieldInfo text="Choose the instruments to subscribe to and monitor during this session." /><SearchSelect v-model="form.symbols" :options="liveSymbols" :descriptions="liveSymbolNames" :logos="liveSymbolLogos" :loading="loadingLiveSymbols" allow-custom input-id="live-symbols" label="Live symbols" placeholder="Search the provider catalog, e.g. BTC-USD…" /><small v-if="liveSymbolError" class="negative">{{ liveSymbolError }}</small></label>
+            <div class="field-label wide symbol-select-field"><span>Symbols</span><FieldInfo text="Choose the instruments to subscribe to and monitor during this session." /><SearchSelect v-model="form.symbols" :options="liveSymbols" :descriptions="liveSymbolNames" :logos="liveSymbolLogos" :loading="loadingLiveSymbols" allow-custom input-id="live-symbols" label="Live symbols" placeholder="Search the provider catalog, e.g. BTC-USD…" /><small v-if="liveSymbolError" class="negative">{{ liveSymbolError }}</small></div>
             <div class="field-label interval-picker-field live-interval-field wide">
               <span>Interval</span>
               <FieldInfo text="Set the candle duration used for strategy evaluation and monitoring." />
@@ -79,14 +87,14 @@
           <div class="section-copy"><h3>Trading logic</h3><p>Select saved strategies and optional indicators for the live feed.</p></div>
           <div class="form-grid two">
             <div class="field-label wide"><span>Strategies</span><FieldInfo text="Select saved strategies to evaluate; leave this empty for market monitoring only." /><SearchSelect v-model="form.strategies" :options="strategyOptions" :option-icons="strategyOptionIcons" input-id="live-strategies" label="Live strategies" placeholder="Select one or more saved strategies..."/><small>Leave empty to monitor the feed without orders.</small></div>
-            <label class="wide">Indicators<FieldInfo text="Add optional indicators to calculate and display during the session." /><SearchSelect v-model="form.indicators" :options="indicatorOptions" :option-icons="indicatorOptionIcons" input-id="live-indicators" label="Live indicators" placeholder="Select optional indicators..."/><small>Strategy-required indicators are added automatically.</small></label>
+            <div class="field-label wide"><span>Indicators</span><FieldInfo text="Add optional indicators to calculate and display during the session." /><SearchSelect v-model="form.indicators" :options="indicatorOptions" :option-icons="indicatorOptionIcons" input-id="live-indicators" label="Live indicators" placeholder="Select optional indicators..."/><small>Strategy-required indicators are added automatically.</small></div>
           </div>
         </div>
 
         <div v-if="setupTab === 3" class="form-section">
           <div class="section-copy"><h3>Performance metrics</h3><p>Choose the measures updated while the live session runs.</p></div>
           <div class="form-grid two">
-            <label class="wide">Metrics<FieldInfo text="Choose the performance measures updated while the session runs." /><SearchSelect v-model="form.config.metrics" :options="liveMetricOptions" :descriptions="liveMetricDescriptions" input-id="live-metrics" label="Live metrics" placeholder="Select live-compatible metrics..."/></label>
+            <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures updated while the session runs." /><SearchSelect v-model="form.config.metrics" :options="liveMetricOptions" :descriptions="liveMetricDescriptions" input-id="live-metrics" label="Live metrics" placeholder="Select live-compatible metrics..."/></div>
           </div>
         </div>
 
@@ -106,7 +114,7 @@
               <div class="form-grid two">
                 <ToggleField v-model="form.config.partial_fills" label="Volume-constrained fills" description="Limit fills to available candle volume." help="Restrict simulated fills to a share of the volume reported by each candle." />
                 <label v-show="form.config.partial_fills">Max volume participation (%)<FieldInfo text="Set the largest percentage of a candle's volume that one simulated fill may consume." /><input v-model.number="form.config.max_volume_participation" type="number" min="0.01" max="100" step="0.01"/></label>
-                <label class="wide">Allowed order types<FieldInfo text="Choose which simulated order instructions strategies may submit." /><SearchSelect v-model="form.config.allowed_order_types" :options="orderTypes" :descriptions="orderTypeDescriptions" plain-options input-id="live-order-types" label="Allowed order types"/></label>
+                <div class="field-label wide"><span>Allowed order types</span><FieldInfo text="Choose which simulated order instructions strategies may submit." /><SearchSelect v-model="form.config.allowed_order_types" :options="orderTypes" :descriptions="orderTypeDescriptions" plain-options input-id="live-order-types" label="Allowed order types"/></div>
               </div>
             </fieldset>
           </div>
@@ -159,10 +167,10 @@
 
     <template v-else>
       <section v-if="hasStrategy" class="metric-grid live-metrics">
-        <article class="metric-card"><span>Equity</span><strong>{{ money(activeStrategySnapshot.equity) }}</strong><small>{{ activeStrategySnapshot.processed_bars || 0 }} bars processed</small></article>
-        <article class="metric-card"><span>Realized P&amp;L</span><strong :class="tone(activeStrategySnapshot.realized_pnl)">{{ money(activeStrategySnapshot.realized_pnl) }}</strong><small>net of commissions and financing</small></article>
-        <article class="metric-card"><span>Unrealized P&amp;L</span><strong :class="tone(activeStrategySnapshot.unrealized_pnl)">{{ money(activeStrategySnapshot.unrealized_pnl) }}</strong><small>open positions</small></article>
-        <article class="metric-card"><span>Open positions</span><strong>{{ Object.keys(activeStrategySnapshot.portfolio?.positions || {}).length }}</strong><small>{{ state.config.provider }} · {{ state.config.interval }}</small></article>
+        <article class="metric-card"><span>Equity</span><strong>{{ money(activeStrategySnapshot.equity) }}</strong></article>
+        <article class="metric-card"><span>Realized P&amp;L</span><strong :class="tone(activeStrategySnapshot.realized_pnl)">{{ money(activeStrategySnapshot.realized_pnl) }}</strong></article>
+        <article class="metric-card"><span>Unrealized P&amp;L</span><strong :class="tone(activeStrategySnapshot.unrealized_pnl)">{{ money(activeStrategySnapshot.unrealized_pnl) }}</strong></article>
+        <article class="metric-card"><span>Open positions</span><strong>{{ Object.keys(activeStrategySnapshot.portfolio?.positions || {}).length }}</strong></article>
       </section>
       <section class="live-dashboard" :class="{ 'has-portfolio': hasStrategy }">
         <article v-if="hasStrategy" class="panel table-panel live-portfolio-panel"><div class="panel-header"><div><span class="eyebrow">Portfolio</span><h3>Positions &amp; cash</h3></div></div><div class="data-table-wrap"><table class="data-table"><thead><tr><th>Asset</th><th class="number">Amount</th></tr></thead><tbody><tr v-for="(quantity, symbol) in activeStrategySnapshot.portfolio?.positions" :key="symbol"><td><span class="live-asset-cell"><img v-if="symbolLogo(symbol)" :src="symbolLogo(symbol)" class="order-symbol-logo" alt="" @error="markSymbolLogoFailed(symbol)"/><span v-else class="order-symbol-logo" aria-hidden="true">{{ symbol.slice(0, 1) }}</span><strong>{{ symbol }}</strong></span></td><td class="number">{{ positionAmount(quantity) }}</td></tr><tr v-for="(amount, currency) in activeStrategySnapshot.portfolio?.cash" :key="currency"><td>{{ currency }} cash</td><td class="number">{{ money(amount) }}</td></tr></tbody></table></div></article>
@@ -178,7 +186,7 @@
           <div v-for="item in watchlist" :key="item.symbol" class="quote-row">
             <img v-if="symbolLogo(item.symbol)" :src="symbolLogo(item.symbol)" class="asset-avatar" alt="" @error="markSymbolLogoFailed(item.symbol)" />
             <span v-else class="asset-avatar" aria-hidden="true">{{ item.symbol.slice(0, 1) }}</span>
-            <span><strong>{{ item.symbol }}</strong><small>{{ title(state.config.provider || '') }} · {{ state.config.interval }}</small></span>
+            <span><strong>{{ item.symbol }}</strong></span>
             <strong v-if="item.price !== undefined">{{ price(item.price) }}</strong>
             <small v-else class="quote-waiting">Waiting for price</small>
           </div>
@@ -201,7 +209,7 @@
                   <td class="number">{{ fill.fill_price == null ? '—' : price(fill.fill_price) }}</td>
                   <td class="number" :class="tone(realizedTradePnl(fill))">{{ realizedTradePnl(fill) == null ? '—' : money(realizedTradePnl(fill)) }}</td>
                   <td class="number">{{ fill.commission == null ? '—' : money(fill.commission) }}</td>
-                  <td><span class="execution-status"><span class="badge" :class="fillStatusClass(fill.status)" :tabindex="fill.reason ? 0 : undefined" :aria-describedby="fill.reason ? `fill-reason-${index}` : undefined">{{ fill.status }}</span><span v-if="fill.reason" :id="`fill-reason-${index}`" class="execution-status-tooltip" role="tooltip">{{ fill.reason }}</span></span></td>
+                  <td><ExecutionStatus :status="fill.status" :reason="fill.reason" /></td>
                 </tr>
               </tbody>
             </table>
@@ -261,7 +269,6 @@
         </div>
       </article>
     </template>
-    <div v-if="state.error" class="callout error-state"><TriangleAlert/><span>{{ state.error }}</span></div>
   </div>
 </template>
 
@@ -285,13 +292,13 @@ import {
   Square,
   SquareCode,
   TrendingDown,
-  TriangleAlert,
   WalletCards
 } from 'lucide-vue-next'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from 'vue'
 import { api, post, query } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import CurrencySelect from '../components/currency-select.vue'
+import ExecutionStatus from '../components/execution-status.vue'
 import FieldInfo from '../components/field-info.vue'
 import IntervalPicker from '../components/interval-picker.vue'
 import SearchSelect from '../components/search-select.vue'
@@ -372,6 +379,8 @@ let timer
 let liveCatalogRequest = 0
 const snapshot = computed(() => state.snapshot || {})
 const activeSession = computed(() => ['running', 'paused'].includes(state.status))
+const sessionFailed = computed(() => state.status === 'error')
+const sessionError = computed(() => sessionFailed.value && state.error ? String(state.error) : '')
 const currentSessionId = computed(() => state.id ?? '__session_without_id__')
 const sessionVisible = computed(() =>
   state.status !== 'idle'
@@ -403,38 +412,48 @@ const activeStrategyName = computed(() =>
     : strategyNames.value[0] || '')
 const activeStrategySnapshot = computed(() =>
   state.strategies?.[activeStrategyName.value] || snapshot.value)
-const riskMetrics = computed(() => [
-  {
+const activeTradingConfig = computed(() => state.config?.config || {})
+const riskMetrics = computed(() => {
+  const metrics = [{
     key: 'gross-exposure', label: 'Gross exposure', icon: ChartNoAxesCombined,
     value: money(activeStrategySnapshot.value.gross_exposure),
     help: 'Total market value of all open positions, adding long and short positions without offsetting them.'
-  },
-  {
-    key: 'net-exposure', label: 'Net exposure', icon: Scale,
-    value: money(activeStrategySnapshot.value.net_exposure),
-    help: 'Signed market value of open positions: long exposure minus short exposure.'
-  },
-  {
-    key: 'leverage', label: 'Leverage', icon: Gauge,
-    value: `${Number(activeStrategySnapshot.value.leverage || 0).toFixed(2)}x`,
-    help: 'Gross exposure divided by account equity. 1.00x means gross positions equal current equity.'
-  },
-  {
-    key: 'buying-power', label: 'Buying power', icon: WalletCards,
-    value: money(activeStrategySnapshot.value.buying_power),
-    help: 'Additional gross exposure available before reaching configured leverage or margin limits.'
-  },
-  {
-    key: 'drawdown', label: 'Drawdown', icon: TrendingDown,
-    value: percent(activeStrategySnapshot.value.drawdown),
-    help: 'Percentage change from the highest equity reached. A negative value shows how far equity is below its peak.'
-  },
-  {
-    key: 'total-costs', label: 'Total costs', icon: ReceiptText,
-    value: money(activeStrategySnapshot.value.total_costs),
-    help: 'Cumulative simulated commissions and financing costs charged during this session.'
+  }]
+  if (activeTradingConfig.value.allow_short) {
+    metrics.push({
+      key: 'net-exposure', label: 'Net exposure', icon: Scale,
+      value: money(activeStrategySnapshot.value.net_exposure),
+      help: 'Signed market value of open positions: long exposure minus short exposure.'
+    })
   }
-])
+  if (activeTradingConfig.value.allow_margin) {
+    metrics.push({
+      key: 'leverage', label: 'Leverage', icon: Gauge,
+      value: `${Number(activeStrategySnapshot.value.leverage || 0).toFixed(2)}x`,
+      help: 'Gross exposure divided by account equity. 1.00x means gross positions equal current equity.'
+    })
+  }
+  metrics.push(
+    {
+      key: 'buying-power', label: 'Buying power', icon: WalletCards,
+      value: money(activeStrategySnapshot.value.buying_power),
+      help: activeTradingConfig.value.allow_margin
+        ? 'Additional gross exposure available before reaching configured leverage or margin limits.'
+        : 'Account value still available for additional positions without borrowing funds.'
+    },
+    {
+      key: 'drawdown', label: 'Drawdown', icon: TrendingDown,
+      value: percent(activeStrategySnapshot.value.drawdown),
+      help: 'Percentage change from the highest equity reached. A negative value shows how far equity is below its peak.'
+    },
+    {
+      key: 'total-costs', label: 'Total costs', icon: ReceiptText,
+      value: money(activeStrategySnapshot.value.total_costs),
+      help: 'Cumulative simulated commissions and financing costs charged during this session.'
+    }
+  )
+  return metrics
+})
 const strategyUpdates = computed(() => updates.value.map(update => {
   const strategyUpdate = update.strategies?.[activeStrategyName.value]
   if (!strategyUpdate) return update
@@ -718,13 +737,6 @@ function symbolLogo(symbol) {
 function markSymbolLogoFailed(symbol) {
   if (symbol) failedSymbolLogos.value = new Set(failedSymbolLogos.value).add(symbol)
 }
-function fillStatusClass(status) {
-  const value = String(status || '').toLowerCase()
-  if (value === 'filled') return 'success'
-  if (value === 'rejected') return 'error'
-  if (value === 'canceled') return 'partial'
-  return 'neutral'
-}
 function fillKey(fill, index) { return `${fill.order?.id || ''}:${fill.timestamp}:${fill.status}:${index}` }
 function fillTime(fill) {
   return formatConfiguredTimeWithSeconds(fill.timestamp, props.bootstrap?.display)
@@ -780,6 +792,18 @@ async function start() { starting.value = true; try { updateState(await post('/a
 async function stop() { try { updateState(await post('/api/live/stop')); clearTimeout(timer); emit('toast', 'Live trading session stopped.') } catch (error) { emit('toast', error.message, 'error') } }
 function newConfiguration() {
   dismissedSessionId.value = currentSessionId.value
+  updateState({
+    id: null,
+    status: 'idle',
+    config: {},
+    snapshot: {},
+    strategies: {},
+    updates: [],
+    recent_order_outcomes: {},
+    health: {},
+    replay: null,
+    error: null
+  })
   Object.assign(form, defaultLiveForm())
   setupTab.value = 0
   selectedStrategyName.value = ''

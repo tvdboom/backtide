@@ -39,7 +39,7 @@
           </header>
           <div v-if="expandedId === item.id" class="experiment-breakdown">
             <article v-for="run in item.runs" :key="run.strategy_id" class="run-breakdown-card">
-              <header><span class="run-kind-icon" :class="{ benchmark: run.is_benchmark }"><BarChart3 v-if="run.is_benchmark" :size="17" /><BrainCircuit v-else :size="17" /></span><span><strong>{{ run.strategy_name }}</strong><small v-if="showBenchmarkLabel(run)">Benchmark</small></span></header>
+              <header><span class="run-kind-icon" :class="{ benchmark: run.is_benchmark }"><BarChart3 v-if="run.is_benchmark" :size="17" /><BrainCircuit v-else :size="17" /></span><span><strong>{{ run.strategy_name }}</strong></span></header>
               <div v-if="run.error" class="run-summary-error">{{ run.error }}</div>
               <div v-else class="run-summary-metrics">
                 <div v-for="metricItem in runSummaryMetrics(run)" :key="metricItem.label"><span>{{ metricItem.label }}</span><strong :class="metricItem.tone">{{ metricItem.value }}</strong></div>
@@ -117,19 +117,19 @@
 
           <div class="result-section-heading strategy-heading">
             <div><span class="eyebrow">Run details</span><h3>Strategies</h3></div>
-            <p>Select a strategy to inspect its own metrics, trades, orders, and chart annotations.</p>
+            <p>Select a strategy to inspect its own metrics, execution history, and chart annotations.</p>
           </div>
           <div class="strategy-switcher"><button v-for="(run, index) in detail.runs" :key="run.strategy_id" :class="{ active: strategy === index, 'benchmark-run': run.is_benchmark }" @click="strategy = index"><BarChart3 v-if="run.is_benchmark" :size="15" aria-hidden="true"/><span>{{ run.strategy_name }}</span></button></div>
           <section v-if="activeRun" class="metric-grid result-metrics">
-            <article v-for="metricItem in headlineMetrics" :key="metricItem.label" class="metric-card"><span>{{ metricItem.label }}</span><strong :class="tone(metricItem.raw)">{{ metricItem.value }}</strong><small>{{ metricItem.note }}</small></article>
+            <article v-for="metricItem in headlineMetrics" :key="metricItem.label" class="metric-card"><span>{{ metricItem.label }}</span><strong :class="tone(metricItem.raw)">{{ metricItem.value }}</strong></article>
           </section>
           <article class="panel chart-workspace result-workspace">
             <div class="result-plot-tabs strategy-plot-tabs" role="tablist" aria-label="Strategy results"><button v-for="tabItem in strategyTabs" :key="tabItem.id" role="tab" :aria-selected="strategyTab === tabItem.id" :class="{ active: strategyTab === tabItem.id }" @click="strategyTab = tabItem.id"><component :is="tabItem.icon" :size="18"/><strong>{{ tabItem.label }}</strong></button></div>
             <div class="result-plot-description"><p>{{ activeStrategyTab.description }}</p></div>
             <div class="result-plot-stage" :class="{ 'has-options': isStrategyPlot && strategyTab === 'price' }">
               <ChartPanel v-if="isStrategyPlot" :figure="strategyFigure" :loading="strategyLoading" :error="strategyError" />
-              <div v-else class="data-table-wrap result-table" :class="{ 'result-record-table': isRecordTable, 'result-trades-table': strategyTab === 'trades', 'result-orders-table': strategyTab === 'orders' }" @scroll.passive="loadOrdersOnScroll">
-                <table class="data-table"><thead><tr><th v-for="column in tableColumns" :key="column" :class="tableColumnClass(column)">{{ label(column) }}</th></tr></thead><tbody><tr v-for="(row, index) in tableRows" :key="index"><td v-for="column in tableColumns" :key="column" :class="tableCellClass(row, column)"><span v-if="isRecordTable && column === 'symbol'" class="order-symbol-cell"><span class="order-symbol-logo"><img v-if="symbolLogo(row) && !failedSymbolLogos.has(row.symbol)" :src="symbolLogo(row)" alt="" @error="markSymbolLogoFailed(row.symbol)"/><span v-else aria-hidden="true">{{ String(row.symbol || '?').slice(0, 1) }}</span></span><strong>{{ row.symbol }}</strong></span><template v-else>{{ cell(row[column], column) }}</template></td></tr></tbody></table>
+              <div v-else class="data-table-wrap result-table" :class="{ 'result-record-table': isRecordTable, 'result-orders-table': strategyTab === 'orders' }" @scroll.passive="loadOrdersOnScroll">
+                <table class="data-table"><thead><tr><th v-for="column in tableColumns" :key="column" :class="tableColumnClass(column)">{{ label(column) }}</th></tr></thead><tbody><tr v-for="(row, index) in tableRows" :key="index"><td v-for="column in tableColumns" :key="column" :class="tableCellClass(row, column)"><span v-if="isRecordTable && column === 'symbol'" class="order-symbol-cell"><span class="order-symbol-logo"><img v-if="symbolLogo(row) && !failedSymbolLogos.has(row.symbol)" :src="symbolLogo(row)" alt="" @error="markSymbolLogoFailed(row.symbol)"/><span v-else aria-hidden="true">{{ String(row.symbol || '?').slice(0, 1) }}</span></span><strong>{{ row.symbol }}</strong></span><ExecutionStatus v-else-if="isRecordTable && column === 'status'" :status="row.status"/><template v-else>{{ cell(row[column], column) }}</template></td></tr></tbody></table>
                 <div v-if="!tableRows.length && !(strategyTab === 'orders' && (ordersLoading || ordersError))" class="empty-state"><p>No {{ strategyTabLabel.toLowerCase() }} for this run.</p></div>
                 <div v-if="strategyTab === 'orders' && ordersLoading" class="table-load-state" role="status"><span class="spinner small"/> Loading more orders…</div>
                 <div v-else-if="strategyTab === 'orders' && ordersError" class="table-load-state error-state"><span>{{ ordersError }}</span><button class="text-button" type="button" @click="loadMoreOrders">Retry</button></div>
@@ -158,13 +158,14 @@
 </template>
 
 <script setup>
-import { Activity, ArrowLeft, ArrowRightLeft, BarChart3, BrainCircuit, CalendarDays, ChartLine, ChartNoAxesCombined, ChevronDown, CircleDollarSign, Clock3, CopyPlus, Download, FileChartColumn, FileCode2, FlaskConical, Gauge, Layers3, ListChecks, Medal, Plus, ReceiptText, Scale, ScrollText, Search, SlidersHorizontal, Square, TableProperties, Timer, Trash2, TriangleAlert, WalletCards, X } from 'lucide-vue-next'
+import { Activity, ArrowLeft, ArrowRightLeft, BarChart3, BrainCircuit, CalendarDays, CalendarRange, ChartLine, ChartNoAxesCombined, ChevronDown, CircleDollarSign, Clock3, Coins, CopyPlus, Download, FileChartColumn, FileCode2, FlaskConical, Gauge, Layers3, Medal, Plus, ReceiptText, Scale, ScrollText, Search, SlidersHorizontal, Square, TableProperties, Timer, Trash2, TriangleAlert, WalletCards, X } from 'lucide-vue-next'
 import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, post, query, remove } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import ConfirmationModal from '../components/confirmation-modal.vue'
+import ExecutionStatus from '../components/execution-status.vue'
 import ToggleField from '../components/toggle-field.vue'
-import { formatConfiguredDate, formatConfiguredDateTime, formatIntervalLabel, formatResultMetric, instrumentLogoUrl } from '../state'
+import { consumeResultsOverviewRequest, formatConfiguredDate, formatConfiguredDateTime, formatIntervalLabel, formatResultMetric, instrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
@@ -191,6 +192,7 @@ const experimentBatchSize = 10
 const overviewTabs = [
   { id: 'pnl', label: 'PnL', icon: CircleDollarSign, description: 'Cumulative profit and loss over time for each strategy.' },
   { id: 'cash', label: 'Cash', icon: WalletCards, description: 'Cash balance timeline by strategy and settlement currency.' },
+  { id: 'dividends', label: 'Dividends', icon: Coins, description: 'Dividend payments recorded for the experiment symbols.' },
   { id: 'pnl_histogram', label: 'PnL histogram', icon: BarChart3, description: 'Distribution of realized trade PnL across strategies.' },
   { id: 'rolling_returns', label: 'Rolling returns', icon: ChartNoAxesCombined, description: 'Rolling return trend to compare momentum over time.' },
   { id: 'rolling_sharpe', label: 'Rolling Sharpe', icon: Medal, description: 'Risk-adjusted performance through time.' },
@@ -202,8 +204,7 @@ const strategyTabs = [
   { id: 'mae_mfe', label: 'MAE / MFE', icon: Scale, description: 'Maximum adverse and favorable excursion per trade.' },
   { id: 'position_size', label: 'Position size', icon: Layers3, description: 'Position size evolution through time.' },
   { id: 'price', label: 'Trades on price', icon: ChartLine, description: 'Price action with strategy context.' },
-  { id: 'trades', label: 'Trades', icon: ListChecks, description: 'Completed trades recorded by this strategy.' },
-  { id: 'orders', label: 'Orders', icon: ReceiptText, description: 'Submitted orders and execution outcomes.' }
+  { id: 'orders', label: 'Orders', icon: ReceiptText, description: 'Every submitted order, including fills, cancellations, and execution PnL.' }
 ]
 const strategyPlotIds = new Set(['mae_mfe', 'position_size', 'price'])
 let pollTimer, searchTimer, experimentObserver, experimentLoadVersion = 0
@@ -222,7 +223,7 @@ const ordersError = computed(() => orderErrors.value[activeOrderKey.value] || ''
 const experimentDescription = computed(() => String(detail.value?.experiment?.description || '').trim())
 const fullLogUrl = computed(() => `/api/experiments/${encodeURIComponent(selectedId.value)}/logs`)
 const isStrategyPlot = computed(() => strategyPlotIds.has(strategyTab.value))
-const isRecordTable = computed(() => ['trades', 'orders'].includes(strategyTab.value))
+const isRecordTable = computed(() => strategyTab.value === 'orders')
 const hasOverviewOptions = computed(() => ['pnl', 'pnl_histogram', 'rolling_returns', 'rolling_sharpe', 'trade_duration'].includes(overviewTab.value))
 const activeOverviewTab = computed(() => overviewTabs.find(item => item.id === overviewTab.value) || overviewTabs[0])
 const activeStrategyTab = computed(() => strategyTabs.find(item => item.id === strategyTab.value) || strategyTabs[0])
@@ -243,11 +244,12 @@ const logPreview = computed(() => {
 })
 const experimentPrimaryMetrics = computed(() => {
   const experiment = detail.value?.experiment || {}
+  const metadata = detail.value?.config_metadata || {}
   const primary = experiment.primary_metric_value ?? experiment.best_sharpe
   return [
     { label: experiment.primary_metric_name || 'Sharpe', value: formatResultMetric(primary, experiment.primary_metric_percentage), tone: tone(primary), icon: Medal },
-    { label: 'Started at', value: dateTime(experiment.started_at), tone: '', icon: CalendarDays },
-    { label: 'Duration', value: duration(experiment.started_at, experiment.finished_at), tone: '', icon: Clock3 },
+    { label: 'Period', value: period(metadata), tone: '', icon: CalendarRange },
+    { label: 'Interval', value: formatIntervalLabel(metadata.interval), tone: '', icon: Timer },
     { label: 'Status', value: experiment.status || 'Unknown', tone: statusTone(experiment.status), icon: Activity }
   ]
 })
@@ -256,20 +258,25 @@ const experimentContextMetrics = computed(() => {
   const experiment = detail.value?.experiment || {}
   return [
     { label: 'Strategies', value: Number(experiment.n_strategies || detail.value?.runs?.length || 0).toLocaleString(), icon: BrainCircuit },
-    { label: 'Period', value: period(metadata), icon: CalendarDays },
     { label: 'Symbols', value: Number(metadata.symbols || 0).toLocaleString(), icon: ChartNoAxesCombined },
-    { label: 'Interval', value: formatIntervalLabel(metadata.interval), icon: Timer }
+    { label: 'Started at', value: dateTime(experiment.started_at), icon: CalendarDays },
+    { label: 'Duration', value: duration(experiment.started_at, experiment.finished_at), icon: Clock3 }
   ]
 })
 const headlineMetrics = computed(() => {
   const metrics = activeRun.value?.metrics || {}
   const primary = detail.value?.experiment?.primary_metric
-  return Object.keys(metrics)
-    .sort((left, right) => Number(right === primary) - Number(left === primary))
+  return [...new Set([primary, 'pnl', ...Object.keys(metrics)])]
+    .filter(key => key && Object.prototype.hasOwnProperty.call(metrics, key))
     .slice(0, 6)
     .map(key => {
       const definition = metricDefinition(key)
-      return metric(definition?.name || enumLabel(key), metrics[key], Boolean(definition?.percentage), key === primary ? 'main experiment metric' : 'selected metric')
+      return metric(
+        key === 'pnl' ? 'PnL' : definition?.name || enumLabel(key),
+        metrics[key],
+        Boolean(definition?.percentage),
+        key === 'pnl'
+      )
     })
 })
 const orderColumns = ['symbol', 'datetime', 'type', 'side', 'qty', 'price', 'pnl', 'commission', 'status']
@@ -295,13 +302,21 @@ const orderRows = computed(() => activeOrderPage.value.orders
       status: enumLabel(record.status)
     }
   }))
-const tableRows = computed(() => strategyTab.value === 'trades' ? activeRun.value?.trades || [] : strategyTab.value === 'orders' ? orderRows.value : Object.entries(activeRun.value?.metrics || {}).map(([metricName, value]) => {
+const tableRows = computed(() => strategyTab.value === 'orders' ? orderRows.value : Object.entries(activeRun.value?.metrics || {}).map(([metricName, value]) => {
   const definition = metricDefinition(metricName)
   return { metric: definition?.name || enumLabel(metricName), value: formatResultMetric(value, Boolean(definition?.percentage)) }
 }))
 const tableColumns = computed(() => strategyTab.value === 'orders' ? orderColumns : Object.keys(tableRows.value[0] || {}))
 
-function metric(labelText, raw, percent, note) { return { label: labelText, raw: Number(raw), value: formatResultMetric(raw, percent), note } }
+function metric(labelText, raw, percent, currencyValue = false) {
+  return {
+    label: labelText,
+    raw: Number(raw),
+    value: currencyValue
+      ? money(raw, activeRun.value?.base_currency || 'USD')
+      : formatResultMetric(raw, percent)
+  }
+}
 function metricDefinition(key) { return [...(props.bootstrap?.metrics?.builtin || []), ...(props.bootstrap?.metrics?.saved || [])].find(item => item.key === key) }
 const tone = value => Number(value) > 0 ? 'positive' : Number(value) < 0 ? 'negative' : ''
 const runSharpe = run => run?.metrics?.sharpe_ratio ?? run?.metrics?.sharpe
@@ -337,9 +352,6 @@ function runSummaryMetrics(run) {
     { label: 'Max drawdown', value: formatResultMetric(drawdown, true), tone: Number(drawdown) ? 'negative' : '' },
     { label: 'Trades / win rate', value: `${trades.toLocaleString()} · ${formatResultMetric(winRate, true)}`, tone: Number(winRate) > 0.5 ? 'positive' : Number(winRate) < 0.5 ? 'negative' : '' }
   ]
-}
-function showBenchmarkLabel(run) {
-  return Boolean(run?.is_benchmark) && String(run?.strategy_name || '').trim().toLowerCase() !== 'benchmark'
 }
 const tags = value => Array.isArray(value) ? value : String(value || '').split(',').map(item => item.trim()).filter(Boolean)
 function date(value) { return formatConfiguredDate(value, props.bootstrap?.display, 'Unknown date') }
@@ -468,6 +480,11 @@ function backToOverview() {
   orderErrors.value = {}
   orderLoadingKeys.clear()
 }
+function resetToRequestedOverview() {
+  if (!consumeResultsOverviewRequest(sessionStorage)) return false
+  backToOverview()
+  return true
+}
 async function loadMoreOrders() {
   const key = activeOrderKey.value
   const run = activeRun.value
@@ -566,6 +583,7 @@ watch(loadMoreSentinel, (element) => {
   if (element) experimentObserver?.observe(element)
 })
 onMounted(() => {
+  resetToRequestedOverview()
   if ('IntersectionObserver' in globalThis) {
     experimentObserver = new IntersectionObserver((entries) => {
       if (entries.some(entry => entry.isIntersecting)) void loadMoreExperiments()
@@ -575,6 +593,7 @@ onMounted(() => {
   pollJobs()
 })
 onActivated(() => {
+  resetToRequestedOverview()
   if (activatedOnce) load()
   activatedOnce = true
 })

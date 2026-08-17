@@ -110,11 +110,11 @@ describe('paper trading setup', () => {
     expect(declaration('.session-financial')).toContain('margin-right: 0')
   })
 
-  it('reveals execution reasons only from the status badge', () => {
-    expect(declaration('.execution-status-tooltip')).toContain('visibility: hidden')
-    expect(declaration('.execution-status-tooltip')).toContain('opacity: 0')
-    expect(styles).toContain('.execution-status .badge:hover + .execution-status-tooltip')
-    expect(styles).toContain('.execution-status .badge:focus-visible + .execution-status-tooltip')
+  it('positions execution reasons in a viewport overlay', () => {
+    expect(declaration('.execution-status-tooltip')).toContain('position: fixed')
+    expect(declaration('.execution-status-tooltip')).toContain('z-index: 300')
+    expect(declaration('.execution-status-tooltip')).toContain('calc(100vw - 24px)')
+    expect(styles).toContain(".execution-status-tooltip[data-placement='below']")
   })
 
   it('keeps every live interval on one full-width row', () => {
@@ -175,6 +175,15 @@ describe('paper trading setup', () => {
     )
     expect(styles).toContain('@media (max-width: 480px)')
   })
+
+  it('styles failed live sessions as red hoverable status badges', () => {
+    expect(declaration('.status-pill.failed')).toContain('color: var(--red)')
+    expect(declaration('.status-pill.failed')).toContain('cursor: help')
+    expect(declaration('.session-status-tooltip')).toContain('max-width: min(480px')
+    expect(styles).toContain(
+      '.status-pill:hover .session-status-tooltip, .status-pill:focus-visible .session-status-tooltip'
+    )
+  })
 })
 
 describe('session history', () => {
@@ -234,11 +243,11 @@ describe('experiment result summaries', () => {
     expect(declaration('.result-plot-options')).toContain('border-left: 1px solid var(--line)')
     expect(declaration('.result-plot-tabs button')).toContain('min-height: 54px')
     expect(declaration('.result-plot-description p')).toContain('font-size: 15px')
-    expect(declaration('.strategy-plot-tabs')).toContain('repeat(6, minmax(0, 1fr))')
+    expect(declaration('.strategy-plot-tabs')).toContain('repeat(5, minmax(0, 1fr))')
     expect(declaration('.modal.document-modal')).toContain('width: min(1140px, 94vw)')
   })
 
-  it('keeps trade and order histories in a bounded table with visible headings', () => {
+  it('keeps order history in a bounded table with visible headings', () => {
     expect(declaration('.result-record-table')).toContain('max-height: 560px')
     expect(declaration('.result-record-table')).toContain('overflow: auto')
     expect(declaration('.result-record-table .data-table th')).toContain('position: sticky')

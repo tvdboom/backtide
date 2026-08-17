@@ -452,9 +452,123 @@ class TestSerialization:
         with pytest.raises(APIError, match="20 characters or fewer"):
             BacktideServices._safe_library_name("Twenty-one characters")
 
+    @pytest.mark.parametrize(
+        "class_name",
+        ["MomentumStrategy", "MomentumIndicator", "MomentumSizer", "MomentumMetric"],
+    )
+    def test_empty_library_names_use_the_custom_python_class(self, class_name):
+        """Custom Python assets fall back to the instantiated class name."""
+        instance = type(class_name, (), {})()
+
+        assert (
+            BacktideServices._library_asset_name("", instance, ignored_class_prefix="My")
+            == class_name
+        )
+
+    @pytest.mark.parametrize(
+        "placeholder",
+        ["MyStrategy", "MyMomentumIndicator", "MyPositionSizer", "myCustomMetric"],
+    )
+    def test_starter_class_names_are_not_used_as_library_names(self, placeholder):
+        """Untouched starter class names do not silently become saved display names."""
+        instance = type(placeholder, (), {})()
+
+        with pytest.raises(APIError, match="rename the placeholder Python class"):
+            BacktideServices._library_asset_name("", instance, ignored_class_prefix="My")
+
 
 class TestServiceCommands:
     """Tests for command validation and backend dispatch."""
+
+    @pytest.mark.parametrize(
+        (
+            "method_name",
+            "domain_module",
+            "utils_module",
+            "builtins_name",
+            "build_name",
+            "check_name",
+            "save_name",
+            "class_name",
+        ),
+        [
+            (
+                "save_strategy",
+                "backtide.strategies",
+                "backtide.strategies.utils",
+                "BUILTIN_STRATEGIES",
+                "_build_custom_strategy",
+                "_check_strategy_code",
+                "_save_strategy",
+                "MomentumStrategy",
+            ),
+            (
+                "save_indicator",
+                "backtide.indicators",
+                "backtide.indicators.utils",
+                "BUILTIN_INDICATORS",
+                "_build_custom_indicator",
+                "_check_indicator_code",
+                "_save_indicator",
+                "MomentumIndicator",
+            ),
+            (
+                "save_sizer",
+                "backtide.sizers",
+                "backtide.sizers.utils",
+                "BUILTIN_SIZERS",
+                "_build_custom_sizer",
+                "_check_sizer_code",
+                "_save_sizer",
+                "MomentumSizer",
+            ),
+            (
+                "save_metric",
+                "backtide.metrics",
+                "backtide.metrics.utils",
+                "BUILTIN_METRICS",
+                "_build_custom_metric",
+                "_check_metric_code",
+                "_save_metric",
+                "MomentumMetric",
+            ),
+        ],
+    )
+    def test_custom_assets_save_under_the_python_class_when_name_is_empty(
+        self,
+        monkeypatch,
+        method_name,
+        domain_module,
+        utils_module,
+        builtins_name,
+        build_name,
+        check_name,
+        save_name,
+        class_name,
+    ):
+        """Custom library assets share class-name fallback behavior."""
+        cfg = SimpleNamespace(data=SimpleNamespace(storage_path="unused"))
+        instance = type(class_name, (), {})()
+        captured = {}
+
+        def save(value, name, received_cfg):
+            captured.update(value=value, name=name, cfg=received_cfg)
+
+        config_module = __import__("backtide.config", fromlist=["get_config"])
+        domain = __import__(domain_module, fromlist=[builtins_name])
+        utilities = __import__(utils_module, fromlist=[build_name, check_name, save_name])
+        monkeypatch.setattr(config_module, "get_config", lambda: cfg)
+        monkeypatch.setattr(domain, builtins_name, [])
+        monkeypatch.setattr(utilities, build_name, lambda _code: instance)
+        monkeypatch.setattr(utilities, check_name, lambda *_args: None)
+        monkeypatch.setattr(utilities, save_name, save)
+
+        result = getattr(BacktideServices(), method_name)(
+            {"kind": "custom", "name": "", "code": "custom source"}
+        )
+
+        assert result == {"saved": class_name}
+        assert captured == {"value": instance, "name": class_name, "cfg": cfg}
 
     def test_live_instruments_uses_provider_specific_catalog(self, monkeypatch):
         """Paper trading receives canonical symbols from the selected provider."""
@@ -1299,6 +1413,160 @@ end_date = "2024-03-01"
             ],
         }
 
+    def test_analysis_metrics_returns_per_symbol_statistics(self, monkeypatch):
+        """The first analysis tab returns tabular statistics without building a figure."""
+        import backtide
+
+        bars = [{"symbol": "AAPL", "close": 100.0}]
+        captured: dict[str, Any] = {}
+
+        class Statistics:
+            @staticmethod
+            def to_dict(*, orient):
+                assert orient == "records"
+                return [
+                    {
+                        "symbol": "AAPL",
+                        "sharpe": 1.24,
+                        "cagr": 0.137,
+                        "max_dd": -0.082,
+                        "win_rate": 0.54,
+                    }
+                ]
+
+        def compute_statistics(data, *, price_col):
+            captured.update(data=data, price_col=price_col)
+            return Statistics()
+
+        def query_bars(symbols, interval, provider, *, limit):
+            captured.update(
+                symbols=symbols,
+                interval=interval,
+                provider=provider,
+                limit=limit,
+            )
+            return bars
+
+        analysis = SimpleNamespace(compute_statistics=compute_statistics)
+        monkeypatch.setitem(sys.modules, "backtide.analysis", analysis)
+        monkeypatch.setattr(backtide, "analysis", analysis, raising=False)
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.storage",
+            SimpleNamespace(query_bars=query_bars, query_dividends=lambda *_args: []),
+        )
+
+        result = BacktideServices().analysis_plot(
+            "metrics",
+            {
+                "symbols": ["AAPL"],
+                "interval": "1d",
+                "provider": "yahoo",
+                "price_col": "close",
+            },
+        )
+
+        assert result == {
+            "rows": [
+                {
+                    "symbol": "AAPL",
+                    "sharpe": 1.24,
+                    "cagr": 0.137,
+                    "max_dd": -0.082,
+                    "win_rate": 0.54,
+                }
+            ]
+        }
+        assert captured == {
+            "data": bars,
+            "price_col": "close",
+            "symbols": ["AAPL"],
+            "interval": "1d",
+            "provider": "yahoo",
+            "limit": 50_000,
+        }
+
+    def test_result_dividends_plot_uses_the_experiment_symbols(self, monkeypatch, tmp_path: Path):
+        """The result dividends tab queries payouts for the configured universe."""
+        import backtide
+
+        experiment = tmp_path / "experiments" / "exp-1"
+        experiment.mkdir(parents=True)
+        (experiment / "config.toml").write_text("config", encoding="utf-8")
+        run = SimpleNamespace(strategy_id="run-1")
+        captured: dict[str, Any] = {}
+
+        class Figure:
+            def to_json(self):
+                return '{"data":[],"layout":{"title":"Dividends"}}'
+
+        def query_dividends(symbols):
+            captured["symbols"] = symbols
+            return [{"symbol": "AAPL", "amount": 1.0}]
+
+        def plot_dividends(data, *, display):
+            captured.update(data=data, display=display)
+            return Figure()
+
+        analysis = SimpleNamespace(plot_dividends=plot_dividends)
+        monkeypatch.setitem(sys.modules, "backtide.analysis", analysis)
+        monkeypatch.setattr(backtide, "analysis", analysis, raising=False)
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.backtest",
+            SimpleNamespace(
+                ExperimentConfig=SimpleNamespace(
+                    from_toml=lambda _text: SimpleNamespace(
+                        data=SimpleNamespace(symbols=["AAPL", "MSFT"])
+                    )
+                )
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.config",
+            SimpleNamespace(
+                get_config=lambda: SimpleNamespace(
+                    data=SimpleNamespace(storage_path=str(tmp_path))
+                )
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.storage",
+            SimpleNamespace(
+                query_bars=lambda *_args, **_kwargs: [],
+                query_dividends=query_dividends,
+                query_strategy_runs=lambda _experiment_id: [run],
+            ),
+        )
+
+        result = BacktideServices().result_plot(
+            {
+                "experiment_id": "exp-1",
+                "strategy_id": "run-1",
+                "plot": "dividends",
+            }
+        )
+
+        assert result["layout"]["title"] == "Dividends"
+        assert captured == {
+            "symbols": ["AAPL", "MSFT"],
+            "data": [{"symbol": "AAPL", "amount": 1.0}],
+            "display": None,
+        }
+
+    def test_benchmark_runs_use_the_configured_symbol_as_their_display_name(self):
+        """Benchmark result labels identify the compared market instrument."""
+        runs = [
+            {"strategy_name": "Benchmark", "is_benchmark": True},
+            {"strategy_name": "Momentum", "is_benchmark": False},
+        ]
+
+        BacktideServices._apply_benchmark_display_name('[strategy]\nbenchmark = "SPY"', runs)
+
+        assert [run["strategy_name"] for run in runs] == ["SPY", "Momentum"]
+
     def test_unknown_result_plot_is_rejected(self, monkeypatch, tmp_path: Path):
         """Result plot names are restricted to the explicit dispatch table."""
         import backtide
@@ -1428,6 +1696,34 @@ end_date = "2024-03-01"
 
         assert result == {"saved": "Renamed"}
         assert captured == {"value": existing, "name": "Renamed"}
+        assert not original_path.exists()
+
+    def test_custom_library_update_uses_the_rebuilt_class_when_name_is_empty(self, tmp_path: Path):
+        """Editing custom code can rename the saved asset from its Python class."""
+        directory = tmp_path / "strategies"
+        directory.mkdir()
+        original_path = directory / "Original.pkl"
+        original_path.write_bytes(b"original")
+        replacement = type("MomentumStrategy", (), {})()
+        captured = {}
+
+        result = BacktideServices()._update_saved_asset(
+            folder="strategies",
+            label="strategy",
+            original_name="Original",
+            payload={"kind": "custom", "name": "", "code": "updated source"},
+            stored={"Original": object()},
+            storage_path=tmp_path,
+            is_builtin=lambda _value: False,
+            validate=lambda _code: pytest.fail("Full updates use the replacement builder"),
+            build=lambda _code: pytest.fail("Full updates use the replacement builder"),
+            rebuild=lambda _payload: replacement,
+            save=lambda value, name: captured.update(value=value, name=name),
+            ignored_class_prefix="My",
+        )
+
+        assert result == {"saved": "MomentumStrategy"}
+        assert captured == {"value": replacement, "name": "MomentumStrategy"}
         assert not original_path.exists()
 
     def test_library_rename_does_not_overwrite_an_existing_file(self, tmp_path: Path):

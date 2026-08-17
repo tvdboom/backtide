@@ -25,10 +25,6 @@ __all__ = [
 
 from typing import Any, ClassVar
 
-import numpy as np
-import pandas as pd
-import polars as pl
-
 from backtide.core.backtest import Order
 
 from backtide.indicators import BaseIndicator
@@ -110,20 +106,27 @@ class AdaptiveRsi:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -223,20 +226,27 @@ class AlphaRsiPro:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -335,20 +345,27 @@ class BollingerMeanReversion:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -443,20 +460,27 @@ class BuyAndHold:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -550,20 +574,27 @@ class DoubleTop:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -666,20 +697,27 @@ class HybridAlphaRsi:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -782,20 +820,27 @@ class Macd:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -893,20 +938,27 @@ class Momentum:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -1013,20 +1065,27 @@ class MultiBollingerRotation:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -1125,20 +1184,27 @@ class RiskAverse:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -1232,20 +1298,27 @@ class Roc:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -1347,20 +1420,27 @@ class RocRotation:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -1464,20 +1544,27 @@ class Rsi:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -1572,20 +1659,27 @@ class Rsrs:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -1688,20 +1782,27 @@ class RsrsRotation:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -1800,20 +1901,27 @@ class SmaCrossover:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -1908,20 +2016,27 @@ class SmaNaive:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -2032,20 +2147,27 @@ class TripleRsiRotation:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -2148,20 +2270,27 @@ class TurtleTrading:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------
@@ -2260,20 +2389,27 @@ class Vcp:
 
         Parameters
         ----------
-        data : dict[str, np.array | pd.DataFrame | pl.DataFrame]
+        data : dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]
             Keys are the experiment's symbols and values are the historical
-            OHLCV data available up to the current bar.
+            OHLCV data available up to the current bar. For example,
+            `data["AAPL"]["close"]` selects AAPL's visible close-price history.
 
-        portfolio : [Portfolio]
-            Current portfolio holdings (cash, positions and open orders).
+        portfolio : [backtide.backtest.Portfolio][portfolio]
+            Current portfolio holdings (cash, positions and open orders). For
+            example, `portfolio.positions.get("AAPL", 0.0)` returns the current
+            signed quantity, while `portfolio.orders` contains pending orders.
 
-        state : [State]
-            Current simulation state.
+        state : [backtide.backtest.State][state]
+            Current simulation state. For example, use `state.is_warmup` to
+            suppress orders during warmup and `state.datetime` to read the
+            current bar's timezone-aware timestamp.
 
-        indicators : dict[str, dict[str, np.array | pd.DataFrame | pl.DataFrame]] | None
+        indicators : dict[str, dict[str, numpy.ndarray | pandas.DataFrame | polars.DataFrame]] | None
             The first keys are the indicator names. The second keys are the
             experiment's symbols. The values are the pre-computed indicator
-            values. `None` if no indicators were selected.
+            histories available up to the current bar. For example,
+            `indicators["SMA_20"]["AAPL"]` selects AAPL's visible 20-bar SMA
+            history. `None` is permitted when no indicators were selected.
 
         Returns
         -------

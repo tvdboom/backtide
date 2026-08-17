@@ -208,6 +208,25 @@ describe('search-select', () => {
     expect(selectedLogo.get('img').classes()).toContain('loaded')
   })
 
+  it('retries a transient selected-logo failure with a cache-busting URL', async () => {
+    const wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: ['ASML'],
+        options: ['ASML'],
+        logos: { ASML: 'https://example.test/asml.png?token=test' }
+      }
+    })
+
+    const image = wrapper.get('.selected-symbol-logo img')
+    await image.trigger('error')
+    expect(image.attributes('src')).toBe(
+      'https://example.test/asml.png?token=test&selected_retry=1'
+    )
+
+    await image.trigger('load')
+    expect(image.classes()).toContain('loaded')
+  })
+
   it('retains the same working menu logo after selecting a symbol', async () => {
     const wrapper = mount(SearchSelect, {
       props: {

@@ -31,7 +31,7 @@
         <div class="form-grid two library-editor-fields">
           <label v-if="editor === 'builtin'">Name<input v-model="draft.name" required maxlength="20" /></label>
           <div v-else class="custom-source-row wide">
-            <label>Name<input v-model="draft.name" required maxlength="20" /></label>
+            <label>Name<input v-model="draft.name" maxlength="20" placeholder="Defaults to Python class name" /></label>
             <label class="file-button upload-code-button" title="Replace the editor contents with a Python file">
               <Upload :size="16" />
               <span>Load Python file</span>
@@ -83,7 +83,7 @@ import PythonEditor from '../components/python-editor.vue'
 import ToggleField from '../components/toggle-field.vue'
 
 const props = defineProps({ bootstrap: Object })
-const emit = defineEmits(['toast'])
+const emit = defineEmits(['catalog-updated', 'toast'])
 const isStrategy = location.hash.slice(1) === 'strategies'
 const isMetric = location.hash.slice(1) === 'metrics'
 const isSizer = location.hash.slice(1) === 'sizers'
@@ -92,6 +92,7 @@ const singular = isStrategy ? 'Strategy' : isMetric ? 'Metric' : isSizer ? 'Size
 const endpoint = isStrategy ? '/api/strategies' : isMetric ? '/api/metrics' : isSizer ? '/api/sizers' : '/api/indicators'
 const initialCatalog = isStrategy ? props.bootstrap.strategies : isMetric ? props.bootstrap.metrics : isSizer ? props.bootstrap.sizers : props.bootstrap.indicators
 const assetKind = isStrategy ? 'strategy' : isMetric ? 'metric' : isSizer ? 'sizer' : 'indicator'
+const catalogKey = isStrategy ? 'strategies' : isMetric ? 'metrics' : isSizer ? 'sizers' : 'indicators'
 const intro = isSizer
   ? 'Save position-sizing presets for use by custom strategy order logic.'
   : 'Save built-in presets or bring your own Python implementation.'
@@ -111,6 +112,7 @@ const deleting = ref(false)
 const pendingDelete = ref('')
 const draft = reactive({ name: '', type: '', code: '', params: {} })
 let activatedOnce = false
+let inferredDraftName = ''
 const isEditing = computed(() => Boolean(editingName.value))
 const allItems = computed(() => isMetric ? [...catalog.builtin, ...catalog.saved] : catalog.saved)
 const filtered = computed(() => allItems.value.filter(item => filter.value === 'all' || (filter.value === 'builtin') === item.builtin).filter(item => `${item.name} ${item.type} ${item.description}`.toLowerCase().includes(search.value.toLowerCase())))
@@ -127,6 +129,10 @@ async function load() {
   loadError.value = ''
   try {
     assignCatalog(await api(endpoint))
+    emit('catalog-updated', {
+      key: catalogKey,
+      catalog: { builtin: [...catalog.builtin], saved: [...catalog.saved] }
+    })
   } catch (error) {
     loadError.value = error.message
     emit('toast', error.message, 'error')
@@ -151,15 +157,17 @@ async function save() {
   finally { saving.value = false }
 }
 function openAdd() {
+  inferredDraftName = ''
   editingName.value = ''
   draft.type = catalog.builtin[0]?.type || ''
-  draft.name = isSizer ? selectedBuiltin.value?.name || '' : ''
+  draft.name = selectedBuiltin.value?.name || ''
   draft.code = ''
   draft.params = {}
   editor.value = isMetric ? 'custom' : 'builtin'
   if (!isMetric) resetParameters()
 }
 function openEdit(item) {
+  inferredDraftName = ''
   editingName.value = item.name
   draft.name = item.name
   draft.type = item.type
@@ -168,6 +176,7 @@ function openEdit(item) {
   editor.value = item.builtin ? 'builtin' : 'custom'
 }
 function closeEditor() {
+  inferredDraftName = ''
   editor.value = ''
   editingName.value = ''
   draft.name = ''
@@ -177,14 +186,25 @@ function resetParameters() {
   draft.params = Object.fromEntries(
     (selectedBuiltin.value?.parameters || []).map(parameter => [parameter.name, parameter.default])
   )
-  if (isSizer && !isEditing.value) draft.name = selectedBuiltin.value?.name || ''
+  if (!isEditing.value) draft.name = selectedBuiltin.value?.name || ''
 }
 function selectEditor(value) {
+  const changingMode = editor.value !== value
+  inferredDraftName = ''
+  if (value === 'custom' && changingMode) draft.name = ''
   editor.value = value
-  if (value === 'builtin' && !selectedBuiltin.value) {
-    draft.type = catalog.builtin[0]?.type || ''
+  if (value === 'builtin') {
+    if (!selectedBuiltin.value) draft.type = catalog.builtin[0]?.type || ''
     resetParameters()
+    if (changingMode) draft.name = selectedBuiltin.value?.name || ''
   }
+}
+function pythonClassName(code) {
+  const classes = [...String(code || '').matchAll(/^\s*class\s+([A-Za-z_]\w*)\b/gm)]
+  return classes.at(-1)?.[1] || ''
+}
+function isStarterClassName(name) {
+  return String(name).toLowerCase().startsWith('my')
 }
 async function loadPython(event) {
   const file = event.target.files?.[0]
@@ -194,7 +214,6 @@ async function loadPython(event) {
     return
   }
   draft.code = await file.text()
-  if (!draft.name) draft.name = file.name.slice(0, -3)
 }
 async function destroy() {
   const name = pendingDelete.value
@@ -209,10 +228,27 @@ async function destroy() {
   catch (error) { emit('toast', error.message, 'error') }
   finally { deleting.value = false }
 }
-watch(editor, value => {
-  if (value === 'custom' && !draft.code.trim()) {
-    draft.code = customCodePlaceholder
+watch([editor, () => draft.code, () => draft.name], ([mode, code, name]) => {
+  if (mode !== 'custom') {
+    inferredDraftName = ''
+    return
   }
+  if (!code.trim()) {
+    draft.code = customCodePlaceholder
+    return
+  }
+  if (name.trim() && name !== inferredDraftName) {
+    inferredDraftName = ''
+    return
+  }
+  const className = pythonClassName(code)
+  if (!className || isStarterClassName(className)) {
+    if (name === inferredDraftName) draft.name = ''
+    inferredDraftName = ''
+    return
+  }
+  inferredDraftName = className
+  if (name !== className) draft.name = className
 })
 onMounted(() => {
   if (initialCatalog) assignCatalog(initialCatalog)

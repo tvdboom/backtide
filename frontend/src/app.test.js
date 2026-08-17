@@ -10,8 +10,14 @@ vi.mock('./api', () => ({ api }))
 vi.mock('./pages/analysis-page.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('./pages/dashboard-page.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('./pages/download-page.vue', () => ({ default: { name: 'DownloadPage', template: '<input aria-label="Download state" />' } }))
-vi.mock('./pages/experiment-page.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('./pages/library-page.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('./pages/experiment-page.vue', () => ({ default: {
+  props: ['bootstrap'],
+  template: '<div class="experiment-catalog">{{ bootstrap && bootstrap.strategies ? bootstrap.strategies.saved.map(item => item.name).join(",") : "" }}</div>'
+} }))
+vi.mock('./pages/library-page.vue', () => ({ default: {
+  emits: ['catalog-updated'],
+  template: '<button class="publish-catalog" @click="$emit(\'catalog-updated\', { key: \'strategies\', catalog: { builtin: [], saved: [{ name: \'Fresh strategy\' }] } })">Publish</button>'
+} }))
 vi.mock('./pages/live-page.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('./pages/live-history-page.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('./pages/results-page.vue', () => ({ default: { template: '<div />' } }))
@@ -70,6 +76,25 @@ describe('App theme control', () => {
     expect(wrapper.text()).toContain('Indicators')
     expect(wrapper.text()).toContain('Metrics')
     expect(wrapper.text()).toContain('Sizers')
+    wrapper.unmount()
+  })
+
+  it('shares newly saved library assets with the experiment builder immediately', async () => {
+    api.mockImplementation(path => Promise.resolve(path === '/api/live'
+      ? { status: 'stopped' }
+      : { strategies: { builtin: [], saved: [] } }))
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const strategies = wrapper.findAll('nav button')
+      .find(button => button.text().includes('Strategies'))
+    const experiment = wrapper.findAll('nav button')
+      .find(button => button.text().includes('New experiment'))
+    await strategies.trigger('click')
+    await wrapper.get('.publish-catalog').trigger('click')
+    await experiment.trigger('click')
+
+    expect(wrapper.get('.experiment-catalog').text()).toContain('Fresh strategy')
     wrapper.unmount()
   })
 

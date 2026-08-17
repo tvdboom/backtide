@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, markRaw, shallowRef } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ResultsPage from './results-page.vue'
 
@@ -60,7 +61,8 @@ const detail = {
     strategy_id: 'strategy-1',
     strategy_name: 'Trend engine',
     is_benchmark: false,
-    metrics: { total_return: 0.12, sharpe_ratio: 1.42, max_drawdown: -0.08 },
+    base_currency: 'USD',
+    metrics: { total_return: 0.12, sharpe_ratio: 1.42, pnl: 1250, max_drawdown: -0.08 },
     trades: [{ symbol: 'AAPL' }],
     orders: []
   }]
@@ -198,10 +200,10 @@ describe('results page', () => {
     expect(wrapper.text()).toContain('Study 12')
   })
 
-  it('does not repeat the benchmark label when it is already the strategy name', async () => {
+  it('shows a benchmark symbol without a duplicated benchmark label', async () => {
     query.mockResolvedValue([{
       ...summary,
-      runs: [{ ...summary.runs[0], strategy_name: 'Benchmark', is_benchmark: true }]
+      runs: [{ ...summary.runs[0], strategy_name: 'SPY', is_benchmark: true }]
     }])
     wrapper = mount(ResultsPage, { props: { bootstrap: {} } })
     await flushPromises()
@@ -209,19 +211,19 @@ describe('results page', () => {
     await wrapper.get('.breakdown-toggle').trigger('click')
 
     const heading = wrapper.get('.run-breakdown-card > header')
-    expect(heading.get('strong').text()).toBe('Benchmark')
+    expect(heading.get('strong').text()).toBe('SPY')
     expect(heading.find('small').exists()).toBe(false)
   })
 
   it('uses an icon instead of a duplicated benchmark pill in the strategy selector', async () => {
     api.mockImplementation(path => path === '/api/jobs' ? [] : {
       ...detail,
-      runs: [{ ...detail.runs[0], strategy_name: 'Benchmark', is_benchmark: true }]
+      runs: [{ ...detail.runs[0], strategy_name: 'SPY', is_benchmark: true }]
     })
     await mountAndOpen({ display: { logokit_api_key: 'test-token' } })
 
     const benchmark = wrapper.get('.strategy-switcher button')
-    expect(benchmark.text()).toBe('Benchmark')
+    expect(benchmark.text()).toBe('SPY')
     expect(benchmark.find('svg').exists()).toBe(true)
     expect(benchmark.find('.badge').exists()).toBe(false)
   })
@@ -232,6 +234,7 @@ describe('results page', () => {
     expect(wrapper.text()).toContain('Experiment overview')
     expect(wrapper.text()).toContain('Strategies')
     expect(wrapper.get('.result-workspace').text()).toContain('Rolling Sharpe')
+    expect(wrapper.get('.result-workspace').text()).toContain('Dividends')
     expect(wrapper.get('.result-workspace').text()).toContain('Cumulative profit and loss over time for each strategy.')
     expect(wrapper.findAll('.result-workspace')[1].text()).toContain('Trades on price')
     expect(wrapper.get('.result-overview-metrics').text()).toContain('Sharpe1.42')
@@ -241,15 +244,26 @@ describe('results page', () => {
     expect(wrapper.get('.result-overview-metrics').text()).toContain('Symbols2')
     expect(wrapper.get('.result-overview-metrics').text()).toContain('Period2024-01-01 → 2024-03-01 (61d)')
     expect(wrapper.get('.result-overview-metrics').text()).toContain('Interval1d')
-    expect(wrapper.findAll('.context-metrics .result-overview-metric').map(item => item.get('span').text())).toEqual([
-      'Strategies', 'Period', 'Symbols', 'Interval'
+    expect(wrapper.findAll('.primary-metrics .result-overview-metric').map(item => item.get('span').text())).toEqual([
+      'Sharpe', 'Period', 'Interval', 'Status'
     ])
+    expect(wrapper.findAll('.context-metrics .result-overview-metric').map(item => item.get('span').text())).toEqual([
+      'Strategies', 'Symbols', 'Started at', 'Duration'
+    ])
+    const overviewMetrics = wrapper.findAll('.result-overview-metric')
+    const periodMetric = overviewMetrics.find(item => item.get('span').text() === 'Period')
+    const startedAtMetric = overviewMetrics.find(item => item.get('span').text() === 'Started at')
+    expect(periodMetric.get('svg').classes()).toContain('lucide-calendar-range-icon')
+    expect(startedAtMetric.get('svg').classes()).toContain('lucide-calendar-days-icon')
     expect(post).toHaveBeenCalledWith('/api/results/plot', expect.objectContaining({ plot: 'pnl' }))
     expect(post).not.toHaveBeenCalledWith('/api/results/plot', expect.objectContaining({ plot: 'mae_mfe' }))
 
     const strategyTabs = wrapper.findAll('.strategy-plot-tabs button').map(button => button.text())
-    expect(strategyTabs).toEqual(['Metrics', 'MAE / MFE', 'Position size', 'Trades on price', 'Trades', 'Orders'])
+    expect(strategyTabs).toEqual(['Metrics', 'MAE / MFE', 'Position size', 'Trades on price', 'Orders'])
     expect(wrapper.findAll('.result-workspace')[1].get('.result-table').exists()).toBe(true)
+    expect(wrapper.get('.result-metrics').text()).toContain('PnL')
+    expect(wrapper.get('.result-metrics').text()).toContain('1,250.00')
+    expect(wrapper.findAll('.result-metrics .metric-card small')).toHaveLength(0)
 
     await wrapper.get('.results-back').trigger('click')
     expect(wrapper.find('.result-detail-page').exists()).toBe(false)
@@ -286,53 +300,9 @@ describe('results page', () => {
     expect(wrapper.get('.result-overview-metrics').text()).toContain('Period01/01/2024 → 01/03/2024')
 
     const tabs = wrapper.findAll('.strategy-plot-tabs button')
-    await tabs.find(button => button.text() === 'Trades').trigger('click')
-    expect(wrapper.get('.result-table').text()).toContain('11/08/2026 19:05')
     await tabs.find(button => button.text() === 'Orders').trigger('click')
     await flushPromises()
     expect(wrapper.get('.result-orders-table').text()).toContain('11/08/2026 19:05')
-  })
-
-  it('renders trades with symbol logos, numeric alignment, and PnL tones', async () => {
-    api.mockImplementation(path => path === '/api/jobs' ? [] : {
-      ...detail,
-      config_metadata: { ...detail.config_metadata, instrument_type: 'cryptocurrencies' },
-      runs: [{
-        ...detail.runs[0],
-        trades: [
-          {
-            symbol: 'BTC-USD', quantity: 2.3893, entry_ts: 1509325200,
-            entry_price: 4181.0695, exit_ts: 1510462800, exit_price: 6241.9275, pnl: 4909.1829
-          },
-          {
-            symbol: 'BTC-USD', quantity: 1.7657, entry_ts: 1515214800,
-            entry_price: 16968.8702, exit_ts: 1515560400, exit_price: 14393.7995, pnl: -4572.231
-          }
-        ]
-      }]
-    })
-    await mountAndOpen({ display: { logokit_api_key: 'test-token' } })
-
-    const tradesTab = wrapper.findAll('.strategy-plot-tabs button').find(button => button.text() === 'Trades')
-    await tradesTab.trigger('click')
-
-    const table = wrapper.get('.result-trades-table')
-    expect(table.classes()).toContain('result-record-table')
-    expect(table.findAll('th').map(header => header.text())).toEqual([
-      'Symbol', 'Quantity', 'Entry ts', 'Entry price', 'Exit ts', 'Exit price', 'PnL'
-    ])
-    expect(table.findAll('th')[1].classes()).toContain('number')
-    expect(table.findAll('th')[3].classes()).toContain('number')
-    expect(table.findAll('th')[5].classes()).toContain('number')
-
-    const rows = table.findAll('tbody tr')
-    expect(rows).toHaveLength(2)
-    expect(rows[0].get('.order-symbol-cell').text()).toBe('BTC-USD')
-    expect(rows[0].get('.order-symbol-logo img').attributes('src')).toBe(
-      'https://img.logokit.com/crypto/BTC?token=test-token'
-    )
-    expect(rows[0].findAll('td')[6].classes()).toContain('positive')
-    expect(rows[1].findAll('td')[6].classes()).toContain('negative')
   })
 
   it('renders orders as the legacy formatted table without nested JSON', async () => {
@@ -379,10 +349,12 @@ describe('results page', () => {
     expect(rows[0].text()).toContain('Buy')
     expect(rows[0].findAll('td')[5].text()).toContain('1,000.00')
     expect(rows[0].findAll('td')[6].classes()).toContain('positive')
+    expect(rows[0].get('.execution-status .badge').classes()).toContain('success')
     expect(rows[1].text()).toContain('MSFT')
     expect(rows[1].text()).toContain('Sell')
     expect(rows[1].findAll('td')[6].classes()).toContain('negative')
     expect(rows[1].findAll('td')[8].classes()).toContain('warning')
+    expect(rows[1].get('.execution-status .badge').classes()).toContain('partial')
     expect(table.text()).not.toContain('order_type')
     expect(table.text()).not.toContain('{')
   })
@@ -431,6 +403,30 @@ describe('results page', () => {
 
     expect(wrapper.get('.result-detail-page').text()).toContain('Momentum study')
     expect(sessionStorage.getItem('backtide:result-id')).toBeNull()
+  })
+
+  it('returns a cached result page to the overview after a new experiment is queued', async () => {
+    const away = markRaw({ template: '<div class="away" />' })
+    const current = shallowRef(markRaw(ResultsPage))
+    const Host = defineComponent({
+      setup: () => ({ current }),
+      template: '<KeepAlive><component :is="current" :bootstrap="{}" /></KeepAlive>'
+    })
+    wrapper = mount(Host)
+    await flushPromises()
+    await wrapper.get('.experiment-card-actions .secondary').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.result-detail-page').exists()).toBe(true)
+
+    current.value = away
+    await wrapper.vm.$nextTick()
+    sessionStorage.setItem('backtide:results-overview', 'true')
+    current.value = markRaw(ResultsPage)
+    await wrapper.vm.$nextTick()
+    await flushPromises()
+
+    expect(wrapper.find('.result-detail-page').exists()).toBe(false)
+    expect(wrapper.get('.experiment-result-card').text()).toContain('Momentum study')
   })
 
   it('opens a new experiment with the saved configuration', async () => {
@@ -512,6 +508,22 @@ describe('results page', () => {
     await tabs[1].trigger('click')
 
     expect(workspace.get('.result-plot-description').text()).toBe('Cash balance timeline by strategy and settlement currency.')
+  })
+
+  it('loads the dividends plot for the selected experiment', async () => {
+    await mountAndOpen()
+    post.mockClear()
+
+    const dividends = wrapper.findAll('.result-workspace')[0]
+      .findAll('.result-plot-tabs button')
+      .find(button => button.text() === 'Dividends')
+    await dividends.trigger('click')
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith('/api/results/plot', expect.objectContaining({
+      experiment_id: 'experiment-1',
+      plot: 'dividends'
+    }))
   })
 
   it('places active plot controls in a right-side options region', async () => {

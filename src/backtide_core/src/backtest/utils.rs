@@ -222,16 +222,17 @@ pub fn build_py_cache(
 
 /// Build a Python dict `{symbol: dataframe}` view through bar `idx`.
 ///
-/// Takes pre-built full dataframes per symbol and returns cheap O(1)
-/// `df.iloc[:idx+1]` views.
+/// Restricts a shared cache to the symbols available to this strategy run,
+/// then returns cheap O(1) `df.iloc[:idx+1]` views.
 pub fn build_per_symbol_view<'py>(
     py: Python<'py>,
     cached: &HashMap<String, Py<PyAny>>,
     idx: usize,
+    symbols: &HashSet<&str>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let out = PyDict::new(py);
 
-    for (sym, df) in cached {
+    for (sym, df) in cached.iter().filter(|(sym, _)| symbols.contains(sym.as_str())) {
         // The `head` method works for pandas and polars
         out.set_item(sym, df.bind(py).call_method1("head", (idx + 1,))?)?;
     }
@@ -241,21 +242,62 @@ pub fn build_per_symbol_view<'py>(
 
 /// Build a Python dict view of indicator values up to bar `idx`.
 ///
-/// Takes pre-built full numpy arrays per (indicator, symbol, series) and
-/// returns cheap O(1) `arr[:idx+1]` slice-views.
+/// Restricts pre-built full arrays to the symbols available to this strategy
+/// run and returns cheap O(1) `arr[:idx+1]` slice-views.
 pub fn build_indicator_view<'py>(
     py: Python<'py>,
     cached: &HashMap<String, HashMap<String, Py<PyAny>>>,
     idx: usize,
+    symbols: &HashSet<&str>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let out = PyDict::new(py);
 
     for (name, per_sym) in cached {
         let by_sym = PyDict::new(py);
-        for (sym, df) in per_sym {
+        for (sym, df) in per_sym.iter().filter(|(sym, _)| symbols.contains(sym.as_str())) {
             by_sym.set_item(sym, df.bind(py).call_method1("head", (idx + 1,))?)?;
         }
         out.set_item(name, by_sym)?;
     }
     Ok(out.into_any())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn python_strategy_views_exclude_symbols_outside_the_run_universe() {
+        let aligned = HashMap::from([
+            ("SAB.MC".to_owned(), vec![Some(Bar::NAN)]),
+            ("EXW1.DE".to_owned(), vec![Some(Bar::NAN)]),
+        ]);
+        let indicators = HashMap::from([(
+            "signal".to_owned(),
+            HashMap::from([
+                ("SAB.MC".to_owned(), vec![vec![1.0]]),
+                ("EXW1.DE".to_owned(), vec![vec![2.0]]),
+            ]),
+        )]);
+        let cached_symbols = HashSet::from(["SAB.MC", "EXW1.DE"]);
+        let strategy_symbols = HashSet::from(["SAB.MC"]);
+
+        Python::attach(|py| {
+            let (data, indicator_data) =
+                build_py_cache(py, &aligned, &indicators, &cached_symbols).unwrap();
+
+            let data_view = build_per_symbol_view(py, &data, 0, &strategy_symbols).unwrap();
+            let data_view = data_view.cast::<PyDict>().unwrap();
+            assert!(data_view.contains("SAB.MC").unwrap());
+            assert!(!data_view.contains("EXW1.DE").unwrap());
+
+            let indicator_view =
+                build_indicator_view(py, &indicator_data, 0, &strategy_symbols).unwrap();
+            let indicator_view = indicator_view.cast::<PyDict>().unwrap();
+            let signal =
+                indicator_view.get_item("signal").unwrap().unwrap().cast_into::<PyDict>().unwrap();
+            assert!(signal.contains("SAB.MC").unwrap());
+            assert!(!signal.contains("EXW1.DE").unwrap());
+        });
+    }
 }

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, ref } from 'vue'
 import AnalysisPage from './analysis-page.vue'
 
 const { api, post } = vi.hoisted(() => ({
@@ -22,7 +23,11 @@ describe('analysis page', () => {
       name: 'Apple Inc.',
       instrument_type: 'stocks'
     }])
-    post.mockReset().mockResolvedValue({ data: [], layout: {} })
+    post.mockReset().mockImplementation((_endpoint, payload) => Promise.resolve(
+      payload.plot === 'metrics'
+        ? { rows: [{ symbol: 'AAPL', sharpe: 1.24, cagr: 0.137, max_dd: -0.082, win_rate: 0.54 }] }
+        : { data: [], layout: {} }
+    ))
     sessionStorage.clear()
   })
 
@@ -33,6 +38,20 @@ describe('analysis page', () => {
     expect(wrapper.find('.chart-title .badge').exists()).toBe(false)
     expect(wrapper.get('.chart-title').text()).not.toContain('1 series')
     expect(wrapper.text()).not.toContain('Run analysis')
+  })
+
+  it('opens with the stock metrics table instead of a chart', async () => {
+    const wrapper = mount(AnalysisPage, { props: { bootstrap: {} } })
+    await flushPromises()
+
+    expect(wrapper.get('.chart-tabs button.active').text()).toContain('Metrics')
+    expect(wrapper.find('.chart-stub').exists()).toBe(false)
+    expect(wrapper.get('.analysis-metrics-table').text()).toContain('AAPL')
+    expect(wrapper.get('.analysis-metrics-table').text()).toContain('1.24')
+    expect(wrapper.get('.analysis-metrics-table').text()).toContain('+13.70%')
+    expect(post).toHaveBeenCalledWith('/api/analysis', expect.objectContaining({
+      plot: 'metrics', symbols: ['AAPL']
+    }))
   })
 
   it('shows instrument logos in the symbol menu and selected chips', async () => {
@@ -81,6 +100,41 @@ describe('analysis page', () => {
       symbols: ['AAPL'], interval: '15m'
     }))
     expect(sessionStorage.getItem('backtide:analysis-interval')).toBeNull()
+  })
+
+  it('selects the symbol requested after the cached page is reactivated', async () => {
+    api.mockResolvedValue([
+      { symbol: 'AAPL', interval: '1d', provider: 'yahoo', name: 'Apple Inc.' },
+      { symbol: 'MSFT', interval: '15m', provider: 'yahoo', name: 'Microsoft Corp.' }
+    ])
+    const OtherPage = defineComponent({ template: '<div>Other page</div>' })
+    const Host = defineComponent({
+      components: { AnalysisPage, OtherPage },
+      setup() {
+        return { analysisActive: ref(true) }
+      },
+      template: `
+        <KeepAlive>
+          <AnalysisPage v-if="analysisActive" :bootstrap="{}" />
+          <OtherPage v-else />
+        </KeepAlive>
+      `
+    })
+    const wrapper = mount(Host)
+    await flushPromises()
+    wrapper.vm.analysisActive = false
+    await flushPromises()
+    sessionStorage.setItem('backtide:analysis-symbols', JSON.stringify(['MSFT']))
+    sessionStorage.setItem('backtide:analysis-interval', '15m')
+
+    wrapper.vm.analysisActive = true
+    await flushPromises()
+
+    expect(wrapper.get('.tag').text()).toContain('MSFT')
+    expect(wrapper.get('.tag').text()).not.toContain('AAPL')
+    expect(wrapper.findAll('select')[0].element.value).toBe('15m')
+    expect(sessionStorage.getItem('backtide:analysis-symbols')).toBeNull()
+    wrapper.unmount()
   })
 
   it('refreshes automatically when interval or price changes', async () => {

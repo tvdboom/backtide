@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from backtide.analysis.utils import REFERENCE_LINE, _plot
+from backtide.backtest import OrderStatus
 from backtide.config import get_config
 
 if TYPE_CHECKING:
@@ -126,7 +127,7 @@ def plot_position_size(
     fig = go.Figure()
     fig.add_hline(y=0, line=REFERENCE_LINE)
 
-    fills = [o for o in run.orders if o.status == "filled"]
+    fills = [o for o in run.orders if o.status == OrderStatus.Filled]
 
     by_symbol = defaultdict(list)
     for o in fills:

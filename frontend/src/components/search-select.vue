@@ -18,7 +18,13 @@
           <small v-if="descriptions[item]">{{ descriptions[item] }}</small>
         </span>
         <template v-else>{{ item }}</template>
-        <button v-if="removable" type="button" :aria-label="`Remove ${item}`" @click.stop="remove(item)">×</button>
+        <button
+          v-if="removable"
+          type="button"
+          :aria-label="`Remove ${item}`"
+          @pointerdown.stop.prevent
+          @click.stop="remove(item)"
+        >×</button>
       </span>
       <input
         :id="inputId"
@@ -29,7 +35,6 @@
         @focus="open"
         @blur="close"
         @keydown.enter.prevent="choose(filtered[0] || needle)"
-        @keydown.backspace="backspace"
       />
     </div>
     <div v-if="focused && loading" class="search-menu search-state" role="status">
@@ -125,8 +130,18 @@ function selectedLogoSource(value) {
 }
 
 function selectedLogoCandidates(value) {
-  return [props.logos[value], props.selectedLogos[value]]
+  const sources = [props.logos[value], props.selectedLogos[value]]
     .filter((source, index, sources) => source && sources.indexOf(source) === index)
+  return [
+    ...sources,
+    ...sources.map(source => retryLogoSource(source, 1)),
+    ...sources.map(source => retryLogoSource(source, 2))
+  ]
+}
+
+function retryLogoSource(source, attempt) {
+  const separator = source.includes('?') ? '&' : '?'
+  return `${source}${separator}selected_retry=${attempt}`
 }
 
 function selectedLogoLoaded(value) {
@@ -174,9 +189,6 @@ function open() {
 }
 function remove(value) {
   emit('update:modelValue', props.modelValue.filter(item => item !== value))
-}
-function backspace() {
-  if (!needle.value && props.modelValue.length) remove(props.modelValue.at(-1))
 }
 function close() {
   window.clearTimeout(closeTimer)

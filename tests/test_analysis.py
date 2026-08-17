@@ -34,7 +34,7 @@ from backtide.analysis.utils import (
     _plot,
     _resolve_dt,
 )
-from backtide.backtest import RunResult
+from backtide.backtest import OrderStatus, RunResult
 from backtide.core.data import Currency
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -762,7 +762,7 @@ class _StubOrderRecord:
         symbol: str,
         quantity: int,
         ts: int,
-        status: str = "filled",
+        status: OrderStatus = OrderStatus.Filled,
         *,
         fill_price: float = 100.0,
         commission: float = 0.0,

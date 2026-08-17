@@ -363,6 +363,61 @@ describe('live page', () => {
     wrapper.unmount()
   })
 
+  it('shows a failed session as a red badge with the full error on hover', async () => {
+    const error = 'websocket error: IO error: the remote host closed the connection'
+    api.mockResolvedValue({
+      id: 'failed-session',
+      status: 'error',
+      config: {
+        mode: 'paper', provider: 'kraken', interval: '1m', symbols: ['BTC-USD'], strategies: []
+      },
+      snapshot: {},
+      updates: [],
+      error
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    const badge = wrapper.get('.session-actions .status-pill')
+    const tooltip = wrapper.get('.session-status-tooltip')
+    expect(badge.text()).toContain('Session failed')
+    expect(badge.classes()).toContain('failed')
+    expect(badge.attributes('tabindex')).toBe('0')
+    expect(badge.attributes('aria-describedby')).toBe('session-error-tooltip')
+    expect(tooltip.text()).toBe(error)
+    expect(wrapper.find('.callout.error-state').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('clears a failed session error when opening a new configuration', async () => {
+    const error = 'websocket error: IO error: the remote host closed the connection'
+    api.mockResolvedValue({
+      id: 'failed-session',
+      status: 'error',
+      config: {
+        mode: 'paper', provider: 'kraken', interval: '1m', symbols: ['BTC-USD'], strategies: []
+      },
+      snapshot: {},
+      updates: [],
+      error
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    await wrapper.get('.session-actions .primary').trigger('click')
+
+    expect(wrapper.find('.live-setup').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain(error)
+    expect(wrapper.find('.session-status-tooltip').exists()).toBe(false)
+    expect(wrapper.emitted('live-status').at(-1)[0]).toMatchObject({
+      id: null,
+      status: 'idle',
+      error: null
+    })
+    wrapper.unmount()
+  })
+
   it('applies every experiment prefill when a cached Live trading page is reopened', async () => {
     post.mockResolvedValue({
       status: 'running', config: {}, snapshot: {}, strategies: {}, updates: [], health: {}, error: null
@@ -722,6 +777,8 @@ describe('live page', () => {
         config: {
           initial_cash: 10_000,
           base_currency: 'EUR',
+          allow_short: true,
+          allow_margin: true,
           metrics: ['total_return', 'final_equity']
         }
       },
@@ -844,6 +901,58 @@ describe('live page', () => {
       .toEqual([0, 2_200])
     expect(wrapper.get('.live-portfolio-panel').text()).toContain('ETH-USD')
     expect(wrapper.get('.live-portfolio-panel').text()).not.toContain('BTC-USD')
+    wrapper.unmount()
+  })
+
+  it('shows only relevant exposure metrics for a cash-only long account', async () => {
+    api.mockResolvedValue({
+      status: 'running',
+      config: {
+        provider: 'kraken',
+        interval: '1m',
+        symbols: ['BTC-USD'],
+        strategies: ['Buy & Hold'],
+        config: {
+          initial_cash: 10_000,
+          base_currency: 'EUR',
+          allow_short: false,
+          allow_margin: false
+        }
+      },
+      snapshot: {
+        equity: 10_000,
+        latest_prices: { 'BTC-USD': 100 },
+        portfolio: { positions: {}, cash: { EUR: 10_000 }, orders: [] }
+      },
+      strategies: {
+        'Buy & Hold': {
+          equity: 10_000,
+          gross_exposure: 2_500,
+          net_exposure: 2_500,
+          leverage: 0.25,
+          buying_power: 7_500,
+          drawdown: 0,
+          total_costs: 0,
+          portfolio: { positions: {}, cash: { EUR: 10_000 }, orders: [] }
+        }
+      },
+      updates: [],
+      health: {},
+      error: null
+    })
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    const riskMetrics = wrapper.findAll('[data-risk-metric]')
+    expect(riskMetrics.map(item => item.attributes('data-risk-metric'))).toEqual([
+      'gross-exposure',
+      'buying-power',
+      'drawdown',
+      'total-costs'
+    ])
+    expect(wrapper.get('[data-risk-metric="buying-power"] .risk-metric-help')
+      .attributes('aria-label'))
+      .toBe('About this setting: Account value still available for additional positions without borrowing funds.')
     wrapper.unmount()
   })
 
@@ -1052,7 +1161,7 @@ describe('live page', () => {
     await flushPromises()
 
     const execution = wrapper.get('.execution-panel')
-    expect(wrapper.get('.live-metrics').text()).toContain('net of commissions and financing')
+    expect(wrapper.findAll('.live-metrics .metric-card small')).toHaveLength(0)
     expect(execution.findAll('th').map(column => column.text())).toEqual([
       'Time', 'Symbol', 'Side', 'Type', 'Quantity', 'Fill price', 'P&L', 'Commission',
       'Status'
@@ -1118,6 +1227,7 @@ describe('live page', () => {
 
     const quotes = wrapper.findAll('.quote-row')
     expect(quotes).toHaveLength(2)
+    expect(wrapper.findAll('.quote-row > span small')).toHaveLength(0)
     expect(quotes[0].get('img').attributes('src')).toContain('img.logokit.com/crypto/BTC')
     expect(quotes[0].text()).toContain('60,000')
     expect(quotes[1].get('img').attributes('src')).toContain('img.logokit.com/crypto/ETH')
@@ -1127,11 +1237,14 @@ describe('live page', () => {
     const executions = wrapper.findAll('.live-execution-table tbody tr')
     expect(executions).toHaveLength(12)
     const status = executions[0].get('.badge')
-    const tooltip = executions[0].get('[role="tooltip"]')
     expect(status.classes()).toContain('error')
     expect(status.attributes('tabindex')).toBe('0')
-    expect(status.attributes('aria-describedby')).toBe(tooltip.attributes('id'))
-    expect(tooltip.text()).toBe('insufficient cash')
+    await status.trigger('mouseenter')
+    await flushPromises()
+    const tooltip = document.body.querySelector('.execution-status-tooltip')
+    expect(status.attributes('aria-describedby')).toBe(tooltip?.id)
+    expect(tooltip?.textContent.trim()).toBe('insufficient cash')
+    expect(tooltip?.parentElement).toBe(document.body)
     expect(executions[0].find('.execution-reason').exists()).toBe(false)
     wrapper.unmount()
   })

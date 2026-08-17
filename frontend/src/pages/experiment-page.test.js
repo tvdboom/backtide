@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, markRaw, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import IntervalPicker from '../components/interval-picker.vue'
 import ExperimentPage from './experiment-page.vue'
@@ -137,8 +138,9 @@ describe('experiment page', () => {
     expect(wrapper.get('.currency-picker-field').exists()).toBe(true)
 
     await wrapper.findAll('.tabs button')[5].trigger('click')
-    expect(wrapper.get('select').element.value).toBe('Percentage')
-    expect(wrapper.get('select').find('option:checked').text()).toBe('Percentage (%)')
+    expect(wrapper.find('select').exists()).toBe(false)
+    expect(wrapper.get('#experiment-commission-pct').element.value).toBe('0.1')
+    expect(wrapper.get('#experiment-commission-fixed').element.value).toBe('0')
 
     await wrapper.findAll('.tabs button')[7].trigger('click')
     expect(wrapper.get('select').element.value).toBe('ForwardFill')
@@ -188,6 +190,63 @@ describe('experiment page', () => {
       'https://img.logokit.com/ticker/AVIANRO?token=test%20token'
     )
     expect(wrapper.find('.logo-attribution').exists()).toBe(false)
+  })
+
+  it('does not remove a selected symbol when its field label is clicked', async () => {
+    query.mockResolvedValue([
+      { symbol: 'AAPL', name: 'Apple Inc.', instrument_type: 'stocks' }
+    ])
+    const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[1].trigger('click')
+    await wrapper.get('#experiment-symbols').trigger('focus')
+    await wrapper.get('.search-menu button').trigger('click')
+
+    await wrapper.get('.symbol-select-field > span').trigger('click')
+
+    expect(wrapper.findAll('.symbol-select-field .tag')).toHaveLength(1)
+    expect(wrapper.get('.symbol-select-field .tag').text()).toContain('AAPL')
+  })
+
+  it('applies a reused setup when the cached experiment builder is reactivated', async () => {
+    query.mockResolvedValue([
+      { symbol: 'AAPL', name: 'Apple Inc.', instrument_type: 'stocks' }
+    ])
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.strategies.saved = [{
+      name: 'Momentum', type: 'Macd', builtin: true, description: 'Follow trends.',
+      required_indicators: []
+    }]
+    const away = markRaw({ template: '<div class="away" />' })
+    const current = shallowRef(markRaw(ExperimentPage))
+    const Host = defineComponent({
+      setup: () => ({ current, pageBootstrap }),
+      template: '<KeepAlive><component :is="current" :bootstrap="pageBootstrap" /></KeepAlive>'
+    })
+    const wrapper = mount(Host)
+    await flushPromises()
+
+    current.value = away
+    await wrapper.vm.$nextTick()
+    const reused = structuredClone(pageBootstrap.defaults)
+    reused.general.name = 'Reused momentum setup'
+    reused.data.symbols = ['AAPL']
+    reused.portfolio.initial_cash = 25000
+    reused.strategy.strategies = ['Momentum']
+    sessionStorage.setItem('backtide:experiment-config', JSON.stringify(reused))
+
+    current.value = markRaw(ExperimentPage)
+    await wrapper.vm.$nextTick()
+    await flushPromises()
+
+    expect(wrapper.get('#experiment-name').element.value).toBe('Reused momentum setup')
+    await wrapper.findAll('.tabs button')[1].trigger('click')
+    expect(wrapper.get('.symbol-select-field .tag').text()).toContain('AAPL')
+    await wrapper.findAll('.tabs button')[2].trigger('click')
+    expect(wrapper.get('#experiment-initial-cash').element.value).toBe('25000')
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+    expect(wrapper.get('#experiment-strategies').element.closest('.search-select').textContent)
+      .toContain('Momentum')
   })
 
   it('uses a valid initial cash default', async () => {
@@ -426,21 +485,18 @@ describe('experiment page', () => {
     expect(option.find('.search-option-logo').exists()).toBe(false)
   })
 
-  it('shows only the commission inputs used by the selected commission model', async () => {
+  it('always shows percentage and fixed commission inputs without a model dropdown', async () => {
     const wrapper = mount(ExperimentPage, { props: { bootstrap } })
     await flushPromises()
     await wrapper.findAll('.tabs button')[5].trigger('click')
 
     expect(wrapper.text()).toContain('Commission (%)')
-    expect(wrapper.text()).not.toContain('Fixed commission')
-
-    await wrapper.get('#experiment-commission-type').setValue('Fixed')
-    expect(wrapper.text()).not.toContain('Commission (%)')
     expect(wrapper.text()).toContain('Fixed commission')
-
-    await wrapper.get('#experiment-commission-type').setValue('PercentagePlusFixed')
-    expect(wrapper.text()).toContain('Commission (%)')
-    expect(wrapper.text()).toContain('Fixed commission')
+    expect(wrapper.text()).toContain('Slippage (%)')
+    expect(wrapper.find('#experiment-commission-type').exists()).toBe(false)
+    expect(wrapper.get('#experiment-commission-pct').exists()).toBe(true)
+    expect(wrapper.get('#experiment-commission-fixed').exists()).toBe(true)
+    expect(wrapper.get('#experiment-slippage').exists()).toBe(true)
   })
 
   it('resets a queued experiment while preserving its selected asset class', async () => {
@@ -471,9 +527,12 @@ describe('experiment page', () => {
 
     expect(post).toHaveBeenCalledWith('/api/experiments', expect.objectContaining({
       general: expect.objectContaining({ name: 'Persistent draft' }),
-      data: expect.objectContaining({ instrument_type: 'etf', symbols: ['AAPL'] })
+      data: expect.objectContaining({ instrument_type: 'etf', symbols: ['AAPL'] }),
+      metrics: expect.objectContaining({ metrics: expect.arrayContaining(['pnl']) }),
+      exchange: expect.objectContaining({ commission_type: 'PercentagePlusFixed' })
     }))
     expect(wrapper.emitted('navigate')).toEqual([['results']])
+    expect(sessionStorage.getItem('backtide:results-overview')).toBe('true')
     expect(wrapper.get('.tabs button.active').text()).toContain('General')
     expect(wrapper.get('#experiment-name').element.value).toBe('')
 

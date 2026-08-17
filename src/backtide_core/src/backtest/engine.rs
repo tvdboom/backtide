@@ -1401,8 +1401,8 @@ fn run_one_strategy(
                 Ok(orders)
             } else {
                 Python::attach(|py| -> PyResult<Vec<Order>> {
-                    let data = build_per_symbol_view(py, cached_data, bar_index)?;
-                    let inds = build_indicator_view(py, cached_indicators, bar_index)?;
+                    let data = build_per_symbol_view(py, cached_data, bar_index, &symbols)?;
+                    let inds = build_indicator_view(py, cached_indicators, bar_index, &symbols)?;
 
                     let orders: Vec<Order> = strategy
                         .bind(py)
@@ -1515,10 +1515,11 @@ fn run_one_strategy(
                             o.id = OrderId::new();
                         }
 
-                        // Reject orders targeting a symbol not present in the experiment.
-                        if !it_map.contains_key(o.symbol.as_str()) {
+                        // Reject orders targeting a symbol outside this strategy run. The
+                        // experiment-wide profile map can also contain a benchmark symbol.
+                        if !symbols.contains(o.symbol.as_str()) {
                             let reason = format!(
-                                "unknown symbol {:?}: not in the experiment's symbol list",
+                                "unknown symbol {:?}: not in this strategy run's symbol list",
                                 o.symbol
                             );
                             warn!(strategy=%name, order_id=%o.id, "{reason}");

@@ -54,6 +54,9 @@ class MyIndicator(BaseIndicator):
 MyIndicator()
 ```
 
+See [Indicator examples](../examples/indicators.md) for complete single-output
+and rolling custom indicators that work with both supported dataframe backends.
+
 <br>
 
 ## Built-in indicators

@@ -113,7 +113,7 @@ describe('download page', () => {
     expect(wrapper.get('.download-profile-meta').text()).toContain('ExchangeXNAS')
     expect(wrapper.get('.download-profile-meta').text()).toContain('CurrencyUSD')
     expect(wrapper.findAll('.download-profile')[1].get('.download-profile-icon img').attributes('src')).toBe(
-      'https://img.logokit.com/ticker/EURUSD%3ACUR?token=test%20token'
+      'https://img.logokit.com/ticker/EURUSD:CUR?token=test%20token'
     )
     const interval = wrapper.get('.download-interval-row').text()
     expect(interval).toContain('Provider availability')

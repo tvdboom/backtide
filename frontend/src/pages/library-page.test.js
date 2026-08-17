@@ -36,6 +36,10 @@ const bootstrap = {
       parameters: [{ name: 'fraction', label: 'Fraction', kind: 'number', default: 0.1, required: false }]
     }],
     saved: [{ name: 'Ten percent', type: 'FixedFractional', builtin: true, description: 'Use ten percent.', params: { fraction: 0.1 } }]
+  },
+  metrics: {
+    builtin: [{ key: 'sharpe', name: 'Sharpe ratio', builtin: true, description: 'Risk-adjusted return.' }],
+    saved: []
   }
 }
 
@@ -45,6 +49,7 @@ describe('library page', () => {
     api.mockImplementation(async endpoint => {
       if (endpoint === '/api/strategies') return bootstrap.strategies
       if (endpoint === '/api/sizers') return bootstrap.sizers
+      if (endpoint === '/api/metrics') return bootstrap.metrics
       return bootstrap.indicators
     })
     post.mockReset()
@@ -60,6 +65,10 @@ describe('library page', () => {
     expect(wrapper.text()).toContain('Long term')
     expect(wrapper.find('.loading-screen').exists()).toBe(false)
     expect(api).toHaveBeenCalledWith('/api/strategies')
+    expect(wrapper.emitted('catalog-updated').at(-1)[0]).toEqual({
+      key: 'strategies',
+      catalog: bootstrap.strategies
+    })
   })
 
   it.each(['strategies', 'indicators', 'sizers'])('labels %s editor options without implementation details', async page => {
@@ -78,7 +87,42 @@ describe('library page', () => {
     expect(wrapper.get('.library-editor input[required]').attributes('maxlength')).toBe('20')
 
     await wrapper.findAll('.library-editor-mode button')[1].trigger('click')
-    expect(wrapper.get('.custom-source-row input[required]').attributes('maxlength')).toBe('20')
+    const customName = wrapper.get('.custom-source-row input')
+    expect(customName.attributes('maxlength')).toBe('20')
+    expect(customName.attributes('required')).toBeUndefined()
+    expect(customName.attributes('placeholder')).toBe('Defaults to Python class name')
+  })
+
+  it.each([
+    ['strategies', 'Buy and hold'],
+    ['indicators', 'Simple moving average'],
+    ['sizers', 'Fixed Fractional']
+  ])('uses the selected built-in %s class name as the default asset name', async (page, name) => {
+    location.hash = `#${page}`
+    const wrapper = mount(LibraryPage, { props: { bootstrap } })
+    await flushPromises()
+
+    await wrapper.get('.page-intro .primary').trigger('click')
+
+    expect(wrapper.get('.library-editor input[required]').element.value).toBe(name)
+  })
+
+  it('updates the default name when another built-in class is selected', async () => {
+    location.hash = '#strategies'
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.strategies.builtin.push({
+      type: 'AdaptiveRsi',
+      name: 'Adaptive RSI',
+      parameters: []
+    })
+    api.mockResolvedValue(pageBootstrap.strategies)
+    const wrapper = mount(LibraryPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+
+    await wrapper.get('.page-intro .primary').trigger('click')
+    await wrapper.get('.library-editor select').setValue('AdaptiveRsi')
+
+    expect(wrapper.get('.library-editor input[required]').element.value).toBe('Adaptive RSI')
   })
 
   it('uses the shared titled toggle field for boolean constructor options', async () => {
@@ -98,6 +142,124 @@ describe('library page', () => {
     expect(field.get('.field-info').exists()).toBe(true)
     expect(field.get('.toggle-description').text()).toBe('Turn this option on or off.')
     expect(field.get('.toggle').element.checked).toBe(true)
+  })
+
+  it.each([
+    ['strategies', '/api/strategies', 'MomentumStrategy'],
+    ['indicators', '/api/indicators', 'MomentumIndicator'],
+    ['sizers', '/api/sizers', 'MomentumSizer'],
+    ['metrics', '/api/metrics', 'MomentumMetric']
+  ])('prefills a custom %s name from its Python class', async (page, endpoint, className) => {
+    location.hash = `#${page}`
+    post.mockResolvedValue({ saved: className })
+    const wrapper = mount(LibraryPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          PythonEditor: {
+            props: ['modelValue'],
+            emits: ['update:modelValue'],
+            template: '<textarea class="python-editor-stub" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
+          }
+        }
+      }
+    })
+    await flushPromises()
+
+    await wrapper.get('.page-intro .primary').trigger('click')
+    if (page !== 'metrics') {
+      await wrapper.findAll('.library-editor-mode button')[1].trigger('click')
+    }
+    const name = wrapper.get('.custom-source-row input')
+    expect(name.attributes('required')).toBeUndefined()
+    expect(name.attributes('placeholder')).toBe('Defaults to Python class name')
+    expect(name.element.value).toBe('')
+
+    const code = `class ${className}:\n    pass\n\n${className}()`
+    await wrapper.get('.python-editor-stub').setValue(code)
+    await flushPromises()
+    expect(name.element.value).toBe(className)
+
+    await wrapper.get('.library-editor').trigger('submit')
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith(endpoint, expect.objectContaining({
+      kind: 'custom',
+      name: className,
+      code
+    }))
+  })
+
+  it.each([
+    ['strategies', 'MyMomentumStrategy'],
+    ['indicators', 'myCustomIndicator'],
+    ['sizers', 'MyPositionSizer'],
+    ['metrics', 'MyCustomMetric']
+  ])('leaves the custom %s name empty for a MyXxx class', async (page, className) => {
+    location.hash = `#${page}`
+    const wrapper = mount(LibraryPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          PythonEditor: {
+            props: ['modelValue'],
+            emits: ['update:modelValue'],
+            template: '<textarea class="python-editor-stub" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
+          }
+        }
+      }
+    })
+    await flushPromises()
+
+    await wrapper.get('.page-intro .primary').trigger('click')
+    if (page !== 'metrics') {
+      await wrapper.findAll('.library-editor-mode button')[1].trigger('click')
+    }
+    await wrapper.get('.python-editor-stub').setValue(
+      `class ${className}:\n    pass\n\n${className}()`
+    )
+    await flushPromises()
+
+    expect(wrapper.get('.custom-source-row input').element.value).toBe('')
+  })
+
+  it('keeps an inferred name in sync until the user enters a custom name', async () => {
+    location.hash = '#strategies'
+    const wrapper = mount(LibraryPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          PythonEditor: {
+            props: ['modelValue'],
+            emits: ['update:modelValue'],
+            template: '<textarea class="python-editor-stub" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
+          }
+        }
+      }
+    })
+    await flushPromises()
+
+    await wrapper.get('.page-intro .primary').trigger('click')
+    await wrapper.findAll('.library-editor-mode button')[1].trigger('click')
+    const code = wrapper.get('.python-editor-stub')
+    const name = wrapper.get('.custom-source-row input')
+
+    await code.setValue('class M:\n    pass\n\nM()')
+    await flushPromises()
+    expect(name.element.value).toBe('M')
+
+    await code.setValue('class MomentumStrategy:\n    pass\n\nMomentumStrategy()')
+    await flushPromises()
+    expect(name.element.value).toBe('MomentumStrategy')
+
+    await name.setValue('Manual name')
+    await code.setValue('class RevisedStrategy:\n    pass\n\nRevisedStrategy()')
+    await flushPromises()
+    expect(name.element.value).toBe('Manual name')
+
+    await name.setValue('')
+    await flushPromises()
+    expect(name.element.value).toBe('RevisedStrategy')
   })
 
   it('refreshes indicators after rendering bootstrap data', async () => {
@@ -221,7 +383,7 @@ describe('library page', () => {
     expect(source).toContain(importLine)
     expect(source).toContain('data : pl.DataFrame')
     expect(source).toContain(instanceLine)
-    expect(wrapper.get('.custom-source-row').find('input[required]').exists()).toBe(true)
+    expect(wrapper.get('.custom-source-row').find('input[required]').exists()).toBe(false)
     expect(wrapper.get('.upload-code-button').text()).toBe('Load Python file')
   })
 
@@ -302,7 +464,7 @@ describe('library page', () => {
     expect(modal.text()).toContain(`Edit ${singular}`)
     expect(modal.get('.python-editor-stub').element.value).toBe(source)
 
-    await modal.get('.custom-source-row input[required]').setValue(`Updated ${singular}`)
+    await modal.get('.custom-source-row input').setValue(`Updated ${singular}`)
     await modal.get('.python-editor-stub').setValue(updatedSource)
     await modal.trigger('submit')
     await flushPromises()

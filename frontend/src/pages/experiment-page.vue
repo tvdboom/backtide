@@ -31,7 +31,7 @@
         <div class="form-grid experiment-identity-grid">
           <label>Name<FieldInfo text="Give the experiment a recognizable name for results and history." /><input id="experiment-name" v-model="config.general.name" maxlength="80" placeholder="Enter a name..." /></label>
           <label>Icon<FieldInfo text="Choose the icon used to identify this experiment in the interface." /><select id="experiment-icon" v-model="config.general.icon"><option v-for="item in experimentIcons" :key="item.value" :value="item.value">{{ item.value }} {{ item.label }}</option></select></label>
-          <label class="wide">Tags<FieldInfo text="Add searchable labels that help organize related experiments." /><SearchSelect v-model="config.general.tags" :options="[]" :uppercase-custom="false" allow-custom input-id="experiment-tags" label="Experiment tags" placeholder="Type a tag and press Enter…" /></label>
+          <div class="field-label wide"><span>Tags</span><FieldInfo text="Add searchable labels that help organize related experiments." /><SearchSelect v-model="config.general.tags" :options="[]" :uppercase-custom="false" allow-custom input-id="experiment-tags" label="Experiment tags" placeholder="Type a tag and press Enter…" /></div>
           <label class="wide">Description<FieldInfo text="Record the hypothesis, purpose, or assumptions behind this experiment." /><textarea v-model="config.general.description" rows="5" placeholder="Add a description..." /></label>
         </div>
       </div>
@@ -45,7 +45,7 @@
           </div>
         </div>
         <div class="form-grid two">
-          <label class="wide symbol-select-field">Symbols<FieldInfo text="Choose the instruments whose historical bars will be used in the experiment." /><SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /></label>
+          <div class="field-label wide symbol-select-field"><span>Symbols</span><FieldInfo text="Choose the instruments whose historical bars will be used in the experiment." /><SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /></div>
           <div class="field-label interval-picker-field">
             <span>Interval</span>
             <FieldInfo text="Set the duration represented by each historical market-data bar." />
@@ -90,7 +90,7 @@
         <div class="section-copy"><h3>Trading logic</h3><p>Select saved strategies, optional indicators and a benchmark.</p></div>
         <div class="form-grid two">
           <div class="field-label wide benchmark-field"><span>Benchmark</span><FieldInfo text="Choose a passive reference instrument used to compare experiment performance." /><small class="field-help">Compare performance against a passive benchmark for this asset class.</small><BenchmarkSelect :model-value="config.strategy.benchmark" :options="benchmarkSymbols" :descriptions="symbolNames" :logos="symbolLogos" label="Experiment benchmark" :placeholder="benchmarkPlaceholder" @update:model-value="setBenchmark" /></div>
-          <label class="wide">Strategies<FieldInfo text="Select the saved trading strategies to run against the same market data." /><SearchSelect v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></label>
+          <div class="field-label wide"><span>Strategies</span><FieldInfo text="Select the saved trading strategies to run against the same market data." /><SearchSelect v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></div>
           <section v-if="selectedStrategies.length" class="selection-insights wide" aria-label="Selected strategy details">
             <article v-for="item in selectedStrategies" :key="item.name" class="asset-selection-card">
               <header><span class="metric-icon"><LibraryAssetIcon kind="strategy" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ catalogTypeLabel(item.type) }}</small></span></header>
@@ -98,7 +98,7 @@
               <div v-if="item.required_indicators?.length" class="required-indicators"><strong>Injected indicators</strong><div class="indicator-chip-list"><span v-for="indicator in item.required_indicators" :key="indicator.name" class="indicator-chip" :title="indicator.description"><Shapes :size="14" />{{ indicator.name }}</span></div></div>
             </article>
           </section>
-          <label class="wide">Indicators<FieldInfo text="Add optional indicators that will be calculated and supplied during the simulation." /><SearchSelect v-model="config.indicators.indicators" :options="savedIndicators" :descriptions="indicatorOptionDetails" :option-icons="indicatorOptionIcons" option-name-first label="Experiment indicators" placeholder="Search saved indicators…" /></label>
+          <div class="field-label wide"><span>Indicators</span><FieldInfo text="Add optional indicators that will be calculated and supplied during the simulation." /><SearchSelect v-model="config.indicators.indicators" :options="savedIndicators" :descriptions="indicatorOptionDetails" :option-icons="indicatorOptionIcons" option-name-first label="Experiment indicators" placeholder="Search saved indicators…" /></div>
           <section v-if="selectedIndicators.length" class="selection-insights wide" aria-label="Selected indicator details">
             <article v-for="item in selectedIndicators" :key="item.name" class="asset-selection-card compact-card">
               <header><span class="metric-icon"><LibraryAssetIcon kind="indicator" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ catalogTypeLabel(item.type) }}</small></span></header>
@@ -111,7 +111,7 @@
       <div v-if="tab === 4" class="form-section">
         <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, then select the experiment headline.</p></div>
         <div class="form-grid two">
-          <label class="wide">Metrics<FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /></label>
+          <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /></div>
           <label>Main metric<FieldInfo text="Select the headline measure used to rank and summarize experiment results." /><select id="experiment-main-metric" v-model="config.metrics.main_metric"><option v-for="key in config.metrics.metrics" :key="key" :value="key">{{ metricLabel(key) }}</option></select><small>The best value appears in the results overview.</small></label>
           <section v-if="selectedMetrics.length" class="selection-insights wide" aria-label="Selected metric details">
             <article v-for="item in selectedMetrics" :key="item.key" class="asset-selection-card compact-card">
@@ -128,17 +128,16 @@
           <fieldset class="settings-group">
             <legend>Fees and price impact</legend>
             <div class="form-grid three">
-              <label>Commission<FieldInfo text="Choose whether simulated transaction costs use percentage, fixed, or combined fees." /><select id="experiment-commission-type" v-model="config.exchange.commission_type"><option v-for="item in enums.commission_types" :key="item" :value="optionValue('commission_type', item)">{{ item }}</option></select></label>
-              <label v-if="showsPercentageCommission">Commission (%)<FieldInfo text="Apply this percentage fee to the value of each simulated fill." /><input v-model.number="config.exchange.commission_pct" type="number" min="0" step="0.01" /></label>
-              <label v-if="showsFixedCommission">Fixed commission<FieldInfo text="Apply this fixed cash fee to each simulated fill." /><input v-model.number="config.exchange.commission_fixed" type="number" min="0" step="0.01" /></label>
-              <label>Slippage (%)<FieldInfo text="Move simulated fill prices against the order by this percentage." /><input v-model.number="config.exchange.slippage" type="number" min="0" step="0.01" /></label>
+              <label>Commission (%)<FieldInfo text="Apply this percentage fee to the value of each simulated fill." /><input id="experiment-commission-pct" v-model.number="config.exchange.commission_pct" type="number" min="0" step="0.01" /></label>
+              <label>Fixed commission<FieldInfo text="Apply this fixed cash fee to each simulated fill." /><input id="experiment-commission-fixed" v-model.number="config.exchange.commission_fixed" type="number" min="0" step="0.01" /></label>
+              <label>Slippage (%)<FieldInfo text="Move simulated fill prices against the order by this percentage." /><input id="experiment-slippage" v-model.number="config.exchange.slippage" type="number" min="0" step="0.01" /></label>
             </div>
           </fieldset>
           <fieldset class="settings-group">
             <legend>Order handling</legend>
             <div class="form-grid two">
               <ToggleField v-model="config.exchange.partial_fills" label="Partial fills" description="Limit fills to available bar volume." help="Permit an order to fill only the quantity supported by available market volume." />
-              <label>Allowed order types<FieldInfo text="Choose which simulated order instructions strategies may submit." /><SearchSelect v-model="config.exchange.allowed_order_types" :options="enums.order_types" :descriptions="orderTypeDescriptions" plain-options input-id="experiment-order-types" label="Allowed order types" /></label>
+              <div class="field-label"><span>Allowed order types</span><FieldInfo text="Choose which simulated order instructions strategies may submit." /><SearchSelect v-model="config.exchange.allowed_order_types" :options="enums.order_types" :descriptions="orderTypeDescriptions" plain-options input-id="experiment-order-types" label="Allowed order types" /></div>
             </div>
           </fieldset>
         </div>
@@ -230,7 +229,7 @@ import {
   Upload,
   X
 } from 'lucide-vue-next'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { post, query } from '../api'
 import BenchmarkSelect from '../components/benchmark-select.vue'
 import CurrencySelect from '../components/currency-select.vue'
@@ -245,7 +244,8 @@ import {
   consumeExperimentDraft,
   defaultExperimentBenchmark,
   experimentOptionValue,
-  instrumentLogoUrl
+  instrumentLogoUrl,
+  requestResultsOverview
 } from '../state'
 
 const props = defineProps({ bootstrap: Object })
@@ -265,9 +265,7 @@ const experimentIcons = [
 ]
 const enums = props.bootstrap.enums
 const savedDraft = consumeExperimentDraft(sessionStorage)
-const config = reactive(cloneApiState(savedDraft || props.bootstrap.defaults))
-if (!config.metrics) config.metrics = { metrics: ['total_return', 'final_equity', 'pnl', 'n_trades', 'win_rate', 'cagr', 'ann_volatility', 'sharpe', 'sortino', 'max_dd', 'excess_return', 'alpha'], main_metric: 'sharpe' }
-if (!config.general.icon) config.general.icon = experimentIcons[0].value
+const config = reactive(normalizedExperimentConfig(savedDraft || props.bootstrap.defaults))
 const optionValue = experimentOptionValue
 const intervalValues = Object.fromEntries(
   enums.intervals.map(item => [item, optionValue('interval', item)])
@@ -351,14 +349,6 @@ const benchmarkSymbols = computed(() => config.data.instrument_type === 'forex'
 const benchmarkPlaceholder = computed(() => benchmarkSymbols.value.length
   ? 'Search or enter a benchmark ticker…'
   : 'Enter an optional benchmark ticker…')
-const showsPercentageCommission = computed(() => [
-  'Percentage',
-  'PercentagePlusFixed'
-].includes(config.exchange.commission_type))
-const showsFixedCommission = computed(() => [
-  'Fixed',
-  'PercentagePlusFixed'
-].includes(config.exchange.commission_type))
 const availablePositionSymbols = computed(() => config.data.symbols.filter(symbol =>
   !positions.value.some(position => position.symbol === symbol)))
 const orderTypeDescriptions = computed(() => Object.fromEntries(enums.order_types.map(item => [
@@ -379,6 +369,21 @@ const orderTypeDescriptions = computed(() => Object.fromEntries(enums.order_type
 ])))
 
 function enumLabel(value) { return String(value).replace(/([a-z])([A-Z])/g, '$1 $2').replace('Na N', 'NaN') }
+function normalizedExperimentConfig(value) {
+  const defaults = cloneApiState(props.bootstrap.defaults)
+  const incoming = cloneApiState(value || {})
+  for (const [section, sectionValue] of Object.entries(incoming)) {
+    defaults[section] = sectionValue && typeof sectionValue === 'object' && !Array.isArray(sectionValue)
+      ? { ...(defaults[section] || {}), ...sectionValue }
+      : sectionValue
+  }
+  if (!defaults.metrics) {
+    defaults.metrics = { metrics: ['total_return', 'final_equity', 'pnl', 'n_trades', 'win_rate', 'cagr', 'ann_volatility', 'sharpe', 'sortino', 'max_dd', 'excess_return', 'alpha'], main_metric: 'sharpe' }
+  }
+  if (!defaults.general.icon) defaults.general.icon = experimentIcons[0].value
+  defaults.exchange.commission_type = 'PercentagePlusFixed'
+  return defaults
+}
 function catalogTypeLabel(value) {
   return enumLabel(value).replace(/\b(Macd|Rsi|Roc|Rsrs|Sma|Ema|Vwap)\b/g, token => token.toUpperCase())
 }
@@ -553,15 +558,36 @@ function dismissIssue() {
 
 function resetExperiment() {
   const instrumentType = config.data.instrument_type
-  const defaults = cloneApiState(props.bootstrap.defaults)
+  const defaults = normalizedExperimentConfig(props.bootstrap.defaults)
   defaults.data.instrument_type = instrumentType
-  if (!defaults.general.icon) defaults.general.icon = experimentIcons[0].value
   Object.assign(config, defaults)
   benchmarkIsAutomatic.value = true
   applyAutomaticBenchmark()
   positions.value = []
   tab.value = 0
   dismissIssue()
+}
+
+async function applyPendingExperimentDraft() {
+  const pendingDraft = consumeExperimentDraft(sessionStorage)
+  if (!pendingDraft) return false
+  const nextConfig = normalizedExperimentConfig(pendingDraft)
+  for (const key of Object.keys(config)) {
+    if (!(key in nextConfig)) delete config[key]
+  }
+  Object.assign(config, nextConfig)
+  positions.value = Object.entries(config.portfolio.starting_positions || {})
+    .filter(([symbol]) => config.data.symbols.includes(symbol))
+    .map(([symbol, quantity]) => ({ symbol, quantity }))
+  benchmarkIsAutomatic.value = false
+  tab.value = 0
+  dismissIssue()
+  try {
+    await loadInstruments()
+  } catch (error) {
+    await showInstrumentError(error)
+  }
+  return true
 }
 
 async function run() {
@@ -574,9 +600,12 @@ async function run() {
   running.value = true
   try {
     const payload = cloneApiState(config)
+    payload.exchange.commission_type = 'PercentagePlusFixed'
+    if (!payload.metrics.metrics.includes('pnl')) payload.metrics.metrics.unshift('pnl')
     payload.portfolio.starting_positions = parsePositions()
     const job = await post('/api/experiments', payload)
     resetExperiment()
+    requestResultsOverview(sessionStorage)
     emit('toast', `Experiment queued · ${job.id}`)
     emit('navigate', 'results')
   } catch (error) { await showIssue(error.message) }
@@ -589,6 +618,7 @@ async function importConfig(event) {
   try {
     benchmarkIsAutomatic.value = false
     Object.assign(config, await post('/api/config/parse', { suffix, text: await file.text() }))
+    config.exchange.commission_type = 'PercentagePlusFixed'
     positions.value = Object.entries(config.portfolio.starting_positions || {})
       .filter(([symbol]) => config.data.symbols.includes(symbol))
       .map(([symbol, quantity]) => ({ symbol, quantity }))
@@ -613,4 +643,5 @@ watch(config, () => {
 }, { deep: true })
 onBeforeUnmount(() => window.clearTimeout(issueTimer))
 onMounted(initializeInstruments)
+onActivated(() => { void applyPendingExperimentDraft() })
 </script>

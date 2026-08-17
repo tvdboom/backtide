@@ -4,8 +4,10 @@
 
 <script setup>
 import { python } from '@codemirror/lang-python'
+import { indentWithTab } from '@codemirror/commands'
+import { indentUnit } from '@codemirror/language'
 import { Compartment, EditorState } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
+import { EditorView, keymap } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
@@ -18,6 +20,8 @@ const editorElement = ref(null)
 let view
 let themeObserver
 const themeCompartment = new Compartment()
+
+defineExpose({ getView: () => view })
 
 function backtideTheme() {
   const dark = document.documentElement.dataset.theme !== 'light'
@@ -55,6 +59,9 @@ onMounted(() => {
       extensions: [
         basicSetup,
         python(),
+        EditorState.tabSize.of(4),
+        indentUnit.of('    '),
+        keymap.of([indentWithTab]),
         themeCompartment.of(backtideTheme()),
         EditorView.lineWrapping,
         EditorState.readOnly.of(props.readonly),

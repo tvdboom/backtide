@@ -83,6 +83,7 @@
           :key="`${page}-${refreshKey}`"
           :bootstrap="bootstrap"
           @dismiss-toast="toast = null"
+          @catalog-updated="updateCatalog"
           @live-status="setLiveStatus"
           @navigate="navigate"
           @toast="showToast"
@@ -241,6 +242,11 @@ function navigate(next) {
   location.hash = page.value
   sidebarOpen.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function updateCatalog({ key, catalog }) {
+  if (!bootstrap.value || !['strategies', 'indicators', 'metrics', 'sizers'].includes(key)) return
+  bootstrap.value[key] = catalog
 }
 
 function showToast(message, kind = 'success') {

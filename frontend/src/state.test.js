@@ -3,6 +3,7 @@ import {
   cloneApiState,
   configuredPlotlyDateTimeFormat,
   consumeExperimentDraft,
+  consumeResultsOverviewRequest,
   defaultExperimentBenchmark,
   experimentOptionValue,
   flattenFills,
@@ -16,6 +17,7 @@ import {
   formatResultMetric,
   instrumentLogoUrl,
   paperEquitySeries,
+  requestResultsOverview,
   resolvePage,
   symbolsForAnalysis
 } from './state'
@@ -67,6 +69,21 @@ describe('result and route state', () => {
     expect(consumeExperimentDraft(storage)).toBeNull()
   })
 
+  it('requests the results overview once and clears a queued detail target', () => {
+    const values = new Map([['backtide:result-id', 'old-experiment']])
+    const storage = {
+      getItem: key => values.get(key) || null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: key => values.delete(key)
+    }
+
+    requestResultsOverview(storage)
+
+    expect(values.has('backtide:result-id')).toBe(false)
+    expect(consumeResultsOverviewRequest(storage)).toBe(true)
+    expect(consumeResultsOverviewRequest(storage)).toBe(false)
+  })
+
   it('formats fractional and already-percent result metrics', () => {
     expect(formatResultMetric(0.125, true)).toBe('12.50%')
     expect(formatResultMetric(12.5, true)).toBe('12.50%')
@@ -94,7 +111,7 @@ describe('result and route state', () => {
       'https://img.logokit.com/crypto/BTC?token=token'
     )
     expect(instrumentLogoUrl('EUR-USD', 'Forex', 'token')).toBe(
-      'https://img.logokit.com/ticker/EURUSD%3ACUR?token=token'
+      'https://img.logokit.com/ticker/EURUSD:CUR?token=token'
     )
     expect(instrumentLogoUrl('AAPL', 'Stocks', '')).toBe('')
   })

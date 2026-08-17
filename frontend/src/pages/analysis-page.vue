@@ -1,8 +1,8 @@
 <template>
   <div class="page">
-    <section class="page-intro"><div><h2>Analyze market data</h2><p>Explore prices, returns, correlation, seasonality, volatility, volume and dividends.</p></div></section>
+    <section class="page-intro"><div><h2>Analyze market data</h2><p>Compare key metrics and explore prices, returns, correlation, seasonality, volatility, volume and dividends.</p></div></section>
     <section class="panel analysis-controls">
-      <label>Symbols<SearchSelect v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" placeholder="Search stored instruments…" /></label>
+      <div class="field-label"><span>Symbols</span><SearchSelect v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" label="Analysis symbols" placeholder="Search stored instruments…" /></div>
       <label>Interval<select v-model="form.interval"><option v-for="item in availableIntervals" :key="item">{{ item }}</option></select></label>
       <label>Price<select v-model="form.price_col"><option value="open">Open</option><option value="high">High</option><option value="low">Low</option><option value="close">Close</option><option value="adj_close">Adjusted close</option></select></label>
       <label v-if="form.plot === 'volatility'">Window<input v-model.number="form.window" type="number" min="2" /></label>
@@ -12,14 +12,33 @@
         <button v-for="item in plots" :key="item.id" :class="{ active: form.plot === item.id }" type="button" @click="selectPlot(item.id)"><component :is="item.icon" :size="16"/>{{ item.label }}</button>
       </div>
       <div class="chart-title"><div><h3>{{ current.label }}</h3><p>{{ current.description }}</p></div></div>
-      <ChartPanel :figure="figure" :loading="loading" :error="error" />
+      <div v-if="form.plot === 'metrics'" class="analysis-metrics">
+        <div v-if="loading" class="empty-state" role="status"><span class="spinner" /><p>Calculating metrics…</p></div>
+        <div v-else-if="error" class="empty-state error-state"><p>{{ error }}</p></div>
+        <div v-else-if="!metrics.length" class="empty-state"><p>No metrics are available for the selected data.</p></div>
+        <div v-else class="data-table-wrap">
+          <table class="data-table analysis-metrics-table">
+            <thead><tr><th>Stock</th><th class="number">Sharpe</th><th class="number">CAGR</th><th class="number">Max drawdown</th><th class="number">Win rate</th></tr></thead>
+            <tbody>
+              <tr v-for="row in metrics" :key="row.symbol">
+                <td><span class="storage-instrument"><span class="order-symbol-logo"><img v-if="logos[row.symbol]" :src="logos[row.symbol]" alt=""/><span v-else aria-hidden="true">{{ row.symbol.slice(0, 1) }}</span></span><span><strong>{{ row.symbol }}</strong><small>{{ names[row.symbol] || row.symbol }}</small></span></span></td>
+                <td class="number">{{ number(row.sharpe) }}</td>
+                <td class="number">{{ percent(row.cagr, true) }}</td>
+                <td class="number">{{ percent(row.max_dd) }}</td>
+                <td class="number">{{ percent(row.win_rate) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <ChartPanel v-else :figure="figure" :loading="loading" :error="error" />
     </section>
   </div>
 </template>
 
 <script setup>
-import { BarChart3, CandlestickChart, ChartLine, ChartNoAxesCombined, CircleDollarSign, Grid3X3, ScatterChart, Waves } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { BarChart3, CandlestickChart, ChartLine, ChartNoAxesCombined, CircleDollarSign, Gauge, Grid3X3, ScatterChart, Waves } from 'lucide-vue-next'
+import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, post } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import SearchSelect from '../components/search-select.vue'
@@ -28,6 +47,7 @@ import { instrumentLogoUrl, symbolsForAnalysis } from '../state'
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['toast'])
 const plots = [
+  { id: 'metrics', label: 'Metrics', icon: Gauge, description: 'Key performance and risk metrics for each selected stock.' },
   { id: 'price', label: 'Price', icon: ChartLine, description: 'Compare price histories across selected symbols.' },
   { id: 'candlestick', label: 'Candles', icon: CandlestickChart, description: 'Inspect open, high, low and close behavior.' },
   { id: 'returns', label: 'Returns', icon: BarChart3, description: 'Study the distribution of bar-to-bar returns.' },
@@ -39,8 +59,9 @@ const plots = [
   { id: 'dividends', label: 'Dividends', icon: CircleDollarSign, description: 'Review historical cash distributions.' }
 ]
 const storage = ref([])
-const form = reactive({ symbols: [], interval: '1d', price_col: 'close', window: 21, plot: 'price' })
+const form = reactive({ symbols: [], interval: '1d', price_col: 'close', window: 21, plot: 'metrics' })
 const figure = ref(null)
+const metrics = ref([])
 const loading = ref(false)
 const error = ref('')
 const symbols = computed(() => [...new Set(storage.value.map(row => row.symbol))])
@@ -67,12 +88,33 @@ const analysisSymbols = computed(() => symbolsForAnalysis(form.symbols, form.plo
 let refreshTimer
 let requestId = 0
 let ready = false
+let activatedOnce = false
+
+function consumeAnalysisRequest() {
+  const requestedSymbols = sessionStorage.getItem('backtide:analysis-symbols')
+  const requestedInterval = sessionStorage.getItem('backtide:analysis-interval')
+  sessionStorage.removeItem('backtide:analysis-symbols')
+  sessionStorage.removeItem('backtide:analysis-interval')
+  if (requestedSymbols === null && requestedInterval === null) return false
+
+  const requested = JSON.parse(requestedSymbols || '[]')
+  form.symbols = requested.filter(symbol => symbols.value.includes(symbol))
+  form.interval = requestedInterval && availableIntervals.value.includes(requestedInterval)
+    ? requestedInterval
+    : availableIntervals.value.includes('1d') ? '1d' : availableIntervals.value[0] || '1d'
+  return true
+}
+
 async function plot() {
   const id = ++requestId
+  const plotName = form.plot
   loading.value = true; error.value = ''
   try {
     const result = await post('/api/analysis', { ...form, symbols: analysisSymbols.value })
-    if (id === requestId) figure.value = result
+    if (id === requestId) {
+      if (plotName === 'metrics') metrics.value = result.rows || []
+      else figure.value = result
+    }
   } catch (reason) {
     if (id === requestId) { error.value = reason.message; emit('toast', reason.message, 'error') }
   } finally {
@@ -90,20 +132,35 @@ function schedulePlot() {
   refreshTimer = window.setTimeout(plot, 120)
 }
 function selectPlot(value) { form.plot = value }
+function number(value) {
+  return value !== null && value !== '' && Number.isFinite(Number(value))
+    ? Number(value).toFixed(2)
+    : '—'
+}
+function percent(value, signed = false) {
+  if (value === null || value === '' || !Number.isFinite(Number(value))) return '—'
+  const result = Number(value) * 100
+  return `${signed && result > 0 ? '+' : ''}${result.toFixed(2)}%`
+}
 watch(() => [form.symbols.join('|'), form.interval, form.price_col, form.window, form.plot], schedulePlot)
 onMounted(async () => {
   storage.value = await api('/api/storage')
-  const requested = JSON.parse(sessionStorage.getItem('backtide:analysis-symbols') || '[]')
-  const requestedInterval = sessionStorage.getItem('backtide:analysis-interval')
-  sessionStorage.removeItem('backtide:analysis-symbols')
-  sessionStorage.removeItem('backtide:analysis-interval')
-  form.symbols = requested.filter(symbol => symbols.value.includes(symbol))
-  if (!form.symbols.length) form.symbols = symbols.value.slice(0, 2)
-  form.interval = requestedInterval && availableIntervals.value.includes(requestedInterval)
-    ? requestedInterval
-    : availableIntervals.value.includes('1d') ? '1d' : availableIntervals.value[0] || '1d'
+  if (!consumeAnalysisRequest()) {
+    form.symbols = symbols.value.slice(0, 2)
+    form.interval = availableIntervals.value.includes('1d')
+      ? '1d'
+      : availableIntervals.value[0] || '1d'
+  }
   ready = true
   if (form.symbols.length) plot()
+})
+onActivated(() => {
+  if (!activatedOnce) {
+    activatedOnce = true
+    return
+  }
+  if (!ready) return
+  consumeAnalysisRequest()
 })
 onBeforeUnmount(() => window.clearTimeout(refreshTimer))
 </script>

@@ -525,6 +525,7 @@ class BacktideServices:
             config_text = self._read_text(
                 experiment_root / experiment["id"] / "config.toml", max_bytes=500_000
             )
+            self._apply_benchmark_display_name(config_text, experiment["runs"])
             experiment.update(
                 self._primary_metric_summary(config_text, experiment["runs"], metric_catalog)
             )
@@ -553,6 +554,7 @@ class BacktideServices:
             max_bytes=200_000,
         )
         experiment = rows[0]
+        self._apply_benchmark_display_name(config_text, runs)
         experiment.update(self._primary_metric_summary(config_text, runs))
         return {
             "experiment": experiment,
@@ -640,6 +642,11 @@ class BacktideServices:
             )
         elif plot_name == "cash":
             figure = analysis.plot_cash_holdings(runs, display=None)
+        elif plot_name == "dividends":
+            from backtide.storage import query_dividends
+
+            dividends = query_dividends(list(config.data.symbols))
+            figure = analysis.plot_dividends(dividends, display=None)
         elif plot_name == "pnl_histogram":
             figure = analysis.plot_pnl_histogram(
                 runs,
@@ -767,7 +774,7 @@ class BacktideServices:
         return {"deleted": deleted}
 
     def analysis_plot(self, plot_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Build one of the existing Plotly analysis figures for the SPA."""
+        """Build analysis metrics or one of the existing Plotly figures for the SPA."""
         from backtide import analysis
         from backtide.storage import query_bars, query_dividends
 
@@ -783,7 +790,7 @@ class BacktideServices:
             "vwap": "plot_vwap",
         }
         function_name = names.get(plot_name)
-        if function_name is None:
+        if function_name is None and plot_name != "metrics":
             raise APIError("Unknown analysis plot.", 404)
         symbols = payload.get("symbols") or []
         if not symbols:
@@ -797,6 +804,12 @@ class BacktideServices:
                 payload.get("provider"),
                 limit=min(int(payload.get("limit", 50_000)), 100_000),
             )
+        if plot_name == "metrics":
+            statistics = analysis.compute_statistics(
+                data,
+                price_col=payload.get("price_col", "close"),
+            )
+            return {"rows": dataframe_records(statistics)}
         kwargs: dict[str, Any] = {"display": None}
         if plot_name in {"price", "returns", "correlation", "seasonality", "volatility"}:
             kwargs["price_col"] = payload.get("price_col", "close")
@@ -853,13 +866,17 @@ class BacktideServices:
             _save_strategy,
         )
 
-        name = self._safe_library_name(payload.get("name"))
         instance = self._build_library_asset(
             payload,
             label="strategy",
             builtins=BUILTIN_STRATEGIES,
             validate=_check_strategy_code,
             build=_build_custom_strategy,
+        )
+        name = self._library_asset_name(
+            payload.get("name"),
+            instance if payload.get("kind") == "custom" else None,
+            ignored_class_prefix="My",
         )
         _save_strategy(instance, name, get_config())
         return {"saved": name}
@@ -895,6 +912,7 @@ class BacktideServices:
                 build=_build_custom_strategy,
             ),
             save=lambda value, name: _save_strategy(value, name, cfg),
+            ignored_class_prefix="My",
         )
 
     def delete_strategy(self, name: str) -> dict[str, bool]:
@@ -944,13 +962,17 @@ class BacktideServices:
         )
 
         cfg = get_config()
-        name = self._safe_library_name(payload.get("name"))
         instance = self._build_library_asset(
             payload,
             label="indicator",
             builtins=BUILTIN_INDICATORS,
             validate=lambda code: _check_indicator_code(code, cfg),
             build=_build_custom_indicator,
+        )
+        name = self._library_asset_name(
+            payload.get("name"),
+            instance if payload.get("kind") == "custom" else None,
+            ignored_class_prefix="My",
         )
         _save_indicator(instance, name, cfg)
         return {"saved": name}
@@ -986,6 +1008,7 @@ class BacktideServices:
                 build=_build_custom_indicator,
             ),
             save=lambda value, name: _save_indicator(value, name, cfg),
+            ignored_class_prefix="My",
         )
 
     def delete_indicator(self, name: str) -> dict[str, bool]:
@@ -1071,13 +1094,17 @@ class BacktideServices:
         from backtide.sizers.utils import _build_custom_sizer, _check_sizer_code, _save_sizer
 
         cfg = get_config()
-        name = self._safe_library_name(payload.get("name"))
         instance = self._build_library_asset(
             payload,
             label="sizer",
             builtins=BUILTIN_SIZERS,
             validate=_check_sizer_code,
             build=_build_custom_sizer,
+        )
+        name = self._library_asset_name(
+            payload.get("name"),
+            instance if payload.get("kind") == "custom" else None,
+            ignored_class_prefix="My",
         )
         _save_sizer(instance, name, cfg)
         return {"saved": name}
@@ -1113,6 +1140,7 @@ class BacktideServices:
                 build=_build_custom_sizer,
             ),
             save=lambda value, name: _save_sizer(value, name, cfg),
+            ignored_class_prefix="My",
         )
 
     def delete_sizer(self, name: str) -> dict[str, bool]:
@@ -1125,13 +1153,17 @@ class BacktideServices:
         from backtide.metrics import BUILTIN_METRICS
         from backtide.metrics.utils import _build_custom_metric, _check_metric_code, _save_metric
 
-        name = self._safe_library_name(payload.get("name"))
+        instance = self._build_library_asset(
+            payload,
+            label="metric",
+            builtins=(),
+            validate=_check_metric_code,
+            build=_build_custom_metric,
+        )
+        name = self._library_asset_name(payload.get("name"), instance, ignored_class_prefix="My")
         if any(metric.key == name for metric in BUILTIN_METRICS):
             raise APIError(f"{name!r} is reserved for a built-in metric.", 409)
-        code = str(payload.get("code") or "")
-        if error := _check_metric_code(code):
-            raise APIError(error)
-        _save_metric(_build_custom_metric(code), name, get_config())
+        _save_metric(instance, name, get_config())
         return {"saved": name}
 
     def update_metric(self, original_name: str, payload: dict[str, Any]) -> dict[str, str]:
@@ -1146,9 +1178,6 @@ class BacktideServices:
         )
 
         cfg = get_config()
-        name = self._safe_library_name(payload.get("name"))
-        if any(metric.key == name for metric in BUILTIN_METRICS):
-            raise APIError(f"{name!r} is reserved for a built-in metric.", 409)
         return self._update_saved_asset(
             folder="metrics",
             label="metric",
@@ -1159,7 +1188,16 @@ class BacktideServices:
             is_builtin=lambda _value: False,
             validate=_check_metric_code,
             build=_build_custom_metric,
+            rebuild=lambda value: self._build_library_asset(
+                value,
+                label="metric",
+                builtins=(),
+                validate=_check_metric_code,
+                build=_build_custom_metric,
+            ),
             save=lambda value, name: _save_metric(value, name, cfg),
+            ignored_class_prefix="My",
+            reserved_names={metric.key for metric in BUILTIN_METRICS},
         )
 
     def delete_metric(self, name: str) -> dict[str, bool]:
@@ -1379,30 +1417,41 @@ class BacktideServices:
         build: Callable[[str], Any],
         rebuild: Callable[[dict[str, Any]], Any] | None = None,
         save: Callable[[Any, str], None],
+        ignored_class_prefix: str | None = None,
+        reserved_names: set[str] | None = None,
     ) -> dict[str, str]:
         """Replace a saved library object without leaving an old file after a rename."""
         original = self._safe_name(original_name)
-        name = self._safe_library_name(payload.get("name"))
         original_path = storage_path / folder / f"{original}.pkl"
-        target_path = storage_path / folder / f"{name}.pkl"
 
         if original not in stored:
             if original_path.exists():
                 raise APIError(f"Saved {label} {original!r} could not be loaded.", 422)
             raise APIError(f"Saved {label} {original!r} was not found.", 404)
-        if name != original and target_path.exists():
-            raise APIError(f"A {label} named {name!r} already exists.", 409)
 
         instance = stored[original]
+        custom = not is_builtin(instance)
         if "kind" in payload:
             if rebuild is None:
                 raise APIError(f"Saved {label} configuration cannot be replaced.")
             instance = rebuild(payload)
-        elif not is_builtin(instance):
+            custom = payload.get("kind") == "custom"
+        elif custom:
             code = str(payload.get("code") or "")
             if error := validate(code):
                 raise APIError(error)
             instance = build(code)
+
+        name = self._library_asset_name(
+            payload.get("name"),
+            instance if custom else None,
+            ignored_class_prefix=ignored_class_prefix,
+        )
+        if reserved_names and name in reserved_names:
+            raise APIError(f"{name!r} is reserved for a built-in {label}.", 409)
+        target_path = storage_path / folder / f"{name}.pkl"
+        if name != original and target_path.exists():
+            raise APIError(f"A {label} named {name!r} already exists.", 409)
 
         save(instance, name)
         if name != original:
@@ -1531,6 +1580,28 @@ class BacktideServices:
             raise APIError("Library names must be 20 characters or fewer.")
         return name
 
+    @classmethod
+    def _library_asset_name(
+        cls,
+        value: Any,
+        instance: Any | None = None,
+        *,
+        ignored_class_prefix: str | None = None,
+    ) -> str:
+        """Return an entered library name or infer it from a custom Python instance."""
+        entered = str(value or "").strip()
+        if entered:
+            return cls._safe_library_name(entered)
+        if instance is None:
+            return cls._safe_library_name(entered)
+
+        inferred = type(instance).__name__
+        if ignored_class_prefix and inferred.casefold().startswith(
+            ignored_class_prefix.casefold()
+        ):
+            raise APIError("Enter a name or rename the placeholder Python class.")
+        return cls._safe_library_name(inferred)
+
     @staticmethod
     def _display_name(value: str) -> str:
         """Split a CamelCase Python type into a readable display name."""
@@ -1626,6 +1697,22 @@ class BacktideServices:
             "start_date": data.get("start_date"),
             "end_date": data.get("end_date"),
         }
+
+    @staticmethod
+    def _apply_benchmark_display_name(config_text: str | None, runs: list[dict[str, Any]]) -> None:
+        """Display benchmark runs under their configured market symbol."""
+        try:
+            strategy = tomllib.loads(config_text or "").get("strategy", {})
+        except (tomllib.TOMLDecodeError, TypeError):
+            return
+        if not isinstance(strategy, dict):
+            return
+        benchmark = str(strategy.get("benchmark") or "").strip()
+        if not benchmark:
+            return
+        for run in runs:
+            if run.get("is_benchmark"):
+                run["strategy_name"] = benchmark
 
     @staticmethod
     def _constructor_parameters(
