@@ -112,7 +112,8 @@ impl Binance {
             return Err(HttpError::UnexpectedPayload(format!(
                 "empty response for symbol: {}",
                 symbol.to_owned()
-            )))?;
+            ))
+            .into());
         }
 
         rows.into_iter().map(BinanceKline::try_from).collect()

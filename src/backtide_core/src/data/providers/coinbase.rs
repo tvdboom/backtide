@@ -116,7 +116,8 @@ impl Coinbase {
             return Err(HttpError::UnexpectedPayload(format!(
                 "empty response for product: {}",
                 product_id
-            )))?;
+            ))
+            .into());
         }
 
         let bars: Vec<CoinbaseCandle> =

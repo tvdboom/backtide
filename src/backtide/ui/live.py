@@ -14,6 +14,7 @@ import inspect
 import json
 from pathlib import Path
 import re
+import shutil
 import threading
 import time
 from typing import Any
@@ -358,8 +359,7 @@ class LiveTradingManager:
 
     def session(self, session_id: str) -> dict[str, Any]:
         """Return one persisted session with its bounded event journal."""
-        if not re.fullmatch(r"[0-9a-f]{16}", session_id):
-            raise APIError("Paper session id is invalid.", 400)
+        self._validate_session_id(session_id)
         folder = self._storage_root() / session_id
         manifest = folder / "manifest.json"
         if not manifest.is_file():
@@ -386,6 +386,33 @@ class LiveTradingManager:
         result["updates"] = updates
         result["warmup"] = self._read_json_lines(folder / "warmup.jsonl")
         return result
+
+    def delete_session(self, session_id: str) -> dict[str, int]:
+        """Delete one inactive persisted paper session and its event journal."""
+        self._validate_session_id(session_id)
+        folder = self._storage_root() / session_id
+        with self._lock:
+            active = bool(
+                self._session_id == session_id
+                and self._thread
+                and self._thread.is_alive()
+                and not self._stop.is_set()
+            )
+            if active:
+                raise APIError("Stop the active paper session before deleting it.", 409)
+            if not (folder / "manifest.json").is_file():
+                raise APIError(f"Paper session {session_id!r} was not found.", 404)
+            try:
+                shutil.rmtree(folder)
+            except OSError as exc:
+                raise APIError(f"Could not delete paper session {session_id!r}.", 500) from exc
+        return {"deleted": 1}
+
+    @staticmethod
+    def _validate_session_id(session_id: str) -> None:
+        """Reject identifiers that could escape the paper-session storage root."""
+        if not re.fullmatch(r"[0-9a-f]{16}", session_id):
+            raise APIError("Paper session id is invalid.", 400)
 
     def _reconcile_persisted_status(
         self,
@@ -475,9 +502,15 @@ class LiveTradingManager:
             return
         if self._paused.is_set() and self._config.get("mode") != "replay":
             return
+        flatten_requested = self._flatten_requested
+        cancel_requested = self._cancel_requested
         results = {}
         for name, session in self._sessions.items():
-            orders = self._control_orders(session)
+            orders = self._control_orders(
+                session,
+                flatten_requested=flatten_requested,
+                cancel_requested=cancel_requested,
+            )
             results[name] = session.on_bar(market, orders or None)
         update = self._serialize_combined_update(market, results)
         update["exchange_rates"] = dict(self._exchange_rates)
@@ -488,8 +521,12 @@ class LiveTradingManager:
                 outcomes = self._recent_order_outcomes.setdefault(name, deque(maxlen=12))
                 outcomes.extend(strategy_update.get("fills") or [])
             self._append_event(update)
-        self._flatten_requested = False
-        self._cancel_requested = False
+        controls_processed = bool(results) and all(result.processed for result in results.values())
+        if controls_processed:
+            if flatten_requested:
+                self._flatten_requested = False
+            if cancel_requested:
+                self._cancel_requested = False
 
     def _record_exchange_rate(
         self,
@@ -511,14 +548,20 @@ class LiveTradingManager:
             "timestamp": timestamp,
         }
 
-    def _control_orders(self, session: Any) -> list[Any]:
-        if not self._flatten_requested and not self._cancel_requested:
+    @staticmethod
+    def _control_orders(
+        session: Any,
+        *,
+        flatten_requested: bool,
+        cancel_requested: bool,
+    ) -> list[Any]:
+        if not flatten_requested and not cancel_requested:
             return []
         from backtide.backtest import Order
 
         snapshot = session.snapshot()
         orders = []
-        if self._cancel_requested:
+        if cancel_requested:
             orders.extend(
                 [
                     Order(
@@ -530,7 +573,7 @@ class LiveTradingManager:
                     for open_order in snapshot.portfolio.orders
                 ]
             )
-        if self._flatten_requested:
+        if flatten_requested:
             orders.extend(
                 Order(symbol, -quantity, "Market")
                 for symbol, quantity in snapshot.portfolio.positions.items()

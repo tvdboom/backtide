@@ -179,11 +179,13 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "Internal server error.")
 
     def do_DELETE(self) -> None:
-        """Handle deletion of experiments, stored data and user code."""
+        """Handle deletion of persisted records, stored data, and user code."""
         path = urlsplit(self.path).path.rstrip("/")
         try:
             if path == "/api/storage":
                 result = self.services.delete_storage(self._body())
+            elif path.startswith("/api/live/sessions/"):
+                result = self.services.delete_live_session(unquote(path.rsplit("/", 1)[1]))
             elif path.startswith("/api/experiments/"):
                 result = self.services.delete_experiment(unquote(path.rsplit("/", 1)[1]))
             elif path.startswith("/api/strategies/"):

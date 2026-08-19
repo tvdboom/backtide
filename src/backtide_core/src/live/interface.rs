@@ -1553,6 +1553,47 @@ mod tests {
     }
 
     #[test]
+    fn buy_and_hold_spends_base_cash_when_quote_currency_is_cheaper() {
+        Python::attach(|py| {
+            let strategy = Py::new(py, BuyAndHold::new(Some("BTC-USD".to_owned())))?.into_any();
+            let config = PaperTradingConfig {
+                initial_cash: 10_000.0,
+                base_currency: Currency::EUR,
+                commission_pct: 0.05,
+                slippage: 0.01,
+                ..PaperTradingConfig::default()
+            };
+            let mut session = PaperTradingSession::new(py, Some(config), Some(strategy), None)?;
+            session.set_exchange_rate("USD", "EUR", 0.86, 1_060)?;
+            let market = MarketUpdate {
+                provider: "mock".to_owned(),
+                symbol: "BTC-USD".to_owned(),
+                quote_currency: Some("USD".to_owned()),
+                interval: "1m".to_owned(),
+                open_ts: 1_000,
+                close_ts: 1_060,
+                open: 63_425.1,
+                high: 63_425.1,
+                low: 63_425.1,
+                close: 63_425.1,
+                volume: 1.0,
+                n_trades: Some(1),
+                is_final: true,
+                received_ts: 1_060,
+            };
+
+            let result = session.on_bar(py, market, None)?;
+
+            assert_eq!(result.fills[0].status, OrderStatus::Filled);
+            assert!(result.fills[0].order.quantity > 0.18);
+            assert_eq!(result.snapshot.portfolio.cash[&Currency::EUR], 0.0);
+            assert!(result.fills[0].reason.contains("quantity reduced"));
+            PyResult::Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn crypto_quote_is_converted_and_exact_cash_fit_is_filled() {
         Python::attach(|py| {
             let strategy = Py::new(py, BuyAndHold::new(Some("AAVE-ETH".to_owned())))?.into_any();

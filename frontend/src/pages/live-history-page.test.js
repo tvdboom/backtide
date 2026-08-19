@@ -4,9 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, nextTick, ref } from 'vue'
 import LiveHistoryPage from './live-history-page.vue'
 
-const { api, post } = vi.hoisted(() => ({ api: vi.fn(), post: vi.fn() }))
+const { api, post, remove } = vi.hoisted(() => ({
+  api: vi.fn(),
+  post: vi.fn(),
+  remove: vi.fn()
+}))
 
-vi.mock('../api', () => ({ api, post }))
+vi.mock('../api', () => ({ api, post, remove }))
 
 describe('live session history page', () => {
   beforeEach(() => {
@@ -28,6 +32,7 @@ describe('live session history page', () => {
       snapshot: { equity: 101250 }
     }])
     post.mockReset()
+    remove.mockReset().mockResolvedValue({ deleted: 1 })
     sessionStorage.clear()
   })
 
@@ -166,6 +171,7 @@ describe('live session history page', () => {
     expect(actions).toHaveLength(1)
     expect(actions[0].text()).toBe('Open')
     expect(wrapper.get('.badge.running').text()).toBe('running')
+    expect(activeRow.find('[aria-label^="Delete session from"]').exists()).toBe(false)
     expect(wrapper.findAll('.session-history-row')[1].findAll('.compact-button')
       .map(button => button.text())).toEqual(['Replay', 'Go live'])
 
@@ -193,6 +199,23 @@ describe('live session history page', () => {
     expect(wrapper.emitted('navigate')[0]).toEqual(['live'])
   })
 
+  it('confirms and deletes a stopped session', async () => {
+    const wrapper = mount(LiveHistoryPage, { props: { bootstrap: {} } })
+    await flushPromises()
+
+    await wrapper.get('[aria-label^="Delete session from"]').trigger('click')
+
+    expect(wrapper.get('[role="alertdialog"]').text()).toContain('Delete session from')
+    expect(remove).not.toHaveBeenCalled()
+
+    await wrapper.get('.confirm-submit').trigger('click')
+    await flushPromises()
+
+    expect(remove).toHaveBeenCalledWith('/api/live/sessions/session-1')
+    expect(wrapper.emitted('toast')).toContainEqual(['Session deleted.'])
+    expect(api).toHaveBeenCalledTimes(2)
+  })
+
   it('groups every replay beneath its original session', async () => {
     api.mockResolvedValue([
       {
@@ -207,6 +230,7 @@ describe('live session history page', () => {
           strategies: ['Momentum'],
           config: { base_currency: 'USD', initial_cash: 10000 }
         },
+        health: { replay: { warmup_source: 'unavailable', warmup_bars_loaded: 0 } },
         snapshot: { equity: 10200 }
       },
       {
@@ -254,11 +278,13 @@ describe('live session history page', () => {
       .toEqual(['Replay', 'Replay'])
     expect(wrapper.findAll('.session-replay-row')[0].text()).toContain('$200.00')
     expect(wrapper.get('.session-comparison').text()).toContain('P&L difference: +$150.00')
-    expect(wrapper.get('.session-comparison').text()).toContain('Playback speed: 5×')
+    const speedBadges = wrapper.findAll('.session-replay-speed-badge')
+    expect(speedBadges.map(badge => badge.text())).toEqual(['2×', '5×'])
+    expect(speedBadges[1].attributes('aria-label')).toBe('Playback speed: 5×')
     expect(wrapper.get('.session-comparison').text())
       .toContain('Starting price history: 500 saved bars restored')
     expect(wrapper.get('.session-comparison').text())
-      .toContain('Starting price history was not saved for this older session')
+      .toContain('Starting price history: no matching stored bars were available')
 
     await toggle.trigger('click')
     expect(wrapper.findAll('.session-replay-row')).toHaveLength(0)

@@ -156,6 +156,23 @@ describe('dashboard page', () => {
     expect(wrapper.emitted('navigate')).toEqual([['live-history']])
   })
 
+  it('opens a running live session on the live page', async () => {
+    api.mockResolvedValue({
+      experiments: [],
+      metrics: {},
+      sessions: [{ id: 'session-1', status: 'running', config: {} }],
+      storage: []
+    })
+    const wrapper = mount(DashboardPage, {
+      props: { bootstrap: { display: { logokit_api_key: null } } }
+    })
+    await flushPromises()
+
+    await wrapper.get('.live-session-row').trigger('click')
+
+    expect(wrapper.emitted('navigate')).toEqual([['live']])
+  })
+
   it('does not report an empty database while dashboard data is loading', async () => {
     let resolveDashboard
     api.mockReturnValueOnce(new Promise(resolve => { resolveDashboard = resolve }))

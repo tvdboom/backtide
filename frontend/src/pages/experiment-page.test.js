@@ -171,6 +171,38 @@ describe('experiment page', () => {
     expect(clearMetrics.attributes('disabled')).toBeDefined()
   })
 
+  it('sorts main metrics alphabetically and removes Alpha without a benchmark', async () => {
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.defaults.strategy.benchmark = 'SPY'
+    pageBootstrap.defaults.metrics = {
+      metrics: ['total_return', 'alpha', 'sharpe'],
+      main_metric: 'alpha'
+    }
+    pageBootstrap.metrics.builtin.push({
+      key: 'alpha', name: 'Alpha', description: 'Benchmark-adjusted return.',
+      builtin: true, percentage: true
+    })
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[4].trigger('click')
+
+    expect(wrapper.get('#experiment-main-metric').findAll('option').map(option => option.text()))
+      .toEqual(['Alpha', 'Sharpe ratio', 'Total return'])
+    expect(wrapper.get('#experiment-main-metric').element.value).toBe('alpha')
+
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+    await wrapper.get('[aria-label="Clear SPY benchmark"]').trigger('click')
+    await wrapper.findAll('.tabs button')[4].trigger('click')
+
+    expect(wrapper.get('#experiment-main-metric').findAll('option').map(option => option.text()))
+      .toEqual(['Sharpe ratio', 'Total return'])
+    expect(wrapper.get('#experiment-main-metric').element.value).toBe('sharpe')
+    expect(wrapper.get('[aria-label="Selected metric details"]').text()).not.toContain('Alpha')
+
+    await wrapper.get('#experiment-metrics').trigger('focus')
+    expect(wrapper.find('.search-menu').exists()).toBe(false)
+  })
+
   it('shows serialized defaults with friendly labels and loads the legacy catalog size', async () => {
     const wrapper = mount(ExperimentPage, { props: { bootstrap } })
     await flushPromises()

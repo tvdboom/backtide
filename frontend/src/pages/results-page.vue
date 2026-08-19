@@ -146,7 +146,7 @@
         </template>
     </section>
     <div v-if="documentView" class="modal-layer" @mousedown.self="documentView = ''">
-      <article class="modal panel document-modal"><div class="panel-header"><div><span class="eyebrow">Experiment artifact</span><h3>{{ documentView === 'config' ? 'Saved configuration' : 'Engine logs' }}</h3></div><div class="document-modal-actions"><a v-if="documentView === 'logs'" class="secondary" :href="fullLogUrl" download><Download :size="15"/> Download full log</a><button class="icon-button" aria-label="Close experiment artifact" @click="documentView = ''"><X/></button></div></div><div v-if="documentView === 'logs' && detail.logs === ''" class="document-empty"><ScrollText :size="26"/><strong>Log file is empty</strong><span>This experiment completed without writing any log entries.</span></div><template v-else-if="documentView === 'logs'"><div v-if="logPreview.truncated" class="document-note">Showing the most recent log output, limited to 1,000 lines. Download the full log for the complete output.</div><pre>{{ logPreview.text }}</pre></template><pre v-else>{{ detail.config }}</pre></article>
+      <article class="modal panel document-modal"><div class="panel-header"><div><span class="eyebrow">Experiment artifact</span><h3>{{ documentView === 'config' ? 'Saved configuration' : 'Engine logs' }}</h3></div><div class="document-modal-actions"><a v-if="documentView === 'config'" class="secondary" :href="configDownloadUrl" :download="configDownloadName"><Download :size="15"/> Download config</a><a v-else class="secondary" :href="fullLogUrl" download><Download :size="15"/> Download full log</a><button class="icon-button" aria-label="Close experiment artifact" @click="documentView = ''"><X/></button></div></div><div v-if="documentView === 'logs' && detail.logs === ''" class="document-empty"><ScrollText :size="26"/><strong>Log file is empty</strong><span>This experiment completed without writing any log entries.</span></div><template v-else-if="documentView === 'logs'"><div v-if="logPreview.truncated" class="document-note">Showing the most recent log output, limited to 1,000 lines. Download the full log for the complete output.</div><pre>{{ logPreview.text }}</pre></template><pre v-else>{{ detail.config }}</pre></article>
     </div>
     <ConfirmationModal
       :open="Boolean(pendingDelete)"
@@ -224,6 +224,11 @@ const ordersLoading = computed(() => orderLoadingKeys.has(activeOrderKey.value))
 const ordersError = computed(() => orderErrors.value[activeOrderKey.value] || '')
 const experimentDescription = computed(() => String(detail.value?.experiment?.description || '').trim())
 const fullLogUrl = computed(() => `/api/experiments/${encodeURIComponent(selectedId.value)}/logs`)
+const configDownloadUrl = computed(() => `data:application/toml;charset=utf-8,${encodeURIComponent(detail.value?.config || '')}`)
+const configDownloadName = computed(() => {
+  const name = detail.value?.experiment?.name?.trim().replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '')
+  return `${name || 'backtide-experiment'}.toml`
+})
 const isStrategyPlot = computed(() => strategyPlotIds.has(strategyTab.value))
 const isRecordTable = computed(() => strategyTab.value === 'orders')
 const hasOverviewOptions = computed(() => ['pnl', 'pnl_histogram', 'rolling_returns', 'rolling_sharpe', 'trade_duration'].includes(overviewTab.value))

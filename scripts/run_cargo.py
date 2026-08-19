@@ -1,9 +1,9 @@
 """Cross-platform launcher for cargo commands used by tox.
 
 PyO3-linked binaries (benchmarks, llvm-cov-instrumented tests) need to
-locate the Python shared library at runtime. The lookup directory differs
-by platform, so this launcher patches the appropriate environment variable
-before invoking `cargo`:
+locate the Python shared library and installed Python packages at runtime.
+The lookup directories differ by platform, so this launcher patches the
+appropriate environment variables before invoking `cargo`:
 
 * **POSIX** -- prepend `sysconfig['LIBDIR']` (which holds `libpython`) to
   both `LD_LIBRARY_PATH` (runtime loader) and `LIBRARY_PATH` (link-time
@@ -12,6 +12,8 @@ before invoking `cargo`:
   where `pythonXY.dll` lives) to `PATH`. Without this, cargo-spawned bench/test
   `.exe` files fail with `STATUS_DLL_NOT_FOUND` because the venv's `Scripts`
   dir does not contain the DLL.
+* **All platforms** -- prepend the active interpreter's `purelib` and `platlib`
+  directories to `PYTHONPATH` so embedded PyO3 tests can import dependencies.
 
 Usage:
     python scripts/run_cargo.py cargo bench --manifest-path ...
@@ -27,7 +29,7 @@ import sys
 import sysconfig
 
 
-def _prepend(env: dict[str, str], key: str, value: str):
+def _prepend(env: dict[str, str], key: str, value: str) -> None:
     """Prepend `value` to the `os.pathsep`-separated variable `key` in `env`.
 
     If `key` is unset or empty, it is set to `value`. Otherwise, `value`
@@ -57,10 +59,12 @@ def main(argv: list[str]) -> int:
     llvm-cov-instrumented tests) locate the Python shared library at runtime,
     then dispatches `argv` via :func:`subprocess.call`.
 
-    On Windows, the base interpreter directory (where `pythonXY.dll` lives)
-    and the directory of `sys.executable` are prepended to `PATH`. On
-    POSIX, `sysconfig['LIBDIR']` (where `libpython` lives) is prepended
-    to both `LD_LIBRARY_PATH` (runtime) and `LIBRARY_PATH` (link-time).
+    The active interpreter's package directories are prepended to
+    `PYTHONPATH`. On Windows, the base interpreter directory (where
+    `pythonXY.dll` lives) and the directory of `sys.executable` are prepended
+    to `PATH`. On POSIX, `sysconfig['LIBDIR']` (where `libpython` lives) is
+    prepended to both `LD_LIBRARY_PATH` (runtime) and `LIBRARY_PATH`
+    (link-time).
 
     Parameters
     ----------
@@ -79,6 +83,11 @@ def main(argv: list[str]) -> int:
         return 2
 
     env = os.environ.copy()
+    package_dirs = dict.fromkeys(sysconfig.get_paths().get(key) for key in ("purelib", "platlib"))
+    for package_dir in package_dirs:
+        if package_dir and os.path.isdir(package_dir):
+            _prepend(env, "PYTHONPATH", package_dir)
+
     if os.name == "nt":
         # `pythonXY.dll` lives next to the base interpreter; venvs only
         # contain a launcher in `Scripts/`, so the DLL is not on PATH by

@@ -118,6 +118,8 @@ impl<'a, 'py> FromPyObject<'a, 'py> for OrderId {
 /// without crossing the Python boundary.
 #[derive(Clone, Debug)]
 pub enum BuiltinSizer {
+    /// Equal-weight available cash after conversion to the instrument quote currency.
+    CashEqualWeight(EqualWeight),
     EqualWeight(EqualWeight),
     FixedFractional(FixedFractional),
     FixedNotional(FixedNotional),
@@ -128,6 +130,11 @@ pub enum BuiltinSizer {
 }
 
 impl BuiltinSizer {
+    /// Whether the sizer should receive available cash instead of total equity.
+    pub(crate) fn uses_cash_capital(&self) -> bool {
+        matches!(self, Self::CashEqualWeight(_))
+    }
+
     /// Run the sizing calculation entirely in Rust.
     pub fn calculate(
         &self,
@@ -145,6 +152,7 @@ impl BuiltinSizer {
         }
 
         delegate!(
+            CashEqualWeight,
             EqualWeight,
             FixedFractional,
             FixedNotional,

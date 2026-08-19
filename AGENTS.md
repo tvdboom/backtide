@@ -265,7 +265,22 @@ without inspecting the semantic change.
 
 ## Required validation
 
-Use focused commands while iterating, then the widest practical checks before handoff.
+Use focused commands while iterating, but focused checks never replace the complete validation
+required before handoff. Every change must finish with all pre-commit hooks, all Python tests, all
+Rust tests, and all frontend tests passing:
+
+```text
+uv run pre-commit run --all-files --show-diff-on-failure
+just test
+pnpm --dir frontend test
+```
+
+Do not hand off with any failing hook or test. Fix every failure, including failures in code outside
+the immediate patch when the change exposes them. The only exception is a check that cannot run
+because a required tool, service, platform library, or network resource is unavailable; report the
+exact command and failure in that case.
+
+Additional focused and release-oriented validation commands include:
 
 ```text
 uv run pytest -n=auto tests/<focused-file>.py
@@ -292,8 +307,7 @@ Useful aggregate commands are `just test`, `just lint`, `just bench`, and `just 
 validation is `pytest tests/test_live.py`, `cargo test --manifest-path src/backtide_core/Cargo.toml
 live::`, and `cargo bench --manifest-path src/backtide_core/Cargo.toml --bench live_bench --no-run`.
 
-If a check cannot run because a tool, service, platform library, or network is unavailable, report
-the exact command and failure. Never claim a check passed when it was skipped.
+Never claim a check passed when it was skipped.
 
 ## Change discipline
 

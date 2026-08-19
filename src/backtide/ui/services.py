@@ -791,8 +791,8 @@ class BacktideServices:
             "volume": "plot_volume",
             "vwap": "plot_vwap",
         }
-        function_name = names.get(plot_name)
-        if function_name is None and plot_name != "metrics":
+        function_name = names.get(plot_name, "")
+        if not function_name and plot_name != "metrics":
             raise APIError("Unknown analysis plot.", 404)
         symbols = payload.get("symbols") or []
         if not symbols:
@@ -1155,6 +1155,13 @@ class BacktideServices:
         from backtide.metrics import BUILTIN_METRICS
         from backtide.metrics.utils import _build_custom_metric, _check_metric_code, _save_metric
 
+        reserved_names = {metric.key for metric in BUILTIN_METRICS}
+        entered_name = str(payload.get("name") or "").strip()
+        if entered_name:
+            entered_name = self._safe_library_name(entered_name)
+            if entered_name in reserved_names:
+                raise APIError(f"{entered_name!r} is reserved for a built-in metric.", 409)
+
         instance = self._build_library_asset(
             payload,
             label="metric",
@@ -1163,7 +1170,7 @@ class BacktideServices:
             build=_build_custom_metric,
         )
         name = self._library_asset_name(payload.get("name"), instance, ignored_class_prefix="My")
-        if any(metric.key == name for metric in BUILTIN_METRICS):
+        if name in reserved_names:
             raise APIError(f"{name!r} is reserved for a built-in metric.", 409)
         _save_metric(instance, name, get_config())
         return {"saved": name}
@@ -1279,6 +1286,13 @@ class BacktideServices:
 
         manager = getattr(self, "_live_manager", None) or LiveTradingManager()
         return manager.session(session_id)
+
+    def delete_live_session(self, session_id: str) -> dict[str, int]:
+        """Delete one inactive persisted paper session."""
+        from backtide.ui.live import LiveTradingManager
+
+        manager = getattr(self, "_live_manager", None) or LiveTradingManager()
+        return manager.delete_session(session_id)
 
     def replay_live(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Replay a persisted paper session through a fresh engine."""

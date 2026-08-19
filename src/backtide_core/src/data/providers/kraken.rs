@@ -136,7 +136,8 @@ impl Kraken {
             return Err(HttpError::UnexpectedPayload(format!(
                 "empty response for pair: {}",
                 symbol
-            )))?;
+            ))
+            .into());
         }
 
         let bars: Vec<KrakenOHLC> =

@@ -47,6 +47,8 @@ describe('experiment selectors', () => {
     expect(declaration('.interval-picker button.selected')).toContain(
       'background: var(--surface-active)'
     )
+    expect(declaration('.interval-picker button:disabled')).toContain('opacity: .38')
+    expect(declaration('.interval-picker button:disabled')).toContain('cursor: not-allowed')
   })
 
   it('keeps the experiment name compact beside its icon picker', () => {
@@ -190,8 +192,10 @@ describe('session history', () => {
   it('keeps column positions fixed while replay rows expand', () => {
     expect(declaration('.session-history-table')).toContain('table-layout: fixed')
     expect(declaration('.session-history-table')).toContain('min-width: 1240px')
-    expect(declaration('.session-history-table th:nth-child(1)')).toContain('width: 15%')
-    expect(declaration('.session-history-table th:nth-child(7)')).toContain('width: 240px')
+    expect(declaration('.session-history-table th, .session-history-table td'))
+      .toContain('padding-inline: 10px')
+    expect(declaration('.session-history-table th:nth-child(1)')).toContain('width: 14%')
+    expect(declaration('.session-history-table th:nth-child(7)')).toContain('width: 300px')
     expect(declaration('.session-history-table td:last-child')).toContain('overflow: hidden')
     expect(declaration('.session-history-actions .compact-button')).toContain('max-width: 100%')
     expect(declaration('.session-history-actions .compact-button')).toContain('padding-inline: 12px')

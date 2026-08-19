@@ -585,16 +585,21 @@ impl PaperBroker {
         };
 
         if let Some(sizer) = order.sizer.take() {
-            let equity = self.snapshot().equity / quote_to_base_rate;
             let stop_distance = order.price.and_then(|price| {
                 let distance = (raw_price - price).abs();
                 (distance > 0.0).then_some(distance)
             });
             let quantity = match sizer {
                 SizerSlot::Builtin(builtin) => {
-                    builtin.calculate(equity, raw_price, stop_distance, None)
+                    let capital = if builtin.uses_cash_capital() {
+                        self.portfolio.cash.amount(&self.config.base_currency) / quote_to_base_rate
+                    } else {
+                        self.snapshot().equity / quote_to_base_rate
+                    };
+                    builtin.calculate(capital, raw_price, stop_distance, None)
                 },
                 SizerSlot::Custom(custom) => Python::attach(|py| -> PyResult<f64> {
+                    let equity = self.snapshot().equity / quote_to_base_rate;
                     custom
                         .bind(py)
                         .call_method1(

@@ -67,6 +67,10 @@ class StubServices(BacktideServices):
         """Return a deterministic persisted paper session."""
         return {"id": session_id, "status": "stopped"}
 
+    def delete_live_session(self, session_id):
+        """Return a deterministic paper-session deletion result."""
+        return {"deleted": session_id}
+
     def paper_config_from_experiment(self, experiment_id):
         """Return a deterministic paper-trading draft."""
         return {"experiment_id": experiment_id, "provider": "kraken"}
@@ -261,6 +265,10 @@ class TestJSONRoutes:
         )
         assert response.status == 200
         assert json.loads(body) == {"replayed": "abc123"}
+
+        response, body = request(web_server, "DELETE", "/api/live/sessions/abc123")
+        assert response.status == 200
+        assert json.loads(body) == {"deleted": "abc123"}
 
     def test_experiment_paper_config_route(self, web_server):
         """Experiment promotion returns a live wizard draft."""
@@ -2717,6 +2725,50 @@ class TestLiveTradingManager:
         assert restored["updates"] == [update]
         assert restored["warmup"][0]["symbol"] == "BTC-USD"
 
+    def test_deletes_an_inactive_persisted_session(self, tmp_path):
+        """Deleting a stopped session removes its manifest and recorded events."""
+        session_id = "0123456789abcdef"
+        folder = tmp_path / session_id
+        folder.mkdir()
+        (folder / "manifest.json").write_text(
+            json.dumps({"id": session_id, "status": "stopped"}),
+            encoding="utf-8",
+        )
+        (folder / "events.jsonl").write_text("{}\n", encoding="utf-8")
+
+        result = LiveTradingManager(tmp_path).delete_session(session_id)
+
+        assert result == {"deleted": 1}
+        assert not folder.exists()
+
+    def test_rejects_deleting_the_active_session(self, tmp_path):
+        """An active worker keeps ownership of its persisted session directory."""
+        session_id = "0123456789abcdef"
+        folder = tmp_path / session_id
+        folder.mkdir()
+        (folder / "manifest.json").write_text(
+            json.dumps({"id": session_id, "status": "running"}),
+            encoding="utf-8",
+        )
+        manager = LiveTradingManager(tmp_path)
+        manager._session_id = session_id
+        manager._thread = threading.current_thread()
+
+        with pytest.raises(APIError, match="Stop the active paper session") as error:
+            manager.delete_session(session_id)
+
+        assert error.value.status == 409
+        assert folder.exists()
+
+    def test_rejects_an_invalid_session_id_before_deletion(self, tmp_path):
+        """Session deletion cannot address a path outside its storage directory."""
+        manager = LiveTradingManager(tmp_path)
+
+        with pytest.raises(APIError, match="Paper session id is invalid") as error:
+            manager.delete_session("../outside")
+
+        assert error.value.status == 400
+
     @pytest.mark.parametrize("status", ["running", "paused"])
     def test_session_history_closes_orphaned_active_manifests(
         self,
@@ -2788,3 +2840,82 @@ class TestLiveTradingManager:
         assert manager.status()["health"]["paused"] is True
         manager.resume()
         assert manager.status()["health"]["paused"] is False
+
+    def test_flatten_remains_pending_until_a_market_update_is_processed(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """A partial candle cannot consume a flatten request that it does not process."""
+
+        class Order:
+            def __init__(self, symbol, quantity, order_type):
+                self.symbol = symbol
+                self.quantity = quantity
+                self.order_type = order_type
+
+        market = SimpleNamespace(
+            symbol="BTC-USD",
+            interval="1m",
+            open_ts=1_700_000_000,
+            close_ts=1_700_000_060,
+            open=100.0,
+            high=102.0,
+            low=99.0,
+            close=101.0,
+            volume=10.0,
+            n_trades=1,
+            is_final=False,
+            provider="mock",
+            received_ts=1_700_000_030,
+        )
+        snapshot = SimpleNamespace(
+            latest_prices={"BTC-USD": 101.0},
+            equity=1_001.0,
+            realized_pnl=0.0,
+            unrealized_pnl=1.0,
+            processed_bars=1,
+            portfolio=SimpleNamespace(
+                cash={"USD": 900.0},
+                positions={"BTC-USD": 1.0},
+                orders=[],
+            ),
+        )
+
+        class Session:
+            def __init__(self):
+                self.submissions = []
+
+            def snapshot(self):
+                return snapshot
+
+            def on_bar(self, update, orders):
+                self.submissions.append(orders)
+                return SimpleNamespace(
+                    market=update,
+                    fills=[],
+                    orders_submitted=len(orders or []),
+                    processed=update.is_final,
+                    snapshot=snapshot,
+                    indicators={},
+                )
+
+        monkeypatch.setitem(sys.modules, "backtide.backtest", SimpleNamespace(Order=Order))
+        session = Session()
+        manager = LiveTradingManager(tmp_path)
+        manager._sessions = {"Buy & Hold": session}
+        manager._session = session
+        manager._prepare_session()
+        manager.flatten()
+
+        manager._process_market(market)
+
+        assert manager._flatten_requested is True
+        assert session.submissions[0][0].quantity == -1.0
+
+        market.is_final = True
+        market.received_ts = market.close_ts
+        manager._process_market(market)
+
+        assert manager._flatten_requested is False
+        assert session.submissions[1][0].quantity == -1.0
