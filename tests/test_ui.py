@@ -1248,9 +1248,17 @@ end_date = "2024-03-01"
             ),
         )
 
-        result = BacktideServices().experiments()
+        services = BacktideServices()
+        monkeypatch.setattr(
+            services,
+            "_read_text",
+            lambda *_args, **_kwargs: '[data]\nsymbols = ["AAPL", "MSFT"]',
+        )
+
+        result = services.experiments()
 
         assert captured == [("exp-1", False)]
+        assert result[0]["n_symbols"] == 2
         assert result[0]["runs"] == [
             {
                 "strategy_id": "run-1",
@@ -1261,6 +1269,38 @@ end_date = "2024-03-01"
                 "error": None,
             }
         ]
+
+    def test_primary_metric_summary_preserves_configured_metric_order(self):
+        """Result summaries expose selected metrics for ordered breakdown rendering."""
+        services = BacktideServices()
+        result = services._primary_metric_summary(
+            """
+[metrics]
+metrics = ["total_return", "pnl", "sharpe", "win_rate"]
+main_metric = "sharpe"
+""",
+            [{"is_benchmark": False, "metrics": {"sharpe": 1.25}}],
+            {
+                "builtin": [
+                    {
+                        "key": "sharpe",
+                        "name": "Sharpe ratio",
+                        "percentage": False,
+                        "higher_is_better": True,
+                    }
+                ],
+                "saved": [],
+            },
+        )
+
+        assert result["primary_metric"] == "sharpe"
+        assert result["selected_metrics"] == [
+            "total_return",
+            "pnl",
+            "sharpe",
+            "win_rate",
+        ]
+        assert result["primary_metric_value"] == 1.25
 
     def test_experiment_summaries_only_enrich_the_requested_page(self, monkeypatch):
         """Experiment paging fetches and enriches only the requested ten-item slice."""

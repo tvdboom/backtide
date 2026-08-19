@@ -22,12 +22,14 @@
             <div class="experiment-result-identity">
               <span class="experiment-avatar" aria-hidden="true">{{ item.icon || '🧪' }}</span>
               <div class="experiment-result-copy">
-                <div class="experiment-result-title-line"><h3>{{ item.name }}</h3><span class="result-status"><i :class="String(item.status).toLowerCase()" />{{ item.status }}</span></div>
+                <div class="experiment-result-title-line"><h3>{{ item.name }}</h3></div>
                 <div v-if="tags(item.tags).length" class="experiment-result-tags"><span v-for="tag in tags(item.tags)" :key="tag" class="result-tag">{{ tag }}</span></div>
                 <div class="experiment-result-meta">
-                  <span><CalendarDays :size="14" />{{ date(item.started_at) }}</span>
+                  <span><CalendarDays :size="14" />{{ dateTime(item.started_at) }}</span>
                   <span><Medal :size="14" />{{ item.primary_metric_name || 'Sharpe' }} <strong :class="tone(item.primary_metric_value ?? item.best_sharpe)">{{ formatResultMetric(item.primary_metric_value ?? item.best_sharpe, item.primary_metric_percentage) }}</strong></span>
                   <span><BrainCircuit :size="14" />{{ item.n_strategies || item.runs?.length || 0 }} {{ (item.n_strategies || item.runs?.length) === 1 ? 'strategy' : 'strategies' }}</span>
+                  <span><ChartNoAxesCombined :size="14" />{{ item.n_symbols || 0 }} {{ item.n_symbols === 1 ? 'symbol' : 'symbols' }}</span>
+                  <span class="experiment-result-status"><Activity :size="14" /><strong :class="statusTone(item.status)">{{ item.status || 'Unknown' }}</strong></span>
                 </div>
               </div>
             </div>
@@ -42,7 +44,7 @@
               <header><span class="run-kind-icon" :class="{ benchmark: run.is_benchmark }"><BarChart3 v-if="run.is_benchmark" :size="17" /><BrainCircuit v-else :size="17" /></span><span><strong>{{ run.strategy_name }}</strong></span></header>
               <div v-if="run.error" class="run-summary-error">{{ run.error }}</div>
               <div v-else class="run-summary-metrics">
-                <div v-for="metricItem in runSummaryMetrics(run)" :key="metricItem.label"><span>{{ metricItem.label }}</span><strong :class="metricItem.tone">{{ metricItem.value }}</strong></div>
+                <div v-for="metricItem in runSummaryMetrics(item, run)" :key="metricItem.key"><span>{{ metricItem.label }}</span><strong :class="metricItem.tone">{{ metricItem.value }}</strong></div>
               </div>
             </article>
             <div v-if="!item.runs?.length" class="overview-no-runs">No strategy metrics were stored for this experiment.</div>
@@ -190,21 +192,21 @@ const orderErrors = ref({})
 const orderBatchSize = 100
 const experimentBatchSize = 10
 const overviewTabs = [
-  { id: 'pnl', label: 'PnL', icon: CircleDollarSign, description: 'Cumulative profit and loss over time for each strategy.' },
+  { id: 'pnl', label: 'PNL', icon: CircleDollarSign, description: 'Cumulative profit and loss over time for each strategy.' },
   { id: 'cash', label: 'Cash', icon: WalletCards, description: 'Cash balance timeline by strategy and settlement currency.' },
   { id: 'dividends', label: 'Dividends', icon: Coins, description: 'Dividend payments recorded for the experiment symbols.' },
-  { id: 'pnl_histogram', label: 'PnL histogram', icon: BarChart3, description: 'Distribution of realized trade PnL across strategies.' },
+  { id: 'pnl_histogram', label: 'PNL histogram', icon: BarChart3, description: 'Distribution of realized trade PNL across strategies.' },
   { id: 'rolling_returns', label: 'Rolling returns', icon: ChartNoAxesCombined, description: 'Rolling return trend to compare momentum over time.' },
   { id: 'rolling_sharpe', label: 'Rolling Sharpe', icon: Medal, description: 'Risk-adjusted performance through time.' },
   { id: 'trade_duration', label: 'Trade duration', icon: Timer, description: 'Distribution of trade holding periods.' },
-  { id: 'trade_pnl', label: 'Trade PnL', icon: ArrowRightLeft, description: 'Per-trade PnL profile for each strategy.' }
+  { id: 'trade_pnl', label: 'Trade PNL', icon: ArrowRightLeft, description: 'Per-trade PNL profile for each strategy.' }
 ]
 const strategyTabs = [
   { id: 'metrics', label: 'Metrics', icon: TableProperties, description: 'Every metric stored for this strategy.' },
   { id: 'mae_mfe', label: 'MAE / MFE', icon: Scale, description: 'Maximum adverse and favorable excursion per trade.' },
   { id: 'position_size', label: 'Position size', icon: Layers3, description: 'Position size evolution through time.' },
   { id: 'price', label: 'Trades on price', icon: ChartLine, description: 'Price action with strategy context.' },
-  { id: 'orders', label: 'Orders', icon: ReceiptText, description: 'Every submitted order, including fills, cancellations, and execution PnL.' }
+  { id: 'orders', label: 'Orders', icon: ReceiptText, description: 'Every submitted order, including fills, cancellations, and execution PNL.' }
 ]
 const strategyPlotIds = new Set(['mae_mfe', 'position_size', 'price'])
 let pollTimer, searchTimer, experimentObserver, experimentLoadVersion = 0
@@ -265,15 +267,15 @@ const experimentContextMetrics = computed(() => {
 })
 const headlineMetrics = computed(() => {
   const metrics = activeRun.value?.metrics || {}
-  const primary = detail.value?.experiment?.primary_metric
-  return [...new Set([primary, 'pnl', ...Object.keys(metrics)])]
-    .filter(key => key && Object.prototype.hasOwnProperty.call(metrics, key))
+  return orderedExperimentMetricKeys(detail.value?.experiment, detail.value?.runs, activeRun.value)
+    .filter(key => hasRunMetric(metrics, key))
     .slice(0, 6)
     .map(key => {
       const definition = metricDefinition(key)
+      const raw = runMetricValue(metrics, key)
       return metric(
-        key === 'pnl' ? 'PnL' : definition?.name || enumLabel(key),
-        metrics[key],
+        key === 'pnl' ? 'PNL' : definition?.name || enumLabel(key),
+        raw,
         Boolean(definition?.percentage),
         key === 'pnl'
       )
@@ -302,10 +304,19 @@ const orderRows = computed(() => activeOrderPage.value.orders
       status: enumLabel(record.status)
     }
   }))
-const tableRows = computed(() => strategyTab.value === 'orders' ? orderRows.value : Object.entries(activeRun.value?.metrics || {}).map(([metricName, value]) => {
-  const definition = metricDefinition(metricName)
-  return { metric: definition?.name || enumLabel(metricName), value: formatResultMetric(value, Boolean(definition?.percentage)) }
-}))
+const tableRows = computed(() => {
+  if (strategyTab.value === 'orders') return orderRows.value
+  const metrics = activeRun.value?.metrics || {}
+  return orderedExperimentMetricKeys(detail.value?.experiment, detail.value?.runs, activeRun.value)
+    .filter(key => hasRunMetric(metrics, key))
+    .map(key => {
+      const definition = metricDefinition(key)
+      return {
+        metric: key === 'pnl' ? 'PNL' : definition?.name || enumLabel(key),
+        value: formatResultMetric(runMetricValue(metrics, key), Boolean(definition?.percentage))
+      }
+    })
+})
 const tableColumns = computed(() => strategyTab.value === 'orders' ? orderColumns : Object.keys(tableRows.value[0] || {}))
 
 function metric(labelText, raw, percent, currencyValue = false) {
@@ -319,9 +330,31 @@ function metric(labelText, raw, percent, currencyValue = false) {
 }
 function metricDefinition(key) { return [...(props.bootstrap?.metrics?.builtin || []), ...(props.bootstrap?.metrics?.saved || [])].find(item => item.key === key) }
 const tone = value => Number(value) > 0 ? 'positive' : Number(value) < 0 ? 'negative' : ''
-const runSharpe = run => run?.metrics?.sharpe_ratio ?? run?.metrics?.sharpe
-const runReturn = run => run?.metrics?.total_return ?? run?.metrics?.return
-const runDrawdown = run => run?.metrics?.max_drawdown ?? run?.metrics?.max_dd
+const metricAliases = {
+  max_dd: ['max_drawdown'],
+  sharpe: ['sharpe_ratio'],
+  total_return: ['return']
+}
+const canonicalMetricKeys = {
+  max_drawdown: 'max_dd',
+  return: 'total_return',
+  sharpe_ratio: 'sharpe'
+}
+const metricImportance = [
+  'sharpe',
+  'total_return',
+  'pnl',
+  'max_dd',
+  'cagr',
+  'n_trades',
+  'win_rate',
+  'sortino',
+  'ann_volatility',
+  'final_equity',
+  'excess_return',
+  'alpha'
+]
+const currencyMetrics = new Set(['avg_loss', 'avg_win', 'best_trade', 'expectancy', 'final_equity', 'pnl', 'worst_trade'])
 function money(value, currency = 'USD', signed = true) {
   if (!Number.isFinite(Number(value))) return '—'
   try {
@@ -333,28 +366,68 @@ function money(value, currency = 'USD', signed = true) {
     return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2, signDisplay: signed ? 'exceptZero' : 'auto' })
   }
 }
-function runSummaryMetrics(run) {
+function runMetricValue(metrics, key) {
+  if (Object.prototype.hasOwnProperty.call(metrics, key)) return metrics[key]
+  const alias = metricAliases[key]?.find(candidate => Object.prototype.hasOwnProperty.call(metrics, candidate))
+  return alias ? metrics[alias] : undefined
+}
+function hasRunMetric(metrics, key) {
+  return Object.prototype.hasOwnProperty.call(metrics, key) ||
+    Boolean(metricAliases[key]?.some(candidate => Object.prototype.hasOwnProperty.call(metrics, candidate)))
+}
+function orderedExperimentMetricKeys(experiment, runs = [], run = null) {
+  const primary = canonicalMetricKeys[experiment?.primary_metric] || experiment?.primary_metric
+  const configured = Array.isArray(experiment?.selected_metrics) && experiment.selected_metrics.length
+    ? experiment.selected_metrics.map(key => canonicalMetricKeys[key] || key)
+    : [...new Set((runs?.length ? runs : [run])
+        .flatMap(experimentRun => Object.keys(experimentRun?.metrics || {}))
+        .map(key => canonicalMetricKeys[key] || key))]
+        .sort((left, right) => {
+          const leftRank = metricImportance.indexOf(left)
+          const rightRank = metricImportance.indexOf(right)
+          if (leftRank < 0 && rightRank < 0) return left.localeCompare(right)
+          if (leftRank < 0) return 1
+          if (rightRank < 0) return -1
+          return leftRank - rightRank
+        })
+  return [...new Set([primary, ...configured])].filter(Boolean)
+}
+function runSummaryMetric(key, run) {
   const metrics = run?.metrics || {}
-  const sharpe = runSharpe(run)
-  const pnl = metrics.pnl
-  const totalReturn = runReturn(run)
-  const cagr = metrics.cagr
-  const alpha = metrics.alpha
-  const drawdown = runDrawdown(run)
-  const winRate = metrics.win_rate
-  const trades = Number(metrics.n_trades ?? 0)
-  return [
-    { label: 'Sharpe', value: formatResultMetric(sharpe, false), tone: tone(sharpe) },
-    { label: 'PnL', value: money(pnl, run.base_currency), tone: tone(pnl) },
-    { label: 'Return', value: formatResultMetric(totalReturn, true), tone: tone(totalReturn) },
-    { label: 'CAGR', value: formatResultMetric(cagr, true), tone: tone(cagr) },
-    { label: 'Alpha', value: run.is_benchmark ? '—' : formatResultMetric(alpha, true), tone: run.is_benchmark ? '' : tone(alpha) },
-    { label: 'Max drawdown', value: formatResultMetric(drawdown, true), tone: Number(drawdown) ? 'negative' : '' },
-    { label: 'Trades / win rate', value: `${trades.toLocaleString()} · ${formatResultMetric(winRate, true)}`, tone: Number(winRate) > 0.5 ? 'positive' : Number(winRate) < 0.5 ? 'negative' : '' }
-  ]
+  const definition = metricDefinition(key)
+  const raw = runMetricValue(metrics, key)
+  return {
+    key,
+    label: key === 'pnl' ? 'PNL' : definition?.name || enumLabel(key),
+    value: currencyMetrics.has(key)
+      ? money(raw, run.base_currency)
+      : formatResultMetric(raw, Boolean(definition?.percentage)),
+    tone: tone(raw)
+  }
+}
+function runSummaryMetrics(experiment, run) {
+  const metrics = run?.metrics || {}
+  const ordered = orderedExperimentMetricKeys(experiment, experiment?.runs, run)
+  const items = []
+  for (const key of ordered) {
+    if (key === 'n_trades' || key === 'win_rate') {
+      if (items.some(item => item.key === 'trades_win_rate')) continue
+      const trades = runMetricValue(metrics, 'n_trades')
+      const winRate = runMetricValue(metrics, 'win_rate')
+      const rawTone = Number(winRate)
+      items.push({
+        key: 'trades_win_rate',
+        label: 'Trades / win rate',
+        value: `${Number.isFinite(Number(trades)) ? Number(trades).toLocaleString() : '—'} / ${formatResultMetric(winRate, true)}`,
+        tone: rawTone > 0.5 ? 'positive' : rawTone < 0.5 ? 'negative' : ''
+      })
+      continue
+    }
+    items.push(runSummaryMetric(key, run))
+  }
+  return items
 }
 const tags = value => Array.isArray(value) ? value : String(value || '').split(',').map(item => item.trim()).filter(Boolean)
-function date(value) { return formatConfiguredDate(value, props.bootstrap?.display, 'Unknown date') }
 function dateTime(value) { return formatConfiguredDateTime(value, props.bootstrap?.display, 'Unknown') }
 function duration(start, finish) {
   const seconds = Math.max(0, Number(finish || 0) - Number(start || 0))
@@ -379,7 +452,7 @@ function statusTone(status) {
   const normalized = String(status || '').toLowerCase()
   return normalized === 'success' ? 'positive' : normalized === 'error' ? 'negative' : normalized === 'partial' ? 'warning' : ''
 }
-function label(value) { if (value === 'pnl') return 'PnL'; return value.replaceAll('_', ' ').replace(/^./, match => match.toUpperCase()) }
+function label(value) { if (value === 'pnl') return 'PNL'; return value.replaceAll('_', ' ').replace(/^./, match => match.toUpperCase()) }
 function cell(value, column = '') {
   if (/(?:^|_)(?:timestamp|ts|datetime|started_at|finished_at)$/.test(column)) return formatConfiguredDateTime(value, props.bootstrap?.display)
   if (/(?:^|_)(?:date|start_date|end_date)$/.test(column)) return formatConfiguredDate(value, props.bootstrap?.display)

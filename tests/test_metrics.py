@@ -29,7 +29,20 @@ class TestMetricCatalog:
         config = MetricExpConfig()
 
         assert config.main_metric == "sharpe"
-        assert "sharpe" in config.metrics
+        assert config.metrics == [
+            "sharpe",
+            "total_return",
+            "pnl",
+            "max_dd",
+            "cagr",
+            "n_trades",
+            "win_rate",
+            "sortino",
+            "ann_volatility",
+            "final_equity",
+            "excess_return",
+            "alpha",
+        ]
 
     def test_catalog_exposes_extended_rust_metrics(self):
         """The Rust catalog includes legacy and extended performance metrics."""

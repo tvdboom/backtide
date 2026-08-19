@@ -54,10 +54,9 @@ tox:
 ty:
     uv run ty check
 
-# Build and serve the documentation without replacing a running development install
-docs:
-    uv run --isolated --no-editable --no-default-groups --group docs python scripts/generate_stubs.py
-    $env:PYTHONPATH="."; uv run --isolated --no-editable --no-default-groups --group docs mkdocs serve
+# Serve documentation from the existing development environment without syncing it.
+docs dev_addr="127.0.0.1:8001":
+    uv run --no-sync python -m mkdocs serve --dev-addr {{dev_addr}}
 
 launch:
     # Launch the checkout while keeping Rust rebuilds explicit.

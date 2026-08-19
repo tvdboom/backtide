@@ -8,16 +8,16 @@ use std::collections::HashMap;
 
 /// Stable keys selected by a new experiment unless explicitly overridden.
 pub const DEFAULT_METRICS: &[&str] = &[
+    "sharpe",
     "total_return",
-    "final_equity",
     "pnl",
+    "max_dd",
+    "cagr",
     "n_trades",
     "win_rate",
-    "cagr",
-    "ann_volatility",
-    "sharpe",
     "sortino",
-    "max_dd",
+    "ann_volatility",
+    "final_equity",
     "excess_return",
     "alpha",
 ];
@@ -296,6 +296,27 @@ pub fn compute_builtin_metrics(
 mod tests {
     use super::*;
     use crate::data::models::Currency;
+
+    #[test]
+    fn default_metrics_follow_the_result_summary_priority() {
+        assert_eq!(
+            DEFAULT_METRICS,
+            [
+                "sharpe",
+                "total_return",
+                "pnl",
+                "max_dd",
+                "cagr",
+                "n_trades",
+                "win_rate",
+                "sortino",
+                "ann_volatility",
+                "final_equity",
+                "excess_return",
+                "alpha",
+            ],
+        );
+    }
 
     #[test]
     fn selected_metrics_are_computed_and_unselected_metrics_are_omitted() {

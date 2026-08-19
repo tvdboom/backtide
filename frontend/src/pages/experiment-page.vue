@@ -109,13 +109,22 @@
       </div>
 
       <div v-if="tab === 4" class="form-section">
-        <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, then select the experiment headline.</p></div>
+        <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, drag them into order, then select the experiment headline.</p></div>
         <div class="form-grid two">
-          <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /></div>
+          <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /><button type="button" class="text-button metric-clear-button" aria-label="Clear all metrics" :disabled="config.metrics.metrics.length === 0" @click="clearMetrics"><X :size="14" /> Clear all metrics</button></div>
           <label>Main metric<FieldInfo text="Select the headline measure used to rank and summarize experiment results." /><select id="experiment-main-metric" v-model="config.metrics.main_metric"><option v-for="key in config.metrics.metrics" :key="key" :value="key">{{ metricLabel(key) }}</option></select><small>The best value appears in the results overview.</small></label>
-          <section v-if="selectedMetrics.length" class="selection-insights wide" aria-label="Selected metric details">
-            <article v-for="item in selectedMetrics" :key="item.key" class="asset-selection-card compact-card">
-              <header><span class="metric-icon"><LibraryAssetIcon kind="metric" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ item.builtin ? 'Built-in' : 'Custom' }}</small></span></header>
+          <section v-if="selectedMetrics.length" class="selection-insights metric-selection-list wide" aria-label="Selected metric details">
+            <article v-for="(item, index) in selectedMetrics" :key="item.key" class="asset-selection-card compact-card metric-selection-card" :class="{ 'main-metric-card': item.key === config.metrics.main_metric, dragging: draggedMetricKey === item.key, 'drop-target': dragOverMetricKey === item.key }" :draggable="item.key !== config.metrics.main_metric" @dragstart="startMetricDrag($event, item.key)" @dragover.prevent="dragOverMetric(item.key)" @drop.prevent="dropMetric($event, item.key)" @dragend="finishMetricDrag">
+              <header>
+                <span class="metric-icon"><LibraryAssetIcon kind="metric" :builtin="item.builtin" :size="18" /></span>
+                <span><strong>{{ item.name }}</strong><small>{{ item.key === config.metrics.main_metric ? 'Main metric' : item.builtin ? 'Built-in' : 'Custom' }}</small></span>
+                <span class="metric-order-actions">
+                  <span class="metric-drag-handle" :class="{ disabled: item.key === config.metrics.main_metric }" :title="item.key === config.metrics.main_metric ? 'The main metric stays first' : `Drag ${item.name} to reorder`"><GripVertical :size="16" aria-hidden="true" /></span>
+                  <span class="metric-order-number" :aria-label="`Metric position ${index + 1}`">{{ index + 1 }}</span>
+                  <button type="button" class="icon-button" :aria-label="`Move ${item.name} up`" :disabled="item.key === config.metrics.main_metric || index <= 1" @click="moveMetric(item.key, -1)"><ChevronUp :size="15" /></button>
+                  <button type="button" class="icon-button" :aria-label="`Move ${item.name} down`" :disabled="item.key === config.metrics.main_metric || index === selectedMetrics.length - 1" @click="moveMetric(item.key, 1)"><ChevronDown :size="15" /></button>
+                </span>
+              </header>
               <p>{{ item.description }}</p>
             </article>
           </section>
@@ -216,8 +225,11 @@ import {
   Bot,
   Braces,
   ChartCandlestick,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  GripVertical,
   Landmark,
   Play,
   Plus,
@@ -263,9 +275,26 @@ const experimentIcons = [
   { value: '🏆', label: 'Champion' },
   { value: '🔬', label: 'Inspect' }
 ]
+const defaultMetricImportance = [
+  'sharpe',
+  'total_return',
+  'pnl',
+  'max_dd',
+  'cagr',
+  'n_trades',
+  'win_rate',
+  'sortino',
+  'ann_volatility',
+  'final_equity',
+  'excess_return',
+  'alpha'
+]
 const enums = props.bootstrap.enums
 const savedDraft = consumeExperimentDraft(sessionStorage)
-const config = reactive(normalizedExperimentConfig(savedDraft || props.bootstrap.defaults))
+const config = reactive(normalizedExperimentConfig(
+  savedDraft || props.bootstrap.defaults,
+  { prioritizeDefaults: !savedDraft }
+))
 const optionValue = experimentOptionValue
 const intervalValues = Object.fromEntries(
   enums.intervals.map(item => [item, optionValue('interval', item)])
@@ -273,6 +302,8 @@ const intervalValues = Object.fromEntries(
 const tab = ref(0)
 const running = ref(false)
 const issue = ref(null)
+const draggedMetricKey = ref('')
+const dragOverMetricKey = ref('')
 const benchmarkIsAutomatic = ref(!savedDraft && !config.strategy.benchmark)
 let issueTimer
 const instruments = ref([])
@@ -369,7 +400,18 @@ const orderTypeDescriptions = computed(() => Object.fromEntries(enums.order_type
 ])))
 
 function enumLabel(value) { return String(value).replace(/([a-z])([A-Z])/g, '$1 $2').replace('Na N', 'NaN') }
-function normalizedExperimentConfig(value) {
+function orderedMetricKeys(keys, mainMetric, prioritize = false) {
+  const unique = [...new Set((keys || []).filter(Boolean))]
+  const remaining = unique.filter(key => key !== mainMetric)
+  if (prioritize) {
+    const rank = new Map(defaultMetricImportance.map((key, index) => [key, index]))
+    remaining.sort((left, right) =>
+      (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER)
+    )
+  }
+  return [...(mainMetric && unique.includes(mainMetric) ? [mainMetric] : []), ...remaining]
+}
+function normalizedExperimentConfig(value, { prioritizeDefaults = false } = {}) {
   const defaults = cloneApiState(props.bootstrap.defaults)
   const incoming = cloneApiState(value || {})
   for (const [section, sectionValue] of Object.entries(incoming)) {
@@ -378,8 +420,13 @@ function normalizedExperimentConfig(value) {
       : sectionValue
   }
   if (!defaults.metrics) {
-    defaults.metrics = { metrics: ['total_return', 'final_equity', 'pnl', 'n_trades', 'win_rate', 'cagr', 'ann_volatility', 'sharpe', 'sortino', 'max_dd', 'excess_return', 'alpha'], main_metric: 'sharpe' }
+    defaults.metrics = { metrics: [...defaultMetricImportance], main_metric: 'sharpe' }
   }
+  defaults.metrics.metrics = orderedMetricKeys(
+    defaults.metrics.metrics,
+    defaults.metrics.main_metric,
+    prioritizeDefaults
+  )
   if (!defaults.general.icon) defaults.general.icon = experimentIcons[0].value
   defaults.exchange.commission_type = 'PercentagePlusFixed'
   return defaults
@@ -388,6 +435,51 @@ function catalogTypeLabel(value) {
   return enumLabel(value).replace(/\b(Macd|Rsi|Roc|Rsrs|Sma|Ema|Vwap)\b/g, token => token.toUpperCase())
 }
 function metricLabel(key) { return metricCatalog.value.find(item => item.key === key)?.name || enumLabel(key) }
+function moveMetric(key, direction) {
+  const from = config.metrics.metrics.indexOf(key)
+  const to = from + direction
+  if (from < 1 || to < 1 || to >= config.metrics.metrics.length) return
+  const reordered = [...config.metrics.metrics]
+  reordered.splice(to, 0, reordered.splice(from, 1)[0])
+  config.metrics.metrics = reordered
+}
+function clearMetrics() {
+  finishMetricDrag()
+  config.metrics.main_metric = ''
+  config.metrics.metrics = []
+}
+function startMetricDrag(event, key) {
+  if (key === config.metrics.main_metric) {
+    event.preventDefault()
+    return
+  }
+  draggedMetricKey.value = key
+  dragOverMetricKey.value = ''
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', key)
+  }
+}
+function dragOverMetric(key) {
+  if (!draggedMetricKey.value || key === draggedMetricKey.value) return
+  dragOverMetricKey.value = key
+}
+function dropMetric(event, targetKey) {
+  const sourceKey = draggedMetricKey.value || event.dataTransfer?.getData('text/plain')
+  const from = config.metrics.metrics.indexOf(sourceKey)
+  const target = config.metrics.metrics.indexOf(targetKey)
+  if (from > 0 && target >= 0 && sourceKey !== targetKey) {
+    const reordered = [...config.metrics.metrics]
+    const [metric] = reordered.splice(from, 1)
+    reordered.splice(Math.max(1, target), 0, metric)
+    config.metrics.metrics = reordered
+  }
+  finishMetricDrag()
+}
+function finishMetricDrag() {
+  draggedMetricKey.value = ''
+  dragOverMetricKey.value = ''
+}
 const instrumentTypeIcons = {
   Stocks: ChartCandlestick,
   ETF: Landmark,
@@ -558,7 +650,7 @@ function dismissIssue() {
 
 function resetExperiment() {
   const instrumentType = config.data.instrument_type
-  const defaults = normalizedExperimentConfig(props.bootstrap.defaults)
+  const defaults = normalizedExperimentConfig(props.bootstrap.defaults, { prioritizeDefaults: true })
   defaults.data.instrument_type = instrumentType
   Object.assign(config, defaults)
   benchmarkIsAutomatic.value = true
@@ -601,7 +693,6 @@ async function run() {
   try {
     const payload = cloneApiState(config)
     payload.exchange.commission_type = 'PercentagePlusFixed'
-    if (!payload.metrics.metrics.includes('pnl')) payload.metrics.metrics.unshift('pnl')
     payload.portfolio.starting_positions = parsePositions()
     const job = await post('/api/experiments', payload)
     resetExperiment()
@@ -618,6 +709,7 @@ async function importConfig(event) {
   try {
     benchmarkIsAutomatic.value = false
     Object.assign(config, await post('/api/config/parse', { suffix, text: await file.text() }))
+    config.metrics.metrics = orderedMetricKeys(config.metrics.metrics, config.metrics.main_metric)
     config.exchange.commission_type = 'PercentagePlusFixed'
     positions.value = Object.entries(config.portfolio.starting_positions || {})
       .filter(([symbol]) => config.data.symbols.includes(symbol))
@@ -634,6 +726,9 @@ watch(() => [...config.data.symbols], selected => {
 })
 watch(() => [...config.metrics.metrics], selected => {
   if (!selected.includes(config.metrics.main_metric)) config.metrics.main_metric = selected[0] || ''
+})
+watch(() => config.metrics.main_metric, mainMetric => {
+  config.metrics.metrics = orderedMetricKeys(config.metrics.metrics, mainMetric)
 })
 watch(config, () => {
   if (!issue.value?.correctable) return

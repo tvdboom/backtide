@@ -6,7 +6,7 @@
     --backtide-surface-2: #f0f4f9;
     --backtide-surface-3: #e6edf6;
     --backtide-surface-input: #fff;
-    --backtide-header-bg: rgb(244 247 251 / 94%);
+    --backtide-header-bg: #f4f7fb;
     --backtide-line: #dce4ef;
     --backtide-line-strong: #c7d3e1;
     --backtide-muted: #64748b;
@@ -69,7 +69,7 @@
     --backtide-surface-2: #121d31;
     --backtide-surface-3: #17243b;
     --backtide-surface-input: #0a1220;
-    --backtide-header-bg: rgb(8 13 25 / 92%);
+    --backtide-header-bg: #080d19;
     --backtide-line: #1c2940;
     --backtide-line-strong: #293b5c;
     --backtide-muted: #8290aa;
@@ -148,7 +148,7 @@ body {
 
 .md-tabs {
     color: var(--backtide-muted);
-    background: var(--backtide-surface);
+    background: var(--backtide-header-bg);
     border-bottom: 1px solid var(--backtide-line);
 }
 

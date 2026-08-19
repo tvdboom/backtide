@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, markRaw, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import IntervalPicker from '../components/interval-picker.vue'
+import SearchSelect from '../components/search-select.vue'
 import ExperimentPage from './experiment-page.vue'
 
 const { post, query } = vi.hoisted(() => ({ post: vi.fn(), query: vi.fn() }))
@@ -110,6 +111,64 @@ describe('experiment page', () => {
     expect(details.text()).toContain('Custom')
     expect(details.text()).not.toContain('Rust built-in')
     expect(details.text()).not.toContain('Custom Python')
+  })
+
+  it('orders default metrics by importance and lets users reorder non-main metrics', async () => {
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.defaults.metrics = {
+      metrics: ['final_equity', 'win_rate', 'pnl', 'total_return', 'sharpe', 'max_dd'],
+      main_metric: 'sharpe'
+    }
+    pageBootstrap.metrics.builtin.push(
+      { key: 'final_equity', name: 'Final equity', description: 'Ending value.', builtin: true },
+      { key: 'win_rate', name: 'Win rate', description: 'Winning trades.', builtin: true, percentage: true },
+      { key: 'pnl', name: 'Profit and loss', description: 'Net profit.', builtin: true },
+      { key: 'max_dd', name: 'Maximum drawdown', description: 'Peak decline.', builtin: true, percentage: true }
+    )
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+    await wrapper.findAll('.tabs button')[4].trigger('click')
+
+    const selectedKeys = () => wrapper.getComponent(SearchSelect).props('modelValue')
+    expect(selectedKeys()).toEqual([
+      'sharpe', 'total_return', 'pnl', 'max_dd', 'win_rate', 'final_equity'
+    ])
+    expect(wrapper.get('[aria-label="Move Sharpe ratio down"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[aria-label="Move Profit and loss up"]').trigger('click')
+    expect(selectedKeys()).toEqual([
+      'sharpe', 'pnl', 'total_return', 'max_dd', 'win_rate', 'final_equity'
+    ])
+
+    await wrapper.get('#experiment-main-metric').setValue('max_dd')
+    await flushPromises()
+    expect(selectedKeys()).toEqual([
+      'max_dd', 'sharpe', 'pnl', 'total_return', 'win_rate', 'final_equity'
+    ])
+
+    let metricCards = wrapper.findAll('.metric-selection-card')
+    expect(metricCards[0].attributes('draggable')).toBe('false')
+    expect(metricCards[1].attributes('draggable')).toBe('true')
+    const dataTransfer = {
+      effectAllowed: '',
+      getData: vi.fn(() => 'final_equity'),
+      setData: vi.fn()
+    }
+    await metricCards[5].trigger('dragstart', { dataTransfer })
+    metricCards = wrapper.findAll('.metric-selection-card')
+    await metricCards[2].trigger('dragover', { dataTransfer })
+    expect(metricCards[2].classes()).toContain('drop-target')
+    await metricCards[2].trigger('drop', { dataTransfer })
+    expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', 'final_equity')
+    expect(selectedKeys()).toEqual([
+      'max_dd', 'sharpe', 'final_equity', 'pnl', 'total_return', 'win_rate'
+    ])
+
+    const clearMetrics = wrapper.get('[aria-label="Clear all metrics"]')
+    await clearMetrics.trigger('click')
+    expect(selectedKeys()).toEqual([])
+    expect(wrapper.get('#experiment-main-metric').element.value).toBe('')
+    expect(clearMetrics.attributes('disabled')).toBeDefined()
   })
 
   it('shows serialized defaults with friendly labels and loads the legacy catalog size', async () => {
@@ -528,7 +587,7 @@ describe('experiment page', () => {
     expect(post).toHaveBeenCalledWith('/api/experiments', expect.objectContaining({
       general: expect.objectContaining({ name: 'Persistent draft' }),
       data: expect.objectContaining({ instrument_type: 'etf', symbols: ['AAPL'] }),
-      metrics: expect.objectContaining({ metrics: expect.arrayContaining(['pnl']) }),
+      metrics: { metrics: ['sharpe', 'total_return'], main_metric: 'sharpe' },
       exchange: expect.objectContaining({ commission_type: 'PercentagePlusFixed' })
     }))
     expect(wrapper.emitted('navigate')).toEqual([['results']])

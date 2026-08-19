@@ -18,14 +18,11 @@
         <div v-else-if="!metrics.length" class="empty-state"><p>No metrics are available for the selected data.</p></div>
         <div v-else class="data-table-wrap">
           <table class="data-table analysis-metrics-table">
-            <thead><tr><th>Stock</th><th class="number">Sharpe</th><th class="number">CAGR</th><th class="number">Max drawdown</th><th class="number">Win rate</th></tr></thead>
+            <thead><tr><th>Stock</th><th v-for="column in metricColumns" :key="column.key" class="number">{{ column.label }}</th></tr></thead>
             <tbody>
               <tr v-for="row in metrics" :key="row.symbol">
                 <td><span class="storage-instrument"><span class="order-symbol-logo"><img v-if="logos[row.symbol]" :src="logos[row.symbol]" alt=""/><span v-else aria-hidden="true">{{ row.symbol.slice(0, 1) }}</span></span><span><strong>{{ row.symbol }}</strong><small>{{ names[row.symbol] || row.symbol }}</small></span></span></td>
-                <td class="number">{{ number(row.sharpe) }}</td>
-                <td class="number">{{ percent(row.cagr, true) }}</td>
-                <td class="number">{{ percent(row.max_dd) }}</td>
-                <td class="number">{{ percent(row.win_rate) }}</td>
+                <td v-for="column in metricColumns" :key="column.key" class="number">{{ formatMetric(row[column.key], column) }}</td>
               </tr>
             </tbody>
           </table>
@@ -58,6 +55,15 @@ const plots = [
   { id: 'vwap', label: 'VWAP', icon: CircleDollarSign, description: 'Contrast price with volume-weighted value.' },
   { id: 'dividends', label: 'Dividends', icon: CircleDollarSign, description: 'Review historical cash distributions.' }
 ]
+const metricDefinitions = {
+  sharpe: { label: 'Sharpe', format: 'number' },
+  cagr: { label: 'CAGR', format: 'signed-percent' },
+  max_dd: { label: 'Max drawdown', format: 'percent' },
+  win_rate: { label: 'Win rate', format: 'percent' },
+  ann_volatility: { label: 'Annualized volatility', format: 'percent' },
+  sortino: { label: 'Sortino', format: 'number' },
+  total_bars: { label: 'Total bars', format: 'integer' }
+}
 const storage = ref([])
 const form = reactive({ symbols: [], interval: '1d', price_col: 'close', window: 21, plot: 'metrics' })
 const figure = ref(null)
@@ -85,6 +91,14 @@ const selectedLogos = computed(() => Object.fromEntries(form.symbols.map(symbol 
 const availableIntervals = computed(() => [...new Set(storage.value.filter(row => !form.symbols.length || form.symbols.includes(row.symbol)).map(row => row.interval))])
 const current = computed(() => plots.find(item => item.id === form.plot))
 const analysisSymbols = computed(() => symbolsForAnalysis(form.symbols, form.plot))
+const metricColumns = computed(() => {
+  const keys = [...new Set(metrics.value.flatMap(row => Object.keys(row)))]
+  return keys.filter(key => key !== 'symbol').map(key => ({
+    key,
+    label: metricDefinitions[key]?.label || metricLabel(key),
+    format: metricDefinitions[key]?.format || 'number'
+  }))
+})
 let refreshTimer
 let requestId = 0
 let ready = false
@@ -141,6 +155,19 @@ function percent(value, signed = false) {
   if (value === null || value === '' || !Number.isFinite(Number(value))) return '—'
   const result = Number(value) * 100
   return `${signed && result > 0 ? '+' : ''}${result.toFixed(2)}%`
+}
+function metricLabel(key) {
+  return key.replaceAll('_', ' ').replace(/^./, character => character.toUpperCase())
+}
+function formatMetric(value, column) {
+  if (column.format === 'percent') return percent(value)
+  if (column.format === 'signed-percent') return percent(value, true)
+  if (column.format === 'integer') {
+    return value !== null && value !== '' && Number.isFinite(Number(value))
+      ? Math.trunc(Number(value)).toLocaleString()
+      : '—'
+  }
+  return number(value)
 }
 watch(() => [form.symbols.join('|'), form.interval, form.price_col, form.window, form.plot], schedulePlot)
 onMounted(async () => {

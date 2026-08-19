@@ -25,7 +25,16 @@ describe('analysis page', () => {
     }])
     post.mockReset().mockImplementation((_endpoint, payload) => Promise.resolve(
       payload.plot === 'metrics'
-        ? { rows: [{ symbol: 'AAPL', sharpe: 1.24, cagr: 0.137, max_dd: -0.082, win_rate: 0.54 }] }
+        ? { rows: [{
+            symbol: 'AAPL',
+            sharpe: 1.24,
+            cagr: 0.137,
+            max_dd: -0.082,
+            win_rate: 0.54,
+            ann_volatility: 0.183,
+            sortino: 1.62,
+            total_bars: 252
+          }] }
         : { data: [], layout: {} }
     ))
     sessionStorage.clear()
@@ -49,9 +58,33 @@ describe('analysis page', () => {
     expect(wrapper.get('.analysis-metrics-table').text()).toContain('AAPL')
     expect(wrapper.get('.analysis-metrics-table').text()).toContain('1.24')
     expect(wrapper.get('.analysis-metrics-table').text()).toContain('+13.70%')
+    expect(wrapper.findAll('.analysis-metrics-table th').map(header => header.text())).toEqual([
+      'Stock',
+      'Sharpe',
+      'CAGR',
+      'Max drawdown',
+      'Win rate',
+      'Annualized volatility',
+      'Sortino',
+      'Total bars'
+    ])
+    expect(wrapper.get('.analysis-metrics-table').text()).toContain('18.30%')
+    expect(wrapper.get('.analysis-metrics-table').text()).toContain('1.62')
+    expect(wrapper.get('.analysis-metrics-table').text()).toContain('252')
     expect(post).toHaveBeenCalledWith('/api/analysis', expect.objectContaining({
       plot: 'metrics', symbols: ['AAPL']
     }))
+  })
+
+  it('adds a readable column for metrics introduced by the API', async () => {
+    post.mockResolvedValue({ rows: [{ symbol: 'AAPL', tail_ratio: 1.15 }] })
+
+    const wrapper = mount(AnalysisPage, { props: { bootstrap: {} } })
+    await flushPromises()
+
+    expect(wrapper.findAll('.analysis-metrics-table th').map(header => header.text()))
+      .toEqual(['Stock', 'Tail ratio'])
+    expect(wrapper.get('.analysis-metrics-table tbody').text()).toContain('1.15')
   })
 
   it('shows instrument logos in the symbol menu and selected chips', async () => {

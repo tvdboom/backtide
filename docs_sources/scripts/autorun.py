@@ -117,7 +117,7 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
 
     ipy = InteractiveInterpreter()
 
-    lines = src.split("\n")
+    lines = src.splitlines()
     tree = {x.lineno: x for x in ast.parse(src).body}
 
     end_line = 0

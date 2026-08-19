@@ -23,7 +23,10 @@ const summary = {
   status: 'Success',
   started_at: 1750000000,
   n_strategies: 1,
+  n_symbols: 2,
   best_sharpe: 1.42,
+  primary_metric: 'sharpe',
+  selected_metrics: ['total_return', 'pnl', 'cagr', 'alpha', 'max_dd', 'n_trades', 'win_rate', 'sharpe'],
   runs: [{
     strategy_id: 'strategy-1',
     strategy_name: 'Trend engine',
@@ -36,6 +39,22 @@ const summary = {
   }]
 }
 
+const metricBootstrap = {
+  metrics: {
+    builtin: [
+      { key: 'sharpe', name: 'Sharpe ratio', percentage: false },
+      { key: 'total_return', name: 'Total return', percentage: true },
+      { key: 'pnl', name: 'Profit and loss', percentage: false },
+      { key: 'cagr', name: 'CAGR', percentage: true },
+      { key: 'alpha', name: 'Alpha', percentage: true },
+      { key: 'max_dd', name: 'Maximum drawdown', percentage: true },
+      { key: 'n_trades', name: 'Trades', percentage: false },
+      { key: 'win_rate', name: 'Win rate', percentage: true }
+    ],
+    saved: []
+  }
+}
+
 const detail = {
   experiment: {
     id: 'experiment-1',
@@ -45,7 +64,9 @@ const detail = {
     tags: [],
     started_at: 1750000000,
     finished_at: 1750000090,
-    best_sharpe: 1.42
+    best_sharpe: 1.42,
+    primary_metric: 'sharpe',
+    selected_metrics: ['sharpe', 'max_dd', 'total_return', 'pnl']
   },
   config_metadata: {
     symbols: 2,
@@ -118,7 +139,7 @@ describe('results page', () => {
       summary,
       { ...summary, id: 'experiment-2', name: 'Second study' }
     ])
-    wrapper = mount(ResultsPage, { props: { bootstrap: {} } })
+    wrapper = mount(ResultsPage, { props: { bootstrap: metricBootstrap } })
     await flushPromises()
 
     const [card, secondCard] = wrapper.findAll('.experiment-result-card')
@@ -126,9 +147,14 @@ describe('results page', () => {
     expect(card.get('.experiment-avatar').text()).toBe('🎯')
     expect(api).not.toHaveBeenCalledWith('/api/experiments/experiment-1')
     expect(card.get('.experiment-result-title-line h3').text()).toBe('Momentum study')
-    expect(card.get('.experiment-result-title-line .result-status').text()).toContain('Success')
-    expect(card.get('.experiment-result-meta').text()).not.toContain('Success')
+    expect(card.get('.experiment-result-title-line').text()).not.toContain('Success')
+    const status = card.get('.experiment-result-status')
+    expect(status.text()).toBe('Success')
+    expect(status.find('svg').exists()).toBe(true)
+    expect(status.get('strong').classes()).toContain('positive')
+    expect(card.get('.experiment-result-meta > span').text()).toMatch(/\d{1,2}:\d{2}/)
     expect(card.get('.experiment-result-meta').text()).toContain('Sharpe 1.42')
+    expect(card.get('.experiment-result-meta').text()).toContain('2 symbols')
     expect(card.get('.experiment-result-meta').text()).not.toContain('Best Sharpe')
 
     await card.get('.breakdown-toggle').trigger('click')
@@ -137,7 +163,18 @@ describe('results page', () => {
     expect(card.text()).toContain('1,250')
     expect(card.text()).toContain('12.00%')
     expect(card.text()).toContain('-8.00%')
-    expect(card.findAll('.run-summary-metrics > div')).toHaveLength(7)
+    const metrics = card.findAll('.run-summary-metrics > div')
+    expect(metrics).toHaveLength(7)
+    expect(metrics.map(item => item.get('span').text())).toEqual([
+      'Sharpe ratio',
+      'Total return',
+      'PNL',
+      'CAGR',
+      'Alpha',
+      'Maximum drawdown',
+      'Trades / win rate'
+    ])
+    expect(metrics.at(-1).get('strong').text()).toBe('14 / 57.00%')
     expect(api).not.toHaveBeenCalledWith('/api/experiments/experiment-1')
 
     await secondCard.get('.breakdown-toggle').trigger('click')
@@ -229,7 +266,7 @@ describe('results page', () => {
   })
 
   it('opens a separate detail view and returns to the experiment overview', async () => {
-    await mountAndOpen()
+    await mountAndOpen(metricBootstrap)
 
     expect(wrapper.text()).toContain('Experiment overview')
     expect(wrapper.text()).toContain('Strategies')
@@ -261,9 +298,15 @@ describe('results page', () => {
     const strategyTabs = wrapper.findAll('.strategy-plot-tabs button').map(button => button.text())
     expect(strategyTabs).toEqual(['Metrics', 'MAE / MFE', 'Position size', 'Trades on price', 'Orders'])
     expect(wrapper.findAll('.result-workspace')[1].get('.result-table').exists()).toBe(true)
-    expect(wrapper.get('.result-metrics').text()).toContain('PnL')
+    expect(wrapper.get('.result-metrics').text()).toContain('PNL')
     expect(wrapper.get('.result-metrics').text()).toContain('1,250.00')
     expect(wrapper.findAll('.result-metrics .metric-card small')).toHaveLength(0)
+    expect(wrapper.findAll('.result-metrics .metric-card span').map(item => item.text())).toEqual([
+      'Sharpe ratio', 'Maximum drawdown', 'Total return', 'PNL'
+    ])
+    expect(wrapper.findAll('.result-table tbody tr').map(row => row.findAll('td')[0].text())).toEqual([
+      'Sharpe ratio', 'Maximum drawdown', 'Total return', 'PNL'
+    ])
 
     await wrapper.get('.results-back').trigger('click')
     expect(wrapper.find('.result-detail-page').exists()).toBe(false)
@@ -305,6 +348,38 @@ describe('results page', () => {
     expect(wrapper.get('.result-orders-table').text()).toContain('11/08/2026 19:05')
   })
 
+  it('uses one deterministic metric order for every strategy in an older experiment', async () => {
+    query.mockResolvedValue([{
+      ...summary,
+      selected_metrics: [],
+      runs: [
+        {
+          ...summary.runs[0],
+          strategy_id: 'strategy-a',
+          metrics: { alpha: 0.03, pnl: 1250, total_return: 0.12, sharpe_ratio: 1.42, max_drawdown: -0.08 }
+        },
+        {
+          ...summary.runs[0],
+          strategy_id: 'strategy-b',
+          strategy_name: 'Second engine',
+          metrics: { max_drawdown: -0.12, sharpe_ratio: 0.8, total_return: 0.07, pnl: 700, alpha: 0.01 }
+        }
+      ]
+    }])
+    wrapper = mount(ResultsPage, { props: { bootstrap: metricBootstrap } })
+    await flushPromises()
+
+    await wrapper.get('.breakdown-toggle').trigger('click')
+
+    const orders = wrapper.findAll('.run-summary-metrics').map(row =>
+      row.findAll(':scope > div span').map(label => label.text())
+    )
+    expect(orders).toEqual([
+      ['Sharpe ratio', 'Total return', 'PNL', 'Maximum drawdown', 'Alpha'],
+      ['Sharpe ratio', 'Total return', 'PNL', 'Maximum drawdown', 'Alpha']
+    ])
+  })
+
   it('renders orders as the legacy formatted table without nested JSON', async () => {
     mockOrderBatches([
       {
@@ -339,7 +414,7 @@ describe('results page', () => {
 
     const table = wrapper.get('.result-orders-table')
     expect(table.findAll('th').map(header => header.text())).toEqual([
-      'Symbol', 'Datetime', 'Type', 'Side', 'Qty', 'Price', 'PnL', 'Commission', 'Status'
+      'Symbol', 'Datetime', 'Type', 'Side', 'Qty', 'Price', 'PNL', 'Commission', 'Status'
     ])
     const rows = table.findAll('tbody tr')
     expect(rows).toHaveLength(2)
@@ -502,7 +577,7 @@ describe('results page', () => {
 
     const workspace = wrapper.findAll('.result-workspace')[0]
     const tabs = workspace.findAll('.result-plot-tabs button')
-    expect(tabs[0].text()).toBe('PnL')
+    expect(tabs[0].text()).toBe('PNL')
     expect(workspace.get('.result-plot-description').text()).toBe('Cumulative profit and loss over time for each strategy.')
 
     await tabs[1].trigger('click')

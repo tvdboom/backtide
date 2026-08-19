@@ -526,6 +526,8 @@ class BacktideServices:
                 experiment_root / experiment["id"] / "config.toml", max_bytes=500_000
             )
             self._apply_benchmark_display_name(config_text, experiment["runs"])
+            config_metadata = self._experiment_config_metadata(config_text) or {}
+            experiment["n_symbols"] = int(config_metadata.get("symbols", 0))
             experiment.update(
                 self._primary_metric_summary(config_text, experiment["runs"], metric_catalog)
             )
@@ -1498,10 +1500,17 @@ class BacktideServices:
         catalog: dict[str, list[dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
         """Resolve the configured headline metric and its best strategy value."""
+        selected_metrics: list[str] = []
         try:
-            metric_key = str(
-                tomllib.loads(config_text or "").get("metrics", {}).get("main_metric")
-            )
+            metric_config = tomllib.loads(config_text or "").get("metrics", {})
+            if not isinstance(metric_config, dict):
+                raise TypeError("Metric configuration must be a table.")
+            metric_key = str(metric_config.get("main_metric"))
+            configured_metrics = metric_config.get("metrics", [])
+            if isinstance(configured_metrics, list):
+                selected_metrics = list(
+                    dict.fromkeys(str(metric) for metric in configured_metrics if metric)
+                )
         except (tomllib.TOMLDecodeError, TypeError):
             metric_key = "sharpe"
         if not metric_key or metric_key == "None":
@@ -1525,6 +1534,7 @@ class BacktideServices:
         best = (max(values) if higher_is_better else min(values)) if values else None
         return {
             "primary_metric": metric_key,
+            "selected_metrics": selected_metrics,
             "primary_metric_name": (
                 definition.get("name", metric_key) if definition else metric_key
             ),
