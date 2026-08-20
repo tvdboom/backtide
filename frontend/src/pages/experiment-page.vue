@@ -109,25 +109,25 @@
       </div>
 
       <div v-if="tab === 4" class="form-section">
-        <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, drag them into order, then select the experiment headline.</p></div>
+        <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, then drag them into order. The first metric is used for the experiment headline.</p></div>
         <div class="form-grid two">
           <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /><button type="button" class="text-button metric-clear-button" aria-label="Clear all metrics" :disabled="config.metrics.metrics.length === 0" @click="clearMetrics"><X :size="14" /> Clear all metrics</button></div>
-          <label>Main metric<FieldInfo text="Select the headline measure used to rank and summarize experiment results." /><select id="experiment-main-metric" v-model="config.metrics.main_metric"><option v-for="key in mainMetricOptions" :key="key" :value="key">{{ metricLabel(key) }}</option></select><small>The best value appears in the results overview.</small></label>
-          <section v-if="selectedMetrics.length" class="selection-insights metric-selection-list wide" aria-label="Selected metric details">
-            <article v-for="(item, index) in selectedMetrics" :key="item.key" class="asset-selection-card compact-card metric-selection-card" :class="{ 'main-metric-card': item.key === config.metrics.main_metric, dragging: draggedMetricKey === item.key, 'drop-target': dragOverMetricKey === item.key }" :draggable="item.key !== config.metrics.main_metric" @dragstart="startMetricDrag($event, item.key)" @dragover.prevent="dragOverMetric(item.key)" @drop.prevent="dropMetric($event, item.key)" @dragend="finishMetricDrag">
+          <TransitionGroup v-if="selectedMetrics.length" tag="section" name="metric-reorder" class="selection-insights metric-selection-list wide" aria-label="Selected metric details">
+            <article v-for="(item, index) in selectedMetrics" :key="item.key" class="asset-selection-card compact-card metric-selection-card" :class="{ dragging: draggedMetricKey === item.key, 'drop-target': dragOverMetricKey === item.key }" draggable="true" @dragstart="startMetricDrag($event, item.key)" @dragover.prevent="dragOverMetric($event, item.key)" @drop.prevent="finishMetricDrag" @dragend="finishMetricDrag">
               <header>
                 <span class="metric-icon"><LibraryAssetIcon kind="metric" :builtin="item.builtin" :size="18" /></span>
-                <span><strong>{{ item.name }}</strong><small>{{ item.key === config.metrics.main_metric ? 'Main metric' : item.builtin ? 'Built-in' : 'Custom' }}</small></span>
+                <span><strong>{{ item.name }}</strong><small>{{ item.builtin ? 'Built-in' : 'Custom' }}</small></span>
                 <span class="metric-order-actions">
-                  <span class="metric-drag-handle" :class="{ disabled: item.key === config.metrics.main_metric }" :title="item.key === config.metrics.main_metric ? 'The main metric stays first' : `Drag ${item.name} to reorder`"><GripVertical :size="16" aria-hidden="true" /></span>
+                  <span class="metric-drag-handle" :title="`Drag ${item.name} to reorder`"><GripVertical :size="16" aria-hidden="true" /></span>
                   <span class="metric-order-number" :aria-label="`Metric position ${index + 1}`">{{ index + 1 }}</span>
-                  <button type="button" class="icon-button" :aria-label="`Move ${item.name} up`" :disabled="item.key === config.metrics.main_metric || index <= 1" @click="moveMetric(item.key, -1)"><ChevronUp :size="15" /></button>
-                  <button type="button" class="icon-button" :aria-label="`Move ${item.name} down`" :disabled="item.key === config.metrics.main_metric || index === selectedMetrics.length - 1" @click="moveMetric(item.key, 1)"><ChevronDown :size="15" /></button>
+                  <button type="button" class="icon-button" :aria-label="`Move ${item.name} up`" :disabled="index === 0" @click="moveMetric(item.key, -1)"><ChevronUp :size="15" /></button>
+                  <button type="button" class="icon-button" :aria-label="`Move ${item.name} down`" :disabled="index === selectedMetrics.length - 1" @click="moveMetric(item.key, 1)"><ChevronDown :size="15" /></button>
+                  <button type="button" class="icon-button metric-remove-button" :aria-label="`Remove ${item.name} metric`" @click="removeMetric(item.key)"><X :size="15" /></button>
                 </span>
               </header>
               <p>{{ item.description }}</p>
             </article>
-          </section>
+          </TransitionGroup>
         </div>
       </div>
 
@@ -304,6 +304,7 @@ const running = ref(false)
 const issue = ref(null)
 const draggedMetricKey = ref('')
 const dragOverMetricKey = ref('')
+let metricDragPreview = null
 const benchmarkIsAutomatic = ref(!savedDraft && !config.strategy.benchmark)
 let issueTimer
 const instruments = ref([])
@@ -367,9 +368,6 @@ const selectedIndicators = computed(() => config.indicators.indicators
 const selectedMetrics = computed(() => config.metrics.metrics
   .map(key => metricCatalog.value.find(item => item.key === key))
   .filter(Boolean))
-const mainMetricOptions = computed(() => config.metrics.metrics
-  .filter(key => key !== 'alpha' || config.strategy.benchmark)
-  .sort((left, right) => metricLabel(left).localeCompare(metricLabel(right))))
 const automaticBenchmark = computed(() => defaultExperimentBenchmark(
   config.portfolio.base_currency,
   config.data.instrument_type,
@@ -405,16 +403,15 @@ const orderTypeDescriptions = computed(() => Object.fromEntries(enums.order_type
 ])))
 
 function enumLabel(value) { return String(value).replace(/([a-z])([A-Z])/g, '$1 $2').replace('Na N', 'NaN') }
-function orderedMetricKeys(keys, mainMetric, prioritize = false) {
+function orderedMetricKeys(keys, prioritize = false) {
   const unique = [...new Set((keys || []).filter(Boolean))]
-  const remaining = unique.filter(key => key !== mainMetric)
   if (prioritize) {
     const rank = new Map(defaultMetricImportance.map((key, index) => [key, index]))
-    remaining.sort((left, right) =>
+    unique.sort((left, right) =>
       (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER)
     )
   }
-  return [...(mainMetric && unique.includes(mainMetric) ? [mainMetric] : []), ...remaining]
+  return unique
 }
 function normalizedExperimentConfig(value, { prioritizeDefaults = false } = {}) {
   const defaults = cloneApiState(props.bootstrap.defaults)
@@ -425,13 +422,11 @@ function normalizedExperimentConfig(value, { prioritizeDefaults = false } = {}) 
       : sectionValue
   }
   if (!defaults.metrics) {
-    defaults.metrics = { metrics: [...defaultMetricImportance], main_metric: 'sharpe' }
+    defaults.metrics = { metrics: [...defaultMetricImportance] }
   }
-  defaults.metrics.metrics = orderedMetricKeys(
-    defaults.metrics.metrics,
-    defaults.metrics.main_metric,
-    prioritizeDefaults
-  )
+  defaults.metrics = {
+    metrics: orderedMetricKeys(defaults.metrics.metrics, prioritizeDefaults)
+  }
   if (!defaults.general.icon) defaults.general.icon = experimentIcons[0].value
   defaults.exchange.commission_type = 'PercentagePlusFixed'
   return defaults
@@ -443,45 +438,59 @@ function metricLabel(key) { return metricCatalog.value.find(item => item.key ===
 function moveMetric(key, direction) {
   const from = config.metrics.metrics.indexOf(key)
   const to = from + direction
-  if (from < 1 || to < 1 || to >= config.metrics.metrics.length) return
+  if (from < 0 || to < 0 || to >= config.metrics.metrics.length) return
   const reordered = [...config.metrics.metrics]
   reordered.splice(to, 0, reordered.splice(from, 1)[0])
   config.metrics.metrics = reordered
 }
 function clearMetrics() {
   finishMetricDrag()
-  config.metrics.main_metric = ''
   config.metrics.metrics = []
 }
+function removeMetric(key) {
+  if (draggedMetricKey.value === key) finishMetricDrag()
+  config.metrics.metrics = config.metrics.metrics.filter(metric => metric !== key)
+}
 function startMetricDrag(event, key) {
-  if (key === config.metrics.main_metric) {
-    event.preventDefault()
-    return
-  }
   draggedMetricKey.value = key
   dragOverMetricKey.value = ''
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', key)
+    if (typeof event.dataTransfer.setDragImage === 'function') {
+      const bounds = event.currentTarget.getBoundingClientRect()
+      const offsetX = Math.max(0, Math.min(bounds.width, event.clientX - bounds.left))
+      const offsetY = Math.max(0, Math.min(bounds.height, event.clientY - bounds.top))
+      metricDragPreview?.remove()
+      metricDragPreview = event.currentTarget.cloneNode(true)
+      metricDragPreview.classList.remove('dragging', 'drop-target')
+      metricDragPreview.classList.add('metric-drag-preview')
+      metricDragPreview.style.width = `${bounds.width}px`
+      document.body.append(metricDragPreview)
+      event.dataTransfer.setDragImage(metricDragPreview, offsetX, offsetY)
+    }
   }
 }
-function dragOverMetric(key) {
-  if (!draggedMetricKey.value || key === draggedMetricKey.value) return
-  dragOverMetricKey.value = key
-}
-function dropMetric(event, targetKey) {
-  const sourceKey = draggedMetricKey.value || event.dataTransfer?.getData('text/plain')
+function dragOverMetric(event, targetKey) {
+  const sourceKey = draggedMetricKey.value
+  if (!sourceKey || targetKey === sourceKey) return
+  dragOverMetricKey.value = targetKey
   const from = config.metrics.metrics.indexOf(sourceKey)
   const target = config.metrics.metrics.indexOf(targetKey)
-  if (from > 0 && target >= 0 && sourceKey !== targetKey) {
-    const reordered = [...config.metrics.metrics]
-    const [metric] = reordered.splice(from, 1)
-    reordered.splice(Math.max(1, target), 0, metric)
-    config.metrics.metrics = reordered
-  }
-  finishMetricDrag()
+  if (from < 0 || target < 0) return
+  const bounds = event.currentTarget.getBoundingClientRect()
+  let insertion = target + (event.clientY > bounds.top + bounds.height / 2 ? 1 : 0)
+  if (from < insertion) insertion -= 1
+  insertion = Math.max(0, Math.min(config.metrics.metrics.length - 1, insertion))
+  if (insertion === from) return
+  const reordered = [...config.metrics.metrics]
+  const [metric] = reordered.splice(from, 1)
+  reordered.splice(insertion, 0, metric)
+  config.metrics.metrics = reordered
 }
 function finishMetricDrag() {
+  metricDragPreview?.remove()
+  metricDragPreview = null
   draggedMetricKey.value = ''
   dragOverMetricKey.value = ''
 }
@@ -599,9 +608,6 @@ function validationIssue() {
   }
   if (!config.metrics.metrics.length) {
     return { tab: 4, selector: '#experiment-metrics', message: 'Select at least one metric.' }
-  }
-  if (!config.metrics.metrics.includes(config.metrics.main_metric)) {
-    return { tab: 4, selector: '#experiment-main-metric', message: 'Choose a main metric from the selected metrics.' }
   }
   if (!config.exchange.allowed_order_types.length) {
     return { tab: 5, selector: '#experiment-order-types', message: 'Select at least one allowed order type.' }
@@ -721,7 +727,7 @@ async function importConfig(event) {
   try {
     benchmarkIsAutomatic.value = false
     Object.assign(config, await post('/api/config/parse', { suffix, text: await file.text() }))
-    config.metrics.metrics = orderedMetricKeys(config.metrics.metrics, config.metrics.main_metric)
+    config.metrics = { metrics: orderedMetricKeys(config.metrics.metrics) }
     config.exchange.commission_type = 'PercentagePlusFixed'
     removeUnavailableAlpha()
     positions.value = Object.entries(config.portfolio.starting_positions || {})
@@ -737,19 +743,16 @@ async function importConfig(event) {
 watch(() => [...config.data.symbols], selected => {
   positions.value = positions.value.filter(position => selected.includes(position.symbol))
 })
-watch(() => [...config.metrics.metrics], selected => {
-  if (!selected.includes(config.metrics.main_metric)) config.metrics.main_metric = selected[0] || ''
-})
-watch(() => config.metrics.main_metric, mainMetric => {
-  config.metrics.metrics = orderedMetricKeys(config.metrics.metrics, mainMetric)
-})
 watch(config, () => {
   if (!issue.value?.correctable) return
   const invalid = validationIssue()
   if (invalid?.message === issue.value.message) return
   dismissIssue()
 }, { deep: true })
-onBeforeUnmount(() => window.clearTimeout(issueTimer))
+onBeforeUnmount(() => {
+  window.clearTimeout(issueTimer)
+  finishMetricDrag()
+})
 onMounted(initializeInstruments)
 onActivated(() => { void applyPendingExperimentDraft() })
 </script>

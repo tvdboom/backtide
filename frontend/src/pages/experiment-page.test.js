@@ -20,7 +20,7 @@ const bootstrap = {
     portfolio: { initial_cash: 10000, base_currency: 'USD', starting_positions: {} },
     strategy: { strategies: [], benchmark: null },
     indicators: { indicators: [] },
-    metrics: { metrics: ['total_return', 'sharpe'], main_metric: 'sharpe' },
+    metrics: { metrics: ['total_return', 'sharpe'] },
     exchange: {
       commission_type: 'Percentage', commission_pct: 0.1, commission_fixed: 0,
       slippage: 0.05, partial_fills: false, allowed_order_types: ['Market'],
@@ -113,11 +113,10 @@ describe('experiment page', () => {
     expect(details.text()).not.toContain('Custom Python')
   })
 
-  it('orders default metrics by importance and lets users reorder non-main metrics', async () => {
+  it('orders default metrics by importance and derives the headline from the first metric', async () => {
     const pageBootstrap = structuredClone(bootstrap)
     pageBootstrap.defaults.metrics = {
-      metrics: ['final_equity', 'win_rate', 'pnl', 'total_return', 'sharpe', 'max_dd'],
-      main_metric: 'sharpe'
+      metrics: ['final_equity', 'win_rate', 'pnl', 'total_return', 'sharpe', 'max_dd']
     }
     pageBootstrap.metrics.builtin.push(
       { key: 'final_equity', name: 'Final equity', description: 'Ending value.', builtin: true },
@@ -133,50 +132,64 @@ describe('experiment page', () => {
     expect(selectedKeys()).toEqual([
       'sharpe', 'total_return', 'pnl', 'max_dd', 'win_rate', 'final_equity'
     ])
-    expect(wrapper.get('[aria-label="Move Sharpe ratio down"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[aria-label="Move Sharpe ratio up"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[aria-label="Move Sharpe ratio down"]').attributes('disabled')).toBeUndefined()
 
     await wrapper.get('[aria-label="Move Profit and loss up"]').trigger('click')
     expect(selectedKeys()).toEqual([
       'sharpe', 'pnl', 'total_return', 'max_dd', 'win_rate', 'final_equity'
     ])
 
-    await wrapper.get('#experiment-main-metric').setValue('max_dd')
-    await flushPromises()
+    await wrapper.get('[aria-label="Move Maximum drawdown up"]').trigger('click')
+    await wrapper.get('[aria-label="Move Maximum drawdown up"]').trigger('click')
+    await wrapper.get('[aria-label="Move Maximum drawdown up"]').trigger('click')
     expect(selectedKeys()).toEqual([
       'max_dd', 'sharpe', 'pnl', 'total_return', 'win_rate', 'final_equity'
     ])
 
     let metricCards = wrapper.findAll('.metric-selection-card')
-    expect(metricCards[0].attributes('draggable')).toBe('false')
+    expect(metricCards[0].attributes('draggable')).toBe('true')
     expect(metricCards[1].attributes('draggable')).toBe('true')
     const dataTransfer = {
       effectAllowed: '',
       getData: vi.fn(() => 'final_equity'),
-      setData: vi.fn()
+      setData: vi.fn(),
+      setDragImage: vi.fn()
     }
     await metricCards[5].trigger('dragstart', { dataTransfer })
+    expect(dataTransfer.setDragImage).toHaveBeenCalled()
+    expect(document.body.querySelector('.metric-drag-preview')).not.toBeNull()
     metricCards = wrapper.findAll('.metric-selection-card')
     await metricCards[2].trigger('dragover', { dataTransfer })
     expect(metricCards[2].classes()).toContain('drop-target')
+    expect(selectedKeys()).toEqual([
+      'max_dd', 'sharpe', 'final_equity', 'pnl', 'total_return', 'win_rate'
+    ])
     await metricCards[2].trigger('drop', { dataTransfer })
+    expect(document.body.querySelector('.metric-drag-preview')).toBeNull()
     expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', 'final_equity')
     expect(selectedKeys()).toEqual([
       'max_dd', 'sharpe', 'final_equity', 'pnl', 'total_return', 'win_rate'
     ])
 
+    await wrapper.get('[aria-label="Remove Profit and loss metric"]').trigger('click')
+    expect(selectedKeys()).toEqual([
+      'max_dd', 'sharpe', 'final_equity', 'total_return', 'win_rate'
+    ])
+    expect(wrapper.find('[aria-label="Remove pnl"]').exists()).toBe(false)
+
     const clearMetrics = wrapper.get('[aria-label="Clear all metrics"]')
     await clearMetrics.trigger('click')
     expect(selectedKeys()).toEqual([])
-    expect(wrapper.get('#experiment-main-metric').element.value).toBe('')
+    expect(wrapper.find('[aria-label="Selected metric details"]').exists()).toBe(false)
     expect(clearMetrics.attributes('disabled')).toBeDefined()
   })
 
-  it('sorts main metrics alphabetically and removes Alpha without a benchmark', async () => {
+  it('removes Alpha from the ordered metrics when no benchmark is selected', async () => {
     const pageBootstrap = structuredClone(bootstrap)
     pageBootstrap.defaults.strategy.benchmark = 'SPY'
     pageBootstrap.defaults.metrics = {
-      metrics: ['total_return', 'alpha', 'sharpe'],
-      main_metric: 'alpha'
+      metrics: ['total_return', 'alpha', 'sharpe']
     }
     pageBootstrap.metrics.builtin.push({
       key: 'alpha', name: 'Alpha', description: 'Benchmark-adjusted return.',
@@ -186,17 +199,16 @@ describe('experiment page', () => {
     await flushPromises()
     await wrapper.findAll('.tabs button')[4].trigger('click')
 
-    expect(wrapper.get('#experiment-main-metric').findAll('option').map(option => option.text()))
-      .toEqual(['Alpha', 'Sharpe ratio', 'Total return'])
-    expect(wrapper.get('#experiment-main-metric').element.value).toBe('alpha')
+    expect(wrapper.find('#experiment-main-metric').exists()).toBe(false)
+    expect(wrapper.findAll('.metric-selection-card strong').map(item => item.text()))
+      .toEqual(['Sharpe ratio', 'Total return', 'Alpha'])
 
     await wrapper.findAll('.tabs button')[3].trigger('click')
     await wrapper.get('[aria-label="Clear SPY benchmark"]').trigger('click')
     await wrapper.findAll('.tabs button')[4].trigger('click')
 
-    expect(wrapper.get('#experiment-main-metric').findAll('option').map(option => option.text()))
+    expect(wrapper.findAll('.metric-selection-card strong').map(item => item.text()))
       .toEqual(['Sharpe ratio', 'Total return'])
-    expect(wrapper.get('#experiment-main-metric').element.value).toBe('sharpe')
     expect(wrapper.get('[aria-label="Selected metric details"]').text()).not.toContain('Alpha')
 
     await wrapper.get('#experiment-metrics').trigger('focus')
@@ -619,7 +631,7 @@ describe('experiment page', () => {
     expect(post).toHaveBeenCalledWith('/api/experiments', expect.objectContaining({
       general: expect.objectContaining({ name: 'Persistent draft' }),
       data: expect.objectContaining({ instrument_type: 'etf', symbols: ['AAPL'] }),
-      metrics: { metrics: ['sharpe', 'total_return'], main_metric: 'sharpe' },
+      metrics: { metrics: ['sharpe', 'total_return'] },
       exchange: expect.objectContaining({ commission_type: 'PercentagePlusFixed' })
     }))
     expect(wrapper.emitted('navigate')).toEqual([['results']])

@@ -215,10 +215,7 @@ def run_experiment(
     indicators_config = IndicatorExpConfig(indicators=indicators)
     kwargs.pop("indicators", None)
 
-    metrics_config = MetricExpConfig(
-        metrics=metrics,
-        main_metric=get("main_metric", "metrics"),
-    )
+    metrics_config = MetricExpConfig(metrics=metrics)
     kwargs.pop("metrics", None)
 
     exchange = ExchangeExpConfig(

@@ -265,11 +265,11 @@ cost-basis lot consumed.
 
 ## Result metric formulas
 
-The [`MetricExpConfig`](../api/models/backtest/metricexpconfig.md) section selects which metrics are computed and names one
-`main_metric`. Sharpe is the default main metric. The application uses that selection for the
-results headline instead of assuming Sharpe, while each strategy's Metrics tab displays every
-selected value. See the [Metrics guide](metrics.md) for the built-in catalog and custom Python
-extension contract.
+The [`MetricExpConfig`](../api/models/backtest/metricexpconfig.md) section selects and orders the
+metrics that are computed. The application uses the first metric for the results headline, while
+each strategy's Metrics tab displays every selected value in the same order. Sharpe is first by
+default. See the [Metrics guide](metrics.md) for the built-in catalog and custom Python extension
+contract.
 
 Every strategy run carries a `metrics` dict of named scalars. They are computed from
 the equity curve and the trade log, plus an extra alignment pass for `alpha` and

@@ -6,9 +6,9 @@ Rust metrics and lets you save custom Python metrics alongside custom strategies
 ## Selecting metrics
 
 Use the **Metrics** step of the experiment builder to choose the metrics computed for every
-strategy. Sharpe ratio is the default main metric. The main metric ranks the strategy runs and
-appears by name on the results overview. The Metrics tab for each run
-shows every selected value.
+strategy, then drag them into the desired order. The first selected metric ranks the strategy runs
+and appears by name on the results overview. Sharpe ratio is first by default. The Metrics tab for
+each run shows every selected value in the same order.
 
 Built-in metrics execute in the Rust engine and are distributed across the same Rayon worker
 pool as strategy results. The catalog includes returns, PnL, CAGR, volatility, Sharpe, Sortino,
@@ -54,7 +54,6 @@ Saved metrics can be selected in the experiment builder or passed directly to
 result = run_experiment(
     symbols=["AAPL"],
     strategies=[strategy],
-    metrics=["total_return", "sharpe", GainToPain()],
-    main_metric="GainToPain",
+    metrics=[GainToPain(), "total_return", "sharpe"],
 )
 ```

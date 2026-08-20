@@ -24,11 +24,10 @@ from backtide.ui.services import APIError, BacktideServices
 class TestMetricCatalog:
     """Tests for built-in metric metadata and experiment defaults."""
 
-    def test_default_main_metric_is_selected_sharpe(self):
-        """Default metric configuration includes Sharpe as its main metric."""
+    def test_default_metrics_begin_with_sharpe(self):
+        """Default metric configuration places Sharpe first."""
         config = MetricExpConfig()
 
-        assert config.main_metric == "sharpe"
         assert config.metrics == [
             "sharpe",
             "total_return",
@@ -70,7 +69,7 @@ class TestMetricCatalog:
         )
 
         summary = services._primary_metric_summary(
-            '[metrics]\nmain_metric = "risk_score"',
+            '[metrics]\nmetrics = ["risk_score"]',
             [
                 {"metrics": {"risk_score": 4.0}, "is_benchmark": False},
                 {"metrics": {"risk_score": 2.0}, "is_benchmark": False},

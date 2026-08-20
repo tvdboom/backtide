@@ -515,6 +515,11 @@ class TestRunExperimentKwargs:
         with pytest.raises(ValueError, match="Unknown keyword argument"):
             run_experiment(not_a_field=123, verbose=False)
 
+    def test_removed_main_metric_kwarg_raises_value_error(self):
+        """The removed main-metric argument is rejected instead of being silently ignored."""
+        with pytest.raises(ValueError, match="Unknown keyword arguments: main_metric"):
+            run_experiment(main_metric="sharpe", verbose=False)
+
     def test_enum_string_alias_via_kwargs(self):
         """Enum aliases like ``interval='1d'`` work through kwargs.
 

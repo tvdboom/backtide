@@ -1025,10 +1025,8 @@ class MetricExpConfig:
     Attributes
     ----------
     metrics : list[str]
-        Built-in metric keys or names of stored custom metrics to compute.
-
-    main_metric : str, default="sharpe"
-        Metric used to rank strategies and summarize the experiment.
+        Ordered built-in metric keys or names of stored custom metrics to compute. The first metric
+        ranks strategies and summarizes the experiment.
 
     See Also
     --------
@@ -1037,7 +1035,6 @@ class MetricExpConfig:
 
     """
 
-    main_metric: str
     metrics: list[str]
 
     def __eq__(self, value, /):

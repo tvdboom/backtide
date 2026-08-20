@@ -369,10 +369,8 @@ pub struct IndicatorExpConfig {
 /// Attributes
 /// ----------
 /// metrics : list[str]
-///     Built-in metric keys or names of stored custom metrics to compute.
-///
-/// main_metric : str, default="sharpe"
-///     Metric used to rank strategies and summarize the experiment.
+///     Ordered built-in metric keys or names of stored custom metrics to compute. The first metric
+///     ranks strategies and summarizes the experiment.
 ///
 /// See Also
 /// --------
@@ -383,14 +381,12 @@ pub struct IndicatorExpConfig {
 #[serde(default)]
 pub struct MetricExpConfig {
     pub metrics: Vec<String>,
-    pub main_metric: String,
 }
 
 impl Default for MetricExpConfig {
     fn default() -> Self {
         Self {
             metrics: DEFAULT_METRICS.iter().map(|key| (*key).to_owned()).collect(),
-            main_metric: "sharpe".to_owned(),
         }
     }
 }
@@ -401,22 +397,18 @@ impl MetricExpConfig {
     const __RUST_DATACLASS__: bool = true;
 
     #[new]
-    #[pyo3(signature = (metrics: "list[str]"=DEFAULT_METRICS.iter().map(|key| (*key).to_owned()).collect(), main_metric: "str"="sharpe"))]
-    fn new(metrics: Vec<String>, main_metric: &str) -> PyResult<Self> {
+    #[pyo3(signature = (metrics: "list[str]"=DEFAULT_METRICS.iter().map(|key| (*key).to_owned()).collect()))]
+    fn new(metrics: Vec<String>) -> PyResult<Self> {
         if metrics.is_empty() {
             return Err(PyValueError::new_err("Select at least one metric."));
         }
-        if !metrics.iter().any(|metric| metric == main_metric) {
-            return Err(PyValueError::new_err("The main metric must be included in metrics."));
-        }
         Ok(Self {
             metrics,
-            main_metric: main_metric.to_owned(),
         })
     }
 
     fn __repr__(&self) -> String {
-        format!("MetricExpConfig(metrics={:?}, main_metric={:?})", self.metrics, self.main_metric)
+        format!("MetricExpConfig(metrics={:?})", self.metrics)
     }
 
     /// Convert to a dictionary.
@@ -821,7 +813,7 @@ pub struct ExperimentConfigInner {
 ///     Indicators to use in this experiment.
 ///
 /// metrics : [MetricExpConfig]
-///     Metrics to compute and the main result metric.
+///     Ordered metrics to compute; the first metric summarizes the result.
 ///
 /// exchange : [ExchangeExpConfig]
 ///     Commission, slippage, order execution, margin and short-selling.

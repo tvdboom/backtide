@@ -757,7 +757,6 @@ class TestServiceCommands:
                 "indicators": {"indicators": ["Fast SMA"]},
                 "metrics": {
                     "metrics": ["total_return", "sharpe", "alpha"],
-                    "main_metric": "sharpe",
                 },
                 "engine": {"warmup_period": 120, "risk_free_rate": 2.5},
                 "exchange": {
@@ -822,7 +821,7 @@ class TestServiceCommands:
 
         experiment = ExperimentConfig.from_dict(
             {
-                "metrics": {"metrics": ["sharpe"], "main_metric": "sharpe"},
+                "metrics": {"metrics": ["sharpe"]},
                 "exchange": {
                     "commission_type": "Fixed",
                     "commission_pct": 0.25,
@@ -1284,8 +1283,7 @@ end_date = "2024-03-01"
         result = services._primary_metric_summary(
             """
 [metrics]
-metrics = ["total_return", "pnl", "sharpe", "win_rate"]
-main_metric = "sharpe"
+metrics = ["sharpe", "total_return", "pnl", "win_rate"]
 """,
             [{"is_benchmark": False, "metrics": {"sharpe": 1.25}}],
             {
@@ -1303,9 +1301,9 @@ main_metric = "sharpe"
 
         assert result["primary_metric"] == "sharpe"
         assert result["selected_metrics"] == [
+            "sharpe",
             "total_return",
             "pnl",
-            "sharpe",
             "win_rate",
         ]
         assert result["primary_metric_value"] == 1.25

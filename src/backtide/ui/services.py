@@ -1513,21 +1513,19 @@ class BacktideServices:
         runs: list[dict[str, Any]],
         catalog: dict[str, list[dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
-        """Resolve the configured headline metric and its best strategy value."""
+        """Resolve the first configured metric and its best strategy value."""
         selected_metrics: list[str] = []
         try:
             metric_config = tomllib.loads(config_text or "").get("metrics", {})
             if not isinstance(metric_config, dict):
                 raise TypeError("Metric configuration must be a table.")
-            metric_key = str(metric_config.get("main_metric"))
             configured_metrics = metric_config.get("metrics", [])
             if isinstance(configured_metrics, list):
                 selected_metrics = list(
                     dict.fromkeys(str(metric) for metric in configured_metrics if metric)
                 )
+            metric_key = selected_metrics[0] if selected_metrics else "sharpe"
         except (tomllib.TOMLDecodeError, TypeError):
-            metric_key = "sharpe"
-        if not metric_key or metric_key == "None":
             metric_key = "sharpe"
         catalog = catalog or self.metric_catalog()
         definition = next(
