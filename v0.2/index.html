@@ -297,7 +297,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="user_guide/introduction/" class="md-tabs__link">
+        <a href="user_guide/overview/introduction/" class="md-tabs__link">
           
   
   
@@ -347,7 +347,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="api/product_map/" class="md-tabs__link">
+        <a href="api/config/get_config/" class="md-tabs__link">
           
   
   
@@ -369,8 +369,15 @@
   
     
     
+      
+  
+  
+  
+  
+    
+    
       <li class="md-tabs__item">
-        <a href="examples/strategies/" class="md-tabs__link">
+        <a href="examples/strategies/daily_reversal/" class="md-tabs__link">
           
   
   
@@ -378,6 +385,9 @@
 
         </a>
       </li>
+    
+  
+
     
   
 
@@ -497,8 +507,8 @@
     .logo {
         display: block;
         margin: 2rem auto;
-        width: 384px;
-        height: 325px;
+        width: min(384px, calc(100% - 2rem));
+        height: auto;
     }
 
     .description {
@@ -574,7 +584,7 @@
     @media only screen and (max-width: 720px) {
         section {padding-bottom: 2em}
         h1 {font-size: 2em}
-        .logo {width: 300px; height: 80px}
+        .logo {width: min(260px, calc(100% - 2rem)); height: auto; margin: 1rem auto}
         .description {font-size: 1.5em; width: 90%; margin-left: -45%}
     }
 </style>
@@ -603,13 +613,13 @@
       </svg>
     </div>
 
-    <img src="img/logo.png" alt="" class="logo" draggable="false">
+    <img src="img/logo.png" alt="Backtide" class="logo" draggable="false">
     <h1>A refreshingly simple trading backtester for beginner retail investors</h1>
     <div class="description">
         <p style="margin-bottom: 2em">
             Backtide is an open-source backtesting platform for Python, built for retail
             investors who want to test trading ideas without drowning in complexity. A
-            Rust-powered core keeps simulations fast, while sensible defaults let you go
+            An optimized core keeps simulations fast, while sensible defaults let you go
             from raw multi-exchange data to validated strategies in just a few lines of
             code. Every setting can still be fine-tuned when needed, but you never have to.
         </p>
@@ -622,7 +632,7 @@
     <h1 style="margin-bottom: -10px">Why you should use Backtide</h1>
     <div class="description-wide" style="display: flex; justify-content: center;">
         <ul style="display: inline-block; text-align: left;">
-            <li><strong>Fast</strong> &mdash; Rust-powered engine runs backtests in a fraction of a second.</li>
+            <li><strong>Fast</strong> &mdash; The optimized engine runs backtests in a fraction of a second.</li>
             <li><strong>Simple</strong> &mdash; Sensible defaults mean a working backtest in minutes.</li>
             <li><strong>Flexible</strong> &mdash; Every parameter is exposed and customizable when you need full control.</li>
             <li><strong>Multi-asset</strong> &mdash; Stocks, ETFs, forex and crypto from Yahoo, Binance, Kraken and more.</li>
@@ -869,7 +879,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/introduction/" class="md-nav__link">
+      <a href="user_guide/overview/introduction/" class="md-nav__link">
         
   
   
@@ -897,7 +907,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/nomenclature/" class="md-nav__link">
+      <a href="user_guide/overview/nomenclature/" class="md-nav__link">
         
   
   
@@ -925,7 +935,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/application/" class="md-nav__link">
+      <a href="user_guide/overview/application/" class="md-nav__link">
         
   
   
@@ -953,7 +963,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/configuration/" class="md-nav__link">
+      <a href="user_guide/overview/configuration/" class="md-nav__link">
         
   
   
@@ -1010,7 +1020,7 @@
   <span class="md-ellipsis">
     
   
-    Research
+    Backtest
   
 
     
@@ -1026,7 +1036,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Research
+    Backtest
   
 
           </label>
@@ -1039,7 +1049,35 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/experiment/" class="md-nav__link">
+      <a href="user_guide/backtest/introduction/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="user_guide/backtest/experiment/" class="md-nav__link">
         
   
   
@@ -1067,14 +1105,42 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/plots/" class="md-nav__link">
+      <a href="user_guide/backtest/results/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Results and plots
+    Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="user_guide/backtest/plots/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plots
   
 
     
@@ -1124,7 +1190,7 @@
   <span class="md-ellipsis">
     
   
-    Trading
+    Live
   
 
     
@@ -1140,7 +1206,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Trading
+    Live
   
 
           </label>
@@ -1153,14 +1219,42 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/live_trading/" class="md-nav__link">
+      <a href="user_guide/live/introduction/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Live trading
+    Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="user_guide/live/paper_trading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Paper trading
   
 
     
@@ -1239,7 +1333,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/strategies/" class="md-nav__link">
+      <a href="user_guide/library/strategies/" class="md-nav__link">
         
   
   
@@ -1267,7 +1361,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/indicators/" class="md-nav__link">
+      <a href="user_guide/library/indicators/" class="md-nav__link">
         
   
   
@@ -1295,7 +1389,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/metrics/" class="md-nav__link">
+      <a href="user_guide/library/metrics/" class="md-nav__link">
         
   
   
@@ -1323,7 +1417,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/sizers/" class="md-nav__link">
+      <a href="user_guide/library/sizers/" class="md-nav__link">
         
   
   
@@ -1331,6 +1425,34 @@
     
   
     Sizers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="user_guide/library/performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
   
 
     
@@ -1409,7 +1531,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/data/" class="md-nav__link">
+      <a href="user_guide/data/market_data/" class="md-nav__link">
         
   
   
@@ -1437,7 +1559,7 @@
   
   
     <li class="md-nav__item">
-      <a href="user_guide/storage/" class="md-nav__link">
+      <a href="user_guide/data/storage/" class="md-nav__link">
         
   
   
@@ -1720,7 +1842,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    config
   
 
     
@@ -1733,232 +1855,6 @@
         
         <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6_1">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Overview
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="api/product_map/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Product map
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="api/application_endpoints/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Application endpoints
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="api/research/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Research
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="api/trading/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Trading
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="api/library/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Library
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="api/data/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Data
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6_6" id="__nav_6_6_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    config
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2078,10 +1974,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_2" >
         
           
-          <label class="md-nav__link" for="__nav_6_7" id="__nav_6_7_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_2" id="__nav_6_2_label" tabindex="0">
             
   
   
@@ -2099,8 +1995,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_7">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_2">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2248,10 +2144,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_3" >
         
           
-          <label class="md-nav__link" for="__nav_6_8" id="__nav_6_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_3" id="__nav_6_3_label" tabindex="0">
             
   
   
@@ -2269,8 +2165,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_8">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_3">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2866,10 +2762,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_9" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_4" >
         
           
-          <label class="md-nav__link" for="__nav_6_9" id="__nav_6_9_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_4" id="__nav_6_4_label" tabindex="0">
             
   
   
@@ -2887,8 +2783,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_9_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_9">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_4">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2952,10 +2848,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_10" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_5" >
         
           
-          <label class="md-nav__link" for="__nav_6_10" id="__nav_6_10_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_5" id="__nav_6_5_label" tabindex="0">
             
   
   
@@ -2973,8 +2869,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_10_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_10">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3122,10 +3018,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_6" >
         
           
-          <label class="md-nav__link" for="__nav_6_11" id="__nav_6_11_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_6" id="__nav_6_6_label" tabindex="0">
             
   
   
@@ -3143,8 +3039,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_11_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_11">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3376,10 +3272,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7" >
         
           
-          <label class="md-nav__link" for="__nav_6_12" id="__nav_6_12_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_7" id="__nav_6_7_label" tabindex="0">
             
   
   
@@ -3397,8 +3293,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_12_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_12">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3426,10 +3322,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12_1" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7_1" >
         
           
-          <label class="md-nav__link" for="__nav_6_12_1" id="__nav_6_12_1_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_7_1" id="__nav_6_7_1_label" tabindex="0">
             
   
   
@@ -3447,8 +3343,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_12_1_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_12_1">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_7_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_7_1">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4156,10 +4052,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12_2" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7_2" >
         
           
-          <label class="md-nav__link" for="__nav_6_12_2" id="__nav_6_12_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_7_2" id="__nav_6_7_2_label" tabindex="0">
             
   
   
@@ -4177,8 +4073,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_12_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_12_2">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_7_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_7_2">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4438,10 +4334,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7_3" >
         
           
-          <label class="md-nav__link" for="__nav_6_12_3" id="__nav_6_12_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_7_3" id="__nav_6_7_3_label" tabindex="0">
             
   
   
@@ -4459,8 +4355,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_12_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_12_3">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_7_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_7_3">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4776,10 +4672,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7_4" >
         
           
-          <label class="md-nav__link" for="__nav_6_12_4" id="__nav_6_12_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_7_4" id="__nav_6_7_4_label" tabindex="0">
             
   
   
@@ -4797,8 +4693,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_12_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_12_4">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_7_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_7_4">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -5198,10 +5094,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7_5" >
         
           
-          <label class="md-nav__link" for="__nav_6_12_5" id="__nav_6_12_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_7_5" id="__nav_6_7_5_label" tabindex="0">
             
   
   
@@ -5219,8 +5115,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_12_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_12_5">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_7_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_7_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -5312,10 +5208,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7_6" >
         
           
-          <label class="md-nav__link" for="__nav_6_12_6" id="__nav_6_12_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_7_6" id="__nav_6_7_6_label" tabindex="0">
             
   
   
@@ -5333,8 +5229,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_12_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_12_6">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_7_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_7_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -5510,10 +5406,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12_7" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7_7" >
         
           
-          <label class="md-nav__link" for="__nav_6_12_7" id="__nav_6_12_7_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_7_7" id="__nav_6_7_7_label" tabindex="0">
             
   
   
@@ -5531,8 +5427,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_12_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_12_7">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_7_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_7_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -5792,10 +5688,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_12_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_7_8" >
         
           
-          <label class="md-nav__link" for="__nav_6_12_8" id="__nav_6_12_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_7_8" id="__nav_6_7_8_label" tabindex="0">
             
   
   
@@ -5813,8 +5709,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_12_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_12_8">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_6_7_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_7_8">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -6446,10 +6342,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_13" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_8" >
         
           
-          <label class="md-nav__link" for="__nav_6_13" id="__nav_6_13_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6_8" id="__nav_6_8_label" tabindex="0">
             
   
   
@@ -6467,8 +6363,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_13_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6_13">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_8">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -6605,15 +6501,65 @@
   
   
   
-    <li class="md-nav__item">
-      <a href="examples/strategies/" class="md-nav__link">
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_1" id="__nav_7_1_label" tabindex="0">
+            
   
   
   <span class="md-ellipsis">
     
   
     Strategies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Strategies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/strategies/daily_reversal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Daily reversal
   
 
     
@@ -6634,8 +6580,58 @@
   
   
     <li class="md-nav__item">
-      <a href="examples/indicators/" class="md-nav__link">
+      <a href="examples/strategies/moving_average_trend/" class="md-nav__link">
         
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Moving-average trend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_2" id="__nav_7_2_label" tabindex="0">
+            
   
   
   <span class="md-ellipsis">
@@ -6649,7 +6645,421 @@
   
   
 
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Indicators
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/indicators/typical_price/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Typical price
+  
+
+    
+  </span>
+  
+  
+
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/indicators/rolling_price_range/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rolling price range
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_3" id="__nav_7_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sizers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sizers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/sizers/capped_allocation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capped allocation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/sizers/stop_risk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stop-risk sizing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_4" id="__nav_7_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Metrics
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/metrics/gain_to_pain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gain to pain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/metrics/ulcer_index/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ulcer index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_5" id="__nav_7_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Live
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Live
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/live/paper_trading_session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Paper-trading session
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/live/market_feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inspect a market feed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 

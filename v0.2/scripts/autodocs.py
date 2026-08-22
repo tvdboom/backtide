@@ -702,6 +702,9 @@ def corrections(html: str, **kwargs) -> str:  # noqa: ARG001
     html = re.sub(r'(?<=style="height:\d+?px; width:)\d+?px(?=;")', "100%", html)
     html = re.sub(r'(?<="showlegend":\w+?),"width":\d+?,"height":\d+?(?=[},])', "", html)
 
+    # Execution guards belong to the documentation build and must never be visible to readers.
+    html = html.replace("# norun", "")
+
     return html
 
 
