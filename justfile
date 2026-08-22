@@ -27,14 +27,22 @@ stubs:
 check:
     uv run python scripts/generate_stubs.py --check
 
-# Run the test suite (Python + Cargo)
-test *args:
+# Run the Python test suite
+python-test *args:
     uv run pytest -n=auto {{args}}
+
+# Run the Rust test suite
+rust-test *args:
     uv run python scripts/run_cargo.py \
         cargo llvm-cov \
             --no-clean \
             --manifest-path src/backtide_core/Cargo.toml \
             --no-cfg-coverage
+
+# Run the complete Python and Rust test suite
+test *args:
+    @just python-test {{args}}
+    @just rust-test {{args}}
 
 # Run Rust benchmarks
 bench *args:

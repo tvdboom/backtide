@@ -265,14 +265,29 @@ without inspecting the semantic change.
 
 ## Required validation
 
-Use focused commands while iterating, but focused checks never replace the complete validation
-required before handoff. Every change must finish with all pre-commit hooks, all Python tests, all
-Rust tests, and all frontend tests passing:
+Use focused commands while iterating and finish with every suite relevant to the changed paths.
+Do not run unrelated language suites merely as a blanket check:
+
+- Frontend-only changes under `application/` and generated assets under
+  `src/backtide/ui/static/` require frontend tests and a production frontend build. Do not run
+  Python or Rust tests for a frontend-only change.
+- Python source, Python tests, Python packaging, or Python tooling changes require Python tests.
+  Rust changes also require Python tests when they affect the public Python extension contract.
+- Run Rust tests only when Rust-owned files change, including `src/backtide_core/`, Cargo files,
+  Rust formatting configuration, or the Cargo launcher. Do not run Rust tests when no Rust-owned
+  file changed.
+- Documentation-only changes require the strict documentation build, not Python or Rust tests.
+- Release, dependency, and genuinely cross-cutting changes still require the complete validation
+  suite.
+
+The complete release-oriented validation is:
 
 ```text
 uv run pre-commit run --all-files --show-diff-on-failure
-just test
+just python-test
+just rust-test
 pnpm --dir application test
+pnpm --dir application build
 ```
 
 Do not hand off with any failing hook or test. Fix every failure, including failures in code outside
@@ -303,9 +318,10 @@ pnpm test
 pnpm build
 ```
 
-Useful aggregate commands are `just test`, `just lint`, `just bench`, and `just tox`. Focused live
-validation is `pytest tests/test_live.py`, `cargo test --manifest-path src/backtide_core/Cargo.toml
-live::`, and `cargo bench --manifest-path src/backtide_core/Cargo.toml --bench live_bench --no-run`.
+Useful aggregate commands are `just test`, `just python-test`, `just rust-test`, `just lint`,
+`just bench`, and `just tox`. Focused live validation is `pytest tests/test_live.py`, `cargo test
+--manifest-path src/backtide_core/Cargo.toml live::`, and `cargo bench --manifest-path
+src/backtide_core/Cargo.toml --bench live_bench --no-run`.
 
 Never claim a check passed when it was skipped.
 
