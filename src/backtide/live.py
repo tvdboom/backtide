@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Live market data and deterministic paper trading.
+Description: Live market data and deterministic simulated sessions.
 
 """
 
@@ -11,11 +11,11 @@ from typing import Protocol, cast
 from backtide.core.live import (
     LiveMarketFeed,
     MarketUpdate,
-    PaperFill,
-    PaperTradingConfig,
-    PaperTradingSession,
-    PaperTradingSnapshot,
-    PaperTradingUpdate,
+    Session,
+    SessionConfig,
+    SessionFill,
+    SessionSnapshot,
+    SessionUpdate,
     collect_market_updates,
 )
 
@@ -101,11 +101,11 @@ def _live_currency_plan(
 __all__ = [
     "LiveMarketFeed",
     "MarketUpdate",
-    "PaperFill",
-    "PaperTradingConfig",
-    "PaperTradingSession",
-    "PaperTradingSnapshot",
-    "PaperTradingUpdate",
+    "Session",
+    "SessionConfig",
+    "SessionFill",
+    "SessionSnapshot",
+    "SessionUpdate",
     "collect_market_updates",
     "list_live_instruments",
 ]

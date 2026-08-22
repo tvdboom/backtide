@@ -710,12 +710,12 @@ class BacktideServices:
 
     def start_experiment(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate an experiment configuration and run it in the background."""
-        from backtide.backtest import ExperimentConfig, run_experiment
+        from backtide.backtest import Experiment, ExperimentConfig
 
         config = ExperimentConfig.from_dict(payload)
 
         def work() -> dict[str, Any]:
-            result = run_experiment(config, verbose=False)
+            result = Experiment(config).run(verbose=False)
             return public_attributes(
                 result,
                 (
@@ -1251,14 +1251,14 @@ class BacktideServices:
         return {"available": True, "providers": providers}
 
     def live_status(self) -> dict[str, Any]:
-        """Return the current paper-trading state if the live module exposes it."""
+        """Return the current live-session state if the live module exposes it."""
         manager = getattr(self, "_live_manager", None)
         if manager is None:
             return {"status": "idle", "snapshot": None, "updates": []}
         return manager.status()
 
     def start_live(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Start a WebSocket-backed paper-trading session."""
+        """Start a WebSocket-backed simulated session."""
         from backtide.ui.live import LiveTradingManager
 
         manager = getattr(self, "_live_manager", None)
@@ -1267,35 +1267,35 @@ class BacktideServices:
         return manager.start(payload)
 
     def stop_live(self) -> dict[str, Any]:
-        """Stop the active paper-trading session."""
+        """Stop the active live session."""
         manager = getattr(self, "_live_manager", None)
         if manager is None:
             return {"status": "idle"}
         return manager.stop()
 
     def live_sessions(self) -> list[dict[str, Any]]:
-        """Return persisted paper-session summaries."""
+        """Return persisted live-session summaries."""
         from backtide.ui.live import LiveTradingManager
 
         manager = getattr(self, "_live_manager", None) or LiveTradingManager()
         return manager.sessions()
 
     def live_session(self, session_id: str) -> dict[str, Any]:
-        """Return one persisted paper session and its event journal."""
+        """Return one persisted live session and its event journal."""
         from backtide.ui.live import LiveTradingManager
 
         manager = getattr(self, "_live_manager", None) or LiveTradingManager()
         return manager.session(session_id)
 
     def delete_live_session(self, session_id: str) -> dict[str, int]:
-        """Delete one inactive persisted paper session."""
+        """Delete one inactive persisted live session."""
         from backtide.ui.live import LiveTradingManager
 
         manager = getattr(self, "_live_manager", None) or LiveTradingManager()
         return manager.delete_session(session_id)
 
     def replay_live(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Replay a persisted paper session through a fresh engine."""
+        """Replay a persisted live session through a fresh simulation engine."""
         from backtide.ui.live import LiveTradingManager
 
         manager = getattr(self, "_live_manager", None)
@@ -1307,27 +1307,27 @@ class BacktideServices:
         )
 
     def pause_live(self) -> dict[str, Any]:
-        """Pause the active paper strategy without closing its feed."""
+        """Pause the active strategy without closing its feed."""
         manager = getattr(self, "_live_manager", None)
         return manager.pause() if manager else {"status": "idle"}
 
     def resume_live(self) -> dict[str, Any]:
-        """Resume the active paper strategy."""
+        """Resume the active strategy."""
         manager = getattr(self, "_live_manager", None)
         return manager.resume() if manager else {"status": "idle"}
 
     def flatten_live(self) -> dict[str, Any]:
-        """Request liquidation of all paper positions."""
+        """Request liquidation of all simulated positions."""
         manager = getattr(self, "_live_manager", None)
         return manager.flatten() if manager else {"status": "idle"}
 
     def cancel_live_orders(self) -> dict[str, Any]:
-        """Request cancellation of every resting paper order."""
+        """Request cancellation of every resting simulated order."""
         manager = getattr(self, "_live_manager", None)
         return manager.cancel_all() if manager else {"status": "idle"}
 
-    def paper_config_from_experiment(self, experiment_id: str) -> dict[str, Any]:
-        """Translate compatible experiment settings into a live-session draft."""
+    def session_config_from_experiment(self, experiment_id: str) -> dict[str, Any]:
+        """Translate shared experiment settings into a live-session draft."""
         from backtide.backtest import ExperimentConfig
         from backtide.config import get_config
 
@@ -1340,7 +1340,7 @@ class BacktideServices:
         portfolio = config.get("portfolio", {})
         strategy = config.get("strategy", {})
         indicators = config.get("indicators", {})
-        metrics = config.get("metrics", {})
+        metrics = config.get("metrics", [])
         exchange = config.get("exchange", {})
         engine = config.get("engine", {})
         benchmark = str(strategy.get("benchmark") or "").strip()
@@ -1366,9 +1366,7 @@ class BacktideServices:
             "OneDay": "1d",
             "OneWeek": "1w",
         }.get(str(data.get("interval")), str(data.get("interval") or "1m"))
-        live_metrics = [
-            key for key in metrics.get("metrics", []) if key not in {"alpha", "excess_return"}
-        ]
+        live_metrics = [key for key in metrics if key not in {"alpha", "excess_return"}]
         return {
             "provider": provider,
             "interval": interval,
@@ -1399,7 +1397,7 @@ class BacktideServices:
                 "metrics": live_metrics,
                 "risk_free_rate": engine.get("risk_free_rate", 0.0),
             },
-            "compatibility": {
+            "notes": {
                 "source_experiment_id": experiment_id,
                 "warnings": [
                     "Historical date ranges and benchmark execution are not copied.",
@@ -1516,16 +1514,13 @@ class BacktideServices:
         """Resolve the first configured metric and its best strategy value."""
         selected_metrics: list[str] = []
         try:
-            metric_config = tomllib.loads(config_text or "").get("metrics", {})
-            if not isinstance(metric_config, dict):
-                raise TypeError("Metric configuration must be a table.")
-            configured_metrics = metric_config.get("metrics", [])
+            configured_metrics = tomllib.loads(config_text or "").get("metrics", [])
             if isinstance(configured_metrics, list):
                 selected_metrics = list(
                     dict.fromkeys(str(metric) for metric in configured_metrics if metric)
                 )
             metric_key = selected_metrics[0] if selected_metrics else "sharpe"
-        except (tomllib.TOMLDecodeError, TypeError):
+        except tomllib.TOMLDecodeError:
             metric_key = "sharpe"
         catalog = catalog or self.metric_catalog()
         definition = next(

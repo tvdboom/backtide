@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <section class="page-intro live-intro">
-      <div><h2>Paper trading</h2><p>Apply a saved strategy to live bars with simulated fills and no capital at risk.</p></div>
+      <div><h2>Live session</h2><p>Apply a saved strategy to live bars with simulated fills and no capital at risk.</p></div>
       <div v-if="sessionVisible" class="session-actions">
         <span
           class="status-pill"
@@ -31,7 +31,7 @@
 
     <section v-if="!sessionVisible" class="live-setup">
       <form class="panel experiment-builder live-builder" @submit.prevent="start">
-        <div class="tabs live-form-tabs" role="tablist" aria-label="Paper trading setup steps">
+        <div class="tabs live-form-tabs" role="tablist" aria-label="Live session setup steps">
           <button v-for="(item, index) in setupTabs" :key="item" type="button" :class="{ active: setupTab === index }" @click="setupTab = index"><span>{{ index + 1 }}</span>{{ item }}</button>
         </div>
 
@@ -61,7 +61,7 @@
             <div class="field-label interval-picker-field live-interval-field wide">
               <span>Interval</span>
               <FieldInfo text="Set the candle duration used for strategy evaluation and monitoring." />
-              <IntervalPicker v-model="form.interval" :options="intervals" :disabled-options="disabledProviderIntervals" input-id="live-interval" label="Paper trading interval" />
+              <IntervalPicker v-model="form.interval" :options="intervals" :disabled-options="disabledProviderIntervals" input-id="live-interval" label="Live session interval" />
             </div>
           </div>
         </div>
@@ -178,7 +178,7 @@
 
         <div class="form-footer"><button v-if="setupTab" type="button" class="secondary" @click="setupTab--"><ChevronLeft :size="16"/> Back</button><span class="form-spacer"/><button v-if="setupTab < setupTabs.length - 1" type="button" class="secondary" @click="setupTab++">Continue <ChevronRight :size="16"/></button><button type="submit" class="primary live-button" :disabled="starting || !available(form.provider) || !form.symbols.length"><span v-if="starting" class="spinner small"/><Radio v-else :size="16"/> {{ starting ? 'Connecting…' : 'Start live session' }}</button></div>
       </form>
-      <aside class="panel safety-panel"><ShieldCheck :size="28"/><h3>Paper mode only</h3><p>Backtide calculates hypothetical fills locally. It does not connect to a brokerage account or submit real orders.</p><ul><li>Real-time provider WebSockets</li><li>Simulated commission and slippage</li><li>Local-only portfolio state</li><li>Bounded event history</li></ul></aside>
+      <aside class="panel safety-panel"><ShieldCheck :size="28"/><h3>Simulation only</h3><p>Backtide calculates hypothetical fills locally. It does not connect to a brokerage account or submit real orders.</p><ul><li>Real-time provider WebSockets</li><li>Simulated commission and slippage</li><li>Local-only portfolio state</li><li>Bounded event history</li></ul></aside>
     </section>
 
     <template v-else>
@@ -336,7 +336,7 @@ import IntervalPicker from '../components/interval-picker.vue'
 import LibraryAssetIcon from '../components/library-asset-icon.vue'
 import SearchSelect from '../components/search-select.vue'
 import ToggleField from '../components/toggle-field.vue'
-import { configuredCurrencyDecimals, configuredPlotlyDateTimeFormat, flattenFills, formatConfiguredCurrency, formatConfiguredTimeWithSeconds, instrumentLogoUrl, paperEquitySeries } from '../state'
+import { configuredCurrencyDecimals, configuredPlotlyDateTimeFormat, flattenFills, formatConfiguredCurrency, formatConfiguredTimeWithSeconds, instrumentLogoUrl, sessionEquitySeries } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['toast', 'live-status', 'navigate'])
@@ -358,8 +358,8 @@ const setupTab = ref(0)
 const livePlot = ref('price')
 const livePlotTabs = [
   { id: 'price', label: 'Price', icon: ChartLine, eyebrow: 'WebSocket market data', title: 'Live market prices' },
-  { id: 'pnl', label: 'P&L', icon: CircleDollarSign, eyebrow: 'Strategy performance', title: 'Net paper P&L' },
-  { id: 'equity', label: 'Equity', icon: WalletCards, eyebrow: 'Account value', title: 'Paper equity' },
+  { id: 'pnl', label: 'P&L', icon: CircleDollarSign, eyebrow: 'Strategy performance', title: 'Net simulated P&L' },
+  { id: 'equity', label: 'Equity', icon: WalletCards, eyebrow: 'Account value', title: 'Simulated equity' },
   { id: 'exposure', label: 'Exposure', icon: ChartNoAxesCombined, eyebrow: 'Risk profile', title: 'Market exposure' },
   { id: 'drawdown', label: 'Drawdown', icon: TrendingDown, eyebrow: 'Risk profile', title: 'Drawdown from peak' }
 ]
@@ -373,8 +373,11 @@ const strategyOptionIcons = computed(() => Object.fromEntries(
 const indicatorOptionIcons = computed(() => Object.fromEntries(
   (props.bootstrap.indicators?.saved || [])
     .map(item => [item.name, item.builtin ? Shapes : Braces])))
-const liveMetricCatalog = computed(() => (props.bootstrap.metrics?.builtin || []).filter(item =>
-  !['alpha', 'excess_return', 'n_trades'].includes(item.key)))
+const liveMetricCatalog = computed(() => [
+  ...(props.bootstrap.metrics?.builtin || []).filter(item =>
+    !['alpha', 'excess_return'].includes(item.key)),
+  ...(props.bootstrap.metrics?.saved || [])
+])
 const liveMetricOptions = computed(() => liveMetricCatalog.value.map(item => item.key))
 const liveMetricDescriptions = computed(() => Object.fromEntries(liveMetricCatalog.value.map(item => [item.key, item.description])))
 const selectedLiveMetrics = computed(() => form.config.metrics
@@ -602,7 +605,7 @@ const watchlist = computed(() => {
 const disabledProviderIntervals = computed(() =>
   intervals.filter(interval => !available(form.provider, interval))
 )
-const equitySeries = computed(() => paperEquitySeries(strategyUpdates.value).filter(
+const equitySeries = computed(() => sessionEquitySeries(strategyUpdates.value).filter(
   item => item.equity !== null && Number.isFinite(Number(item.equity))
 ))
 const marketSeries = computed(() => {
@@ -812,15 +815,14 @@ function defaultLiveForm() {
 function applyExperimentDraft() {
   let draft = null
   try {
-    draft = JSON.parse(sessionStorage.getItem('backtide:paper-config') || 'null')
+    draft = JSON.parse(sessionStorage.getItem('backtide:session-config') || 'null')
   } catch {
     draft = null
   }
-  sessionStorage.removeItem('backtide:paper-config')
+  sessionStorage.removeItem('backtide:session-config')
   if (!draft || typeof draft !== 'object' || Array.isArray(draft)) return false
   const defaults = defaultLiveForm()
   const draftConfig = { ...defaults.config, ...(draft.config || {}) }
-  draftConfig.metrics = draftConfig.metrics.filter(metric => metric !== 'n_trades')
   Object.assign(form, defaults, draft, {
     config: draftConfig
   })
@@ -1021,7 +1023,7 @@ async function start() {
   }
   try {
     updateState(await post('/api/live', request))
-    emit('toast', 'Paper trading session started.')
+    emit('toast', 'Live session started.')
     poll()
   } catch (error) {
     emit('toast', error.message, 'error')
@@ -1029,7 +1031,7 @@ async function start() {
     starting.value = false
   }
 }
-async function stop() { try { updateState(await post('/api/live/stop')); clearTimeout(timer); emit('toast', 'Paper trading session stopped.') } catch (error) { emit('toast', error.message, 'error') } }
+async function stop() { try { updateState(await post('/api/live/stop')); clearTimeout(timer); emit('toast', 'Live session stopped.') } catch (error) { emit('toast', error.message, 'error') } }
 function newConfiguration() {
   dismissedSessionId.value = currentSessionId.value
   updateState({

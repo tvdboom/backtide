@@ -16,7 +16,7 @@ sync:
 
 # Build the Rust extension and regenerate stubs
 build:
-    uv pip install -e .
+    uv run python scripts/run_cargo.py uv pip install -e .
     @just stubs
 
 # Generate stub files from the compiled module

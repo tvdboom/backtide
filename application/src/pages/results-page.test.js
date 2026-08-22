@@ -681,18 +681,18 @@ describe('results page', () => {
     }
     api.mockImplementation(path => {
       if (path === '/api/jobs') return []
-      if (path.endsWith('/paper-config')) return draft
+      if (path.endsWith('/session-config')) return draft
       return detail
     })
     await mountAndOpen()
 
     const liveButton = wrapper.findAll('.result-actions .secondary')
-      .find(button => button.text().includes('Paper trading'))
+      .find(button => button.text().includes('Live session'))
     await liveButton.trigger('click')
     await flushPromises()
 
-    expect(api).toHaveBeenCalledWith('/api/experiments/experiment-1/paper-config')
-    expect(JSON.parse(sessionStorage.getItem('backtide:paper-config'))).toEqual(draft)
+    expect(api).toHaveBeenCalledWith('/api/experiments/experiment-1/session-config')
+    expect(JSON.parse(sessionStorage.getItem('backtide:session-config'))).toEqual(draft)
     expect(wrapper.emitted('navigate')[0]).toEqual(['live'])
   })
 })

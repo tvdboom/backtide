@@ -1,6 +1,6 @@
 # Inspect a live market feed
 
-Use a feed without a paper session when you only want to inspect normalized candle updates.
+Use a feed without a live session when you only want to inspect normalized candle updates.
 
 ```python
 from backtide.live import LiveMarketFeed
@@ -21,5 +21,5 @@ finally:
 ```
 
 Set `include_partial=False` when downstream logic should see completed candles only. A
-`PaperTradingSession` already avoids strategy decisions on partial candles unless
+`Session` already avoids strategy decisions on partial candles unless
 `trade_on_partial=True` is configured.

@@ -1,4 +1,4 @@
-# Experiment
+# Experiments
 ------------
 
 An **experiment** is a single end-to-end backtest run. It binds together a set
@@ -8,37 +8,46 @@ unit. Every experiment is persisted to [storage] so it can be reopened, compared
 and re-analysed long after the original run finished.
 
 You configure an experiment in the **Experiment** tab of the [application][application],
-or programmatically via [`ExperimentConfig`] and [`run_experiment`].
-
-[`run_experiment`] also accepts every field of every sub-config as a flat
-keyword argument, so a one-liner is often enough for ad-hoc runs:
+or programmatically via [`ExperimentConfig`] and [`Experiment`]. Pass the
+configuration first and runtime strategy and indicator objects separately, just as [`Session`] accepts a
+[`SessionConfig`] followed by its runtime strategy and indicators:
 
 ```python
-from backtide.backtest import run_experiment
+from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig
 from backtide.indicators import SimpleMovingAverage
 from backtide.strategies import BuyAndHold
 
-result = run_experiment(
-    name="Apple buy-and-hold",
-    symbols=["AAPL"],
-    interval="1d",
-    start_date="2020-01-01",
-    end_date="2024-12-31",
-    full_history=False,
+config = ExperimentConfig(
+    data=DataExpConfig(
+        symbols=["AAPL"],
+        interval="1d",
+        start_date="2020-01-01",
+        end_date="2024-12-31",
+        full_history=False,
+    )
+)
+result = Experiment(
+    config,
     strategies=[BuyAndHold()],
     indicators=[SimpleMovingAverage(20)],
-)
+).run()
 ```
 
 Strategies and indicators can be passed as a stored name, an instance (the
 class name is used as display name), a `dict[name, instance]`, or any list
-mixing those forms. Instances are used directly and **not** persisted to disk.
+mixing those forms. Instances are used directly and **not** persisted to disk. They stay outside
+`ExperimentConfig` because
+arbitrary Python objects cannot be represented faithfully in TOML or JSON. The
+corresponding strategy and indicator fields inside the configuration contain serializable library
+names so saved experiments remain portable and reproducible. Metrics are different by design:
+built-in strings and custom metric objects share the single `ExperimentConfig.metrics` list. See
+[Metrics](../library/metrics.md#selecting-metrics) for every exact built-in key.
 
 <br>
 
 ## Lifecycle
 
-When [`run_experiment`] is invoked, the engine runs the following phases in
+When [`Experiment.run`][Experiment] is invoked, the engine runs the following phases in
 order. Failures in any phase emit warnings (visible on the results page) but
 do not stop the run unless they leave it without a single tradeable bar.
 
@@ -58,8 +67,8 @@ do not stop the run unless they leave it without a single tradeable bar.
 
 ## Configuration sections
 
-[`ExperimentConfig`] is a thin wrapper around seven typed sub-configurations.
-They map one-to-one to the tabs in the application's experiment page.
+[`ExperimentConfig`] groups seven typed sections plus the ordered `metrics` list. They map to the
+tabs in the application's experiment page.
 
 | Section                | What it controls                                                                             |
 |------------------------|----------------------------------------------------------------------------------------------|
@@ -68,6 +77,7 @@ They map one-to-one to the tabs in the application's experiment page.
 | [`PortfolioExpConfig`] | Initial cash, base currency, starting positions.                                             |
 | [`StrategyExpConfig`]  | Selected strategies and the benchmark symbol.                                                |
 | [`IndicatorExpConfig`] | Extra indicators to compute on top of the auto-injected ones.                                |
+| `metrics`              | Built-in metric keys and custom metric objects, in display and ranking order.                |
 | [`ExchangeExpConfig`]  | Commission, slippage, allowed order types, margin, short selling, currency conversion.       |
 | [`EngineExpConfig`]    | Warmup period, trade-on-close, risk-free rate, exclusive orders, RNG seed, empty-bar policy. |
 
@@ -113,20 +123,27 @@ Margin is controlled through [`ExchangeExpConfig`]. By default, it is **disabled
 | `raise_on_margin_limit` | `False` | When `True`, the engine raises an error if an order would breach `max_leverage` or if equity falls below `maintenance_margin`. When `False`, orders are auto-shrunk or rejected with a warning instead. |
 
 ```python
-from backtide.backtest import run_experiment
+from backtide.backtest import (
+    DataExpConfig,
+    ExchangeExpConfig,
+    Experiment,
+    ExperimentConfig,
+    GeneralExpConfig,
+)
 from backtide.strategies import SmaCrossover
 
-result = run_experiment(
-    name="SMA crossover with 2x margin",
-    symbols=["AAPL"],
-    interval="1d",
-    strategies=[SmaCrossover()],
-    allow_margin=True,
-    max_leverage=3.0,
-    initial_margin=50.0,
-    maintenance_margin=25.0,
-    margin_interest=8.0,
+config = ExperimentConfig(
+    general=GeneralExpConfig(name="SMA crossover with 2x margin"),
+    data=DataExpConfig(symbols=["AAPL"], interval="1d"),
+    exchange=ExchangeExpConfig(
+        allow_margin=True,
+        max_leverage=3.0,
+        initial_margin=50.0,
+        maintenance_margin=25.0,
+        margin_interest=8.0,
+    ),
 )
+result = Experiment(config, strategies=[SmaCrossover()]).run()
 ```
 
 ### What to consider
@@ -180,7 +197,7 @@ symbol it does not currently hold. The engine:
    simulation.
 
 ```python
-from backtide.backtest import run_experiment, Order
+from backtide.backtest import DataExpConfig, ExchangeExpConfig, Experiment, ExperimentConfig, Order
 from backtide.indicators import RelativeStrengthIndex
 from backtide.strategies import BaseStrategy
 
@@ -209,14 +226,11 @@ class ShortOnRsiExtreme(BaseStrategy):
         return orders
 
 
-result = run_experiment(
-    name="Short on extreme RSI",
-    symbols=["AAPL"],
-    interval="1d",
-    strategies=[ShortOnRsiExtreme()],
-    allow_short_selling=True,
-    borrow_rate=3.5,
+config = ExperimentConfig(
+    data=DataExpConfig(symbols=["AAPL"], interval="1d"),
+    exchange=ExchangeExpConfig(allow_short_selling=True, borrow_rate=3.5),
 )
+result = Experiment(config, strategies=[ShortOnRsiExtreme()]).run()
 ```
 
 ### What to consider

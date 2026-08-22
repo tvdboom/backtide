@@ -7,6 +7,7 @@ use pyo3::prelude::*;
 pub mod engine;
 pub mod interface;
 pub mod models;
+pub mod selection;
 pub mod utils;
 
 /// Register the Python interface for `backtide.core.metrics`.

@@ -3,7 +3,7 @@
 
 Backtide includes a modern Vue web application for the complete research workflow:
 download market data, manage reusable strategies and indicators, configure backtests,
-inspect interactive Plotly results, analyze stored series, and run live paper-trading
+inspect interactive Plotly results, analyze stored series, and run live
 sessions. The app and API run locally on your machine.
 
 The production frontend is bundled into every Python wheel. Installing Backtide does
@@ -50,9 +50,9 @@ the app can start jobs and modify the configured local Backtide store.
 | **Backtest** | Experiments | Configure data, portfolios, reusable assets, execution assumptions, risk, and engine behavior. |
 | **Backtest** | Results | Compare completed runs and inspect metrics, equity, trades, orders, configuration, and logs. |
 | **Backtest** | Analysis | Build interactive price, return, correlation, seasonality, volatility, volume, and dividend plots. |
-| **Live** | Paper trading | Configure and run live-data strategies with local simulated execution. See [Paper trading]. |
-| **Live** | Session history | Inspect persisted journals and replay a prior session through a fresh paper engine. |
-| **Library** | Strategies | Create and manage strategies used by backtests and paper trading. |
+| **Live** | Live simulation | Configure and run live-data strategies with local simulated execution. See [Live simulation]. |
+| **Live** | Session history | Inspect persisted journals and replay a prior session through a fresh simulation engine. |
+| **Library** | Strategies | Create and manage strategies used by backtests and live simulation. |
 | **Library** | Indicators | Manage strategy dependencies and optional backtest/live monitoring indicators. |
 | **Library** | Metrics | Browse built-in and custom performance definitions. |
 | **Library** | Sizers | Save reusable built-in presets or custom position-sizing policies. |
@@ -95,6 +95,6 @@ same backend used by an installed wheel.
 ![Home](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/home.png)
 ![Experiment](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/experiment.png)
 ![Results](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/results.png)
-![Paper trading](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/live.png)
+![Live simulation](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/live.png)
 ![Storage](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/storage.png)
 ![Analysis](https://raw.githubusercontent.com/tvdboom/backtide/master/images/scenery/analysis.png)

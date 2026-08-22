@@ -111,7 +111,7 @@
       <div v-if="tab === 4" class="form-section">
         <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, then drag them into order. The first metric is used for the experiment headline.</p></div>
         <div class="form-grid two">
-          <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /><button type="button" class="text-button metric-clear-button" aria-label="Clear all metrics" :disabled="config.metrics.metrics.length === 0" @click="clearMetrics"><X :size="14" /> Clear all metrics</button></div>
+          <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /><button type="button" class="text-button metric-clear-button" aria-label="Clear all metrics" :disabled="config.metrics.length === 0" @click="clearMetrics"><X :size="14" /> Clear all metrics</button></div>
           <TransitionGroup v-if="selectedMetrics.length" tag="section" name="metric-reorder" class="selection-insights metric-selection-list wide" aria-label="Selected metric details">
             <article v-for="(item, index) in selectedMetrics" :key="item.key" class="asset-selection-card compact-card metric-selection-card" :class="{ dragging: draggedMetricKey === item.key, 'drop-target': dragOverMetricKey === item.key }" draggable="true" @dragstart="startMetricDrag($event, item.key)" @dragover.prevent="dragOverMetric($event, item.key)" @drop.prevent="finishMetricDrag" @dragend="finishMetricDrag">
               <header>
@@ -365,7 +365,7 @@ const selectedStrategies = computed(() => config.strategy.strategies
 const selectedIndicators = computed(() => config.indicators.indicators
   .map(name => props.bootstrap.indicators.saved.find(item => item.name === name))
   .filter(Boolean))
-const selectedMetrics = computed(() => config.metrics.metrics
+const selectedMetrics = computed(() => config.metrics
   .map(key => metricCatalog.value.find(item => item.key === key))
   .filter(Boolean))
 const automaticBenchmark = computed(() => defaultExperimentBenchmark(
@@ -421,12 +421,8 @@ function normalizedExperimentConfig(value, { prioritizeDefaults = false } = {}) 
       ? { ...(defaults[section] || {}), ...sectionValue }
       : sectionValue
   }
-  if (!defaults.metrics) {
-    defaults.metrics = { metrics: [...defaultMetricImportance] }
-  }
-  defaults.metrics = {
-    metrics: orderedMetricKeys(defaults.metrics.metrics, prioritizeDefaults)
-  }
+  if (!Array.isArray(defaults.metrics)) defaults.metrics = [...defaultMetricImportance]
+  defaults.metrics = orderedMetricKeys(defaults.metrics, prioritizeDefaults)
   if (!defaults.general.icon) defaults.general.icon = experimentIcons[0].value
   defaults.exchange.commission_type = 'PercentagePlusFixed'
   return defaults
@@ -436,20 +432,20 @@ function catalogTypeLabel(value) {
 }
 function metricLabel(key) { return metricCatalog.value.find(item => item.key === key)?.name || enumLabel(key) }
 function moveMetric(key, direction) {
-  const from = config.metrics.metrics.indexOf(key)
+  const from = config.metrics.indexOf(key)
   const to = from + direction
-  if (from < 0 || to < 0 || to >= config.metrics.metrics.length) return
-  const reordered = [...config.metrics.metrics]
+  if (from < 0 || to < 0 || to >= config.metrics.length) return
+  const reordered = [...config.metrics]
   reordered.splice(to, 0, reordered.splice(from, 1)[0])
-  config.metrics.metrics = reordered
+  config.metrics = reordered
 }
 function clearMetrics() {
   finishMetricDrag()
-  config.metrics.metrics = []
+  config.metrics = []
 }
 function removeMetric(key) {
   if (draggedMetricKey.value === key) finishMetricDrag()
-  config.metrics.metrics = config.metrics.metrics.filter(metric => metric !== key)
+  config.metrics = config.metrics.filter(metric => metric !== key)
 }
 function startMetricDrag(event, key) {
   draggedMetricKey.value = key
@@ -475,18 +471,18 @@ function dragOverMetric(event, targetKey) {
   const sourceKey = draggedMetricKey.value
   if (!sourceKey || targetKey === sourceKey) return
   dragOverMetricKey.value = targetKey
-  const from = config.metrics.metrics.indexOf(sourceKey)
-  const target = config.metrics.metrics.indexOf(targetKey)
+  const from = config.metrics.indexOf(sourceKey)
+  const target = config.metrics.indexOf(targetKey)
   if (from < 0 || target < 0) return
   const bounds = event.currentTarget.getBoundingClientRect()
   let insertion = target + (event.clientY > bounds.top + bounds.height / 2 ? 1 : 0)
   if (from < insertion) insertion -= 1
-  insertion = Math.max(0, Math.min(config.metrics.metrics.length - 1, insertion))
+  insertion = Math.max(0, Math.min(config.metrics.length - 1, insertion))
   if (insertion === from) return
-  const reordered = [...config.metrics.metrics]
+  const reordered = [...config.metrics]
   const [metric] = reordered.splice(from, 1)
   reordered.splice(insertion, 0, metric)
-  config.metrics.metrics = reordered
+  config.metrics = reordered
 }
 function finishMetricDrag() {
   metricDragPreview?.remove()
@@ -557,8 +553,8 @@ function setBenchmark(value) {
   removeUnavailableAlpha()
 }
 function removeUnavailableAlpha() {
-  if (config.strategy.benchmark || !config.metrics.metrics.includes('alpha')) return
-  config.metrics.metrics = config.metrics.metrics.filter(key => key !== 'alpha')
+  if (config.strategy.benchmark || !config.metrics.includes('alpha')) return
+  config.metrics = config.metrics.filter(key => key !== 'alpha')
 }
 function setBaseCurrency(value) {
   config.portfolio.base_currency = value
@@ -606,7 +602,7 @@ function validationIssue() {
   if (!config.strategy.strategies.length) {
     return { tab: 3, selector: '#experiment-strategies', message: 'Select at least one strategy.' }
   }
-  if (!config.metrics.metrics.length) {
+  if (!config.metrics.length) {
     return { tab: 4, selector: '#experiment-metrics', message: 'Select at least one metric.' }
   }
   if (!config.exchange.allowed_order_types.length) {
@@ -727,7 +723,7 @@ async function importConfig(event) {
   try {
     benchmarkIsAutomatic.value = false
     Object.assign(config, await post('/api/config/parse', { suffix, text: await file.text() }))
-    config.metrics = { metrics: orderedMetricKeys(config.metrics.metrics) }
+    config.metrics = orderedMetricKeys(config.metrics)
     config.exchange.commission_type = 'PercentagePlusFixed'
     removeUnavailableAlpha()
     positions.value = Object.entries(config.portfolio.starting_positions || {})

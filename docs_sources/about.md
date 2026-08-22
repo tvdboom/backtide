@@ -3,25 +3,29 @@
 
 ## What is it?
 
-Backtide is an open-source backtesting platform for Python, built for retail
-investors who want to test trading ideas without drowning in infrastructure.
-It combines a fast simulation engine with a friendly Python API, interactive
-UI, local storage, market-data integrations, built-in indicators, strategy
-templates, position sizers and analysis plots.
+Backtide is an open-source, local-first trading research platform for Python,
+built for retail investors who want to test and observe trading ideas without
+drowning in infrastructure. It combines fast historical simulation and live
+simulated execution with a friendly Python API, interactive UI, local storage,
+market-data integrations, built-in indicators, strategy templates, position
+sizers and analysis plots.
 
-The goal is simple: go from market data to a reproducible backtest in minutes,
-while still keeping every important setting configurable when you want more
-control. Click [here][getting-started] to get started.
+The goal is simple: go from market data to reproducible evidence in minutes.
+Test a strategy against historical bars, observe the same strategy on public
+exchange WebSockets with locally simulated fills, and keep every important
+setting configurable when you want more control. Click [here][getting-started]
+to get started.
 
 <br>
 
 ## What can I do with it?
 
-Backtide covers the complete workflow for testing rule-based trading ideas:
-download and store market data, configure an experiment, run one or more
-strategies, benchmark the results, and inspect what happened with plots and
-trade-level analytics. Click on the icons to read more about its main
-functionalities.
+Backtide covers the complete workflow for researching rule-based trading ideas:
+download and store market data, configure historical experiments, run one or
+more strategies, benchmark and analyze the results, then use those same
+strategies in live sessions. Sessions can consume public exchange
+WebSockets, record market events and replay them deterministically for later
+inspection. Click on the icons to read more about its main functionalities.
 
 <div class="row">
   <div class="column">
@@ -95,24 +99,25 @@ functionalities.
 
 ## Who is it intended for?
 
-* **Beginner retail investors** who want to learn whether a trading idea would
-  have worked historically before risking real money.
+* **Beginner retail investors** who want to learn how a trading idea behaved
+  historically and observe it on live market data without risking real money.
 * **Python users** who want a clean API for market-data ingestion, technical
-  indicators, strategy execution, storage and plotting without stitching
-  together many separate tools.
+  indicators, backtesting, live simulation, storage and plotting without
+  stitching together many separate tools.
 * **Tinkerers and strategy builders** who want to compare built-in strategies,
-  write custom strategies, test position sizing rules and inspect every order
-  and trade.
+  write custom strategies, test position sizing rules, and inspect every
+  simulated order and trade across historical and live sessions.
 * **Data-minded investors** who care about reproducibility: experiment configs,
-  results, equity curves, orders and trades are persisted locally for later
-  analysis.
+  live-session events, results, equity curves, orders and trades are persisted
+  locally for later analysis and replay.
 * **Educators and learners** who want an approachable sandbox for portfolio
   mechanics, indicators, drawdowns, risk, currency conversion and benchmark
   comparisons.
 
 !!! warning
-    Backtide is intended for research and education. It helps you test assumptions;
-    it does not provide financial advice nor guarantee future returns.
+    Backtide is intended for research and education. Live simulation uses simulated
+    execution and never submits broker orders. Backtide does not provide financial
+    advice or guarantee future returns.
 
 
 <br>
@@ -122,12 +127,16 @@ functionalities.
 Backtide recognizes the support from [JetBrains](http://www.jetbrains.com) by providing core project
 contributors with a set of developer tools free of charge.
 
-<div align="center" markdown>
-  [![JetBrains](img/support/jetbrains.png){ .icon width="200" height="200" }](https://www.jetbrains.com/community/opensource/#support)
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  [![RustRover](img/support/rustrover.png){ .icon width="200" height="200" }](https://www.jetbrains.com/rustrover/)
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  [![PyCharm](img/support/pycharm.png){ .icon width="200" height="200" }](https://www.jetbrains.com/pycharm/)
+<div class="support-logos">
+  <a href="https://www.jetbrains.com/community/opensource/#support">
+    <img src="img/support/jetbrains.png" alt="JetBrains">
+  </a>
+  <a href="https://www.jetbrains.com/rustrover/">
+    <img src="img/support/rustrover.png" alt="RustRover">
+  </a>
+  <a href="https://www.jetbrains.com/pycharm/">
+    <img src="img/support/pycharm.png" alt="PyCharm">
+  </a>
 </div>
 
 <br>

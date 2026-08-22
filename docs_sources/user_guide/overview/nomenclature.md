@@ -11,7 +11,7 @@ related to this package. The most frequent terms are described hereunder.
 <div markdown style="margin: -1em 0 0 1.2em">
 The local Vue web application that ships with Backtide. It
 provides a graphical interface for downloading data, configuring experiments,
-running strategies, paper trading, and analyzing results without writing Python. Launch
+running strategies, live simulation, and analyzing results without writing Python. Launch
 it with [`backtide launch`][launch]. Read more in the [user guide][application].
 </div>
 
@@ -136,12 +136,12 @@ and order type determine the requested direction and execution behavior. See [`O
 
 <br>
 
-[](){#nom-paper-trading}
-<strong id="paper-trading">paper trading</strong>
+[](){#nom-live-session}
+<strong id="live-session">live simulation</strong>
 <div markdown style="margin: -1em 0 0 1.2em">
 Running a strategy on current market updates with locally simulated orders and fills. No broker is
 connected and no real capital is placed at risk. Read more in the
-[paper trading guide](../live/paper_trading.md).
+[live simulation guide](../live/sessions.md).
 </div>
 
 <br>

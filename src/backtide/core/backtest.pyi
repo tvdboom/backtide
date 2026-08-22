@@ -14,7 +14,6 @@ __all__ = [
     "ExperimentStatus",
     "GeneralExpConfig",
     "IndicatorExpConfig",
-    "MetricExpConfig",
     "Order",
     "OrderRecord",
     "OrderStatus",
@@ -27,7 +26,6 @@ __all__ = [
     "Trade",
     "experiment_log",
     "request_abort",
-    "run_experiment",
 ]
 
 from typing import Any, ClassVar
@@ -35,6 +33,8 @@ from typing import Any, ClassVar
 from backtide.core.data import Currency, InstrumentType, Interval
 
 from backtide.sizers import BaseSizer
+
+from backtide.metrics import BaseMetric
 
 class CommissionType:
     """How trading commissions are calculated.
@@ -660,8 +660,9 @@ class ExperimentConfig:
     indicators : [IndicatorExpConfig]
         Indicators to use in this experiment.
 
-    metrics : [MetricExpConfig]
-        Ordered metrics to compute; the first metric summarizes the result.
+    metrics : list[str | BaseMetric | dict[str, BaseMetric]]
+        Ordered built-in keys, stored names, or custom metric instances to compute. The first
+        metric summarizes the result.
 
     exchange : [ExchangeExpConfig]
         Commission, slippage, order execution, margin and short-selling.
@@ -673,7 +674,6 @@ class ExperimentConfig:
     --------
     - backtide.backtest:DataExpConfig
     - backtide.backtest:GeneralExpConfig
-    - backtide.backtest:MetricExpConfig
     - backtide.backtest:StrategyExpConfig
 
     """
@@ -683,7 +683,7 @@ class ExperimentConfig:
     exchange: ExchangeExpConfig
     general: GeneralExpConfig
     indicators: IndicatorExpConfig
-    metrics: MetricExpConfig
+    metrics: list[str | BaseMetric | dict[str, BaseMetric]]
     portfolio: PortfolioExpConfig
     strategy: StrategyExpConfig
 
@@ -802,7 +802,7 @@ class ExperimentResult:
     See Also
     --------
     - backtide.backtest:ExperimentConfig
-    - backtide.backtest:run_experiment
+    - backtide.backtest:Experiment
     - backtide.backtest:RunResult
 
     """
@@ -849,7 +849,7 @@ class ExperimentStatus:
     See Also
     --------
     - backtide.backtest:ExperimentResult
-    - backtide.backtest:run_experiment
+    - backtide.backtest:Experiment
 
     """
 
@@ -1018,49 +1018,6 @@ class IndicatorExpConfig:
             Self as dict.
 
         """
-
-class MetricExpConfig:
-    """Metric settings for an experiment.
-
-    Attributes
-    ----------
-    metrics : list[str]
-        Ordered built-in metric keys or names of stored custom metrics to compute. The first metric
-        ranks strategies and summarizes the experiment.
-
-    See Also
-    --------
-    - backtide.metrics:BaseMetric
-    - backtide.backtest:ExperimentConfig
-
-    """
-
-    metrics: list[str]
-
-    def __eq__(self, value, /):
-        ...
-    def __ge__(self, value, /):
-        ...
-    def __getstate__(self, /):
-        ...
-    def __gt__(self, value, /):
-        ...
-    def __init__(self, /, *args, **kwargs):
-        ...
-    def __le__(self, value, /):
-        ...
-    def __lt__(self, value, /):
-        ...
-    def __ne__(self, value, /):
-        ...
-    def __new__(cls, *args, **kwargs):
-        ...
-    def __repr__(self, /):
-        ...
-    def __str__(self, /):
-        ...
-    def to_dict(self):
-        """Convert to a dictionary."""
 
 class Order:
     """A trading order submitted during the simulation.
@@ -1760,6 +1717,15 @@ class Trade:
     def __str__(self, /):
         ...
 
+def _run_experiment(config, verbose=True, strategy_overrides=None, indicator_overrides=None):
+    """Low-level entry point that runs an already-built experiment
+    configuration.
+
+    This is **not** the public API. Use [`Experiment`][backtide.backtest.Experiment],
+    which resolves polymorphic strategies and indicators before delegating here.
+
+    """
+
 def experiment_log(message, level=...):
     """Write a message to the active experiment's log file.
 
@@ -1771,20 +1737,3 @@ def experiment_log(message, level=...):
 
 def request_abort():
     """Signal the Rust engine to abort the current experiment."""
-
-def run_experiment(
-    config,
-    verbose=True,
-    strategy_overrides=None,
-    indicator_overrides=None,
-    metric_overrides=None,
-):
-    """Low-level entry point that runs an already-built experiment
-    configuration.
-
-    This is **not** the public API — Python callers should use
-    `backtide.backtest.run_experiment`, which handles kwargs
-    translation and polymorphic strategies/indicators before
-    delegating here.
-
-    """

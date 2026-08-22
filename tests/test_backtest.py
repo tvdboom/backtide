@@ -20,19 +20,17 @@ from backtide.backtest import (
     EngineExpConfig,
     EquitySample,
     ExchangeExpConfig,
+    Experiment,
     ExperimentConfig,
     ExperimentResult,
     ExperimentStatus,
     GeneralExpConfig,
-    IndicatorExpConfig,
     Order,
     OrderRecord,
     OrderType,
     PortfolioExpConfig,
     RunResult,
-    StrategyExpConfig,
     Trade,
-    run_experiment,
 )
 from backtide.indicators import SimpleMovingAverage
 from backtide.strategies import BaseStrategy, BuyAndHold
@@ -377,1081 +375,286 @@ class TestResultModels:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# run_experiment integration
+# Experiment
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class TestRunExperiment:
-    """Smoke tests for the run_experiment pipeline."""
+def _fixture_config(
+    *,
+    name: str = "",
+    symbols: list[str] | None = None,
+    metrics: list[Any] | None = None,
+) -> ExperimentConfig:
+    """Return an offline experiment configuration backed by the test fixture."""
+    return ExperimentConfig(
+        general=GeneralExpConfig(name=name),
+        data=DataExpConfig(
+            symbols=["AAPL"] if symbols is None else symbols,
+            instrument_type="stocks",
+            interval="1d",
+            full_history=False,
+            start_date="2024-01-01",
+            end_date="2024-03-01",
+        ),
+        metrics=metrics
+        or [
+            "sharpe",
+            "total_return",
+            "pnl",
+            "max_dd",
+            "cagr",
+            "win_rate",
+            "profit_factor",
+            "final_equity",
+        ],
+    )
+
+
+class TestExperiment:
+    """Tests for the class-based experiment interface."""
+
+    def test_old_function_is_not_public(self):
+        """The removed function API has no compatibility adapter."""
+        assert not hasattr(backtest_module, "run_experiment")
 
     def test_no_symbols_raises(self):
         """An experiment with no symbols cannot run."""
-        cfg = ExperimentConfig(
-            general=GeneralExpConfig(name="empty"),
-            data=DataExpConfig(symbols=[]),
-            strategy=StrategyExpConfig(benchmark="", strategies=[]),
-        )
+        config = _fixture_config(symbols=[])
         with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(cfg, verbose=False)
+            Experiment(config, strategies=[BuyAndHold()]).run(verbose=False)
 
-    def test_no_data_returns_failed(self, monkeypatch):
-        """When there is no data and no strategies, status is 'failed'.
+    def test_no_strategies_raises(self):
+        """An experiment requires at least one strategy."""
+        with pytest.raises(ValueError, match="no strategies"):
+            Experiment(_fixture_config(), strategies=[]).run(verbose=False)
 
-        Uses ``conftest``'s temp storage so this never hits the network:
-        the resolve/download phase is monkey-patched to return empty.
-        """
-        from backtide.core import data as core_data
+    def test_runtime_dependencies_follow_config(self, monkeypatch):
+        """Strategies and indicators are runtime dependencies while metrics live in config."""
+        captured: dict[str, Any] = {}
 
-        # Stub out network calls to keep the test offline.
-        monkeypatch.setattr(
-            core_data,
-            "resolve_profiles",
-            list,
-            raising=False,
-        )
-
-        cfg = ExperimentConfig(
-            general=GeneralExpConfig(name="offline"),
-            data=DataExpConfig(symbols=["NOPE-XYZ"]),
-            strategy=StrategyExpConfig(benchmark="SPY", strategies=[]),
-        )
-        # We expect either a clean failed result, or a runtime/value error from
-        # the resolve step; both are acceptable defensive outcomes.
-        try:
-            result = run_experiment(cfg, verbose=False)
-        except (RuntimeError, ValueError):
-            return
-        assert isinstance(result, ExperimentResult)
-        assert result.status in (ExperimentStatus.Error, ExperimentStatus.Success)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# run_experiment kwargs forms
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestRunExperimentKwargs:
-    """Tests for the kwargs-based ``run_experiment`` invocation forms.
-
-    All tests rely on the no-symbols / empty-data guard rails so they
-    never need network access to verify that the kwargs translation
-    layer correctly populates an ``ExperimentConfig``.
-    """
-
-    # ── Backward compatibility ──────────────────────────────────────
-
-    def test_positional_experiment_config_still_works(self):
-        """Passing an ExperimentConfig positionally is backward compatible."""
-        cfg = ExperimentConfig(
-            general=GeneralExpConfig(name="legacy"),
-            data=DataExpConfig(symbols=[]),
-        )
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(cfg, verbose=False)
-
-    def test_no_args_uses_defaults(self):
-        """Calling without args uses defaults (no symbols → RuntimeError)."""
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(verbose=False)
-
-    # ── Flat kwargs ──────────────────────────────────────────────────
-
-    def test_flat_kwargs_route_to_general(self):
-        """Flat ``name`` / ``description`` kwargs route to ``general``."""
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(
-                name="flat-name",
-                description="flat-desc",
-                tags=["a", "b"],
-                verbose=False,
+        def fake_run(config, verbose, strategies, indicators):
+            captured.update(
+                config=config,
+                verbose=verbose,
+                strategies=strategies,
+                indicators=indicators,
             )
+            return object()
 
-    def test_flat_kwargs_route_to_data(self):
-        """Flat ``symbols`` / ``interval`` kwargs route to ``data``."""
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(
-                symbols=[],
-                interval="1d",
-                instrument_type="stocks",
-                full_history=False,
-                start_date="2024-01-01",
-                end_date="2024-03-01",
-                verbose=False,
-            )
+        monkeypatch.setattr(backtest_module, "_run_experiment", fake_run)
+        strategy = BuyAndHold()
+        indicator = SimpleMovingAverage(20)
+        config = _fixture_config(metrics=["sharpe"])
 
-    def test_flat_kwargs_route_to_portfolio(self):
-        """Flat ``initial_cash`` / ``base_currency`` kwargs route to portfolio."""
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(
-                initial_cash=50_000,
-                base_currency="USD",
-                verbose=False,
-            )
+        result = Experiment(
+            config,
+            strategies={"Runtime strategy": strategy},
+            indicators={"Runtime indicator": indicator},
+        ).run(verbose=False)
 
-    def test_flat_kwargs_route_to_exchange(self):
-        """Flat exchange-section kwargs route to ``exchange``."""
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(
-                commission_type="Fixed",
-                commission_fixed=2.5,
-                slippage=0.1,
-                allow_short_selling=False,
-                verbose=False,
-            )
+        assert result is not None
+        assert captured["config"].strategy.strategies == ["Runtime strategy"]
+        assert captured["config"].indicators.indicators == ["Runtime indicator"]
+        assert captured["config"].metrics == ["sharpe"]
+        assert captured["strategies"] == {"Runtime strategy": strategy}
+        assert captured["indicators"] == {"Runtime indicator": indicator}
+        assert captured["verbose"] is False
 
-    def test_flat_kwargs_route_to_engine(self):
-        """Flat engine-section kwargs route to ``engine``."""
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(
-                warmup_period=5,
-                trade_on_close=True,
-                risk_free_rate=0.02,
-                empty_bar_policy="Skip",
-                verbose=False,
-            )
+    def test_blank_name_is_generated(self, monkeypatch):
+        """A blank name is replaced before dispatch."""
 
-    def test_unknown_flat_kwarg_raises_value_error(self):
-        """Unknown kwargs raise ValueError with a helpful message."""
-        with pytest.raises(ValueError, match="Unknown keyword argument"):
-            run_experiment(not_a_field=123, verbose=False)
+        class Capture(RuntimeError):
+            """Capture the normalized configuration."""
 
-    def test_removed_main_metric_kwarg_raises_value_error(self):
-        """The removed main-metric argument is rejected instead of being silently ignored."""
-        with pytest.raises(ValueError, match="Unknown keyword arguments: main_metric"):
-            run_experiment(main_metric="sharpe", verbose=False)
-
-    def test_enum_string_alias_via_kwargs(self):
-        """Enum aliases like ``interval='1d'`` work through kwargs.
-
-        Regression test: serde-based round-tripping doesn't honour these
-        aliases; the implementation must use Python-level setattr.
-        """
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(interval="1d", verbose=False)
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(interval="1h", verbose=False)
-
-    # ── Sub-config kwargs ────────────────────────────────────────────
-
-    def test_sub_config_instance_kwargs(self):
-        """Each sub-config can be passed as a typed instance kwarg."""
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(
-                general=GeneralExpConfig(name="sub"),
-                data=DataExpConfig(symbols=[]),
-                portfolio=PortfolioExpConfig(initial_cash=20_000),
-                strategy=StrategyExpConfig(strategies=[]),
-                indicators=IndicatorExpConfig(indicators=[]),
-                exchange=ExchangeExpConfig(),
-                engine=EngineExpConfig(warmup_period=3),
-                verbose=False,
-            )
-
-    # ── Mixing positional and kwargs ─────────────────────────────────
-
-    def test_positional_config_with_kwargs_overrides(self):
-        """Kwargs override fields of a positional ExperimentConfig."""
-        cfg = ExperimentConfig(
-            general=GeneralExpConfig(name="orig"),
-            data=DataExpConfig(symbols=[]),
-        )
-        # If kwargs were ignored, this would still hit the no-symbols guard
-        # (it does anyway). We just verify no error is raised by the
-        # kwargs translation itself.
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(cfg, name="overridden", verbose=False)
-
-    def test_blank_name_gets_auto_generated(self, monkeypatch):
-        """Blank names are replaced by an 8-char auto id before dispatch."""
-
-        class _CaptureConfig(RuntimeError):
-            def __init__(self, cfg):
+            def __init__(self, config):
                 super().__init__("captured")
-                self.cfg = cfg
+                self.config = config
 
-        class _FakeUuid:
+        class FakeUuid:
+            """Return a deterministic UUID string."""
+
             def __str__(self) -> str:
                 return "01234567-89ab-cdef-0123-456789abcdef"
 
-        monkeypatch.setattr(backtest_module.uuid, "uuid4", lambda: _FakeUuid())
+        monkeypatch.setattr(backtest_module.uuid, "uuid4", FakeUuid)
 
-        def _fake_run_experiment(
-            cfg, _verbose, _strategy_overrides, _indicator_overrides, _metric_overrides
-        ):
-            raise _CaptureConfig(cfg)
+        def fake_run(config, _verbose, _strategies, _indicators):
+            raise Capture(config)
 
-        monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
+        monkeypatch.setattr(backtest_module, "_run_experiment", fake_run)
+        with pytest.raises(Capture) as captured:
+            Experiment(_fixture_config(), strategies=[BuyAndHold()]).run(verbose=False)
 
-        with pytest.raises(_CaptureConfig) as ex:
-            run_experiment(
-                name="",
-                symbols=["AAPL"],
-                instrument_type="stocks",
-                interval="1d",
-                full_history=False,
-                start_date="2024-01-01",
-                end_date="2024-03-01",
-                strategies=[BuyAndHold()],
-                verbose=False,
-            )
-
-        assert ex.value.cfg.general.name == "01234567"
+        assert captured.value.config.general.name == "01234567"
 
     def test_explicit_name_is_preserved(self, monkeypatch):
-        """A non-empty name passes through unchanged."""
+        """A non-empty experiment name is unchanged."""
 
-        class _CaptureConfig(RuntimeError):
-            def __init__(self, cfg):
-                super().__init__("captured")
-                self.cfg = cfg
+        def fake_run(config, _verbose, _strategies, _indicators):
+            assert config.general.name == "named"
+            return object()
 
-        def _fake_run_experiment(
-            cfg, _verbose, _strategy_overrides, _indicator_overrides, _metric_overrides
-        ):
-            raise _CaptureConfig(cfg)
+        monkeypatch.setattr(backtest_module, "_run_experiment", fake_run)
+        Experiment(_fixture_config(name="named"), strategies=[BuyAndHold()]).run(verbose=False)
 
-        monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
+    def test_keyboard_interrupt_cleans_up(self, monkeypatch):
+        """An interrupted experiment is translated and cleaned up."""
+        cleaned: list[tuple[str | None, str]] = []
 
-        with pytest.raises(_CaptureConfig) as ex:
-            run_experiment(
-                name="my-exp",
-                symbols=["AAPL"],
-                instrument_type="stocks",
-                interval="1d",
-                full_history=False,
-                start_date="2024-01-01",
-                end_date="2024-03-01",
-                strategies=[BuyAndHold()],
-                verbose=False,
+        def fake_run(*_args):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backtest_module, "_run_experiment", fake_run)
+        monkeypatch.setattr(
+            backtest_module,
+            "_cleanup_experiment",
+            lambda experiment_id, name: cleaned.append((experiment_id, name)),
+        )
+
+        with pytest.raises(backtest_module.ExperimentAborted):
+            Experiment(_fixture_config(name="interrupt"), strategies=[BuyAndHold()]).run(
+                verbose=False
             )
 
-        assert ex.value.cfg.general.name == "my-exp"
-
-    def test_flat_falsy_kwargs_override_config(self, monkeypatch):
-        """Explicit falsy flat kwargs are not replaced by config defaults."""
-        captured = {}
-
-        def _fake_run_experiment(
-            cfg, _verbose, _strategy_overrides, _indicator_overrides, _metric_overrides
-        ):
-            captured["config"] = cfg
-            return object()
-
-        monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
-
-        cfg = ExperimentConfig(
-            data=DataExpConfig(symbols=["AAPL"], full_history=True),
-            strategy=StrategyExpConfig(strategies=["BuyAndHold"]),
-            exchange=ExchangeExpConfig(partial_fills=True, allow_margin=True),
-            engine=EngineExpConfig(trade_on_close=True, risk_free_rate=0.05),
-        )
-        run_experiment(
-            cfg,
-            full_history=False,
-            partial_fills=False,
-            allow_margin=False,
-            trade_on_close=False,
-            risk_free_rate=0.0,
-            verbose=False,
-        )
-
-        resolved = captured["config"]
-        assert resolved.data.full_history is False
-        assert resolved.exchange.partial_fills is False
-        assert resolved.exchange.allow_margin is False
-        assert resolved.engine.trade_on_close is False
-        assert resolved.engine.risk_free_rate == 0.0
-
-    def test_flat_kwargs_override_section_objects(self, monkeypatch):
-        """Flat fields take precedence while preserving other section fields."""
-        captured = {}
-
-        def _fake_run_experiment(
-            cfg, _verbose, _strategy_overrides, _indicator_overrides, _metric_overrides
-        ):
-            captured["config"] = cfg
-            return object()
-
-        monkeypatch.setattr(backtest_module, "_run_experiment", _fake_run_experiment)
-
-        run_experiment(
-            data=DataExpConfig(symbols=["AAPL"], interval="1d", full_history=True),
-            interval="1h",
-            full_history=False,
-            strategy=StrategyExpConfig(benchmark="SPY", strategies=["BuyAndHold"]),
-            benchmark=None,
-            engine=EngineExpConfig(warmup_period=10, trade_on_close=True),
-            trade_on_close=False,
-            verbose=False,
-        )
-
-        resolved = captured["config"]
-        assert resolved.data.symbols == ["AAPL"]
-        assert str(resolved.data.interval) == "1h"
-        assert resolved.data.full_history is False
-        assert resolved.strategy.benchmark is None
-        assert resolved.strategy.strategies == ["BuyAndHold"]
-        assert resolved.engine.warmup_period == 10
-        assert resolved.engine.trade_on_close is False
+        assert cleaned == [(None, "interrupt")]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# run_experiment polymorphic strategies / indicators
-# ─────────────────────────────────────────────────────────────────────────────
+class TestExperimentPolymorphicForms:
+    """Tests for runtime strategy and indicator forms."""
 
-
-# Date range matching the pre-built test fixture so these tests are offline.
-run_kwargs: dict[str, Any] = {
-    "symbols": ["AAPL"],
-    "instrument_type": "stocks",
-    "interval": "1d",
-    "full_history": False,
-    "start_date": "2024-01-01",
-    "end_date": "2024-03-01",
-}
-
-
-class TestRunExperimentPolymorphicForms:
-    """Tests for the polymorphic ``strategies`` / ``indicators`` kwargs.
-
-    Each test runs a real (small) backtest against the pre-built
-    ``tests/_data/database.duckdb`` fixture and inspects the
-    [`RunResult`] entries returned in ``result.strategies`` to verify
-    that inline instances and dict forms are honoured by the engine.
-    """
-
-    def test_strategies_single_instance_uses_class_name(self):
-        """A single ``BaseStrategy`` instance is accepted and the run completes."""
-        result = run_experiment(strategies=BuyAndHold(), verbose=False, **run_kwargs)
-        assert isinstance(result, ExperimentResult)
+    @pytest.mark.parametrize(
+        "strategies",
+        [
+            BuyAndHold(),
+            [BuyAndHold()],
+            {"Named": BuyAndHold()},
+            [BuyAndHold(), {"Other": BuyAndHold(symbol="AAPL")}],
+        ],
+    )
+    def test_strategy_forms_run(self, strategies):
+        """A supported strategy form completes an experiment."""
+        result = Experiment(_fixture_config(), strategies=strategies).run(verbose=False)
         assert result.status == ExperimentStatus.Success
 
-    def test_strategies_list_of_instances(self):
-        """A list of instances produces a completed result."""
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result.status == ExperimentStatus.Success
-
-    def test_strategies_dict_form_uses_explicit_name(self):
-        """``strategies=[{'name': instance}]`` passes the instance under that name."""
-        result = run_experiment(
-            strategies=[{"My Strategy": BuyAndHold()}],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result.status == ExperimentStatus.Success
-
-    def test_strategies_mixed_list(self):
-        """A list mixing instances and dicts produces a completed result."""
-        result = run_experiment(
-            strategies=[BuyAndHold(), {"named": BuyAndHold(symbol="AAPL")}],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result.status == ExperimentStatus.Success
-
-    def test_strategies_via_strategy_sub_config_dict(self):
-        """Strategies passed via flat ``strategies`` kwarg are honoured."""
-        result = run_experiment(
-            strategies=BuyAndHold(),
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result.status == ExperimentStatus.Success
-
-    def test_indicators_instance_runs_successfully(self):
-        """An indicator instance is computed and the strategy completes."""
-        result = run_experiment(
+    def test_indicator_instance_runs(self):
+        """A custom indicator instance is computed."""
+        result = Experiment(
+            _fixture_config(),
             strategies=[BuyAndHold()],
             indicators=[SimpleMovingAverage(20)],
-            verbose=False,
-            **run_kwargs,
-        )
+        ).run(verbose=False)
         assert result.status == ExperimentStatus.Success
-
-    def test_indicators_sub_config_form(self):
-        """``indicators=IndicatorExpConfig(...)`` is treated as the sub-config."""
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            indicators=IndicatorExpConfig(indicators=[]),
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result.status == ExperimentStatus.Success
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Regression: auto-injected indicators reach built-in strategies
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestAutoIndicatorLookup:
-    """Built-in strategies must find the indicators the engine auto-injects.
-
-    Previously the strategy-side helper produced ``__auto_BB_20_2p0`` while
-    the engine stored series under ``BB_20_2p0``, so every built-in strategy
-    that relied on an auto-included indicator (BB, RSI, SMA, MACD, ATR, …)
-    silently returned no orders. The two helpers are now aligned and all
-    indicator-driven strategies actually trade.
-    """
+    """Built-in strategies find indicators injected by the engine."""
 
     def test_multi_bollinger_rotation_produces_orders(self):
-        """MultiBollingerRotation trades with auto-injected Bollinger Bands."""
+        """MultiBollingerRotation trades with its Bollinger Bands."""
         from backtide.strategies import MultiBollingerRotation
 
-        result = run_experiment(
+        result = Experiment(
+            _fixture_config(),
             strategies=MultiBollingerRotation(period=5, rebalance_interval=1),
-            verbose=False,
-            **run_kwargs,
-        )
+        ).run(verbose=False)
         assert result.status == ExperimentStatus.Success
-        rr = result.strategies[0]
-        assert len(rr.orders) > 0, "rotation strategy produced no orders"
+        assert result.strategies[0].orders
 
     def test_triple_rsi_rotation_produces_orders(self):
-        """TripleRsiRotation trades with auto-injected RSI indicators."""
+        """TripleRsiRotation trades with its RSI indicators."""
         from backtide.strategies import TripleRsiRotation
 
-        result = run_experiment(
-            strategies=TripleRsiRotation(
-                short_period=2, medium_period=3, long_period=5, rebalance_interval=1
-            ),
-            verbose=False,
-            **run_kwargs,
+        strategy = TripleRsiRotation(
+            short_period=2,
+            medium_period=3,
+            long_period=5,
+            rebalance_interval=1,
         )
+        result = Experiment(_fixture_config(), strategies=strategy).run(verbose=False)
         assert result.status == ExperimentStatus.Success
-        rr = result.strategies[0]
-        assert len(rr.orders) > 0, "rotation strategy produced no orders"
+        assert result.strategies[0].orders
 
     def test_bollinger_mean_reversion_produces_orders(self):
-        """BollingerMeanReversion triggers when price crosses bands.
-
-        Pick a very short window so the band is volatile enough for the
-        AAPL Jan-Mar 2024 fixture to produce at least one cross.
-        """
+        """BollingerMeanReversion uses its injected indicator."""
         from backtide.strategies import BollingerMeanReversion
 
-        # The strategy is satisfied as long as it can *look up* its
-        # auto-injected BB indicator — even on a quiet stretch the order
-        # list may be empty, but the run must succeed without warnings.
-        result = run_experiment(
+        result = Experiment(
+            _fixture_config(),
             strategies=BollingerMeanReversion(period=3, std_dev=1.0),
-            verbose=False,
-            **run_kwargs,
-        )
+        ).run(verbose=False)
         assert result.status == ExperimentStatus.Success
-        # Either we got orders, or — at minimum — the auto-indicator
-        # lookup didn't fail loudly. We assert the auto-indicator
-        # warning is absent because that's the failure mode the
-        # regression fix targets.
-        rr = result.strategies[0]
-        # The fix is verified if there are orders OR no
-        # "produced no orders" warning. Most short fixtures yield
-        # at least one band touch, so we assert orders are produced
-        # with a permissive parameter set.
-        assert len(rr.orders) > 0, "indicator-driven strategy produced no orders"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Additional coverage tests
-# ─────────────────────────────────────────────────────────────────────────────
+        assert result.strategies[0].orders
 
 
 class TestBaseStrategyLog:
-    """Tests for BaseStrategy.log() method."""
+    """Tests for BaseStrategy.log()."""
 
-    def test_log_default_level(self):
-        """Test log method with default info level."""
+    @pytest.mark.parametrize("level", ["error", "warn", "debug"])
+    def test_custom_level(self, level):
+        """A custom log level is forwarded."""
         from unittest.mock import patch
 
         with patch("backtide.backtest.experiment_log") as mock_log:
-            BaseStrategy.log("test message")
-            mock_log.assert_called_once_with("test message", "info")
+            BaseStrategy.log("message", level=level)
+            mock_log.assert_called_once_with("message", level)
 
-    def test_log_custom_level(self):
-        """Test log method with custom log level."""
+    def test_default_level(self):
+        """The default log level is info."""
         from unittest.mock import patch
 
         with patch("backtide.backtest.experiment_log") as mock_log:
-            BaseStrategy.log("test error", level="error")
-            mock_log.assert_called_once_with("test error", "error")
-
-    def test_log_warn_level(self):
-        """Test log method with warn level."""
-        from unittest.mock import patch
-
-        with patch("backtide.backtest.experiment_log") as mock_log:
-            BaseStrategy.log("test warning", level="warn")
-            mock_log.assert_called_once_with("test warning", "warn")
-
-    def test_log_debug_level(self):
-        """Test log method with debug level."""
-        from unittest.mock import patch
-
-        with patch("backtide.backtest.experiment_log") as mock_log:
-            BaseStrategy.log("test debug", level="debug")
-            mock_log.assert_called_once_with("test debug", "debug")
-
-
-class TestRunExperimentPolymorphicDict:
-    """Tests for dict form of polymorphic strategies/indicators parameters."""
-
-    def test_strategies_dict_multiple_entries(self):
-        """Test that multiple strategies in dict form are handled correctly."""
-        result = run_experiment(
-            strategies=[
-                {"Strategy1": BuyAndHold()},
-                {"Strategy2": BuyAndHold()},
-            ],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result.status is not None
-
-    def test_mixed_strategies_strings_and_instances(self):
-        """Test mixing string names with instances."""
-        result = run_experiment(
-            strategies=[
-                "BuyAndHold",
-                BuyAndHold(),
-                {"CustomName": BuyAndHold()},
-            ],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result.status is not None
-
-    def test_indicators_dict_form(self):
-        """Test indicator with dict form."""
-        from backtide.indicators import SimpleMovingAverage
-
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            indicators=[{"MyIndicator": SimpleMovingAverage(20)}],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result.status is not None
-
-
-class TestRunExperimentErrors:
-    """Tests for error cases in run_experiment."""
-
-    def test_no_symbols_raises_error(self):
-        """Test that missing symbols raises ValueError."""
-        with pytest.raises(ValueError, match="no symbols"):
-            run_experiment(
-                symbols=[],
-                strategies=[BuyAndHold()],
-                verbose=False,
-            )
-
-    def test_no_strategies_raises_error(self):
-        """Test that missing strategies raises ValueError."""
-        with pytest.raises(ValueError, match="no strategies"):
-            run_experiment(
-                symbols=["AAPL"],
-                instrument_type="stocks",
-                interval="1d",
-                strategies=[],
-                verbose=False,
-            )
-
-    def test_unknown_kwargs_raise_error(self):
-        """Test that unknown keyword arguments raise ValueError."""
-        with pytest.raises(ValueError, match="Unknown keyword arguments"):
-            run_experiment(
-                symbols=["AAPL"],
-                instrument_type="stocks",
-                interval="1d",
-                strategies=[BuyAndHold()],
-                unknown_arg="invalid",
-                verbose=False,
-            )
+            BaseStrategy.log("message")
+            mock_log.assert_called_once_with("message", "info")
 
 
 class TestCleanupExperiment:
-    """Tests for _cleanup_experiment function."""
+    """Tests for best-effort experiment cleanup."""
 
     def test_cleanup_with_experiment_id_calls_delete(self):
-        """Test cleanup with experiment ID calls delete."""
+        """A known experiment id is deleted directly."""
         from unittest.mock import patch
 
-        with patch("backtide.backtest._delete_experiment") as mock_delete:
-            from backtide.backtest import _cleanup_experiment
+        with patch("backtide.backtest._delete_experiment") as delete:
+            backtest_module._cleanup_experiment("exp-123", "name")
+            delete.assert_called_once_with("exp-123")
 
-            _cleanup_experiment("exp-123", "test-name")
-            mock_delete.assert_called_once_with("exp-123")
-
-    def test_cleanup_with_experiment_id_delete_failure(self):
-        """Test cleanup gracefully handles delete failure."""
+    def test_cleanup_without_id_uses_latest_name_match(self):
+        """A partial experiment is found by name."""
         from unittest.mock import patch
-
-        with patch("backtide.backtest._delete_experiment") as mock_delete:
-            mock_delete.side_effect = Exception("Delete failed")
-            from backtide.backtest import _cleanup_experiment
-
-            # Should not raise - best-effort removal
-            _cleanup_experiment("exp-123", "test-name")
-
-    def test_cleanup_without_experiment_id_queries_experiments(self):
-        """Test cleanup without ID queries experiments by name."""
-        from unittest.mock import patch
-
-        import pandas as pd
 
         with (
-            patch("backtide.backtest._query_experiments") as mock_query,
-            patch("backtide.backtest._to_pandas") as mock_to_pandas,
-            patch("backtide.backtest._delete_experiment") as mock_delete,
+            patch("backtide.backtest._query_experiments") as query,
+            patch("backtide.backtest._to_pandas", return_value=pd.DataFrame({"id": ["exp-456"]})),
+            patch("backtide.backtest._delete_experiment") as delete,
         ):
-            df = pd.DataFrame({"id": ["exp-456"]})
-            mock_to_pandas.return_value = df
-            from backtide.backtest import _cleanup_experiment
+            backtest_module._cleanup_experiment(None, "name")
+            query.assert_called_once_with(search="name", limit=1)
+            delete.assert_called_once_with("exp-456")
 
-            _cleanup_experiment(None, "test-name")
-            mock_query.assert_called_once()
-            mock_delete.assert_called_once_with("exp-456")
-
-    def test_cleanup_query_returns_empty(self):
-        """Test cleanup when query returns empty result."""
+    def test_cleanup_failures_are_ignored(self):
+        """Cleanup remains best effort."""
         from unittest.mock import patch
 
-        import pandas as pd
-
-        with (
-            patch("backtide.backtest._query_experiments"),
-            patch("backtide.backtest._to_pandas") as mock_to_pandas,
-            patch("backtide.backtest._delete_experiment") as mock_delete,
-        ):
-            mock_to_pandas.return_value = pd.DataFrame()
-            from backtide.backtest import _cleanup_experiment
-
-            _cleanup_experiment(None, "nonexistent")
-            # Should not call delete if no experiments found
-            assert mock_delete.call_count == 0
-
-
-class TestIntegrationCoverage:
-    """Integration tests to cover additional paths."""
-
-    def test_run_experiment_with_indicators_and_custom_dates(self):
-        """Test run_experiment with indicators and custom date range."""
-        from backtide.indicators import SimpleMovingAverage
-
-        result = run_experiment(
-            name="test-with-indicators",
-            symbols=["AAPL"],
-            instrument_type="stocks",
-            interval="1d",
-            full_history=False,
-            start_date="2024-01-01",
-            end_date="2024-03-01",
-            strategies=[BuyAndHold()],
-            indicators=[SimpleMovingAverage(10), SimpleMovingAverage(20)],
-            initial_cash=50000,
-            commission_pct=0.001,
-            slippage=0.001,
-            verbose=False,
-        )
-        assert result is not None
-
-    def test_run_experiment_with_tags_and_description(self):
-        """Test run_experiment with tags and description in config."""
-        result = run_experiment(
-            name="test-tags",
-            tags=["test", "coverage"],
-            description="Test experiment for coverage",
-            symbols=["AAPL"],
-            instrument_type="stocks",
-            interval="1d",
-            full_history=False,
-            start_date="2024-01-01",
-            end_date="2024-03-01",
-            strategies=[BuyAndHold()],
-            verbose=False,
-        )
-        assert result is not None
-
-    def test_multiple_strategies_execution(self):
-        """Test execution with multiple strategies."""
-        result = run_experiment(
-            strategies=[
-                BuyAndHold(),
-                BuyAndHold(symbol="AAPL"),
-            ],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert len(result.strategies) >= 1
-
-
-class TestPolymorphicResolution:
-    """Tests for polymorphic parameter resolution."""
-
-    def test_resolve_instance_strategies(self):
-        """Test resolution of strategy instances."""
-        result = run_experiment(
-            strategies=BuyAndHold(),
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_resolve_list_of_instances(self):
-        """Test resolution of list of strategy instances."""
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_indicators_instance_form(self):
-        """Test indicators as instances."""
-        from backtide.indicators import SimpleMovingAverage
-
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            indicators=[SimpleMovingAverage(10)],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-
-class TestBacktestErrorPaths:
-    """Tests for various error paths in backtest module."""
-
-    def test_run_experiment_exception_cleanup_on_keyboard_interrupt(self, monkeypatch):
-        """Test cleanup is called on KeyboardInterrupt."""
-        cleanup_called = []
-
-        def fake_run(*args, **kwargs):  # noqa: ARG001
-            raise KeyboardInterrupt
-
-        def fake_cleanup(exp_id, name):
-            cleanup_called.append((exp_id, name))
-
-        monkeypatch.setattr(backtest_module, "_run_experiment", fake_run)
-        monkeypatch.setattr(backtest_module, "_cleanup_experiment", fake_cleanup)
-
-        with pytest.raises(backtest_module.ExperimentAborted):
-            run_experiment(strategies=[BuyAndHold()], verbose=False, **run_kwargs)
-
-        assert len(cleanup_called) > 0
-
-    def test_cleanup_with_name_search_raises_exception(self):
-        """Test cleanup gracefully handles query exceptions."""
-        from unittest.mock import patch
-
-        import backtide.backtest as backtide_module
-
-        with patch("backtide.backtest._query_experiments") as mock_query:
-            mock_query.side_effect = Exception("Query failed")
-
-            # Should not raise - best-effort removal
-            backtide_module._cleanup_experiment(None, "test-name")
-
-    def test_cleanup_with_pandas_conversion_failure(self):
-        """Test cleanup handles pandas conversion failures."""
-        from unittest.mock import patch
-
-        import backtide.backtest as backtide_module
-
-        with (
-            patch("backtide.backtest._query_experiments"),
-            patch("backtide.backtest._to_pandas") as mock_to_pandas,
-        ):
-            mock_to_pandas.side_effect = Exception("Conversion failed")
-
-            # Should not raise
-            backtide_module._cleanup_experiment(None, "test-name")
-
-
-class TestComplexConfigurations:
-    """Tests for complex experiment configurations."""
-
-    def test_experiment_with_multiple_indicators(self):
-        """Test experiment with multiple indicator types."""
-        from backtide.indicators import SimpleMovingAverage
-
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            indicators=[
-                SimpleMovingAverage(5),
-                SimpleMovingAverage(10),
-                SimpleMovingAverage(20),
-            ],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_experiment_kwargs_precedence(self):
-        """Test that kwargs override config values."""
-        result = run_experiment(
-            config=ExperimentConfig(),
-            name="override_test",
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_experiment_with_slippage_and_commission(self):
-        """Test experiment with slippage and commission."""
-        result = run_experiment(
-            commission_pct=0.001,
-            slippage=0.001,
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_experiment_with_warmup_period(self):
-        """Test experiment with warmup period."""
-        result = run_experiment(
-            warmup_period=5,
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-
-class TestExperimentConfigEdgeCases:
-    """Tests for edge cases in experiment configuration."""
-
-    def test_run_with_empty_string_name_generates_uuid(self):
-        """Test that empty name gets auto-generated UUID."""
-        result = run_experiment(
-            name="    ",  # Whitespace name
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_run_with_none_indicators(self):
-        """Test run with None indicators."""
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            indicators=None,
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_run_with_single_indicator_instance(self):
-        """Test run with single indicator (not in list)."""
-        from backtide.indicators import SimpleMovingAverage
-
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            indicators=SimpleMovingAverage(10),
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_run_with_very_large_initial_cash(self):
-        """Test with very large initial cash."""
-        result = run_experiment(
-            initial_cash=999_999_999,
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_run_with_very_small_commission(self):
-        """Test with very small commission rate."""
-        result = run_experiment(
-            commission_pct=0.00001,
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_run_with_zero_slippage(self):
-        """Test run with zero slippage."""
-        result = run_experiment(
-            slippage=0.0,
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-
-class TestMultipleStrategies:
-    """Tests for running multiple strategies."""
-
-    def test_run_three_strategies(self):
-        """Test running three different strategy instances."""
-        result = run_experiment(
-            strategies=[
-                BuyAndHold(),
-                BuyAndHold(symbol="AAPL"),
-                BuyAndHold(symbol="AAPL"),
-            ],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_run_with_mixed_dict_and_instance_strategies(self):
-        """Test with mixed dict, instance, and string strategies."""
-        result = run_experiment(
-            strategies=[
-                {"Custom1": BuyAndHold()},
-                BuyAndHold(),
-                {"Custom2": BuyAndHold()},
-            ],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_indicators_with_multiple_instances(self):
-        """Test multiple indicator instances."""
-        from backtide.indicators import SimpleMovingAverage
-
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            indicators=[
-                SimpleMovingAverage(3),
-                SimpleMovingAverage(5),
-                SimpleMovingAverage(7),
-                SimpleMovingAverage(10),
-            ],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-    def test_indicators_dict_form_multiple(self):
-        """Test multiple indicators in dict form."""
-        from backtide.indicators import SimpleMovingAverage
-
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            indicators=[
-                {"SMA3": SimpleMovingAverage(3)},
-                {"SMA5": SimpleMovingAverage(5)},
-            ],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
-
-
-class TestDataFormats:
-    """Tests for different data formats and edge cases."""
-
-    def test_run_experiment_full_history(self):
-        """Test with full_history=True."""
-        result = run_experiment(
-            full_history=True,
-            strategies=[BuyAndHold()],
-            verbose=False,
-            symbols=["AAPL"],
-            instrument_type="stocks",
-            interval="1d",
-        )
-        assert result is not None
-
-    def test_run_experiment_with_explicit_dates(self):
-        """Test with explicit date range."""
-        result = run_experiment(
-            full_history=False,
-            start_date="2024-01-15",
-            end_date="2024-02-15",
-            strategies=[BuyAndHold()],
-            verbose=False,
-            symbols=["AAPL"],
-            instrument_type="stocks",
-            interval="1d",
-        )
-        assert result is not None
-
-    def test_run_experiment_with_only_start_date(self):
-        """Test with only start date."""
-        result = run_experiment(
-            symbols=["AAPL"],
-            instrument_type="stocks",
-            interval="1d",
-            full_history=False,
-            start_date="2024-01-01",
-            strategies=[BuyAndHold()],
-            verbose=False,
-        )
-        assert result is not None
-
-    def test_run_experiment_with_only_end_date(self):
-        """Test with only end date."""
-        result = run_experiment(
-            symbols=["AAPL"],
-            instrument_type="stocks",
-            interval="1d",
-            full_history=False,
-            end_date="2024-03-01",
-            strategies=[BuyAndHold()],
-            verbose=False,
-        )
-        assert result is not None
-
-
-class TestAbortEventHandling:
-    """Tests for abort event handling in backtest."""
-
-    def test_abort_event_not_set(self):
-        """Test normal case when abort is not set."""
-        assert backtest_module._abort_event is None
-        result = run_experiment(
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert result is not None
+        with patch("backtide.backtest._query_experiments", side_effect=RuntimeError("failed")):
+            backtest_module._cleanup_experiment(None, "name")
 
 
 class TestStoredExperimentAccess:
-    """Tests for accessing stored experiments."""
+    """Tests for persisted experiment access."""
 
-    def test_query_and_iterate_experiments(self):
-        """Test querying experiments and accessing results."""
+    def test_query_experiment_after_run(self):
+        """A completed experiment can be queried by name."""
         from backtide.storage import query_experiments, query_strategy_runs
 
-        # Run an experiment first
-        run_experiment(
-            name="test-stored-exp",
+        result = Experiment(
+            _fixture_config(name="test-stored-exp"),
             strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
+        ).run(verbose=False)
+        experiments = cast(
+            pd.DataFrame,
+            query_experiments(search="test-stored-exp", limit=1),
         )
 
-        # Query experiments
-        experiments = cast(pd.DataFrame, query_experiments(search="test-stored-exp", limit=1))
-        if not experiments.empty:
-            exp_id = experiments.iloc[0]["id"]
-            runs = query_strategy_runs(exp_id)
-            assert runs is not None
-
-    def test_experiment_result_attributes(self):
-        """Test that experiment results have expected attributes."""
-        result = run_experiment(
-            name="test-attrs",
-            strategies=[BuyAndHold()],
-            verbose=False,
-            **run_kwargs,
-        )
-        assert hasattr(result, "experiment_id")
-        assert hasattr(result, "status")
-        assert hasattr(result, "strategies")
+        assert result.experiment_id
+        assert not experiments.empty
+        assert query_strategy_runs(experiments.iloc[0]["id"]) is not None

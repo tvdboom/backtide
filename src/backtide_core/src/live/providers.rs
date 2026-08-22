@@ -320,7 +320,7 @@ fn parse_coinbase(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>
     };
     // Coinbase snapshots can contain many historical candles for one product.
     // A live session must start from the newest candle for every subscribed
-    // product instead of replaying the snapshot through the paper strategy.
+    // product instead of replaying the snapshot through the live strategy.
     let mut latest_by_symbol = HashMap::new();
     for candle in
         events.iter().filter_map(|event| event.get("candles").and_then(Value::as_array)).flatten()
@@ -362,7 +362,7 @@ fn parse_kraken(interval: Interval, value: &Value) -> Result<Vec<MarketUpdate>, 
         return Ok(Vec::new());
     };
     // Snapshot payloads may contain multiple historical candles per product.
-    // Keep the newest one so paper trading begins at the live edge.
+    // Keep the newest one so the session begins at the live edge.
     let mut latest_by_symbol = HashMap::with_capacity(data.len());
     for candle in data {
         let begin = required_string(candle, "interval_begin")?;

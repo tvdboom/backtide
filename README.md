@@ -5,7 +5,7 @@
 
 ## Test the idea. Trade the evidence.
 
-### A refreshingly simple backtesting and paper trading platform for retail investors
+### A refreshingly simple backtesting and live simulation platform for retail investors
 </div>
 
 <br>
@@ -28,7 +28,7 @@
 </tr>
 <tr>
 <td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/results.png?raw=true" alt="Results" width="100%"/></td>
-<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/live.png?raw=true" alt="Paper trading" width="100%"/></td>
+<td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/live.png?raw=true" alt="Live simulation" width="100%"/></td>
 </tr>
 <tr>
 <td><img src="https://github.com/tvdboom/backtide/blob/master/images/scenery/storage.png?raw=true" alt="Storage" width="100%"/></td>
@@ -43,7 +43,7 @@
 
 Backtide is an open-source backtesting platform for Python, built for retail
 investors who want to test trading ideas without drowning in complexity. A
-Rust-powered core keeps simulations and paper execution fast, while sensible
+Rust-powered core keeps historical and live simulations fast, while sensible
 defaults let you go from raw multi-exchange data to validated strategies in just
 a few lines of code. Run the same strategy objects against historical bars or
 public exchange WebSockets, without connecting a brokerage account.
@@ -59,8 +59,8 @@ public exchange WebSockets, without connecting a brokerage account.
 - **Multi-exchange** — Stocks, ETFs, forex and crypto from Yahoo, Binance, Kraken and more.
 - **Batteries included** — Built-in strategies and technical indicators out of the box.
 - **Rich analytics** — 20+ plots cover PnL, returns, drawdown and more.
-- **Live paper trading** — Apply strategies to Binance, Coinbase, or Kraken WebSocket candles with local simulated fills.
-- **Interactive UI** — A packaged Vue app configures, runs, and analyzes backtests and paper sessions visually.
+- **Live simulation** — Apply strategies to Binance, Coinbase, or Kraken WebSocket candles with local simulated fills.
+- **Interactive UI** — A packaged Vue app configures, runs, and analyzes backtests and live sessions visually.
 - **Simple installation** — Python wheels include the Rust extension and production frontend; users do not need Rust or Node.js.
 - **Open source** — MIT-licensed, community-driven and free forever.
 

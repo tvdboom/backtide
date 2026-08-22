@@ -7,7 +7,7 @@ More-specific `AGENTS.md` files may add rules for their subtree, but may not wea
 
 Backtide is a local-first trading research application. It combines a Python API and web server,
 a Rust/PyO3 core, an embedded DuckDB database, and a Vue single-page application. The main use
-cases are downloading market data, configuring and running backtests, running paper-trading
+cases are downloading market data, configuring and running backtests, running live simulation
 sessions from live WebSocket data, persisting results, and analysing those results with Plotly.
 
 Keep the package approachable for Python users. A released wheel must contain the compiled Rust
@@ -34,7 +34,7 @@ Node.js, or pnpm. Node/pnpm are development-only tools for rebuilding the SPA.
 |   |   |-- ui/                 Python HTTP/API service and generated production SPA assets
 |   |   |-- core/               Generated `.pyi` files for the PyO3 extension
 |   |   |-- backtest.py         High-level experiment wrapper and model re-exports
-|   |   |-- live.py             High-level paper-trading facade and model re-exports
+|   |   |-- live.py             High-level live-session facade and model re-exports
 |   |   |-- data.py             Market-data re-exports
 |   |   |-- storage.py          Storage re-exports
 |   |   |-- config.py           Configuration re-exports
@@ -43,7 +43,7 @@ Node.js, or pnpm. Node/pnpm are development-only tools for rebuilding the SPA.
 |       |-- database/           Canonical DuckDB table schemas, one SQL file per table
 |       |-- src/
 |       |   |-- backtest/       Historical simulation engine, orders, FX, margin, models
-|       |   |-- live/           Paper engine, live models, WebSocket providers, PyO3 API
+|       |   |-- live/           Session engine, live models, WebSocket providers, PyO3 API
 |       |   |-- data/           Historical providers, data models, resolution/download logic
 |       |   |-- storage/        `Storage` trait and mutex-protected DuckDB implementation
 |       |   |-- config/         Runtime and experiment configuration
@@ -91,8 +91,8 @@ exceptions: they are generated, but shipped in wheels and therefore must be kept
   put reusable work in the service layer.
 - `application/` is the source of truth for UI code. The production assets under
   `src/backtide/ui/static/` are build output; rebuild them instead of editing minified files.
-- Paper trading is simulation only. Never add broker order submission, credentials, or claims of
-  guaranteed execution. Live providers normalize incoming messages before the paper engine sees
+- Live sessions are simulation only. Never add broker order submission, credentials, or claims of
+  guaranteed execution. Live providers normalize incoming messages before the session engine sees
   them, and disconnect/cancel paths must release tasks and sockets deterministically.
 
 ## Database schema discipline

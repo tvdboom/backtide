@@ -13,15 +13,14 @@ from typing import Any
 import click
 import yaml
 
-from backtide.backtest import ExperimentAborted, ExperimentConfig, ExperimentStatus
-from backtide.backtest import run_experiment as run_backtest
+from backtide.backtest import Experiment, ExperimentAborted, ExperimentConfig, ExperimentStatus
 from backtide.core.config import get_config
 from backtide.core.utils import init_logging
 from backtide.data import download_bars, resolve_profiles
 from backtide.live import (
     LiveMarketFeed,
-    PaperTradingConfig,
-    PaperTradingSession,
+    Session,
+    SessionConfig,
     _live_currency_plan,
 )
 
@@ -118,7 +117,7 @@ def download(symbols, instrument_type, interval, start, end, log_level, verbose)
     --------
     - backtide.data:download_bars
     - backtide.data:resolve_profiles
-    - backtide.cli:run_experiment
+    - backtide.cli:run_experiment_command
 
     Examples
     --------
@@ -183,7 +182,7 @@ def launch(address: str, port: str, log_level: str):
 
     Starts the bundled graphical interface, which lets you browse stored
     experiments, inspect equity curves, trade logs, performance metrics and
-    paper-trading sessions without writing any code.
+    simulated live sessions without writing any code.
 
     Read more in the [user guide][application].
 
@@ -205,7 +204,7 @@ def launch(address: str, port: str, log_level: str):
     --------
     - backtide.config:Config
     - backtide.cli:download
-    - backtide.cli:run_experiment
+    - backtide.cli:run_experiment_command
 
     Examples
     --------
@@ -249,7 +248,7 @@ def launch(address: str, port: str, log_level: str):
     show_default=True,
     help="Show a progress bar while the experiment is running.",
 )
-def run_experiment(config: Path, log_level: str, *, verbose: bool):
+def run_experiment_command(config: Path, log_level: str, *, verbose: bool) -> None:
     """Run a backtest experiment defined in a configuration file.
 
     Reads an experiment configuration from a `.toml`, `.yaml`/`.yml` or `.json`
@@ -275,7 +274,7 @@ def run_experiment(config: Path, log_level: str, *, verbose: bool):
     --------
     - backtide.backtest:ExperimentResult
     - backtide.cli:launch
-    - backtide.backtest:run_experiment
+    - backtide.backtest:Experiment
 
     Examples
     --------
@@ -304,7 +303,7 @@ def run_experiment(config: Path, log_level: str, *, verbose: bool):
     click.echo(f"Running experiment from {config.name}...")
 
     try:
-        result = run_backtest(exp_cfg, verbose=verbose)
+        result = Experiment(exp_cfg).run(verbose=verbose)
     except (KeyboardInterrupt, ExperimentAborted):
         click.echo("\nExperiment aborted. Nothing was stored.", err=True)
         raise SystemExit(130) from None
@@ -367,6 +366,25 @@ def _load_live_strategy(name: Any, cfg: Any) -> Any:
     return strategies[name]
 
 
+def _load_session_metrics(values: Any, cfg: Any) -> list[Any]:
+    """Resolve built-in keys and saved custom metrics for a CLI session."""
+    from backtide.metrics import BUILTIN_METRICS
+    from backtide.metrics.utils import _load_stored_metrics
+
+    builtin = {metric.key for metric in BUILTIN_METRICS}
+    stored = _load_stored_metrics(cfg)
+    resolved = []
+    for value in values:
+        name = str(value)
+        if name in builtin:
+            resolved.append(name)
+        elif name in stored:
+            resolved.append({name: stored[name]})
+        else:
+            raise click.UsageError(f"Metric {name!r} was not found.")
+    return resolved
+
+
 def _write_cli_live_manifest(
     session_id: str,
     *,
@@ -412,22 +430,22 @@ def _write_cli_live_manifest(
     help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
 )
 def start_live_session(config: Path, log_level: str | None) -> None:
-    """Start a WebSocket-backed paper-trading session from a configuration file.
+    """Start a WebSocket-backed simulated session from a configuration file.
 
     Reads a live-session configuration from a `.toml`, `.yaml`/`.yml`, or
     `.json` file, connects to the selected public exchange WebSocket, and feeds
-    normalized candles into a local [PaperTradingSession]. The command runs
+    normalized candles into a local [Session]. The command runs
     until interrupted with Ctrl+C; no real orders are submitted. Session state
     and replayable events are saved to the same history used by the application.
 
-    Read more in the [paper-trading guide][paper-trading].
+    Read more in the [live-session guide][live-simulation].
 
     Parameters
     ----------
     config : Path
         Path to a live-session configuration. Top-level fields are `provider`,
         `symbols`, `interval`, optional saved `strategy`, `batch_size`, and
-        `timeout_seconds`. Put [PaperTradingConfig] fields under `paper`.
+        `timeout_seconds`. Put [SessionConfig] fields under `session`.
 
     --log_level, -l : str, default="warn"
         Minimum log level to emit. Choose from: `error`, `warn`, `info` or
@@ -436,8 +454,8 @@ def start_live_session(config: Path, log_level: str | None) -> None:
     See Also
     --------
     - backtide.live:LiveMarketFeed
-    - backtide.live:PaperTradingSession
-    - backtide.cli:run_experiment
+    - backtide.live:Session
+    - backtide.backtest:Experiment
 
     Examples
     --------
@@ -449,7 +467,7 @@ def start_live_session(config: Path, log_level: str | None) -> None:
     interval = "1m"
     strategy = "my-saved-strategy"
 
-    [paper]
+    [session]
     initial_cash = 25000
     commission_pct = 0.1
     slippage = 0.05
@@ -471,7 +489,7 @@ def start_live_session(config: Path, log_level: str | None) -> None:
         "symbols",
         "interval",
         "strategy",
-        "paper",
+        "session",
         "batch_size",
         "timeout_seconds",
     }
@@ -481,7 +499,7 @@ def start_live_session(config: Path, log_level: str | None) -> None:
     provider = values.get("provider")
     symbols = values.get("symbols")
     interval = values.get("interval", "1m")
-    paper = values.get("paper", {})
+    session_values = values.get("session", {})
     if not isinstance(provider, str) or not provider.strip():
         raise click.UsageError("provider must be a non-empty string.")
     if (
@@ -492,8 +510,8 @@ def start_live_session(config: Path, log_level: str | None) -> None:
         raise click.UsageError("symbols must be a non-empty list of symbol strings.")
     if not isinstance(interval, str) or not interval.strip():
         raise click.UsageError("interval must be a non-empty string.")
-    if not isinstance(paper, dict):
-        raise click.UsageError("paper must be a mapping of PaperTradingConfig fields.")
+    if not isinstance(session_values, dict):
+        raise click.UsageError("session must be a mapping of SessionConfig fields.")
 
     try:
         batch_size = int(values.get("batch_size", 10))
@@ -518,10 +536,13 @@ def start_live_session(config: Path, log_level: str | None) -> None:
     last_message_at: str | None = None
     received_events = 0
     try:
-        trading_config = PaperTradingConfig(**paper)
+        runtime_config = dict(session_values)
+        if "metrics" in runtime_config:
+            runtime_config["metrics"] = _load_session_metrics(runtime_config["metrics"], cfg)
+        session_config = SessionConfig(**runtime_config)
         strategy = _load_live_strategy(values.get("strategy"), cfg)
         feed = LiveMarketFeed(provider, symbols, interval, include_partial=True)
-        base_currency = str(paper.get("base_currency", "USD")).upper()
+        base_currency = str(session_values.get("base_currency", "USD")).upper()
         inferred_quotes = {symbol: symbol.rsplit("-", 1)[-1].upper() for symbol in symbols}
         target_quotes = inferred_quotes
         conversion_legs: dict[str, tuple[str, str]] = {}
@@ -538,20 +559,20 @@ def start_live_session(config: Path, log_level: str | None) -> None:
                 interval,
                 include_partial=True,
             )
-        session = PaperTradingSession(trading_config, strategy)
+        session = Session(session_config, strategy)
         strategy_name = values.get("strategy")
         strategy_label = str(strategy_name) if strategy_name else "Monitor"
         session_id = new_session_id()
         started_at = utc_now()
         history_config = {
-            "mode": "paper",
+            "mode": "live",
             "provider": provider,
             "interval": interval,
             "symbols": symbols,
             "strategy": strategy_name,
             "strategies": [strategy_name] if strategy_name else [],
             "indicators": [],
-            "config": paper,
+            "config": session_values,
             "target_quotes": target_quotes,
             "conversion_legs": {
                 symbol: {"base": base, "quote": quote}
@@ -571,7 +592,7 @@ def start_live_session(config: Path, log_level: str | None) -> None:
         observed_conversion_legs: set[str] = set()
         exchange_rates: dict[str, dict[str, Any]] = {}
         click.echo(
-            f"Starting live paper session for {', '.join(symbols)} on "
+            f"Starting live session for {', '.join(symbols)} on "
             f"{provider} ({interval}); history id {session_id}. Press Ctrl+C to stop."
         )
 
@@ -611,7 +632,7 @@ def start_live_session(config: Path, log_level: str | None) -> None:
                             f"equity={update.snapshot.equity:.8g} fills={len(update.fills)}"
                         )
         except KeyboardInterrupt:
-            click.echo("\nStopping live paper session...")
+            click.echo("\nStopping live session...")
 
         snapshot = session.snapshot()
         _write_cli_live_manifest(

@@ -20,7 +20,7 @@ describe('live session history page', () => {
       started_at: '2026-08-12T12:00:00Z',
       finished_at: '2026-08-12T12:45:00Z',
       config: {
-        mode: 'paper',
+        mode: 'live',
         provider: 'kraken',
         interval: '1m',
         symbols: ['BTC-USD'],
@@ -84,7 +84,7 @@ describe('live session history page', () => {
         started_at: '2026-08-12T12:00:00Z',
         finished_at: '2026-08-12T12:45:00Z',
         config: {
-          mode: 'paper',
+          mode: 'live',
           strategies: ['Momentum'],
           config: { base_currency: 'USD', initial_cash: 10000 }
         },
@@ -118,7 +118,7 @@ describe('live session history page', () => {
       started_at: '2026-08-12T12:00:00Z',
       finished_at: '2026-08-12T12:45:00Z',
       config: {
-        mode: 'paper',
+        mode: 'live',
         strategies: ['BB Mean Reversion', 'Buy & Hold', 'SMA (Naive)', 'RSI Breakout'],
         config: { base_currency: 'USD', initial_cash: 10000 }
       },
@@ -142,7 +142,7 @@ describe('live session history page', () => {
         started_at: '2026-08-13T12:00:00Z',
         finished_at: null,
         config: {
-          mode: 'paper',
+          mode: 'live',
           symbols: ['BTC-USD'],
           strategies: ['Momentum'],
           config: { base_currency: 'USD' }
@@ -155,7 +155,7 @@ describe('live session history page', () => {
         started_at: '2026-08-12T12:00:00Z',
         finished_at: '2026-08-12T12:45:00Z',
         config: {
-          mode: 'paper',
+          mode: 'live',
           symbols: ['ETH-USD'],
           strategies: ['Momentum'],
           config: { base_currency: 'USD' }
@@ -195,7 +195,7 @@ describe('live session history page', () => {
       warmup_bars: 500,
       config: { base_currency: 'USD', initial_cash: 10000 }
     })
-    expect(sessionStorage.getItem('backtide:paper-config')).toBeNull()
+    expect(sessionStorage.getItem('backtide:session-config')).toBeNull()
     expect(wrapper.emitted('navigate')[0]).toEqual(['live'])
   })
 
@@ -254,7 +254,7 @@ describe('live session history page', () => {
         started_at: '2026-08-12T12:00:00Z',
         finished_at: '2026-08-12T12:45:00Z',
         config: {
-          mode: 'paper',
+          mode: 'live',
           strategies: ['Momentum'],
           config: { base_currency: 'USD', initial_cash: 10000 }
         },
@@ -297,7 +297,7 @@ describe('live session history page', () => {
       started_at: '2026-08-12T12:00:00Z',
       finished_at: '2026-08-12T12:45:00Z',
       config: {
-        mode: 'paper',
+        mode: 'live',
         strategies: [],
         config: { base_currency: 'USD', initial_cash: 10000 }
       },

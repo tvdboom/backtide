@@ -665,6 +665,12 @@ def generate_submodule_stub(submodule_name: str) -> str:
     if indicators_imports:
         lines.append(f"from backtide.indicators import {', '.join(indicators_imports)}\n\n")
 
+    # `BaseMetric` is also a pure-Python extension point rather than a PyO3
+    # class, so add its import when a generated annotation refers to it.
+    metrics_imports = [name for name in ("BaseMetric",) if re.search(rf"\b{name}\b", body_no_docs)]
+    if metrics_imports:
+        lines.append(f"from backtide.metrics import {', '.join(metrics_imports)}\n\n")
+
     lines.append(body)
     return "".join(lines).rstrip("\n") + "\n"
 

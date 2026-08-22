@@ -7,6 +7,7 @@ use crate::backtest::models::*;
 use crate::constants::{Positions, Symbol};
 use crate::data::models::{Currency, InstrumentType, Interval};
 use crate::metrics::engine::DEFAULT_METRICS;
+use crate::metrics::selection::MetricSelection;
 use itertools::Itertools;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::PyValueError;
@@ -364,57 +365,8 @@ pub struct IndicatorExpConfig {
     pub indicators: Vec<String>,
 }
 
-/// Metric settings for an experiment.
-///
-/// Attributes
-/// ----------
-/// metrics : list[str]
-///     Ordered built-in metric keys or names of stored custom metrics to compute. The first metric
-///     ranks strategies and summarizes the experiment.
-///
-/// See Also
-/// --------
-/// - backtide.metrics:BaseMetric
-/// - backtide.backtest:ExperimentConfig
-#[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.backtest")]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct MetricExpConfig {
-    pub metrics: Vec<String>,
-}
-
-impl Default for MetricExpConfig {
-    fn default() -> Self {
-        Self {
-            metrics: DEFAULT_METRICS.iter().map(|key| (*key).to_owned()).collect(),
-        }
-    }
-}
-
-#[pymethods]
-impl MetricExpConfig {
-    #[classattr]
-    const __RUST_DATACLASS__: bool = true;
-
-    #[new]
-    #[pyo3(signature = (metrics: "list[str]"=DEFAULT_METRICS.iter().map(|key| (*key).to_owned()).collect()))]
-    fn new(metrics: Vec<String>) -> PyResult<Self> {
-        if metrics.is_empty() {
-            return Err(PyValueError::new_err("Select at least one metric."));
-        }
-        Ok(Self {
-            metrics,
-        })
-    }
-
-    fn __repr__(&self) -> String {
-        format!("MetricExpConfig(metrics={:?})", self.metrics)
-    }
-
-    /// Convert to a dictionary.
-    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        Ok(pythonize(py, self)?.unbind())
-    }
+fn default_experiment_metrics() -> MetricSelection {
+    MetricSelection::from_names(DEFAULT_METRICS.iter().map(|key| (*key).to_owned()).collect())
 }
 
 #[pymethods]
@@ -773,7 +725,7 @@ impl EngineExpConfig {
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Internal (pure-Rust) representation used for serialization.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExperimentConfigInner {
     pub general: GeneralExpConfig,
@@ -781,9 +733,24 @@ pub struct ExperimentConfigInner {
     pub portfolio: PortfolioExpConfig,
     pub strategy: StrategyExpConfig,
     pub indicators: IndicatorExpConfig,
-    pub metrics: MetricExpConfig,
+    pub metrics: MetricSelection,
     pub exchange: ExchangeExpConfig,
     pub engine: EngineExpConfig,
+}
+
+impl Default for ExperimentConfigInner {
+    fn default() -> Self {
+        Self {
+            general: GeneralExpConfig::default(),
+            data: DataExpConfig::default(),
+            portfolio: PortfolioExpConfig::default(),
+            strategy: StrategyExpConfig::default(),
+            indicators: IndicatorExpConfig::default(),
+            metrics: default_experiment_metrics(),
+            exchange: ExchangeExpConfig::default(),
+            engine: EngineExpConfig::default(),
+        }
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -812,8 +779,9 @@ pub struct ExperimentConfigInner {
 /// indicators : [IndicatorExpConfig]
 ///     Indicators to use in this experiment.
 ///
-/// metrics : [MetricExpConfig]
-///     Ordered metrics to compute; the first metric summarizes the result.
+/// metrics : list[str | BaseMetric | dict[str, BaseMetric]]
+///     Ordered built-in keys, stored names, or custom metric instances to compute. The first
+///     metric summarizes the result.
 ///
 /// exchange : [ExchangeExpConfig]
 ///     Commission, slippage, order execution, margin and short-selling.
@@ -825,7 +793,6 @@ pub struct ExperimentConfigInner {
 /// --------
 /// - backtide.backtest:DataExpConfig
 /// - backtide.backtest:GeneralExpConfig
-/// - backtide.backtest:MetricExpConfig
 /// - backtide.backtest:StrategyExpConfig
 #[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
@@ -835,7 +802,7 @@ pub struct ExperimentConfig {
     pub portfolio: PortfolioExpConfig,
     pub strategy: StrategyExpConfig,
     pub indicators: IndicatorExpConfig,
-    pub metrics: MetricExpConfig,
+    pub metrics: MetricSelection,
     pub exchange: ExchangeExpConfig,
     pub engine: EngineExpConfig,
 }
@@ -875,10 +842,10 @@ mod tests {
     use super::ExperimentConfigInner;
 
     #[test]
-    fn deserializes_legacy_sections_with_current_defaults() {
+    fn deserializes_partial_sections_with_current_defaults() {
         let text = "[exchange]\ncommission_pct = 0.25\n\n[engine]\nwarmup_period = 12\n";
 
-        let parsed: ExperimentConfigInner = toml::from_str(text).expect("legacy configuration");
+        let parsed: ExperimentConfigInner = toml::from_str(text).expect("partial configuration");
 
         assert_eq!(parsed.exchange.commission_pct, 0.25);
         assert!(!parsed.exchange.raise_on_short_violation);
@@ -899,7 +866,7 @@ impl ExperimentConfig {
         portfolio: "PortfolioExpConfig" = PortfolioExpConfig::default(),
         strategy: "StrategyExpConfig" = StrategyExpConfig::default(),
         indicators: "IndicatorExpConfig" = IndicatorExpConfig::default(),
-        metrics: "MetricExpConfig" = MetricExpConfig::default(),
+        metrics: "list[str | BaseMetric | dict[str, BaseMetric]]" = default_experiment_metrics(),
         exchange: "ExchangeExpConfig" = ExchangeExpConfig::default(),
         engine: "EngineExpConfig" = EngineExpConfig::default(),
     ))]
@@ -909,11 +876,14 @@ impl ExperimentConfig {
         portfolio: PortfolioExpConfig,
         strategy: StrategyExpConfig,
         indicators: IndicatorExpConfig,
-        metrics: MetricExpConfig,
+        metrics: MetricSelection,
         exchange: ExchangeExpConfig,
         engine: EngineExpConfig,
-    ) -> Self {
-        Self {
+    ) -> PyResult<Self> {
+        if metrics.is_empty() {
+            return Err(PyValueError::new_err("Select at least one metric."));
+        }
+        Ok(Self {
             general,
             data,
             portfolio,
@@ -922,7 +892,7 @@ impl ExperimentConfig {
             metrics,
             exchange,
             engine,
-        }
+        })
     }
 
     fn __repr__(&self) -> String {

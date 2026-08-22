@@ -46,7 +46,7 @@
             v-if="liveSessionVisible"
             type="button"
             class="connection live-session-link"
-            aria-label="Open active paper trading session"
+            aria-label="Open active live session"
             @click="navigate('live')"
           >
             <span :class="{ online: liveSessionRunning }" />{{ liveSessionLabel }}
@@ -177,8 +177,8 @@ const navigation = [
   {
     label: 'Live',
     items: [
-      { id: 'live', label: 'Paper trading', icon: Activity, component: markRaw(LivePage), guide: `${docsBaseUrl}/live/paper_trading/` },
-      { id: 'live-history', label: 'Session history', icon: Gauge, component: markRaw(LiveHistoryPage), guide: `${docsBaseUrl}/live/paper_trading/` }
+      { id: 'live', label: 'Live session', icon: Activity, component: markRaw(LivePage), guide: `${docsBaseUrl}/live/sessions/` },
+      { id: 'live-history', label: 'Session history', icon: Gauge, component: markRaw(LiveHistoryPage), guide: `${docsBaseUrl}/live/sessions/` }
     ]
   },
   {

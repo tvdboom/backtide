@@ -84,7 +84,7 @@ plotting. Backtide ships all of these out of the box so you can go from an
 idea to a result without gluing together five different libraries.
 
 **Interactive application.** The packaged Vue app lets you configure experiments,
-run strategies, inspect results, and paper trade visually — no code required.
+run strategies, inspect results, and run live simulations visually — no code required.
 When you do need code, the same API powers the app and your scripts, so
 there is zero translation overhead.
 

@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Tests for live market data and paper trading.
+Description: Tests for live market data and live simulation.
 
 """
 
@@ -16,11 +16,11 @@ import backtide.live as live
 from backtide.live import (
     LiveMarketFeed,
     MarketUpdate,
-    PaperFill,
-    PaperTradingConfig,
-    PaperTradingSession,
-    PaperTradingSnapshot,
-    PaperTradingUpdate,
+    Session,
+    SessionConfig,
+    SessionFill,
+    SessionSnapshot,
+    SessionUpdate,
     collect_market_updates,
 )
 
@@ -49,10 +49,10 @@ class TestLiveModels:
         "model",
         [
             MarketUpdate,
-            PaperFill,
-            PaperTradingConfig,
-            PaperTradingSnapshot,
-            PaperTradingUpdate,
+            SessionFill,
+            SessionConfig,
+            SessionSnapshot,
+            SessionUpdate,
         ],
     )
     def test_models_expose_rust_dataclass_marker(self, model):
@@ -170,12 +170,12 @@ class TestProviderSupport:
         }
 
 
-class TestPaperTradingSession:
-    """Tests for deterministic paper execution and accounting."""
+class TestSession:
+    """Tests for deterministic simulated execution and accounting."""
 
     def test_market_order_updates_portfolio(self):
         """Test cash, positions, and equity after a market fill."""
-        session = PaperTradingSession()
+        session = Session()
         result = session.on_bar(market(100.0), [Order("BTC-USD", 10.0)])
 
         assert result.fills[0].status == OrderStatus("Filled")
@@ -185,7 +185,7 @@ class TestPaperTradingSession:
 
     def test_round_trip_realizes_profit(self):
         """Test average-cost accounting over a complete trade."""
-        session = PaperTradingSession()
+        session = Session()
         session.on_bar(market(100.0), [Order("BTC-USD", 10.0)])
         result = session.on_bar(market(110.0, 1_700_000_060), [Order("BTC-USD", -10.0)])
 
@@ -194,7 +194,7 @@ class TestPaperTradingSession:
 
     def test_partial_candle_does_not_trade_by_default(self):
         """Test that an incomplete provider update only marks the account."""
-        session = PaperTradingSession()
+        session = Session()
         result = session.on_bar(market(100.0, is_final=False), [Order("BTC-USD", 1.0)])
 
         assert not result.processed
@@ -203,7 +203,7 @@ class TestPaperTradingSession:
 
     def test_duplicate_and_stale_final_candles_are_idempotent(self):
         """Test reconnect snapshots cannot repeat a strategy decision."""
-        session = PaperTradingSession()
+        session = Session()
         session.on_bar(market(100.0), [Order("BTC-USD", 1.0)])
 
         duplicate = session.on_bar(market(101.0), [Order("BTC-USD", 1.0)])
@@ -217,7 +217,7 @@ class TestPaperTradingSession:
 
     def test_risk_guards_reject_short_and_margin(self):
         """Test default short-selling and cash constraints."""
-        session = PaperTradingSession(PaperTradingConfig(initial_cash=100.0))
+        session = Session(SessionConfig(initial_cash=100.0))
         short = session.on_bar(market(10.0), [Order("BTC-USD", -1.0)])
         margin = session.on_bar(
             market(10.0, 1_700_000_060),

@@ -2,10 +2,11 @@
 -----------
 
 Strategies are the decision-making logic that determines when to buy, sell, or
-hold positions during a backtest. Each strategy receives market data, portfolio
-state, and pre-computed indicator values, and returns a list of orders to
-execute. Backtide provides a set of built-in strategies as well as a framework
-for creating custom strategies.
+hold positions during a backtest or live session. Each strategy
+receives market data, portfolio state, and indicator values, and returns a list
+of orders to execute. The same strategy object can process historical bars or
+live WebSocket candles. Backtide provides a set of built-in strategies as well
+as a framework for creating custom strategies.
 
 <br>
 
@@ -19,8 +20,10 @@ that receives data, state, and indicators, and returns a list of orders:
 - **Portfolio-rotation** strategies operate across multiple instruments,
   periodically ranking and rotating the portfolio into the top performers.
 
-When running a backtest, the strategy's `evaluate` method is called on every
-bar. It receives:
+During backtesting and live simulation, the strategy's `evaluate` method is called
+as each bar becomes available. Historical experiments step through stored bars;
+live sessions evaluate WebSocket candles after any configured warm-up (completed
+candles by default, or partial updates when enabled). The method receives:
 
 - `data` — `dict[str, pandas.DataFrame | polars.DataFrame]`, keyed by symbol.
   For example, `data["AAPL"]["close"]` is AAPL's close-price history through
@@ -207,13 +210,14 @@ custom ones.
 
 Most built-in strategies depend on a handful of indicators (e.g., SMA Crossover
 needs two SMAs, BB Mean Reversion needs Bollinger Bands, etc...). To save you from
-having to add those manually on every experiment, the engine auto-injects them for
-you.
+having to add those manually to every experiment or live session, the engine
+auto-injects them for you.
 
 Auto-injected indicators behave exactly like user-selected ones — they are
-computed once over the full dataset before the simulation starts and are then
-sliced per bar for the strategy. They are de-duplicated across strategies, so
-two strategies asking for the same `SMA(20)` only compute it once.
+de-duplicated across strategies, so two strategies asking for the same `SMA(20)`
+only compute it once. Backtests compute indicators over the full dataset and
+slice them to the history visible at each bar. Live sessions seed them from the
+configured historical warm-up and update them as new candles arrive.
 
 <br>
 

@@ -87,7 +87,7 @@ describe('dashboard activity', () => {
   })
 })
 
-describe('paper trading setup', () => {
+describe('live simulation setup', () => {
   it('matches toggle fields to standard input geometry', () => {
     expect(declaration('.toggle-label')).toContain('width: 100%')
     expect(declaration('.toggle-control')).toContain('width: 100%')

@@ -44,18 +44,15 @@ pub fn experiment_log(message: &str, level: LogLevel) {
 /// Low-level entry point that runs an already-built experiment
 /// configuration.
 ///
-/// This is **not** the public API — Python callers should use
-/// `backtide.backtest.run_experiment`, which handles kwargs
-/// translation and polymorphic strategies/indicators before
-/// delegating here.
-#[pyfunction]
+/// This is **not** the public API. Use [`Experiment`][backtide.backtest.Experiment],
+/// which resolves polymorphic strategies and indicators before delegating here.
+#[pyfunction(name = "_run_experiment")]
 #[pyo3(
     signature = (
         config: "ExperimentConfig",
         verbose: "bool" = true,
         strategy_overrides: "dict[str, Any] | None" = None,
         indicator_overrides: "dict[str, Any] | None" = None,
-        metric_overrides: "dict[str, Any] | None" = None,
     )
 )]
 pub fn run_experiment(
@@ -64,7 +61,6 @@ pub fn run_experiment(
     verbose: bool,
     strategy_overrides: Option<HashMap<String, Py<PyAny>>>,
     indicator_overrides: Option<HashMap<String, Py<PyAny>>>,
-    metric_overrides: Option<HashMap<String, Py<PyAny>>>,
 ) -> PyResult<ExperimentResult> {
     // Always start with a clean abort flag.
     ABORT_REQUESTED.store(false, Ordering::Relaxed);
@@ -73,7 +69,7 @@ pub fn run_experiment(
     let engine = Engine::get()?;
     let strat = strategy_overrides.unwrap_or_default();
     let ind = indicator_overrides.unwrap_or_default();
-    let metrics = metric_overrides.unwrap_or_default();
+    let metrics = cfg.metrics.implementations(py);
 
     // Release the GIL so rayon workers can acquire it.
     Ok(py.detach(|| engine.run_experiment(&cfg, verbose, &strat, &ind, &metrics))?)

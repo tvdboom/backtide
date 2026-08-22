@@ -1219,7 +1219,7 @@ mod tests {
             status: "running".into(),
             started_at: "2026-08-21T10:00:00+00:00".into(),
             finished_at: None,
-            config: r#"{"mode":"paper"}"#.into(),
+            config: r#"{"mode":"live"}"#.into(),
             snapshot: r#"{"equity":1000.0,"metrics":{"custom_score":4.25}}"#.into(),
             health: r#"{"received_events":2}"#.into(),
             error: None,
@@ -1275,7 +1275,7 @@ mod tests {
             portfolio: PortfolioExpConfig::default(),
             strategy: StrategyExpConfig::default(),
             indicators: IndicatorExpConfig::default(),
-            metrics: MetricExpConfig::default(),
+            metrics: ExperimentConfigInner::default().metrics,
             exchange: ExchangeExpConfig::default(),
             engine: EngineExpConfig::default(),
         }

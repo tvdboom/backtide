@@ -222,21 +222,27 @@ describe('live page', () => {
             key: 'n_trades', name: 'Number of trades', description: 'Completed trades.',
             builtin: true, percentage: false
           }
-        ]
+        ],
+        saved: [{
+          key: 'Custom score', name: 'Custom score', description: 'User metric.',
+          builtin: false, percentage: false
+        }]
       }
     }
-    sessionStorage.setItem('backtide:paper-config', JSON.stringify({
-      config: { metrics: ['total_return', 'n_trades', 'final_equity', 'sharpe'] }
+    sessionStorage.setItem('backtide:session-config', JSON.stringify({
+      config: { metrics: ['total_return', 'n_trades', 'final_equity', 'sharpe', 'Custom score'] }
     }))
     const wrapper = mount(LivePage, { props: { bootstrap: pageBootstrap } })
     await flushPromises()
     await wrapper.findAll('.live-form-tabs button')[3].trigger('click')
 
     const selectedKeys = () => wrapper.getComponent(SearchSelect).props('modelValue')
-    expect(selectedKeys()).toEqual(['total_return', 'final_equity', 'sharpe'])
-    expect(wrapper.getComponent(SearchSelect).props('options')).not.toContain('n_trades')
+    expect(selectedKeys()).toEqual([
+      'total_return', 'n_trades', 'final_equity', 'sharpe', 'Custom score'
+    ])
+    expect(wrapper.getComponent(SearchSelect).props('options')).toContain('Custom score')
     expect(wrapper.findAll('.metric-selection-card strong').map(item => item.text()))
-      .toEqual(['Total return', 'Final equity', 'Sharpe ratio'])
+      .toEqual(['Total return', 'Number of trades', 'Final equity', 'Sharpe ratio', 'Custom score'])
     expect(wrapper.findAll('.metric-selection-card').every(card =>
       card.attributes('draggable') === 'true'
     )).toBe(true)
@@ -247,11 +253,13 @@ describe('live page', () => {
       setDragImage: vi.fn()
     }
     let metricCards = wrapper.findAll('.metric-selection-card')
-    await metricCards[2].trigger('dragstart', { dataTransfer })
+    await metricCards[3].trigger('dragstart', { dataTransfer })
     expect(dataTransfer.setDragImage).toHaveBeenCalled()
     expect(document.body.querySelector('.metric-drag-preview')).not.toBeNull()
     await metricCards[0].trigger('dragover', { dataTransfer })
-    expect(selectedKeys()).toEqual(['sharpe', 'total_return', 'final_equity'])
+    expect(selectedKeys()).toEqual([
+      'sharpe', 'total_return', 'n_trades', 'final_equity', 'Custom score'
+    ])
     metricCards = wrapper.findAll('.metric-selection-card')
     expect(metricCards[0].classes()).toContain('dragging')
     expect(metricCards[1].classes()).toContain('drop-target')
@@ -259,7 +267,7 @@ describe('live page', () => {
     expect(document.body.querySelector('.metric-drag-preview')).toBeNull()
 
     await wrapper.get('[aria-label="Remove Final equity live metric"]').trigger('click')
-    expect(selectedKeys()).toEqual(['sharpe', 'total_return'])
+    expect(selectedKeys()).toEqual(['sharpe', 'total_return', 'n_trades', 'Custom score'])
     expect(wrapper.find('[aria-label="Remove final_equity"]').exists()).toBe(false)
 
     await wrapper.get('[aria-label="Clear all live metrics"]').trigger('click')
@@ -385,7 +393,7 @@ describe('live page', () => {
   })
 
   it.each([
-    ['live session', 'paper'],
+    ['live session', 'live'],
     ['replay', 'replay']
   ])('keeps a stopped %s visible until a new configuration is requested', async (_, mode) => {
     const running = {
@@ -439,7 +447,7 @@ describe('live page', () => {
       id: 'failed-session',
       status: 'error',
       config: {
-        mode: 'paper', provider: 'kraken', interval: '1m', symbols: ['BTC-USD'], strategies: []
+        mode: 'live', provider: 'kraken', interval: '1m', symbols: ['BTC-USD'], strategies: []
       },
       snapshot: {},
       updates: [],
@@ -466,7 +474,7 @@ describe('live page', () => {
       id: 'failed-session',
       status: 'error',
       config: {
-        mode: 'paper', provider: 'kraken', interval: '1m', symbols: ['BTC-USD'], strategies: []
+        mode: 'live', provider: 'kraken', interval: '1m', symbols: ['BTC-USD'], strategies: []
       },
       snapshot: {},
       updates: [],
@@ -522,7 +530,7 @@ describe('live page', () => {
 
     show.value = false
     await nextTick()
-    sessionStorage.setItem('backtide:paper-config', JSON.stringify({
+    sessionStorage.setItem('backtide:session-config', JSON.stringify({
       provider: 'binance',
       interval: '5m',
       symbols: ['DOGE-USDT'],
@@ -587,7 +595,7 @@ describe('live page', () => {
         risk_free_rate: 2.5
       })
     }))
-    expect(sessionStorage.getItem('backtide:paper-config')).toBeNull()
+    expect(sessionStorage.getItem('backtide:session-config')).toBeNull()
     wrapper.unmount()
   })
 

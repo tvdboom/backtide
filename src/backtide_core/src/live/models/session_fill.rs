@@ -1,9 +1,9 @@
-//! Paper-order matching results.
+//! Simulated-order matching results.
 
 use crate::backtest::models::{Order, OrderStatus};
 use pyo3::prelude::*;
 
-/// Result of matching one paper order.
+/// Result of matching one simulated order.
 ///
 /// Attributes
 /// ----------
@@ -20,7 +20,7 @@ use pyo3::prelude::*;
 ///     Executed quote-currency price, or `None` when not filled.
 ///
 /// commission : float
-///     Fee charged in the paper account's base currency.
+///     Fee charged in the simulated account's base currency.
 ///
 /// realized_pnl : float | None
 ///     Change in realized PnL from this fill, net of its commission.
@@ -30,24 +30,24 @@ use pyo3::prelude::*;
 ///
 /// See Also
 /// --------
-/// - backtide.live:PaperTradingUpdate
+/// - backtide.live:SessionUpdate
 ///
 /// Examples
 /// --------
 /// ```pycon
 /// from backtide.backtest import Order
-/// from backtide.live import MarketUpdate, PaperTradingSession
+/// from backtide.live import MarketUpdate, Session
 ///
 /// market = MarketUpdate(
 ///     "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
 ///     100.0, 102.0, 99.0, 101.0,
 /// )
-/// fill = PaperTradingSession().on_bar(market, [Order("BTC-USD", 1.0)]).fills[0]
+/// fill = Session().on_bar(market, [Order("BTC-USD", 1.0)]).fills[0]
 /// print(fill.fill_price)
 /// ```
 #[pyclass(get_all, frozen, skip_from_py_object, module = "backtide.live")]
 #[derive(Clone, Debug)]
-pub struct PaperFill {
+pub struct SessionFill {
     /// Submitted order after any sizer resolution.
     pub order: Order,
 
@@ -60,7 +60,7 @@ pub struct PaperFill {
     /// Executed quote-currency price, or `None` when not filled.
     pub fill_price: Option<f64>,
 
-    /// Fee charged in the paper account's base currency.
+    /// Fee charged in the simulated account's base currency.
     pub commission: f64,
 
     /// Change in realized PnL from this fill, net of its commission.
@@ -71,7 +71,7 @@ pub struct PaperFill {
 }
 
 #[pymethods]
-impl PaperFill {
+impl SessionFill {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 }

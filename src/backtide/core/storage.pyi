@@ -45,7 +45,7 @@ def _write_live_session(
     health,
     error,
 ):
-    """Store the current manifest for a live paper or replay session.
+    """Store the current manifest for a live or replay session.
 
     Parameters
     ----------
@@ -309,7 +309,7 @@ def query_experiments(
 
     See Also
     --------
-    - backtide.backtest:run_experiment
+    - backtide.backtest:Experiment
     - backtide.storage:query_strategy_runs
 
     Examples
@@ -396,7 +396,7 @@ def query_strategy_runs(experiment_id, *, include_equity_curve=True) -> list[Run
 
     See Also
     --------
-    - backtide.backtest:run_experiment
+    - backtide.backtest:Experiment
     - backtide.storage:query_experiments
 
     Examples

@@ -1,7 +1,7 @@
 # run-experiment
 ----------------
 
-:: backtide.cli:run_experiment
+:: backtide.cli:run_experiment_command
     :: signature
     :: head
     :: table:

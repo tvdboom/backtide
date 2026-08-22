@@ -61,7 +61,7 @@ fn live_session_row(value: StoredLiveSession) -> LiveSessionRow {
 // Public interface
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Store the current manifest for a live paper or replay session.
+/// Store the current manifest for a live or replay session.
 ///
 /// Parameters
 /// ----------
@@ -488,7 +488,7 @@ pub fn query_dividends(
 ///
 /// See Also
 /// --------
-/// - backtide.backtest:run_experiment
+/// - backtide.backtest:Experiment
 /// - backtide.storage:query_experiments
 ///
 /// Examples
@@ -537,7 +537,7 @@ pub fn query_strategy_runs(
 ///
 /// See Also
 /// --------
-/// - backtide.backtest:run_experiment
+/// - backtide.backtest:Experiment
 /// - backtide.storage:query_strategy_runs
 ///
 /// Examples

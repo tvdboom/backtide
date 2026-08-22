@@ -114,7 +114,7 @@ export function defaultExperimentBenchmark(baseCurrency, instrumentType, availab
   return benchmarkByCurrency[currency] || 'SPY'
 }
 
-export function paperEquitySeries(updates) {
+export function sessionEquitySeries(updates) {
   return updates.map(update => ({
     timestamp: update.market?.received_ts || update.market?.close_ts || 0,
     equity: update.snapshot?.equity ?? null

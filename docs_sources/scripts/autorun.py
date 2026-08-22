@@ -21,7 +21,11 @@ from pandas.io.formats.style import Styler
 from pymdownx.superfences import SuperFencesException
 
 from backtide.backtest import (
-    run_experiment,
+    DataExpConfig,
+    Experiment,
+    ExperimentConfig,
+    GeneralExpConfig,
+    StrategyExpConfig,
 )
 from backtide.config import Config, DataConfig, set_config
 from backtide.strategies import AdaptiveRsi, SmaNaive
@@ -40,14 +44,12 @@ set_config(
 
 def bootstrap_docs_experiment():
     """Ensure docs examples have at least one stored strategy and experiment."""
-    run_experiment(
-        name="Test experiment",
-        symbols=["AAPL", "MSFT"],
-        interval="1d",
-        benchmark="SPY",
-        strategies=[SmaNaive(), AdaptiveRsi()],
-        verbose=False,
+    config = ExperimentConfig(
+        general=GeneralExpConfig(name="Test experiment"),
+        data=DataExpConfig(symbols=["AAPL", "MSFT"], interval="1d"),
+        strategy=StrategyExpConfig(benchmark="SPY"),
     )
+    Experiment(config, strategies=[SmaNaive(), AdaptiveRsi()]).run(verbose=False)
 
 
 bootstrap_docs_experiment()

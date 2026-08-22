@@ -1,7 +1,7 @@
-# PaperFill
------------
+# SessionConfig
+--------------------
 
-:: backtide.live:PaperFill
+:: backtide.live:SessionConfig
     :: signature
     :: head
     :: table:

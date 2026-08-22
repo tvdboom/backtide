@@ -1,8 +1,8 @@
 <template>
   <div class="page">
-    <section class="page-intro"><div><h2>Session history</h2><p>Inspect and replay locally persisted paper-trading sessions.</p></div><div class="session-history-toolbar"><label>Replay speed<select v-model="replaySpeed" aria-label="Replay playback speed"><option value="1">1× real time</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="max">Maximum</option></select></label><button class="secondary" @click="load"><RefreshCw :size="16"/> Refresh</button></div></section>
-    <section v-if="loading" class="panel empty-state large"><span class="spinner"/><p>Loading paper sessions...</p></section>
-    <section v-else-if="!sessions.length" class="panel empty-state large"><History :size="30"/><h3>No saved sessions</h3><p>Completed paper sessions will appear here automatically.</p></section>
+    <section class="page-intro"><div><h2>Session history</h2><p>Inspect and replay locally persisted live sessions.</p></div><div class="session-history-toolbar"><label>Replay speed<select v-model="replaySpeed" aria-label="Replay playback speed"><option value="1">1× real time</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="max">Maximum</option></select></label><button class="secondary" @click="load"><RefreshCw :size="16"/> Refresh</button></div></section>
+    <section v-if="loading" class="panel empty-state large"><span class="spinner"/><p>Loading live sessions...</p></section>
+    <section v-else-if="!sessions.length" class="panel empty-state large"><History :size="30"/><h3>No saved sessions</h3><p>Completed live sessions will appear here automatically.</p></section>
     <section v-else class="panel table-panel">
       <div class="data-table-wrap">
         <table class="data-table session-history-table">
@@ -63,7 +63,7 @@
     <ConfirmationModal
       :open="Boolean(pendingDelete)"
       :title="pendingDelete ? `Delete session from ${dateTime(pendingDelete.started_at)}?` : ''"
-      message="Are you sure you want to delete this paper-trading session and its recorded events? This action cannot be undone."
+      message="Are you sure you want to delete this live session and its recorded events? This action cannot be undone."
       :busy="deleting"
       @cancel="pendingDelete = null"
       @confirm="destroy"
@@ -244,7 +244,7 @@ async function goLive(session) {
   startingLive.value = session.id
   try {
     await post('/api/live', livePayload(session))
-    emit('toast', 'Paper trading session started.')
+    emit('toast', 'Live session started.')
     emit('navigate', 'live')
   } catch (error) {
     emit('toast', error.message, 'error')

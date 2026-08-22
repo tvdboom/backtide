@@ -1,4 +1,4 @@
-//! Deterministic paper-broker execution and portfolio accounting.
+//! Deterministic simulated execution and portfolio accounting.
 
 use crate::backtest::fx::FxTable;
 use crate::backtest::models::{
@@ -8,20 +8,20 @@ use crate::backtest::orders::{apply_slippage, resolve_trigger, TriggerOutcome};
 use crate::backtest::utils::{is_negligible, is_significant};
 use crate::constants::{CashAmount, PositionAmount};
 use crate::live::models::{
-    MarketUpdate, PaperFill, PaperTradingConfig, PaperTradingSnapshot, PaperTradingUpdate,
+    MarketUpdate, SessionConfig, SessionFill, SessionSnapshot, SessionUpdate,
 };
 use crate::metrics::engine::{compute_builtin_metrics, is_builtin_metric};
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-/// Stateful, deterministic paper broker.
+/// Stateful, deterministic simulation broker.
 ///
 /// The broker has no network or wall-clock dependencies. Callers provide
 /// market updates and orders, making the same implementation usable by live
 /// WebSocket feeds, replay tests, and benchmarks.
 #[derive(Debug)]
-pub struct PaperBroker {
-    config: PaperTradingConfig,
+pub struct SessionBroker {
+    config: SessionConfig,
     portfolio: Portfolio,
     latest_prices: HashMap<String, f64>,
     latest_price_timestamps: HashMap<String, i64>,
@@ -44,9 +44,9 @@ pub struct PaperBroker {
     halt_reason: Option<String>,
 }
 
-impl PaperBroker {
-    /// Create a broker from validated paper-trading configuration.
-    pub fn new(config: PaperTradingConfig) -> Result<Self, String> {
+impl SessionBroker {
+    /// Create a broker from validated session configuration.
+    pub fn new(config: SessionConfig) -> Result<Self, String> {
         validate_config(&config)?;
         let initial_cash = config.initial_cash;
         let base_currency = config.base_currency.to_string();
@@ -84,6 +84,16 @@ impl PaperBroker {
         &self.portfolio
     }
 
+    /// Read the bounded equity history used by performance metrics.
+    pub(crate) fn equity_curve(&self) -> &[EquitySample] {
+        &self.equity_curve
+    }
+
+    /// Read the bounded completed-trade history used by performance metrics.
+    pub(crate) fn trades(&self) -> &[Trade] {
+        &self.trades
+    }
+
     /// Record a timestamped conversion rate for live account valuation.
     pub fn set_exchange_rate(
         &mut self,
@@ -114,7 +124,7 @@ impl PaperBroker {
     /// Resting orders are matched first. Newly submitted market orders for the
     /// update's symbol fill against its latest close; all other orders rest
     /// until a matching symbol update arrives.
-    pub fn process(&mut self, market: MarketUpdate, orders: Vec<Order>) -> PaperTradingUpdate {
+    pub fn process(&mut self, market: MarketUpdate, orders: Vec<Order>) -> SessionUpdate {
         let (mut fills, should_process) = self.begin_update(&market);
         let orders_submitted = orders.len();
         if should_process {
@@ -122,7 +132,7 @@ impl PaperBroker {
             self.finish_update(market.close_ts as i64);
         }
 
-        PaperTradingUpdate {
+        SessionUpdate {
             market,
             fills,
             snapshot: self.snapshot(),
@@ -132,7 +142,7 @@ impl PaperBroker {
         }
     }
 
-    pub(crate) fn begin_update(&mut self, market: &MarketUpdate) -> (Vec<PaperFill>, bool) {
+    pub(crate) fn begin_update(&mut self, market: &MarketUpdate) -> (Vec<SessionFill>, bool) {
         let mut fills = Vec::new();
         let structurally_valid = market.is_valid_bar();
 
@@ -177,7 +187,7 @@ impl PaperBroker {
         &mut self,
         orders: Vec<Order>,
         market: &MarketUpdate,
-        fills: &mut Vec<PaperFill>,
+        fills: &mut Vec<SessionFill>,
         fit_buys_to_cash: bool,
     ) {
         for order in orders {
@@ -186,7 +196,7 @@ impl PaperBroker {
     }
 
     /// Return a cloned mark-to-market account snapshot.
-    pub fn snapshot(&self) -> PaperTradingSnapshot {
+    pub fn snapshot(&self) -> SessionSnapshot {
         let cash = self.portfolio.cash.amount(&self.config.base_currency);
         let mut market_value = 0.0;
         let mut gross_exposure = 0.0;
@@ -247,7 +257,7 @@ impl PaperBroker {
             &self.trades,
         );
 
-        PaperTradingSnapshot {
+        SessionSnapshot {
             portfolio: self.portfolio.clone(),
             latest_prices: self.latest_prices.clone(),
             equity,
@@ -373,7 +383,7 @@ impl PaperBroker {
         self.total_costs += cost;
     }
 
-    fn enforce_maintenance_margin(&mut self, timestamp: i64, fills: &mut Vec<PaperFill>) {
+    fn enforce_maintenance_margin(&mut self, timestamp: i64, fills: &mut Vec<SessionFill>) {
         if !self.config.allow_margin || self.config.maintenance_margin <= 0.0 {
             return;
         }
@@ -426,7 +436,7 @@ impl PaperBroker {
         &mut self,
         symbol: &str,
         bar: &crate::data::models::Bar,
-        fills: &mut Vec<PaperFill>,
+        fills: &mut Vec<SessionFill>,
     ) {
         let mut still_open = Vec::with_capacity(self.portfolio.orders.len());
         let open_orders = std::mem::take(&mut self.portfolio.orders);
@@ -480,7 +490,7 @@ impl PaperBroker {
         &mut self,
         order: Order,
         market: &MarketUpdate,
-        fills: &mut Vec<PaperFill>,
+        fills: &mut Vec<SessionFill>,
         fit_buys_to_cash: bool,
     ) {
         if order.order_type != OrderType::Cancel
@@ -558,7 +568,7 @@ impl PaperBroker {
         mut reason: String,
         fit_buy_to_cash: bool,
         available_volume: Option<f64>,
-    ) -> (PaperFill, Option<Order>) {
+    ) -> (SessionFill, Option<Order>) {
         if !raw_price.is_finite() || raw_price <= 0.0 {
             return (
                 rejected_fill(order, timestamp, "invalid fill price or quantity".to_owned()),
@@ -766,7 +776,7 @@ impl PaperBroker {
         self.trail_state.remove(&order.id);
 
         (
-            PaperFill {
+            SessionFill {
                 order,
                 timestamp,
                 status: OrderStatus::Filled,
@@ -852,7 +862,7 @@ fn normalize_cash(next_cash: f64, reference: f64) -> f64 {
     }
 }
 
-fn validate_config(config: &PaperTradingConfig) -> Result<(), String> {
+fn validate_config(config: &SessionConfig) -> Result<(), String> {
     if !config.initial_cash.is_finite() || config.initial_cash < 0.0 {
         return Err("initial_cash must be finite and non-negative".to_owned());
     }
@@ -913,16 +923,16 @@ fn validate_config(config: &PaperTradingConfig) -> Result<(), String> {
     if !config.risk_free_rate.is_finite() {
         return Err("risk_free_rate must be finite".to_owned());
     }
-    for metric in &config.metrics {
-        if !is_builtin_metric(metric) {
-            return Err(format!("unsupported live metric {metric:?}"));
+    for metric in config.metrics.iter() {
+        if !is_builtin_metric(metric) && !config.metrics.has_implementation(metric) {
+            return Err(format!("custom live metric {metric:?} requires a Python metric instance"));
         }
     }
     Ok(())
 }
 
-fn canceled_fill(order: Order, timestamp: i64, reason: String) -> PaperFill {
-    PaperFill {
+fn canceled_fill(order: Order, timestamp: i64, reason: String) -> SessionFill {
+    SessionFill {
         order,
         timestamp,
         status: OrderStatus::Canceled,
@@ -933,8 +943,8 @@ fn canceled_fill(order: Order, timestamp: i64, reason: String) -> PaperFill {
     }
 }
 
-fn rejected_fill(order: Order, timestamp: i64, reason: String) -> PaperFill {
-    PaperFill {
+fn rejected_fill(order: Order, timestamp: i64, reason: String) -> SessionFill {
+    SessionFill {
         order,
         timestamp,
         status: OrderStatus::Rejected,
@@ -998,7 +1008,7 @@ mod tests {
 
     #[test]
     fn market_buy_updates_cash_position_and_equity() {
-        let mut broker = PaperBroker::new(PaperTradingConfig::default()).unwrap();
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
         let result = broker.process(update(100.0, 1_000), vec![market(10.0)]);
 
         assert_eq!(result.fills.len(), 1);
@@ -1010,7 +1020,7 @@ mod tests {
 
     #[test]
     fn closing_trade_realizes_pnl() {
-        let mut broker = PaperBroker::new(PaperTradingConfig::default()).unwrap();
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
         broker.process(update(100.0, 1_000), vec![market(10.0)]);
         let result = broker.process(update(110.0, 1_060), vec![market(-10.0)]);
 
@@ -1023,7 +1033,7 @@ mod tests {
     fn partial_updates_only_mark_to_market_by_default() {
         let mut partial = update(100.0, 1_000);
         partial.is_final = false;
-        let mut broker = PaperBroker::new(PaperTradingConfig::default()).unwrap();
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
         let result = broker.process(partial, vec![market(1.0)]);
 
         assert!(!result.processed);
@@ -1033,7 +1043,7 @@ mod tests {
 
     #[test]
     fn limit_order_rests_until_reached() {
-        let mut broker = PaperBroker::new(PaperTradingConfig::default()).unwrap();
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
         let mut order = market(1.0);
         order.order_type = OrderType::Limit;
         order.price = Some(90.0);
@@ -1050,11 +1060,11 @@ mod tests {
 
     #[test]
     fn short_and_margin_guards_reject_risky_orders() {
-        let config = PaperTradingConfig {
+        let config = SessionConfig {
             initial_cash: 100.0,
-            ..PaperTradingConfig::default()
+            ..SessionConfig::default()
         };
-        let mut broker = PaperBroker::new(config).unwrap();
+        let mut broker = SessionBroker::new(config).unwrap();
 
         let short = broker.process(update(10.0, 1_000), vec![market(-1.0)]);
         assert_eq!(short.fills[0].status, OrderStatus::Rejected);
@@ -1065,7 +1075,7 @@ mod tests {
 
     #[test]
     fn duplicate_and_stale_final_bars_are_not_processed_twice() {
-        let mut broker = PaperBroker::new(PaperTradingConfig::default()).unwrap();
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
         let first = broker.process(update(100.0, 1_000), vec![market(1.0)]);
         assert!(first.processed);
 
@@ -1082,12 +1092,12 @@ mod tests {
 
     #[test]
     fn leverage_limit_applies_across_symbols() {
-        let config = PaperTradingConfig {
+        let config = SessionConfig {
             initial_cash: 100.0,
             allow_margin: true,
-            ..PaperTradingConfig::default()
+            ..SessionConfig::default()
         };
-        let mut broker = PaperBroker::new(config).unwrap();
+        let mut broker = SessionBroker::new(config).unwrap();
         broker.process(update(10.0, 1_000), vec![market(10.0)]);
         broker.process(update_for("ETH-USD", 10.0, 1_060), vec![market_for("ETH-USD", 10.0)]);
 
@@ -1101,12 +1111,12 @@ mod tests {
 
     #[test]
     fn maintenance_margin_breach_liquidates_and_halts() {
-        let config = PaperTradingConfig {
+        let config = SessionConfig {
             initial_cash: 100.0,
             allow_margin: true,
-            ..PaperTradingConfig::default()
+            ..SessionConfig::default()
         };
-        let mut broker = PaperBroker::new(config).unwrap();
+        let mut broker = SessionBroker::new(config).unwrap();
         broker.process(update(10.0, 1_000), vec![market(10.0)]);
         broker.process(update_for("ETH-USD", 10.0, 1_060), vec![market_for("ETH-USD", 10.0)]);
 
@@ -1128,12 +1138,12 @@ mod tests {
 
     #[test]
     fn partial_fill_respects_volume_participation() {
-        let config = PaperTradingConfig {
+        let config = SessionConfig {
             partial_fills: true,
             max_volume_participation: 10.0,
-            ..PaperTradingConfig::default()
+            ..SessionConfig::default()
         };
-        let mut broker = PaperBroker::new(config).unwrap();
+        let mut broker = SessionBroker::new(config).unwrap();
 
         let result = broker.process(update(100.0, 1_000), vec![market(1.0)]);
 
@@ -1150,11 +1160,12 @@ mod tests {
 
     #[test]
     fn selected_metrics_update_after_a_round_trip() {
-        let config = PaperTradingConfig {
-            metrics: vec!["total_return".to_owned(), "pnl".to_owned(), "n_trades".to_owned()],
-            ..PaperTradingConfig::default()
+        let config = SessionConfig {
+            metrics: vec!["total_return".to_owned(), "pnl".to_owned(), "n_trades".to_owned()]
+                .into(),
+            ..SessionConfig::default()
         };
-        let mut broker = PaperBroker::new(config).unwrap();
+        let mut broker = SessionBroker::new(config).unwrap();
         broker.process(update(100.0, 1_000), vec![market(10.0)]);
 
         let result = broker.process(update(110.0, 1_060), vec![market(-10.0)]);
@@ -1166,12 +1177,12 @@ mod tests {
 
     #[test]
     fn maximum_drawdown_halts_new_risk() {
-        let config = PaperTradingConfig {
+        let config = SessionConfig {
             initial_cash: 100.0,
             max_drawdown: 10.0,
-            ..PaperTradingConfig::default()
+            ..SessionConfig::default()
         };
-        let mut broker = PaperBroker::new(config).unwrap();
+        let mut broker = SessionBroker::new(config).unwrap();
         broker.process(update(10.0, 1_000), vec![market(10.0)]);
 
         let drawdown = broker.process(update(8.0, 1_060), Vec::new());
@@ -1186,13 +1197,13 @@ mod tests {
 
     #[test]
     fn borrowed_cash_accrues_configured_margin_interest() {
-        let config = PaperTradingConfig {
+        let config = SessionConfig {
             initial_cash: 100.0,
             allow_margin: true,
             margin_interest: 10.0,
-            ..PaperTradingConfig::default()
+            ..SessionConfig::default()
         };
-        let mut broker = PaperBroker::new(config).unwrap();
+        let mut broker = SessionBroker::new(config).unwrap();
         broker.process(update(10.0, 1_000), vec![market(10.0)]);
         broker.process(update_for("ETH-USD", 10.0, 1_060), vec![market_for("ETH-USD", 10.0)]);
 
@@ -1205,14 +1216,14 @@ mod tests {
 
     #[test]
     fn invalid_risk_configuration_is_rejected() {
-        let config = PaperTradingConfig {
+        let config = SessionConfig {
             initial_margin: 20.0,
             maintenance_margin: 25.0,
-            ..PaperTradingConfig::default()
+            ..SessionConfig::default()
         };
 
         assert_eq!(
-            PaperBroker::new(config).unwrap_err(),
+            SessionBroker::new(config).unwrap_err(),
             "maintenance_margin cannot exceed initial_margin"
         );
     }

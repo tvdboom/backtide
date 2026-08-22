@@ -1,12 +1,11 @@
-# PaperTradingSession
----------------------
+# Experiment
+------------
 
-:: backtide.live:PaperTradingSession
+:: backtide.backtest:Experiment
     :: signature
     :: head
     :: table:
         - parameters
-    :: see also
 
 <br>
 
@@ -21,5 +20,4 @@
 :: methods:
     toc_only: False
     include:
-        - on_bar
-        - snapshot
+        - run

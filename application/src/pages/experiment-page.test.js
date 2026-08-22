@@ -20,7 +20,7 @@ const bootstrap = {
     portfolio: { initial_cash: 10000, base_currency: 'USD', starting_positions: {} },
     strategy: { strategies: [], benchmark: null },
     indicators: { indicators: [] },
-    metrics: { metrics: ['total_return', 'sharpe'] },
+    metrics: ['total_return', 'sharpe'],
     exchange: {
       commission_type: 'Percentage', commission_pct: 0.1, commission_fixed: 0,
       slippage: 0.05, partial_fills: false, allowed_order_types: ['Market'],
@@ -98,7 +98,7 @@ describe('experiment page', () => {
 
   it('labels selected metrics as built-in or custom without implementation details', async () => {
     const pageBootstrap = structuredClone(bootstrap)
-    pageBootstrap.defaults.metrics.metrics.push('MyMetric')
+    pageBootstrap.defaults.metrics.push('MyMetric')
     pageBootstrap.metrics.saved.push({
       key: 'MyMetric', name: 'My metric', description: 'A custom result.', builtin: false
     })
@@ -115,9 +115,9 @@ describe('experiment page', () => {
 
   it('orders default metrics by importance and derives the headline from the first metric', async () => {
     const pageBootstrap = structuredClone(bootstrap)
-    pageBootstrap.defaults.metrics = {
-      metrics: ['final_equity', 'win_rate', 'pnl', 'total_return', 'sharpe', 'max_dd']
-    }
+    pageBootstrap.defaults.metrics = [
+      'final_equity', 'win_rate', 'pnl', 'total_return', 'sharpe', 'max_dd'
+    ]
     pageBootstrap.metrics.builtin.push(
       { key: 'final_equity', name: 'Final equity', description: 'Ending value.', builtin: true },
       { key: 'win_rate', name: 'Win rate', description: 'Winning trades.', builtin: true, percentage: true },
@@ -188,9 +188,7 @@ describe('experiment page', () => {
   it('removes Alpha from the ordered metrics when no benchmark is selected', async () => {
     const pageBootstrap = structuredClone(bootstrap)
     pageBootstrap.defaults.strategy.benchmark = 'SPY'
-    pageBootstrap.defaults.metrics = {
-      metrics: ['total_return', 'alpha', 'sharpe']
-    }
+    pageBootstrap.defaults.metrics = ['total_return', 'alpha', 'sharpe']
     pageBootstrap.metrics.builtin.push({
       key: 'alpha', name: 'Alpha', description: 'Benchmark-adjusted return.',
       builtin: true, percentage: true
@@ -631,7 +629,7 @@ describe('experiment page', () => {
     expect(post).toHaveBeenCalledWith('/api/experiments', expect.objectContaining({
       general: expect.objectContaining({ name: 'Persistent draft' }),
       data: expect.objectContaining({ instrument_type: 'etf', symbols: ['AAPL'] }),
-      metrics: { metrics: ['sharpe', 'total_return'] },
+      metrics: ['sharpe', 'total_return'],
       exchange: expect.objectContaining({ commission_type: 'PercentagePlusFixed' })
     }))
     expect(wrapper.emitted('navigate')).toEqual([['results']])

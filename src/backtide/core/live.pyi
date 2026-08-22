@@ -3,17 +3,19 @@
 __all__ = [
     "LiveMarketFeed",
     "MarketUpdate",
-    "PaperFill",
-    "PaperTradingConfig",
-    "PaperTradingSession",
-    "PaperTradingSnapshot",
-    "PaperTradingUpdate",
+    "Session",
+    "SessionConfig",
+    "SessionFill",
+    "SessionSnapshot",
+    "SessionUpdate",
     "collect_market_updates",
     "list_live_instruments",
 ]
 
 from backtide.core.backtest import Order, OrderStatus, OrderType, Portfolio
 from backtide.core.data import Currency, Instrument
+
+from backtide.metrics import BaseMetric
 
 class LiveMarketFeed:
     """Reusable, cancellable exchange market-data collector.
@@ -46,7 +48,7 @@ class LiveMarketFeed:
     See Also
     --------
     - backtide.live:collect_market_updates
-    - backtide.live:PaperTradingSession
+    - backtide.live:Session
 
     Examples
     --------
@@ -212,7 +214,7 @@ class MarketUpdate:
 
     See Also
     --------
-    - backtide.live:PaperTradingSession
+    - backtide.live:Session
 
     Examples
     --------
@@ -275,59 +277,44 @@ class MarketUpdate:
     def __str__(self, /):
         ...
 
-class PaperFill:
-    """Result of matching one paper order.
+class Session:
+    """A stateful simulated account with optional strategy evaluation.
 
-    Attributes
+    Parameters
     ----------
-    order : [Order]
-        Submitted order after any sizer resolution.
+    config : [SessionConfig] | None, default=None
+        Execution, fee, and risk settings. Uses defaults when omitted.
 
-    timestamp : int
-        Fill, cancellation, or rejection Unix timestamp in seconds.
+    strategy : [BaseStrategy] | None, default=None
+        Existing built-in or custom strategy. Its `evaluate` method runs after
+        resting orders are matched on each processable candle. Explicit orders
+        can also be passed to `on_bar`.
 
-    status : [OrderStatus]
-        Terminal order status.
-
-    fill_price : float | None
-        Executed quote-currency price, or `None` when not filled.
-
-    commission : float
-        Fee charged in the paper account's base currency.
-
-    realized_pnl : float | None
-        Change in realized PnL from this fill, net of its commission.
-
-    reason : str
-        Human-readable matching or rejection reason.
+    indicators : list[[BaseIndicator]] | None, default=None
+        Additional indicators to compute for live monitoring. Indicators
+        required by `strategy` are included automatically.
 
     See Also
     --------
-    - backtide.live:PaperTradingUpdate
+    - backtide.live:MarketUpdate
+    - backtide.live:SessionConfig
 
     Examples
     --------
     ```pycon
-    from backtide.backtest import Order
-    from backtide.live import MarketUpdate, PaperTradingSession
+    from backtide.live import MarketUpdate, Session
 
-    market = MarketUpdate(
-        "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
-        100.0, 102.0, 99.0, 101.0,
+    session = Session()
+    update = session.on_bar(
+        MarketUpdate(
+            "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+            100.0, 102.0, 99.0, 101.0, volume=5.0,
+        )
     )
-    fill = PaperTradingSession().on_bar(market, [Order("BTC-USD", 1.0)]).fills[0]
-    print(fill.fill_price)
+    print(update.snapshot.equity)
     ```
 
     """
-
-    commission: float
-    fill_price: float | None
-    order: Order
-    realized_pnl: float | None
-    reason: str
-    status: OrderStatus
-    timestamp: int
 
     def __eq__(self, value, /):
         ...
@@ -353,9 +340,97 @@ class PaperFill:
         ...
     def __str__(self, /):
         ...
+    def on_bar(self, market, orders=None) -> SessionUpdate:
+        """Process a live or replayed candle.
 
-class PaperTradingConfig:
-    """Configuration for a paper-trading session.
+        Parameters
+        ----------
+        market : [MarketUpdate]
+            Provider-normalized candle update.
+
+        orders : list[[Order]] | None, default=None
+            Explicit orders to submit after resting orders are matched. Orders
+            returned by the configured strategy are appended automatically.
+
+        Returns
+        -------
+        [SessionUpdate]
+            Fills plus a complete mark-to-market account snapshot.
+
+        Examples
+        --------
+        ```pycon
+        from backtide.backtest import Order
+        from backtide.live import MarketUpdate, Session
+
+        session = Session()
+        market = MarketUpdate(
+            "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+            100.0, 102.0, 99.0, 101.0,
+        )
+        update = session.on_bar(market, [Order("BTC-USD", 1.0)])
+        print(update.processed)
+        ```
+
+        """
+    def set_exchange_rate(self, from_currency, to_currency, rate, timestamp=0):
+        """Record a currency-conversion rate for live account valuation.
+
+        Parameters
+        ----------
+        from_currency : str
+            Currency being converted, such as `"ETH"`.
+
+        to_currency : str
+            Currency received, such as `"EUR"`.
+
+        rate : float
+            Positive units of `to_currency` per unit of `from_currency`.
+
+        timestamp : int, default=0
+            Unix timestamp in seconds at which the rate was observed.
+
+        Raises
+        ------
+        ValueError
+            If either currency is empty or `rate` is not finite and positive.
+
+        """
+    def snapshot(self) -> SessionSnapshot:
+        """Return the current account state without processing a candle.
+
+        Returns
+        -------
+        [SessionSnapshot]
+            Current cash, positions, prices, and profit-and-loss values.
+
+        Examples
+        --------
+        ```pycon
+        from backtide.live import Session
+
+        snapshot = Session().snapshot()
+        print(snapshot.equity)
+        ```
+
+        """
+    def warm_up(self, markets) -> int:
+        """Seed strategy and indicator history without trading or changing the account.
+
+        Parameters
+        ----------
+        markets : list[[MarketUpdate]]
+            Historical candles in chronological order.
+
+        Returns
+        -------
+        int
+            Number of valid candles offered to the bounded history buffers.
+
+        """
+
+class SessionConfig:
+    """Configuration for a live simulated session.
 
     Attributes
     ----------
@@ -396,7 +471,7 @@ class PaperTradingConfig:
 
     maintenance_margin : float, default=25
         Minimum equity percentage maintained against gross exposure. Breaches
-        trigger deterministic paper liquidation.
+        trigger deterministic simulated liquidation.
 
     margin_interest : float, default=0
         Annual percentage charged on negative base-currency cash.
@@ -412,7 +487,7 @@ class PaperTradingConfig:
         the guard.
 
     allowed_order_types : list[str | OrderType], default=all order types
-        Order types accepted by the paper broker.
+        Order types accepted by the simulation broker.
 
     partial_fills : bool, default=False
         Whether fills are capped by `max_volume_participation`.
@@ -420,22 +495,23 @@ class PaperTradingConfig:
     max_volume_participation : float, default=100
         Maximum percentage of a candle's volume available to one simulated fill.
 
-    metrics : list[str]
-        Built-in performance metric keys maintained during the session.
+    metrics : list[str | BaseMetric | dict[str, BaseMetric]]
+        Built-in metric keys or custom Python metric instances maintained during the session.
+        Python instances are retained in memory while serialized configurations contain names.
 
     risk_free_rate : float, default=0
         Annual risk-free rate used by risk-adjusted performance metrics.
 
     See Also
     --------
-    - backtide.live:PaperTradingSession
+    - backtide.live:Session
 
     Examples
     --------
     ```pycon
-    from backtide.live import PaperTradingConfig
+    from backtide.live import SessionConfig
 
-    config = PaperTradingConfig(
+    config = SessionConfig(
         initial_cash=25_000,
         commission_pct=0.1,
         slippage=0.05,
@@ -461,7 +537,7 @@ class PaperTradingConfig:
     max_leverage: float
     max_position_size: float
     max_volume_participation: float
-    metrics: list[str]
+    metrics: list[str | BaseMetric | dict[str, BaseMetric]]
     partial_fills: bool
     risk_free_rate: float
     slippage: float
@@ -490,44 +566,59 @@ class PaperTradingConfig:
     def __str__(self, /):
         ...
 
-class PaperTradingSession:
-    """A stateful paper-trading account with optional strategy evaluation.
+class SessionFill:
+    """Result of matching one simulated order.
 
-    Parameters
+    Attributes
     ----------
-    config : [PaperTradingConfig] | None, default=None
-        Execution, fee, and risk settings. Uses defaults when omitted.
+    order : [Order]
+        Submitted order after any sizer resolution.
 
-    strategy : [BaseStrategy] | None, default=None
-        Existing built-in or custom strategy. Its `evaluate` method runs after
-        resting orders are matched on each processable candle. Explicit orders
-        can also be passed to `on_bar`.
+    timestamp : int
+        Fill, cancellation, or rejection Unix timestamp in seconds.
 
-    indicators : list[[BaseIndicator]] | None, default=None
-        Additional indicators to compute for live monitoring. Indicators
-        required by `strategy` are included automatically.
+    status : [OrderStatus]
+        Terminal order status.
+
+    fill_price : float | None
+        Executed quote-currency price, or `None` when not filled.
+
+    commission : float
+        Fee charged in the simulated account's base currency.
+
+    realized_pnl : float | None
+        Change in realized PnL from this fill, net of its commission.
+
+    reason : str
+        Human-readable matching or rejection reason.
 
     See Also
     --------
-    - backtide.live:MarketUpdate
-    - backtide.live:PaperTradingConfig
+    - backtide.live:SessionUpdate
 
     Examples
     --------
     ```pycon
-    from backtide.live import MarketUpdate, PaperTradingSession
+    from backtide.backtest import Order
+    from backtide.live import MarketUpdate, Session
 
-    session = PaperTradingSession()
-    update = session.on_bar(
-        MarketUpdate(
-            "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
-            100.0, 102.0, 99.0, 101.0, volume=5.0,
-        )
+    market = MarketUpdate(
+        "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
+        100.0, 102.0, 99.0, 101.0,
     )
-    print(update.snapshot.equity)
+    fill = Session().on_bar(market, [Order("BTC-USD", 1.0)]).fills[0]
+    print(fill.fill_price)
     ```
 
     """
+
+    commission: float
+    fill_price: float | None
+    order: Order
+    realized_pnl: float | None
+    reason: str
+    status: OrderStatus
+    timestamp: int
 
     def __eq__(self, value, /):
         ...
@@ -553,97 +644,9 @@ class PaperTradingSession:
         ...
     def __str__(self, /):
         ...
-    def on_bar(self, market, orders=None) -> PaperTradingUpdate:
-        """Process a live or replayed candle.
 
-        Parameters
-        ----------
-        market : [MarketUpdate]
-            Provider-normalized candle update.
-
-        orders : list[[Order]] | None, default=None
-            Explicit orders to submit after resting orders are matched. Orders
-            returned by the configured strategy are appended automatically.
-
-        Returns
-        -------
-        [PaperTradingUpdate]
-            Fills plus a complete mark-to-market account snapshot.
-
-        Examples
-        --------
-        ```pycon
-        from backtide.backtest import Order
-        from backtide.live import MarketUpdate, PaperTradingSession
-
-        session = PaperTradingSession()
-        market = MarketUpdate(
-            "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
-            100.0, 102.0, 99.0, 101.0,
-        )
-        update = session.on_bar(market, [Order("BTC-USD", 1.0)])
-        print(update.processed)
-        ```
-
-        """
-    def set_exchange_rate(self, from_currency, to_currency, rate, timestamp=0):
-        """Record a currency-conversion rate for live account valuation.
-
-        Parameters
-        ----------
-        from_currency : str
-            Currency being converted, such as `"ETH"`.
-
-        to_currency : str
-            Currency received, such as `"EUR"`.
-
-        rate : float
-            Positive units of `to_currency` per unit of `from_currency`.
-
-        timestamp : int, default=0
-            Unix timestamp in seconds at which the rate was observed.
-
-        Raises
-        ------
-        ValueError
-            If either currency is empty or `rate` is not finite and positive.
-
-        """
-    def snapshot(self) -> PaperTradingSnapshot:
-        """Return the current account state without processing a candle.
-
-        Returns
-        -------
-        [PaperTradingSnapshot]
-            Current cash, positions, prices, and profit-and-loss values.
-
-        Examples
-        --------
-        ```pycon
-        from backtide.live import PaperTradingSession
-
-        snapshot = PaperTradingSession().snapshot()
-        print(snapshot.equity)
-        ```
-
-        """
-    def warm_up(self, markets) -> int:
-        """Seed strategy and indicator history without trading or changing the account.
-
-        Parameters
-        ----------
-        markets : list[[MarketUpdate]]
-            Historical candles in chronological order.
-
-        Returns
-        -------
-        int
-            Number of valid candles offered to the bounded history buffers.
-
-        """
-
-class PaperTradingSnapshot:
-    """Mark-to-market snapshot of a paper-trading account.
+class SessionSnapshot:
+    """Mark-to-market snapshot of a simulated account.
 
     Attributes
     ----------
@@ -697,14 +700,14 @@ class PaperTradingSnapshot:
 
     See Also
     --------
-    - backtide.live:PaperTradingSession
+    - backtide.live:Session
 
     Examples
     --------
     ```pycon
-    from backtide.live import PaperTradingSession
+    from backtide.live import Session
 
-    snapshot = PaperTradingSession().snapshot()
+    snapshot = Session().snapshot()
     print(snapshot.equity)
     print(snapshot.portfolio.positions)
     ```
@@ -753,7 +756,7 @@ class PaperTradingSnapshot:
     def __str__(self, /):
         ...
 
-class PaperTradingUpdate:
+class SessionUpdate:
     """State transition produced after processing a market update.
 
     Attributes
@@ -761,10 +764,10 @@ class PaperTradingUpdate:
     market : [MarketUpdate]
         Market update supplied by the caller.
 
-    fills : list[[PaperFill]]
+    fills : list[[SessionFill]]
         Orders filled, canceled, or rejected during this transition.
 
-    snapshot : [PaperTradingSnapshot]
+    snapshot : [SessionSnapshot]
         Account state after this transition.
 
     orders_submitted : int
@@ -780,30 +783,30 @@ class PaperTradingUpdate:
     See Also
     --------
     - backtide.live:MarketUpdate
-    - backtide.live:PaperTradingSession
+    - backtide.live:Session
 
     Examples
     --------
     ```pycon
-    from backtide.live import MarketUpdate, PaperTradingSession
+    from backtide.live import MarketUpdate, Session
 
     market = MarketUpdate(
         "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
         100.0, 102.0, 99.0, 101.0,
     )
-    update = PaperTradingSession().on_bar(market)
+    update = Session().on_bar(market)
     print(update.processed)
     print(update.snapshot.equity)
     ```
 
     """
 
-    fills: list[PaperFill]
+    fills: list[SessionFill]
     indicators: dict[str, dict[str, list[list[float]]]]
     market: MarketUpdate
     orders_submitted: int
     processed: bool
-    snapshot: PaperTradingSnapshot
+    snapshot: SessionSnapshot
 
     def __eq__(self, value, /):
         ...
@@ -880,7 +883,7 @@ def collect_market_updates(
     See Also
     --------
     - backtide.live:LiveMarketFeed
-    - backtide.live:PaperTradingSession
+    - backtide.live:Session
 
     Examples
     --------

@@ -116,7 +116,7 @@ describe('dashboard page', () => {
         status: 'stopped',
         started_at: '2026-08-12T12:00:00Z',
         config: {
-          mode: 'paper',
+          mode: 'live',
           symbols: ['BTC-USD'],
           strategies: ['Momentum'],
           config: { base_currency: 'EUR', initial_cash: 10000 }

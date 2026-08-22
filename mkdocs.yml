@@ -127,7 +127,7 @@ nav:
             - Plots: user_guide/backtest/plots.md
         - Live:
             - Introduction: user_guide/live/introduction.md
-            - Paper trading: user_guide/live/paper_trading.md
+            - Sessions: user_guide/live/sessions.md
         - Library:
             - Strategies: user_guide/library/strategies.md
             - Indicators: user_guide/library/indicators.md
@@ -174,20 +174,20 @@ nav:
             - plot_volume: api/analysis/plot_volume.md
             - plot_vwap: api/analysis/plot_vwap.md
         - backtest:
-            - run_experiment: api/backtest/run_experiment.md
+            - Experiment: api/backtest/experiment.md
         - live:
-            - LiveMarketFeed: api/live/livemarketfeed.md
             - collect_market_updates: api/live/collect_market_updates.md
             - list_live_instruments: api/live/list_live_instruments.md
-            - PaperTradingSession: api/live/papertradingsession.md
+            - LiveMarketFeed: api/live/livemarketfeed.md
+            - Session: api/live/session.md
         - storage:
             - delete_symbols: api/storage/delete_symbols.md
             - query_bars: api/storage/query_bars.md
             - query_bars_summary: api/storage/query_bars_summary.md
             - query_dividends: api/storage/query_dividends.md
-            - query_strategy_runs: api/storage/query_strategy_runs.md
             - query_experiments: api/storage/query_experiments.md
             - query_instruments: api/storage/query_instruments.md
+            - query_strategy_runs: api/storage/query_strategy_runs.md
         - models:
             - backtest:
                 - CommissionType: api/models/backtest/commissiontype.md
@@ -203,7 +203,6 @@ nav:
                 - ExperimentStatus: api/models/backtest/experimentstatus.md
                 - GeneralExpConfig: api/models/backtest/generalexpconfig.md
                 - IndicatorExpConfig: api/models/backtest/indicatorexpconfig.md
-                - MetricExpConfig: api/models/backtest/metricexpconfig.md
                 - Order: api/models/backtest/order.md
                 - OrderRecord: api/models/backtest/orderrecord.md
                 - OrderStatus: api/models/backtest/orderstatus.md
@@ -253,10 +252,10 @@ nav:
                 - MetricDefinition: api/models/metrics/metricdefinition.md
             - live:
                 - MarketUpdate: api/models/live/marketupdate.md
-                - PaperFill: api/models/live/paperfill.md
-                - PaperTradingConfig: api/models/live/papertradingconfig.md
-                - PaperTradingSnapshot: api/models/live/papertradingsnapshot.md
-                - PaperTradingUpdate: api/models/live/papertradingupdate.md
+                - SessionConfig: api/models/live/sessionconfig.md
+                - SessionFill: api/models/live/sessionfill.md
+                - SessionSnapshot: api/models/live/sessionsnapshot.md
+                - SessionUpdate: api/models/live/sessionupdate.md
             - sizers:
                 - BaseSizer: api/models/sizers/basesizer.md
                 - EqualWeight: api/models/sizers/equalweight.md
@@ -305,7 +304,7 @@ nav:
             - Gain to pain: examples/metrics/gain_to_pain.md
             - Ulcer index: examples/metrics/ulcer_index.md
         - Live:
-            - Paper-trading session: examples/live/paper_trading_session.md
+            - Live session: examples/live/session.md
             - Inspect a market feed: examples/live/market_feed.md
     - FAQ: faq.md
     - Contributing: contributing.md

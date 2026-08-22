@@ -102,9 +102,9 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                         int(self._first(query, "limit") or 100),
                     )
                 )
-            elif path.startswith("/api/experiments/") and path.endswith("/paper-config"):
-                experiment_id = unquote(path[len("/api/experiments/") : -len("/paper-config")])
-                self._json(self.services.paper_config_from_experiment(experiment_id))
+            elif path.startswith("/api/experiments/") and path.endswith("/session-config"):
+                experiment_id = unquote(path[len("/api/experiments/") : -len("/session-config")])
+                self._json(self.services.session_config_from_experiment(experiment_id))
             elif path.startswith("/api/experiments/"):
                 self._json(self.services.experiment(unquote(path.rsplit("/", 1)[1])))
             elif path == "/api/jobs":

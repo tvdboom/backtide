@@ -84,7 +84,7 @@ impl Engine {
             config.strategy.benchmark.as_deref().map_or("None".to_owned(), |s| format!("{s:?}")),
             config.strategy.strategies.len(),
             config.indicators.indicators.len(),
-            config.metrics.metrics.len(),
+            config.metrics.len(),
             config.engine.risk_free_rate,
         );
 
@@ -537,7 +537,7 @@ impl Engine {
                 ret - rf_ret
             });
 
-            if config.metrics.metrics.iter().any(|metric| metric == "excess_return") {
+            if config.metrics.iter().any(|metric| metric == "excess_return") {
                 if let Some(v) = excess_return {
                     r.metrics.insert("excess_return".into(), v);
                 } else {
@@ -548,7 +548,7 @@ impl Engine {
             }
 
             // Alpha is only meaningful for non-benchmark runs.
-            if config.metrics.metrics.iter().any(|metric| metric == "alpha") {
+            if config.metrics.iter().any(|metric| metric == "alpha") {
                 if let Some(bench) = bench_snapshot.as_ref() {
                     if !r.is_benchmark {
                         // If benchmark never became investable, alpha is unavailable.
@@ -572,7 +572,7 @@ impl Engine {
         }
 
         let mut custom_metrics = Vec::new();
-        for name in config.metrics.metrics.iter().filter(|name| !is_builtin_metric(name)) {
+        for name in config.metrics.iter().filter(|name| !is_builtin_metric(name)) {
             let loaded = Python::attach(|py| -> PyResult<Py<PyAny>> {
                 if let Some(value) = metric_overrides.get(name) {
                     Ok(value.clone_ref(py))
@@ -1794,7 +1794,7 @@ fn run_one_strategy(
     // ── Metrics ─────────────────────────────────────────────────────────────
 
     let metrics = compute_builtin_metrics(
-        &cfg.metrics.metrics,
+        &cfg.metrics,
         cfg.portfolio.initial_cash as f64,
         cfg.engine.risk_free_rate / 100.0,
         &equity_curve,
@@ -1949,7 +1949,7 @@ mod tests {
             portfolio: PortfolioExpConfig::default(),
             strategy: StrategyExpConfig::default(),
             indicators: IndicatorExpConfig::default(),
-            metrics: MetricExpConfig::default(),
+            metrics: ExperimentConfigInner::default().metrics,
             exchange: ExchangeExpConfig::default(),
             engine: EngineExpConfig::default(),
         }

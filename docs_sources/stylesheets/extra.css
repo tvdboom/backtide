@@ -250,6 +250,24 @@ body {
     color: var(--backtide-blue);
 }
 
+.support-logos {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(8px, 4vw, 40px);
+    align-items: center;
+}
+
+.support-logos a {
+    min-width: 0;
+    text-align: center;
+}
+
+.support-logos img {
+    width: 100%;
+    max-width: 200px;
+    height: auto;
+}
+
 
 /* Signature layout */
 .sign {

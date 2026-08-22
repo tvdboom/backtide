@@ -1,10 +1,10 @@
-//! Mark-to-market paper-account snapshots.
+//! Mark-to-market simulated-account snapshots.
 
 use crate::backtest::models::Portfolio;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
-/// Mark-to-market snapshot of a paper-trading account.
+/// Mark-to-market snapshot of a simulated account.
 ///
 /// Attributes
 /// ----------
@@ -58,20 +58,20 @@ use std::collections::HashMap;
 ///
 /// See Also
 /// --------
-/// - backtide.live:PaperTradingSession
+/// - backtide.live:Session
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.live import PaperTradingSession
+/// from backtide.live import Session
 ///
-/// snapshot = PaperTradingSession().snapshot()
+/// snapshot = Session().snapshot()
 /// print(snapshot.equity)
 /// print(snapshot.portfolio.positions)
 /// ```
 #[pyclass(get_all, frozen, skip_from_py_object, module = "backtide.live")]
 #[derive(Clone, Debug)]
-pub struct PaperTradingSnapshot {
+pub struct SessionSnapshot {
     /// Cash, positions, and currently resting orders.
     pub portfolio: Portfolio,
 
@@ -122,7 +122,7 @@ pub struct PaperTradingSnapshot {
 }
 
 #[pymethods]
-impl PaperTradingSnapshot {
+impl SessionSnapshot {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 }

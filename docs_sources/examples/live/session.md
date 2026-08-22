@@ -1,20 +1,20 @@
-# Complete paper-trading session
+# Complete live session
 
 This bounded example connects to Kraken, collects completed one-minute BTC/USD candles, evaluates a
 strategy, prints fills and equity, and always closes the feed. It submits simulated orders only.
 
 ```python
-from backtide.live import LiveMarketFeed, PaperTradingConfig, PaperTradingSession
+from backtide.live import LiveMarketFeed, Session, SessionConfig
 from backtide.strategies import BuyAndHold
 
-config = PaperTradingConfig(
+config = SessionConfig(
     initial_cash=25_000,
     commission_pct=0.10,
     slippage=0.05,
     max_position_size=25.0,
     metrics=["total_return", "sharpe", "max_dd"],
 )
-session = PaperTradingSession(config=config, strategy=BuyAndHold())
+session = Session(config=config, strategy=BuyAndHold())
 feed = LiveMarketFeed(
     provider="kraken",
     symbols=["BTC-USD"],

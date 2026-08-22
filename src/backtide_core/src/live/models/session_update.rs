@@ -1,6 +1,6 @@
-//! Paper-trading state transitions.
+//! Live simulated-session state transitions.
 
-use super::{MarketUpdate, PaperFill, PaperTradingSnapshot};
+use super::{MarketUpdate, SessionFill, SessionSnapshot};
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
@@ -11,10 +11,10 @@ use std::collections::HashMap;
 /// market : [MarketUpdate]
 ///     Market update supplied by the caller.
 ///
-/// fills : list[[PaperFill]]
+/// fills : list[[SessionFill]]
 ///     Orders filled, canceled, or rejected during this transition.
 ///
-/// snapshot : [PaperTradingSnapshot]
+/// snapshot : [SessionSnapshot]
 ///     Account state after this transition.
 ///
 /// orders_submitted : int
@@ -30,32 +30,32 @@ use std::collections::HashMap;
 /// See Also
 /// --------
 /// - backtide.live:MarketUpdate
-/// - backtide.live:PaperTradingSession
+/// - backtide.live:Session
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.live import MarketUpdate, PaperTradingSession
+/// from backtide.live import MarketUpdate, Session
 ///
 /// market = MarketUpdate(
 ///     "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
 ///     100.0, 102.0, 99.0, 101.0,
 /// )
-/// update = PaperTradingSession().on_bar(market)
+/// update = Session().on_bar(market)
 /// print(update.processed)
 /// print(update.snapshot.equity)
 /// ```
 #[pyclass(get_all, frozen, skip_from_py_object, module = "backtide.live")]
 #[derive(Clone, Debug)]
-pub struct PaperTradingUpdate {
+pub struct SessionUpdate {
     /// Market update supplied by the caller.
     pub market: MarketUpdate,
 
     /// Orders filled, canceled, or rejected during this transition.
-    pub fills: Vec<PaperFill>,
+    pub fills: Vec<SessionFill>,
 
     /// Account state after this transition.
-    pub snapshot: PaperTradingSnapshot,
+    pub snapshot: SessionSnapshot,
 
     /// Number of explicit and strategy orders submitted on this update.
     pub orders_submitted: usize,
@@ -68,7 +68,7 @@ pub struct PaperTradingUpdate {
 }
 
 #[pymethods]
-impl PaperTradingUpdate {
+impl SessionUpdate {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 }

@@ -57,7 +57,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// See Also
 /// --------
-/// - backtide.live:PaperTradingSession
+/// - backtide.live:Session
 ///
 /// Examples
 /// --------

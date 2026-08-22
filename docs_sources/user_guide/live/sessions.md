@@ -1,15 +1,15 @@
-# Paper trading
+# Live simulation
 ---------------
 
 Backtide can apply the same strategy objects used by the backtest engine to live
 exchange candles. Market data arrives over public provider WebSockets and orders
-are matched by a local paper-trading engine. No brokerage account is connected,
+are matched by a local live-session engine. No brokerage account is connected,
 no credentials are required, and no real orders are submitted.
 
-Paper trading is useful for checking how a strategy behaves as bars arrive, but
+Live simulation is useful for checking how a strategy behaves as bars arrive, but
 its fills remain a simulation. Network delay, outages, exchange liquidity, queue
 position, and the difference between candle prices and executable quotes can all
-make real execution differ from the paper result.
+make real execution differ from the simulated result.
 
 <br>
 
@@ -36,7 +36,7 @@ Start the packaged web application as usual:
 backtide launch
 ```
 
-Open **Paper trading** under **Live**. The setup is divided into seven focused steps:
+Open **Live simulation** under **Live**. The setup is divided into seven focused steps:
 
 1. **Market data** selects the provider, interval, and symbols.
 2. **Portfolio** configures starting cash and the reporting currency.
@@ -54,7 +54,7 @@ buying power, drawdown, costs, selected metrics, latest indicator values, fills,
 and connection diagnostics. You can pause strategy evaluation, resume it, cancel resting
 orders, request a complete flatten, or stop the session.
 
-When multiple strategies are selected, each receives an independent paper account with the
+When multiple strategies are selected, each receives an independent simulated account with the
 configured starting cash. Orders, fills, snapshots, and metrics remain attributed to that
 strategy; the headline account cards show the sum of those isolated accounts. This avoids one
 strategy's orders changing another strategy's decisions while still making side-by-side forward
@@ -75,7 +75,7 @@ require fixed database columns.
 `allow_margin=True` enables bounded borrowing; it no longer means unlimited negative cash.
 Exposure-increasing orders must satisfy both `max_leverage` and `initial_margin`, as well as
 the per-symbol `max_position_size`. Financing costs accrue from event timestamps. When the
-equity-to-gross-exposure ratio falls below `maintenance_margin`, the paper broker halts new
+equity-to-gross-exposure ratio falls below `maintenance_margin`, the simulation broker halts new
 exposure and liquidates marked positions deterministically.
 
 This is Backtide's generic cross-margin simulation. It does not claim to duplicate an
@@ -85,14 +85,14 @@ exchange's product-specific liquidation engine, insurance fund, or order-book ex
 
 ## Replays
 
-A **replay** runs a saved paper-trading event stream through a new paper engine. It re-evaluates
+A **replay** runs a saved live-session event stream through a new simulation engine. It re-evaluates
 the strategies, indicators, sizers, metrics, order rules, and account configuration instead of
-showing previously saved snapshots. No provider connection is opened, and every order remains a
-simulated paper order.
+showing previously saved snapshots. No provider connection is opened, and every order remains
+simulated.
 
 ### How a replay works
 
-1. A paper session records normalized market updates, receipt timestamps, exchange-rate updates,
+1. A live session records normalized market updates, receipt timestamps, exchange-rate updates,
    and its warm-up bars in the local database.
 2. On **Session history**, choose 1×, 2×, 5×, 10×, or **Maximum**, then select **Replay** for a
    completed session.
@@ -106,11 +106,6 @@ simulated paper order.
    progress, source duration, speed, and warm-up provenance. Expand the replay count in session
    history to compare final P&L with the original.
 
-For older sessions that do not contain a recorded warm-up stream, Backtide tries to load the
-requested warm-up bars from current local market storage. Session history labels whether warm-up
-came from the recording, current storage, or was unavailable. That fallback can make an old replay
-less directly comparable with its source.
-
 Replays are most useful when you want to:
 
 - reproduce a strategy decision or investigate a particular order, fill, or risk halt;
@@ -122,13 +117,13 @@ A replay is not a test of WebSocket reliability, reconnection behavior, current 
 or executable liquidity because it does not contact the provider. Use **Go live** to reconnect
 with the saved setup when those conditions matter. Exact agreement with the original also depends
 on using the same strategy definitions and Backtide version; changing code intentionally changes
-what the fresh paper engine can produce.
+what the fresh simulation engine can produce.
 
 <br>
 
 ## Using the command line
 
-Start a paper-trading session from TOML, YAML, or JSON with
+Start a live session from TOML, YAML, or JSON with
 `backtide start-live-session`. For example, save this as `live.toml`:
 
 ```toml
@@ -139,16 +134,16 @@ strategy = "my-saved-strategy"
 batch_size = 10
 timeout_seconds = 5
 
-[paper]
+[session]
 initial_cash = 25000
 commission_pct = 0.1
 slippage = 0.05
 ```
 
 The optional `strategy` value names a strategy saved in the application's
-**Library**. Omit it to monitor the feed and paper account without generating
-orders. Every field accepted by [`PaperTradingConfig`] can be placed under
-`paper`.
+**Library**. Omit it to monitor the feed and simulated account without generating
+orders. Every field accepted by [`SessionConfig`] can be placed under
+`session`.
 
 Start the session and press Ctrl+C when you want to stop:
 
@@ -164,16 +159,25 @@ shutdown.
 
 ## Using Python
 
-[`PaperTradingSession`] is deterministic when you feed it explicit
+[`Session`] is deterministic when you feed it explicit
 [`MarketUpdate`] objects. That makes the engine suitable for unit tests and
 recorded replays without a network connection:
 
+`SessionConfig` contains account, execution, risk, and metric settings. Its single `metrics` list
+accepts both exact built-in string keys and custom Python metric objects. Strategy and indicator
+instances are runtime dependencies passed to `Session`. [`Experiment`] follows the same
+config-first class pattern, and its metrics likewise live only in `ExperimentConfig.metrics`.
+
 ```python
-from backtide.live import MarketUpdate, PaperTradingConfig, PaperTradingSession
+from backtide.live import MarketUpdate, Session, SessionConfig
 from backtide.strategies import BuyAndHold
 
-session = PaperTradingSession(
-    PaperTradingConfig(initial_cash=25_000, commission_pct=0.1),
+session = Session(
+    SessionConfig(
+        initial_cash=25_000,
+        commission_pct=0.1,
+        metrics=["pnl", "sharpe"],
+    ),
     strategy=BuyAndHold(),
 )
 
@@ -197,10 +201,10 @@ print(transition.snapshot.equity)
 For a bounded batch from a real provider, use [`collect_market_updates`]:
 
 ```python
-from backtide.live import collect_market_updates, PaperTradingSession
+from backtide.live import collect_market_updates, Session
 from backtide.strategies import BuyAndHold
 
-session = PaperTradingSession(strategy=BuyAndHold())
+session = Session(strategy=BuyAndHold())
 
 updates = collect_market_updates(
     "binance",
@@ -217,15 +221,15 @@ The collector always has both an event limit and a timeout. A timeout returns th
 events received so far instead of leaving the caller blocked indefinitely.
 
 To run continuously from Python, compose [`LiveMarketFeed`] with
-[`PaperTradingSession`]. This is the same public API used by the CLI and the
+[`Session`]. This is the same public API used by the CLI and the
 application:
 
 ```python
-from backtide.live import LiveMarketFeed, PaperTradingSession
+from backtide.live import LiveMarketFeed, Session
 from backtide.strategies import BuyAndHold
 
 feed = LiveMarketFeed("kraken", ["BTC-USD"], interval="1m")
-session = PaperTradingSession(strategy=BuyAndHold())
+session = Session(strategy=BuyAndHold())
 
 try:
     while True:
@@ -252,19 +256,19 @@ backoff.
 ## Candle and fill semantics
 
 - Provider payloads are normalized to Backtide's canonical symbols and Unix
-  timestamps in seconds before they reach the paper engine.
+  timestamps in seconds before they reach the simulation engine.
 - Final candles are processed by default. Set `trade_on_partial=True` only when
   a strategy is designed to evaluate repeated updates to the same candle.
 - The session ignores stale or duplicate completed candles so a reconnect cannot
   trade the same bar twice.
-- Market orders are paper-filled from the current candle with configured slippage
+- Market orders are simulated from the current candle with configured slippage
   and commission. Cash, positions, realized PnL, unrealized PnL, and equity are
   updated together.
 - When margin is disabled, a strategy-generated buy is reduced when necessary to
   leave room for slippage and commission. An explicitly submitted oversized order
   is still rejected as `insufficient cash` instead of being changed silently.
 - `allow_short` and `allow_margin` are off by default. Orders that violate the
-  configured account rules are rejected with a reason in [`PaperFill`].
+  configured account rules are rejected with a reason in [`SessionFill`].
 - `allowed_order_types` controls which market, limit, stop, trailing, settlement,
   and cancellation requests the session accepts.
 - With `partial_fills=True`, a fill is capped at `max_volume_participation` of the
@@ -275,6 +279,6 @@ backoff.
   benchmark and therefore are not offered by the live setup.
 - `max_history` bounds the bars retained per symbol for strategy evaluation.
 
-Use [`PaperTradingSession.snapshot`](../../api/live/papertradingsession.md) whenever you need
+Use [`Session.snapshot`](../../api/live/session.md) whenever you need
 the latest read-only account view without processing another market event. It returns a
-[`PaperTradingSnapshot`](../../api/models/live/papertradingsnapshot.md).
+[`SessionSnapshot`](../../api/models/live/sessionsnapshot.md).

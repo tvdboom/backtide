@@ -64,7 +64,7 @@ the terminal with:
     backtide launch
 
 The app provides a graphical interface for configuring experiments, visualizing
-results, managing stored data, and running live paper-trading sessions. No Node.js
+results, managing stored data, and running live sessions. No Node.js
 installation is required. Read more in the [user guide][application].
 
 <br>
@@ -86,7 +86,7 @@ Run `backtide --help` to see all available commands.
 Import backtide in any Python script or notebook for full programmatic control.
 
 ```pycon
-from backtide.backtest import run_experiment
+from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig, GeneralExpConfig
 from backtide.data import resolve_profiles, download_bars
 from backtide.storage import query_bars
 from backtide.strategies import MultiBollingerRotation
@@ -97,11 +97,10 @@ result = download_bars(profiles)
 data = query_bars("AAPL")
 print(data.head())
 
-results = run_experiment(
-    name="test experiment",
-    symbols=["AAPL", "MSFT"],
-    interval="1d",
-    strategies=[MultiBollingerRotation()],
+config = ExperimentConfig(
+    general=GeneralExpConfig(name="test experiment"),
+    data=DataExpConfig(symbols=["AAPL", "MSFT"], interval="1d"),
 )
+results = Experiment(config, strategies=[MultiBollingerRotation()]).run()
 print(results)
 ```

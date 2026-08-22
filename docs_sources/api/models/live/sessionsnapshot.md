@@ -1,7 +1,7 @@
-# PaperTradingSnapshot
+# SessionSnapshot
 ----------------------
 
-:: backtide.live:PaperTradingSnapshot
+:: backtide.live:SessionSnapshot
     :: signature
     :: head
     :: table:

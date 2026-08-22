@@ -71,7 +71,7 @@ describe('App theme control', () => {
     const labels = wrapper.findAll('.nav-label').map(label => label.text())
     expect(labels).toEqual(['Overview', 'Backtest', 'Live', 'Library', 'Data'])
     expect(wrapper.text()).toContain('New experiment')
-    expect(wrapper.text()).toContain('Paper trading')
+    expect(wrapper.text()).toContain('Live session')
     expect(wrapper.text()).toContain('Strategies')
     expect(wrapper.text()).toContain('Indicators')
     expect(wrapper.text()).toContain('Metrics')
@@ -89,8 +89,8 @@ describe('App theme control', () => {
       'New experiment': 'backtest/experiment',
       Results: 'backtest/results',
       Analysis: 'backtest/plots',
-      'Paper trading': 'live/paper_trading',
-      'Session history': 'live/paper_trading',
+      'Live session': 'live/sessions',
+      'Session history': 'live/sessions',
       Strategies: 'library/strategies',
       Indicators: 'library/indicators',
       Metrics: 'library/metrics',
@@ -140,7 +140,7 @@ describe('App theme control', () => {
     const results = wrapper.findAll('nav button')
       .find(button => button.text().includes('Results'))
     await results.trigger('click')
-    const liveSession = wrapper.get('[aria-label="Open active paper trading session"]')
+    const liveSession = wrapper.get('[aria-label="Open active live session"]')
     expect(liveSession.text()).toContain('Session live')
     expect(liveSession.get('span').classes()).toContain('online')
     const actions = wrapper.get('.topbar-actions').element.children
@@ -160,7 +160,7 @@ describe('App theme control', () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    const replay = wrapper.get('[aria-label="Open active paper trading session"]')
+    const replay = wrapper.get('[aria-label="Open active live session"]')
     expect(replay.text()).toContain('Replay')
     expect(replay.text()).not.toContain('complete')
     expect(replay.get('span').classes()).not.toContain('online')

@@ -1,11 +1,12 @@
-//! Paper-trading session configuration.
+//! Live simulated-session configuration.
 
 use crate::backtest::models::OrderType;
 use crate::data::models::Currency;
+use crate::metrics::selection::MetricSelection;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Configuration for a paper-trading session.
+/// Configuration for a live simulated session.
 ///
 /// Attributes
 /// ----------
@@ -46,7 +47,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// maintenance_margin : float, default=25
 ///     Minimum equity percentage maintained against gross exposure. Breaches
-///     trigger deterministic paper liquidation.
+///     trigger deterministic simulated liquidation.
 ///
 /// margin_interest : float, default=0
 ///     Annual percentage charged on negative base-currency cash.
@@ -62,7 +63,7 @@ use serde::{Deserialize, Serialize};
 ///     the guard.
 ///
 /// allowed_order_types : list[str | OrderType], default=all order types
-///     Order types accepted by the paper broker.
+///     Order types accepted by the simulation broker.
 ///
 /// partial_fills : bool, default=False
 ///     Whether fills are capped by `max_volume_participation`.
@@ -70,22 +71,23 @@ use serde::{Deserialize, Serialize};
 /// max_volume_participation : float, default=100
 ///     Maximum percentage of a candle's volume available to one simulated fill.
 ///
-/// metrics : list[str]
-///     Built-in performance metric keys maintained during the session.
+/// metrics : list[str | BaseMetric | dict[str, BaseMetric]]
+///     Built-in metric keys or custom Python metric instances maintained during the session.
+///     Python instances are retained in memory while serialized configurations contain names.
 ///
 /// risk_free_rate : float, default=0
 ///     Annual risk-free rate used by risk-adjusted performance metrics.
 ///
 /// See Also
 /// --------
-/// - backtide.live:PaperTradingSession
+/// - backtide.live:Session
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.live import PaperTradingConfig
+/// from backtide.live import SessionConfig
 ///
-/// config = PaperTradingConfig(
+/// config = SessionConfig(
 ///     initial_cash=25_000,
 ///     commission_pct=0.1,
 ///     slippage=0.05,
@@ -94,7 +96,7 @@ use serde::{Deserialize, Serialize};
 /// ```
 #[pyclass(get_all, set_all, eq, from_py_object, module = "backtide.live")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PaperTradingConfig {
+pub struct SessionConfig {
     /// Starting balance in the base currency.
     pub initial_cash: f64,
 
@@ -143,7 +145,7 @@ pub struct PaperTradingConfig {
     /// Drawdown percentage that halts exposure-increasing orders; zero disables it.
     pub max_drawdown: f64,
 
-    /// Order types accepted by the paper broker.
+    /// Order types accepted by the simulation broker.
     pub allowed_order_types: Vec<OrderType>,
 
     /// Whether candle volume constrains fill quantity.
@@ -152,14 +154,14 @@ pub struct PaperTradingConfig {
     /// Maximum percentage of candle volume available to one fill.
     pub max_volume_participation: f64,
 
-    /// Built-in metric keys maintained during the session.
-    pub metrics: Vec<String>,
+    /// Built-in metric keys and custom metrics maintained during the session.
+    pub metrics: MetricSelection,
 
     /// Annual risk-free rate used by risk-adjusted metrics.
     pub risk_free_rate: f64,
 }
 
-impl Default for PaperTradingConfig {
+impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             initial_cash: 100_000.0,
@@ -192,7 +194,7 @@ impl Default for PaperTradingConfig {
             ],
             partial_fills: false,
             max_volume_participation: 100.0,
-            metrics: vec![
+            metrics: MetricSelection::from_names(vec![
                 "total_return".to_owned(),
                 "pnl".to_owned(),
                 "final_equity".to_owned(),
@@ -202,14 +204,14 @@ impl Default for PaperTradingConfig {
                 "sharpe".to_owned(),
                 "sortino".to_owned(),
                 "max_dd".to_owned(),
-            ],
+            ]),
             risk_free_rate: 0.0,
         }
     }
 }
 
 #[pymethods]
-impl PaperTradingConfig {
+impl SessionConfig {
     #[classattr]
     const __RUST_DATACLASS__: bool = true;
 
@@ -231,10 +233,10 @@ impl PaperTradingConfig {
         borrow_rate: "float" = 0.0,
         max_position_size: "float" = 100.0,
         max_drawdown: "float" = 0.0,
-        allowed_order_types: "list[str | OrderType]" = PaperTradingConfig::default().allowed_order_types,
+        allowed_order_types: "list[str | OrderType]" = SessionConfig::default().allowed_order_types,
         partial_fills: "bool" = false,
         max_volume_participation: "float" = 100.0,
-        metrics: "list[str]" = PaperTradingConfig::default().metrics,
+        metrics: "list[str | BaseMetric | dict[str, BaseMetric]]" = SessionConfig::default().metrics,
         risk_free_rate: "float" = 0.0,
     ))]
     fn new(
@@ -257,7 +259,7 @@ impl PaperTradingConfig {
         allowed_order_types: Vec<OrderType>,
         partial_fills: bool,
         max_volume_participation: f64,
-        metrics: Vec<String>,
+        metrics: MetricSelection,
         risk_free_rate: f64,
     ) -> Self {
         Self {
@@ -287,7 +289,7 @@ impl PaperTradingConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "PaperTradingConfig(initial_cash={}, base_currency={}, allow_short={}, allow_margin={})",
+            "SessionConfig(initial_cash={}, base_currency={}, allow_short={}, allow_margin={})",
             self.initial_cash, self.base_currency, self.allow_short, self.allow_margin,
         )
     }

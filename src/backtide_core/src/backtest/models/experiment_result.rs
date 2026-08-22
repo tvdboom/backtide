@@ -363,7 +363,7 @@ impl RunResult {
 /// See Also
 /// --------
 /// - backtide.backtest:ExperimentConfig
-/// - backtide.backtest:run_experiment
+/// - backtide.backtest:Experiment
 /// - backtide.backtest:RunResult
 #[pyclass(get_all, skip_from_py_object, module = "backtide.backtest")]
 #[derive(Clone, Debug, Serialize, Deserialize)]

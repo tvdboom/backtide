@@ -1,17 +1,17 @@
 # Results
 
-[`run_experiment`] returns an [`ExperimentResult`]. It contains experiment-level status and
+[`Experiment.run`][Experiment] returns an [`ExperimentResult`]. It contains experiment-level status and
 warnings plus one [`RunResult`] for each strategy (and the benchmark, when configured).
 
 ```python
-from backtide.backtest import run_experiment
+from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig, GeneralExpConfig
 from backtide.strategies import BuyAndHold
 
-result = run_experiment(
-    name="Inspect Apple results",
-    symbols=["AAPL"],
-    strategies=[BuyAndHold()],
+config = ExperimentConfig(
+    general=GeneralExpConfig(name="Inspect Apple results"),
+    data=DataExpConfig(symbols=["AAPL"]),
 )
+result = Experiment(config, strategies=[BuyAndHold()]).run()
 
 print(result.status, result.warnings)
 for run in result.strategies:

@@ -24,7 +24,6 @@ from backtide.core.backtest import (
     ExperimentStatus,
     GeneralExpConfig,
     IndicatorExpConfig,
-    MetricExpConfig,
     Order,
     OrderRecord,
     OrderStatus,
@@ -35,10 +34,10 @@ from backtide.core.backtest import (
     State,
     StrategyExpConfig,
     Trade,
+    _run_experiment,
     experiment_log,
     request_abort,
 )
-from backtide.core.backtest import run_experiment as _run_experiment
 from backtide.core.storage import delete_experiment as _delete_experiment
 from backtide.core.storage import query_experiments as _query_experiments
 from backtide.utils.utils import _to_list, _to_pandas
@@ -71,13 +70,8 @@ def _cleanup_experiment(experiment_id: str | None, name: str):
         pass
 
 
-def run_experiment(
-    config: ExperimentConfig | None = None,
-    *,
-    verbose: bool = True,
-    **kwargs: Any,
-) -> ExperimentResult:
-    """Run a backtest experiment with the provided configuration.
+class Experiment:
+    """Configure and run one historical backtest experiment.
 
     Performs the full pipeline end-to-end:
 
@@ -92,61 +86,54 @@ def run_experiment(
 
     Parameters
     ----------
-    config : [ExperimentConfig] | None = None
-        The complete experiment configuration. If `None`, the configuration
-        must be provided through `kwargs`. Missing parameters are filled with
-        the default values.
+    config : [ExperimentConfig] | None, default=None
+        Serializable data, portfolio, execution, engine, and metric settings.
+        Uses defaults when omitted.
 
-    verbose : bool, default=True
-        Whether to display a progress bar while running.
+    strategies : str | object | dict[str, object] | list | None, default=None
+        Runtime strategies for this experiment. Accepts stored names, strategy
+        instances, explicit `dict[name, instance]` mappings, or a list mixing
+        those forms. When omitted, uses the stored names in `config`.
 
-    **kwargs
-        Any combination of:
-
-        * Sub-config objects via keyword (`general`, `data`, `portfolio`,
-          `strategy`, `indicators`, `exchange`, `engine`).
-        * Flat keyword arguments matching any field of the sub-configs
-          (e.g., `name`, `symbols`, `interval`, `initial_cash`).
-
-        The `strategies`, `indicators`, and `metrics` keyword arguments additionally accept,
-        beyond a list of stored names, any of:
-
-        * A single string (name of a stored strategy / indicator).
-        * A [`BaseStrategy`] / [`BaseIndicator`] subclass instance (the class'
-          name is used as the display name).
-        * A `dict[str, instance]` mapping explicit names to instances.
-
-        Keyword arguments take precedence over the corresponding fields in the
-        `config` object. When a sub-config object and one of its flat fields are
-        both supplied, the flat field wins and the remaining values come from
-        the sub-config object.
-
-    Returns
-    -------
-    [ExperimentResult]
-        The aggregated result of the run.
+    indicators : str | object | dict[str, object] | list | None, default=None
+        Runtime indicators to compute in addition to strategy-required
+        indicators. Accepts the same forms as `strategies`. When omitted, uses
+        the stored names in `config`.
 
     Examples
     --------
     ```pycon
-    from backtide.backtest import run_experiment
+    from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig
     from backtide.strategies import BuyAndHold
 
-    result = run_experiment(
-        name="Apple and Microsoft",
-        symbols=["AAPL", "MSFT"],
-        interval="1d",
-        strategies=[BuyAndHold()],
+    config = ExperimentConfig(
+        data=DataExpConfig(
+            symbols=["AAPL", "MSFT"],
+            interval="1d",
+        )
     )
+    result = Experiment(config, strategies=[BuyAndHold()]).run()
     print(result)
     ```
     """
 
-    def resolve_polymorphic_param(values: Any) -> tuple[list[str], dict[str, Any]]:
+    def __init__(
+        self,
+        config: ExperimentConfig | None = None,
+        strategies: Any = None,
+        indicators: Any = None,
+    ) -> None:
+        self.config = config or ExperimentConfig()
+        self.strategies = strategies
+        self.indicators = indicators
+
+    @staticmethod
+    def _resolve_runtime_param(values: Any) -> tuple[list[str], dict[str, Any]]:
         """Resolve the list of stored strategies/indicators."""
         elements: list[str] = []
         overrides: dict[str, Any] = {}
-        for elem in _to_list(values):
+        values = [values] if isinstance(values, dict) else _to_list(values)
+        for elem in values:
             if isinstance(elem, str):
                 elements.append(elem)
             elif isinstance(elem, dict):
@@ -159,134 +146,53 @@ def run_experiment(
 
         return elements, overrides
 
-    kwargs = kwargs.copy()
-    cfg = config or ExperimentConfig()
-
-    def get(key: str, section: str) -> Any:
-        """Resolve one config field, giving explicit flat kwargs precedence."""
-        # `indicators` is both a section name and its sole field name. A typed
-        # section object must be unwrapped; every other explicit value is the
-        # flat field override and may intentionally be falsy or `None`.
-        section_types = (IndicatorExpConfig, MetricExpConfig)
-        if key in kwargs and not (key == section and isinstance(kwargs[key], section_types)):
-            return kwargs.pop(key)
-
-        section_config = kwargs.get(section)
-        if section_config is not None:
-            return getattr(section_config, key)
-
-        return getattr(getattr(cfg, section), key)
-
-    strategies, strategy_overrides = resolve_polymorphic_param(get("strategies", "strategy"))
-    indicators, indicator_overrides = resolve_polymorphic_param(get("indicators", "indicators"))
-    metrics, metric_overrides = resolve_polymorphic_param(get("metrics", "metrics"))
-
-    general = GeneralExpConfig(
-        name=get("name", "general").strip() or str(uuid.uuid4())[:8],
-        icon=get("icon", "general"),
-        tags=get("tags", "general"),
-        description=get("description", "general"),
-    )
-    kwargs.pop("general", None)
-
-    data = DataExpConfig(
-        instrument_type=get("instrument_type", "data"),
-        symbols=get("symbols", "data"),
-        full_history=get("full_history", "data"),
-        start_date=get("start_date", "data"),
-        end_date=get("end_date", "data"),
-        interval=get("interval", "data"),
-    )
-    kwargs.pop("data", None)
-
-    portfolio = PortfolioExpConfig(
-        initial_cash=get("initial_cash", "portfolio"),
-        base_currency=get("base_currency", "portfolio"),
-        starting_positions=get("starting_positions", "portfolio"),
-    )
-    kwargs.pop("portfolio", None)
-
-    strategy = StrategyExpConfig(
-        benchmark=get("benchmark", "strategy"),
-        strategies=strategies,
-    )
-    kwargs.pop("strategy", None)
-
-    indicators_config = IndicatorExpConfig(indicators=indicators)
-    kwargs.pop("indicators", None)
-
-    metrics_config = MetricExpConfig(metrics=metrics)
-    kwargs.pop("metrics", None)
-
-    exchange = ExchangeExpConfig(
-        commission_type=get("commission_type", "exchange"),
-        commission_pct=get("commission_pct", "exchange"),
-        commission_fixed=get("commission_fixed", "exchange"),
-        slippage=get("slippage", "exchange"),
-        allowed_order_types=get("allowed_order_types", "exchange"),
-        partial_fills=get("partial_fills", "exchange"),
-        allow_margin=get("allow_margin", "exchange"),
-        max_leverage=get("max_leverage", "exchange"),
-        initial_margin=get("initial_margin", "exchange"),
-        maintenance_margin=get("maintenance_margin", "exchange"),
-        margin_interest=get("margin_interest", "exchange"),
-        raise_on_margin_limit=get("raise_on_margin_limit", "exchange"),
-        allow_short_selling=get("allow_short_selling", "exchange"),
-        borrow_rate=get("borrow_rate", "exchange"),
-        raise_on_short_violation=get("raise_on_short_violation", "exchange"),
-        max_position_size=get("max_position_size", "exchange"),
-        conversion_mode=get("conversion_mode", "exchange"),
-        conversion_threshold=get("conversion_threshold", "exchange"),
-        conversion_period=get("conversion_period", "exchange"),
-        conversion_interval=get("conversion_interval", "exchange"),
-    )
-    kwargs.pop("exchange", None)
-
-    engine = EngineExpConfig(
-        warmup_period=get("warmup_period", "engine"),
-        trade_on_close=get("trade_on_close", "engine"),
-        risk_free_rate=get("risk_free_rate", "engine"),
-        exclusive_orders=get("exclusive_orders", "engine"),
-        empty_bar_policy=get("empty_bar_policy", "engine"),
-    )
-    kwargs.pop("engine", None)
-
-    cfg = ExperimentConfig(
-        general=general,
-        data=data,
-        portfolio=portfolio,
-        strategy=strategy,
-        indicators=indicators_config,
-        metrics=metrics_config,
-        exchange=exchange,
-        engine=engine,
-    )
-
-    if kwargs:
-        raise ValueError(f"Unknown keyword arguments: {', '.join(kwargs)}")
-
-    if not cfg.data.symbols:
-        raise ValueError("Experiment configuration has no symbols.")
-
-    if not cfg.strategy.strategies and not strategy_overrides:
-        raise ValueError("Experiment configuration has no strategies.")
-
-    try:
-        result = _run_experiment(
-            cfg,
-            verbose,
-            strategy_overrides,
-            indicator_overrides,
-            metric_overrides,
+    def run(self, *, verbose: bool = True) -> ExperimentResult:
+        """Run the configured experiment and return its persisted result."""
+        strategy_values = (
+            self.config.strategy.strategies if self.strategies is None else self.strategies
         )
-    except KeyboardInterrupt:
-        _cleanup_experiment(None, cfg.general.name)
-        raise ExperimentAborted("Experiment aborted by user.") from None
+        indicator_values = (
+            self.config.indicators.indicators if self.indicators is None else self.indicators
+        )
+        strategies, strategy_overrides = self._resolve_runtime_param(strategy_values)
+        indicators, indicator_overrides = self._resolve_runtime_param(indicator_values)
+        general = self.config.general
+        config = ExperimentConfig(
+            general=GeneralExpConfig(
+                name=general.name.strip() or str(uuid.uuid4())[:8],
+                icon=general.icon,
+                tags=general.tags,
+                description=general.description,
+            ),
+            data=self.config.data,
+            portfolio=self.config.portfolio,
+            strategy=StrategyExpConfig(
+                benchmark=self.config.strategy.benchmark,
+                strategies=strategies,
+            ),
+            indicators=IndicatorExpConfig(indicators=indicators),
+            metrics=self.config.metrics,
+            exchange=self.config.exchange,
+            engine=self.config.engine,
+        )
 
-    # If an abort was signaled while the core was running (e.g., from the UI),
-    # remove whatever was persisted and raise.
-    if _abort_event is not None and _abort_event.is_set():
-        _cleanup_experiment(result.experiment_id, cfg.general.name)
-        raise ExperimentAborted("Experiment aborted by user.")
+        if not config.data.symbols:
+            raise ValueError("Experiment configuration has no symbols.")
+        if not config.strategy.strategies and not strategy_overrides:
+            raise ValueError("Experiment configuration has no strategies.")
 
-    return result
+        try:
+            result = _run_experiment(
+                config,
+                verbose,
+                strategy_overrides,
+                indicator_overrides,
+            )
+        except KeyboardInterrupt:
+            _cleanup_experiment(None, config.general.name)
+            raise ExperimentAborted("Experiment aborted by user.") from None
+
+        if _abort_event is not None and _abort_event.is_set():
+            _cleanup_experiment(result.experiment_id, config.general.name)
+            raise ExperimentAborted("Experiment aborted by user.")
+        return result

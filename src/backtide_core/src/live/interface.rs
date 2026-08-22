@@ -1,17 +1,16 @@
-//! PyO3 interface for live feeds and paper-trading sessions.
+//! PyO3 interface for live feeds and simulated sessions.
 
 use crate::backtest::models::{Order, State};
 use crate::data::models::{Bar, Instrument, InstrumentType, Interval, Provider};
 use crate::data::providers::{Binance, Coinbase, DataProvider, Kraken};
 use crate::indicators::interface::_indicator_deterministic_name;
 use crate::indicators::utils::compute_indicators;
-use crate::live::engine::PaperBroker;
-use crate::live::models::{
-    MarketUpdate, PaperTradingConfig, PaperTradingSnapshot, PaperTradingUpdate,
-};
+use crate::live::engine::SessionBroker;
+use crate::live::models::{MarketUpdate, SessionConfig, SessionSnapshot, SessionUpdate};
 use crate::live::providers::{
     support_message, ExchangeMarketDataStream, LiveStreamError, MarketDataStream,
 };
+use crate::metrics::utils::compute_custom_metric;
 use crate::strategies::interface::BuiltinStrategy;
 use crate::strategies::utils::IndicatorView;
 use crate::utils::python::{dict_to_dataframe, to_python};
@@ -54,7 +53,7 @@ use std::time::{Duration, Instant};
 /// See Also
 /// --------
 /// - backtide.live:collect_market_updates
-/// - backtide.live:PaperTradingSession
+/// - backtide.live:Session
 ///
 /// Examples
 /// --------
@@ -269,11 +268,11 @@ impl LiveMarketFeed {
     }
 }
 
-/// A stateful paper-trading account with optional strategy evaluation.
+/// A stateful simulated account with optional strategy evaluation.
 ///
 /// Parameters
 /// ----------
-/// config : [PaperTradingConfig] | None, default=None
+/// config : [SessionConfig] | None, default=None
 ///     Execution, fee, and risk settings. Uses defaults when omitted.
 ///
 /// strategy : [BaseStrategy] | None, default=None
@@ -288,14 +287,14 @@ impl LiveMarketFeed {
 /// See Also
 /// --------
 /// - backtide.live:MarketUpdate
-/// - backtide.live:PaperTradingConfig
+/// - backtide.live:SessionConfig
 ///
 /// Examples
 /// --------
 /// ```pycon
-/// from backtide.live import MarketUpdate, PaperTradingSession
+/// from backtide.live import MarketUpdate, Session
 ///
-/// session = PaperTradingSession()
+/// session = Session()
 /// update = session.on_bar(
 ///     MarketUpdate(
 ///         "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
@@ -305,26 +304,35 @@ impl LiveMarketFeed {
 /// print(update.snapshot.equity)
 /// ```
 #[pyclass(module = "backtide.live")]
-pub struct PaperTradingSession {
-    broker: PaperBroker,
-    config: PaperTradingConfig,
+pub struct Session {
+    broker: SessionBroker,
+    config: SessionConfig,
     strategy: Option<Py<PyAny>>,
     indicator_objects: Vec<(String, Py<PyAny>)>,
+    metric_objects: Vec<(String, Py<PyAny>)>,
     histories: HashMap<String, VecDeque<Bar>>,
 }
 
 #[pymethods]
-impl PaperTradingSession {
+impl Session {
     #[new]
     #[pyo3(signature = (config=None, strategy=None, indicators=None))]
     fn new(
         py: Python<'_>,
-        config: Option<PaperTradingConfig>,
+        config: Option<SessionConfig>,
         strategy: Option<Py<PyAny>>,
         indicators: Option<Vec<Py<PyAny>>>,
     ) -> PyResult<Self> {
         let config = config.unwrap_or_default();
-        let broker = PaperBroker::new(config.clone()).map_err(PyValueError::new_err)?;
+        let broker = SessionBroker::new(config.clone()).map_err(PyValueError::new_err)?;
+        let mut metric_implementations = config.metrics.implementations(py);
+        let metric_objects = config
+            .metrics
+            .iter()
+            .filter_map(|name| {
+                metric_implementations.remove(name).map(|value| (name.clone(), value))
+            })
+            .collect();
         let mut indicator_objects = collect_required_indicators(py, strategy.as_ref())?;
         let mut seen =
             indicator_objects.iter().map(|(name, _)| name.clone()).collect::<HashSet<_>>();
@@ -340,6 +348,7 @@ impl PaperTradingSession {
             config,
             strategy,
             indicator_objects,
+            metric_objects,
             histories: HashMap::new(),
         })
     }
@@ -395,16 +404,16 @@ impl PaperTradingSession {
     ///
     /// Returns
     /// -------
-    /// [PaperTradingUpdate]
+    /// [SessionUpdate]
     ///     Fills plus a complete mark-to-market account snapshot.
     ///
     /// Examples
     /// --------
     /// ```pycon
     /// from backtide.backtest import Order
-    /// from backtide.live import MarketUpdate, PaperTradingSession
+    /// from backtide.live import MarketUpdate, Session
     ///
-    /// session = PaperTradingSession()
+    /// session = Session()
     /// market = MarketUpdate(
     ///     "BTC-USD", "1m", 1_700_000_000, 1_700_000_060,
     ///     100.0, 102.0, 99.0, 101.0,
@@ -418,7 +427,7 @@ impl PaperTradingSession {
         py: Python<'_>,
         market: MarketUpdate,
         orders: Option<Vec<Order>>,
-    ) -> PyResult<PaperTradingUpdate> {
+    ) -> PyResult<SessionUpdate> {
         let explicit_orders = orders.unwrap_or_default();
         self.record_history(&market);
         let (mut fills, processed) = self.broker.begin_update(&market);
@@ -441,10 +450,10 @@ impl PaperTradingSession {
             HashMap::new()
         };
 
-        Ok(PaperTradingUpdate {
+        Ok(SessionUpdate {
             market,
             fills,
-            snapshot: self.broker.snapshot(),
+            snapshot: self.snapshot_with_metrics()?,
             orders_submitted,
             processed,
             indicators,
@@ -455,19 +464,19 @@ impl PaperTradingSession {
     ///
     /// Returns
     /// -------
-    /// [PaperTradingSnapshot]
+    /// [SessionSnapshot]
     ///     Current cash, positions, prices, and profit-and-loss values.
     ///
     /// Examples
     /// --------
     /// ```pycon
-    /// from backtide.live import PaperTradingSession
+    /// from backtide.live import Session
     ///
-    /// snapshot = PaperTradingSession().snapshot()
+    /// snapshot = Session().snapshot()
     /// print(snapshot.equity)
     /// ```
-    fn snapshot(&self) -> PaperTradingSnapshot {
-        self.broker.snapshot()
+    fn snapshot(&self) -> PyResult<SessionSnapshot> {
+        self.snapshot_with_metrics()
     }
 
     /// Seed strategy and indicator history without trading or changing the account.
@@ -493,7 +502,7 @@ impl PaperTradingSession {
     fn __repr__(&self) -> String {
         let snapshot = self.broker.snapshot();
         format!(
-            "PaperTradingSession(equity={}, positions={}, open_orders={}, processed_bars={})",
+            "Session(equity={}, positions={}, open_orders={}, processed_bars={})",
             snapshot.equity,
             snapshot.portfolio.positions.len(),
             snapshot.portfolio.orders.len(),
@@ -502,7 +511,17 @@ impl PaperTradingSession {
     }
 }
 
-impl PaperTradingSession {
+impl Session {
+    fn snapshot_with_metrics(&self) -> PyResult<SessionSnapshot> {
+        let mut snapshot = self.broker.snapshot();
+        for (name, metric) in &self.metric_objects {
+            let value =
+                compute_custom_metric(metric, self.broker.equity_curve(), self.broker.trades())?;
+            snapshot.metrics.insert(name.clone(), value);
+        }
+        Ok(snapshot)
+    }
+
     fn record_history(&mut self, market: &MarketUpdate) {
         if !market.is_valid_bar() {
             return;
@@ -657,7 +676,7 @@ impl PaperTradingSession {
 /// See Also
 /// --------
 /// - backtide.live:LiveMarketFeed
-/// - backtide.live:PaperTradingSession
+/// - backtide.live:Session
 ///
 /// Examples
 /// --------
@@ -1474,10 +1493,10 @@ mod tests {
     }
 
     #[test]
-    fn built_in_strategy_can_drive_paper_session() {
+    fn built_in_strategy_can_drive_live_session() {
         Python::attach(|py| {
             let strategy = Py::new(py, BuyAndHold::new(Some("BTC-USD".to_owned())))?.into_any();
-            let mut session = PaperTradingSession::new(py, None, Some(strategy), None)?;
+            let mut session = Session::new(py, None, Some(strategy), None)?;
             let market = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
@@ -1505,17 +1524,17 @@ mod tests {
     }
 
     #[test]
-    fn buy_and_hold_reserves_cash_for_paper_fees() {
+    fn buy_and_hold_reserves_cash_for_simulated_fees() {
         Python::attach(|py| {
             let strategy = Py::new(py, BuyAndHold::new(Some("BTC-USD".to_owned())))?.into_any();
-            let config = PaperTradingConfig {
+            let config = SessionConfig {
                 initial_cash: 100.0,
                 commission_pct: 0.1,
                 commission_fixed: 0.5,
                 slippage: 0.1,
-                ..PaperTradingConfig::default()
+                ..SessionConfig::default()
             };
-            let mut session = PaperTradingSession::new(py, Some(config), Some(strategy), None)?;
+            let mut session = Session::new(py, Some(config), Some(strategy), None)?;
             let market = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
@@ -1556,14 +1575,14 @@ mod tests {
     fn buy_and_hold_spends_base_cash_when_quote_currency_is_cheaper() {
         Python::attach(|py| {
             let strategy = Py::new(py, BuyAndHold::new(Some("BTC-USD".to_owned())))?.into_any();
-            let config = PaperTradingConfig {
+            let config = SessionConfig {
                 initial_cash: 10_000.0,
                 base_currency: Currency::EUR,
                 commission_pct: 0.05,
                 slippage: 0.01,
-                ..PaperTradingConfig::default()
+                ..SessionConfig::default()
             };
-            let mut session = PaperTradingSession::new(py, Some(config), Some(strategy), None)?;
+            let mut session = Session::new(py, Some(config), Some(strategy), None)?;
             session.set_exchange_rate("USD", "EUR", 0.86, 1_060)?;
             let market = MarketUpdate {
                 provider: "mock".to_owned(),
@@ -1597,14 +1616,14 @@ mod tests {
     fn crypto_quote_is_converted_and_exact_cash_fit_is_filled() {
         Python::attach(|py| {
             let strategy = Py::new(py, BuyAndHold::new(Some("AAVE-ETH".to_owned())))?.into_any();
-            let config = PaperTradingConfig {
+            let config = SessionConfig {
                 initial_cash: 10_000.0,
                 base_currency: Currency::EUR,
                 commission_pct: 0.05,
                 slippage: 0.01,
-                ..PaperTradingConfig::default()
+                ..SessionConfig::default()
             };
-            let mut session = PaperTradingSession::new(py, Some(config), Some(strategy), None)?;
+            let mut session = Session::new(py, Some(config), Some(strategy), None)?;
             session.set_exchange_rate("ETH", "EUR", 4_000.0, 1_060)?;
             let market = MarketUpdate {
                 provider: "mock".to_owned(),
@@ -1646,7 +1665,7 @@ mod tests {
     #[test]
     fn history_replaces_partial_and_ignores_stale_bars() {
         Python::attach(|py| {
-            let mut session = PaperTradingSession::new(py, None, None, None)?;
+            let mut session = Session::new(py, None, None, None)?;
             let mut current = MarketUpdate {
                 provider: "mock".to_owned(),
                 symbol: "BTC-USD".to_owned(),
@@ -1699,7 +1718,7 @@ mod tests {
     fn warmup_seeds_monitoring_indicators_without_changing_account() {
         Python::attach(|py| {
             let indicator = Py::new(py, SimpleMovingAverage::new(2))?.into_any();
-            let mut session = PaperTradingSession::new(py, None, None, Some(vec![indicator]))?;
+            let mut session = Session::new(py, None, None, Some(vec![indicator]))?;
             let mut first = mock_update(1_000);
             first.close = 1.0;
             first.open = 1.0;
@@ -1712,7 +1731,7 @@ mod tests {
             second.low = 2.0;
 
             assert_eq!(session.warm_up(vec![first, second]), 2);
-            let before = session.snapshot();
+            let before = session.snapshot()?;
             assert_eq!(before.processed_bars, 0);
             assert_eq!(before.equity, 100_000.0);
 

@@ -1,7 +1,7 @@
-//! Live market data and deterministic paper trading.
+//! Live market data and deterministic simulated execution.
 
 use crate::live::interface::{
-    collect_market_updates, list_live_instruments, LiveMarketFeed, PaperTradingSession,
+    collect_market_updates, list_live_instruments, LiveMarketFeed, Session,
 };
 use crate::live::models::*;
 use pyo3::prelude::*;
@@ -17,11 +17,11 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_class::<MarketUpdate>()?;
     m.add_class::<LiveMarketFeed>()?;
-    m.add_class::<PaperFill>()?;
-    m.add_class::<PaperTradingConfig>()?;
-    m.add_class::<PaperTradingSession>()?;
-    m.add_class::<PaperTradingSnapshot>()?;
-    m.add_class::<PaperTradingUpdate>()?;
+    m.add_class::<SessionFill>()?;
+    m.add_class::<SessionConfig>()?;
+    m.add_class::<Session>()?;
+    m.add_class::<SessionSnapshot>()?;
+    m.add_class::<SessionUpdate>()?;
 
     m.add_function(wrap_pyfunction!(collect_market_updates, &m)?)?;
     m.add_function(wrap_pyfunction!(list_live_instruments, &m)?)?;

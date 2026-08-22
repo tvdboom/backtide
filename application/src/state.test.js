@@ -17,7 +17,7 @@ import {
   formatIntervalLabel,
   formatResultMetric,
   instrumentLogoUrl,
-  paperEquitySeries,
+  sessionEquitySeries,
   requestResultsOverview,
   resolvePage,
   symbolsForAnalysis
@@ -33,8 +33,8 @@ describe('live session transformations', () => {
     expect(flattenFills(updates, 2).map(fill => fill.order.symbol)).toEqual(['SOL-USD', 'ETH-USD'])
   })
 
-  it('prefers receive timestamps for the paper equity series', () => {
-    const series = paperEquitySeries([
+  it('prefers receive timestamps for the simulated equity series', () => {
+    const series = sessionEquitySeries([
       { market: { received_ts: 20, close_ts: 10 }, snapshot: { equity: 101000 } },
       { market: { close_ts: 30 }, snapshot: { equity: 102000 } }
     ])

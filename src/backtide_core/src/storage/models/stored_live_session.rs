@@ -1,4 +1,4 @@
-//! Persisted paper-trading or replay session metadata.
+//! Persisted live or replay session metadata.
 
 /// One live-session manifest stored in DuckDB.
 #[derive(Clone, Debug, PartialEq, Eq)]

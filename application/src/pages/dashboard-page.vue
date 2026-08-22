@@ -3,10 +3,10 @@
     <section class="hero-card">
       <div>
         <h2>Test the idea.<br><em>Trade the evidence.</em></h2>
-        <p>Build strategies, study market behavior, and move into paper trading from one focused workspace.</p>
+        <p>Build strategies, study market behavior, and move into live simulation from one focused workspace.</p>
         <div class="hero-actions">
           <button class="primary" @click="$emit('navigate', 'experiment')"><Beaker :size="17" /> New experiment</button>
-          <button class="secondary" @click="$emit('navigate', 'live')"><Radio :size="17" /> Start paper trading</button>
+          <button class="secondary" @click="$emit('navigate', 'live')"><Radio :size="17" /> Start live session</button>
         </div>
       </div>
       <div class="market-visual" aria-hidden="true">
@@ -58,7 +58,7 @@
     </section>
 
     <section class="panel dashboard-live-panel">
-      <div class="panel-header"><div><span class="eyebrow">Paper trading</span><h3>Recent live sessions</h3></div><button class="text-button" @click="$emit('navigate', 'live-history')">View all <ArrowUpRight :size="15" /></button></div>
+      <div class="panel-header"><div><span class="eyebrow">Live simulation</span><h3>Recent live sessions</h3></div><button class="text-button" @click="$emit('navigate', 'live-history')">View all <ArrowUpRight :size="15" /></button></div>
       <div v-if="loading" class="empty-state" role="status"><span class="spinner" /><p>Loading recent live sessions…</p></div>
       <div v-else-if="!loadError && !data?.sessions?.length" class="empty-state"><History/><p>No live sessions yet.</p><button class="secondary" @click="$emit('navigate', 'live')">Start your first</button></div>
       <button v-for="session in data?.sessions" :key="session.id" class="activity-row live-session-row" type="button" @click="openLiveSession(session)">
@@ -100,7 +100,7 @@ function sessionSymbols(session) {
   const symbols = session.config?.symbols || []
   return symbols.length ? symbols.join(', ') : session.config?.mode === 'replay' ? 'Replay session' : 'Live session'
 }
-function sessionMode(session) { return session.config?.mode === 'replay' ? 'Replay' : 'Live paper' }
+function sessionMode(session) { return session.config?.mode === 'replay' ? 'Replay' : 'Live' }
 function sessionStrategyNames(session) {
   return session.config?.strategies?.length
     ? session.config.strategies

@@ -15,7 +15,7 @@ The plotting functions are split into two groups by what they consume:
 **data plots** operate on raw market bars (and indicators / dividends) and
 are typically used **before** an experiment to explore the universe; **result
 plots** operate on the [`RunResult`] / [`ExperimentResult`] objects produced
-by [`run_experiment`] and are used to evaluate strategy performance **after**
+by [`Experiment.run`][Experiment] and are used to evaluate strategy performance **after**
 a run.
 
 ### Data analysis
@@ -45,7 +45,7 @@ plots above.
 ### Experiment results
 
 Use these to inspect a finished experiment. They take one or more
-[`RunResult`] objects (returned by [`run_experiment`] in
+[`RunResult`] objects (returned by [`Experiment.run`][Experiment] in
 `result.strategies` or by [`query_strategy_runs`]).
 
 | Plot | Multi-run? | Description |

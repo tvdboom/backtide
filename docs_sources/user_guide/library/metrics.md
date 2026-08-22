@@ -10,9 +10,46 @@ strategy, then drag them into the desired order. The first selected metric ranks
 and appears by name on the results overview. Sharpe ratio is first by default. The Metrics tab for
 each run shows every selected value in the same order.
 
-The catalog includes returns, PnL, CAGR, volatility, Sharpe, Sortino,
-maximum drawdown, Calmar, trade counts, win rate, profit factor, expectancy, average and extreme
-trades, payoff ratio, recovery factor, excess return, and benchmark alpha.
+Pass a built-in metric by its exact key, not its display name. For example, use
+`"ann_volatility"` rather than `"Annualized volatility"`. The complete built-in catalog is:
+
+| String key | Display name | Meaning |
+|------------|--------------|---------|
+| `total_return` | Total return | Net portfolio return over the experiment. |
+| `pnl` | Profit and loss | Final equity minus initial cash. |
+| `final_equity` | Final equity | Portfolio value at the final sample. |
+| `cagr` | CAGR | Compound annual growth rate. |
+| `ann_volatility` | Annualized volatility | Annualized standard deviation of returns. |
+| `sharpe` | Sharpe ratio | Annualized excess return per unit of volatility. |
+| `sortino` | Sortino ratio | Annualized excess return per unit of downside deviation. |
+| `max_dd` | Maximum drawdown | Largest fractional fall from a running equity peak. |
+| `calmar` | Calmar ratio | CAGR divided by absolute maximum drawdown. |
+| `n_trades` | Trades | Number of completed round-trip trades. |
+| `win_rate` | Win rate | Fraction of completed trades with positive PnL. |
+| `profit_factor` | Profit factor | Gross winning PnL divided by gross losing PnL. |
+| `expectancy` | Expectancy | Average PnL per completed trade. |
+| `avg_win` | Average win | Average PnL of profitable trades. |
+| `avg_loss` | Average loss | Average PnL of losing trades. |
+| `best_trade` | Best trade | Largest completed-trade PnL. |
+| `worst_trade` | Worst trade | Smallest completed-trade PnL. |
+| `payoff_ratio` | Payoff ratio | Average win divided by absolute average loss. |
+| `recovery_factor` | Recovery factor | Net PnL divided by absolute maximum drawdown amount. |
+| `excess_return` | Excess return | Return above the compounded risk-free rate. |
+| `alpha` | Alpha | Return above the selected benchmark over the shared window. |
+
+`ExperimentConfig()` selects `sharpe`, `total_return`, `pnl`, `max_dd`, `cagr`,
+`n_trades`, `win_rate`, `sortino`, `ann_volatility`, `final_equity`, `excess_return`,
+and `alpha` by default. The remaining built-ins are opt-in.
+
+You can also inspect the catalog programmatically. `MetricDefinition.key` is the exact value
+accepted in the `metrics` list on [`ExperimentConfig`] and [`SessionConfig`]:
+
+```python
+from backtide.metrics import list_builtin_metrics
+
+for metric in list_builtin_metrics():
+    print(metric.key, metric.name)
+```
 
 ## Custom Python metrics
 
@@ -46,15 +83,28 @@ and the returned value must convert to a finite `float`. Set `percentage = True`
 value is a fraction such as `0.12`, and set `higher_is_better = False` for metrics where the
 smallest value should be considered best.
 
-Saved metrics can be selected in the experiment builder or passed directly to
-[`run_experiment`]:
+Built-in keys and custom Python objects belong in the same config list. This is the only place
+metrics are specified: there is no separate metrics parameter on [`Experiment`] or [`Session`].
+Use a `dict[name, instance]` entry when you want an explicit persisted name; otherwise the custom
+class name is used. Serialization stores the resolved names while an in-memory run retains the
+Python implementations:
 
 ```python
-result = run_experiment(
-    symbols=["AAPL"],
-    strategies=[strategy],
-    metrics=[GainToPain(), "total_return", "sharpe"],
+from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig
+
+config = ExperimentConfig(
+    data=DataExpConfig(symbols=["AAPL"]),
+    metrics=["total_return", "sharpe", GainToPain()],
 )
+result = Experiment(config, strategies=[strategy]).run()
+```
+
+The live interface uses the same selection shape:
+
+```python
+from backtide.live import Session, SessionConfig
+
+session = Session(SessionConfig(metrics=["pnl", {"gain_to_pain": GainToPain()}]))
 ```
 
 See the [Gain to pain](../../examples/metrics/gain_to_pain.md) and

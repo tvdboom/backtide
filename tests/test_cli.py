@@ -14,8 +14,7 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 import pytest
 
-from backtide.cli import download, launch, main, start_live_session
-from backtide.cli import run_experiment as run_experiment_cmd
+from backtide.cli import download, launch, main, run_experiment_command, start_live_session
 
 
 @pytest.fixture
@@ -194,16 +193,16 @@ class TestRunExperimentCommand:
 
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
-    @patch("backtide.cli.run_backtest")
+    @patch("backtide.cli.Experiment")
     def test_toml_success(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
         """A TOML config runs end-to-end and reports success."""
         mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
-        mock_run.return_value = self._stub_result("success")
+        mock_run.return_value.run.return_value = self._stub_result("success")
 
         cfg_path = tmp_path / "exp.toml"
         cfg_path.write_text('[general]\nname = "t"\n', encoding="utf-8")
 
-        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        result = runner.invoke(run_experiment_command, [str(cfg_path)])
         assert result.exit_code == 0, result.output
         assert "Done" in result.output
         assert "completed" in result.output
@@ -211,31 +210,31 @@ class TestRunExperimentCommand:
 
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
-    @patch("backtide.cli.run_backtest")
+    @patch("backtide.cli.Experiment")
     def test_json_config(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
         """A `.json` config is parsed through `from_dict`."""
         mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
-        mock_run.return_value = self._stub_result("success")
+        mock_run.return_value.run.return_value = self._stub_result("success")
 
         cfg_path = tmp_path / "exp.json"
         cfg_path.write_text(json.dumps({"general": {"name": "t"}}), encoding="utf-8")
 
-        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        result = runner.invoke(run_experiment_command, [str(cfg_path)])
         assert result.exit_code == 0
         mock_run.assert_called_once()
 
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
-    @patch("backtide.cli.run_backtest")
+    @patch("backtide.cli.Experiment")
     def test_yaml_config(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
         """A `.yaml` config is parsed through `from_dict`."""
         mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
-        mock_run.return_value = self._stub_result("success")
+        mock_run.return_value.run.return_value = self._stub_result("success")
 
         cfg_path = tmp_path / "exp.yaml"
         cfg_path.write_text("general:\n  name: t\n", encoding="utf-8")
 
-        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        result = runner.invoke(run_experiment_command, [str(cfg_path)])
         assert result.exit_code == 0
         mock_run.assert_called_once()
 
@@ -248,22 +247,24 @@ class TestRunExperimentCommand:
         cfg_path = tmp_path / "exp.ini"
         cfg_path.write_text("[general]\nname=t\n", encoding="utf-8")
 
-        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        result = runner.invoke(run_experiment_command, [str(cfg_path)])
         assert result.exit_code != 0
         assert "Unsupported config extension" in result.output
 
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
-    @patch("backtide.cli.run_backtest")
+    @patch("backtide.cli.Experiment")
     def test_success_with_warnings(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
         """A successful run with warnings echoes each warning."""
         mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
-        mock_run.return_value = self._stub_result("success", warnings=["w1", "w2"])
+        mock_run.return_value.run.return_value = self._stub_result(
+            "success", warnings=["w1", "w2"]
+        )
 
         cfg_path = tmp_path / "exp.toml"
         cfg_path.write_text("", encoding="utf-8")
 
-        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        result = runner.invoke(run_experiment_command, [str(cfg_path)])
         assert result.exit_code == 0
         assert "warning" in result.output.lower()
         assert "w1" in result.output
@@ -271,16 +272,16 @@ class TestRunExperimentCommand:
 
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
-    @patch("backtide.cli.run_backtest")
+    @patch("backtide.cli.Experiment")
     def test_failed_status_exits_nonzero(self, mock_run, _mock_log, mock_cfg, runner, tmp_path):  # noqa: PT019
         """A failed run exits with status 1 and writes warnings to stderr."""
         mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
-        mock_run.return_value = self._stub_result("failed", warnings=["boom"])
+        mock_run.return_value.run.return_value = self._stub_result("failed", warnings=["boom"])
 
         cfg_path = tmp_path / "exp.toml"
         cfg_path.write_text("", encoding="utf-8")
 
-        result = runner.invoke(run_experiment_cmd, [str(cfg_path)])
+        result = runner.invoke(run_experiment_command, [str(cfg_path)])
         assert result.exit_code == 1
         # stderr (mixed_stderr default = True) ends up in `output`.
         assert "failed" in result.output.lower()
@@ -288,16 +289,16 @@ class TestRunExperimentCommand:
 
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
-    @patch("backtide.cli.run_backtest")
+    @patch("backtide.cli.Experiment")
     def test_custom_log_level(self, mock_run, mock_logging, mock_cfg, runner, tmp_path):
         """`--log_level` overrides the config value."""
         mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
-        mock_run.return_value = self._stub_result("success")
+        mock_run.return_value.run.return_value = self._stub_result("success")
 
         cfg_path = tmp_path / "exp.toml"
         cfg_path.write_text("", encoding="utf-8")
 
-        result = runner.invoke(run_experiment_cmd, [str(cfg_path), "--log_level", "debug"])
+        result = runner.invoke(run_experiment_command, [str(cfg_path), "--log_level", "debug"])
         assert result.exit_code == 0
         mock_logging.assert_called_once_with("debug")
 
@@ -345,7 +346,7 @@ class TestStartLiveSessionCommand:
 
         class Session:
             def __init__(self, config, strategy):
-                assert config == "paper-config"
+                assert config == "session-config"
                 assert strategy is None
 
             def on_bar(self, value):
@@ -371,14 +372,14 @@ class TestStartLiveSessionCommand:
 
         with (
             patch("backtide.cli.LiveMarketFeed", Feed),
-            patch("backtide.cli.PaperTradingConfig", return_value="paper-config"),
-            patch("backtide.cli.PaperTradingSession", Session),
+            patch("backtide.cli.SessionConfig", return_value="session-config"),
+            patch("backtide.cli.Session", Session),
             patch("backtide.live_history.new_session_id", return_value="0123456789abcdef"),
         ):
             result = runner.invoke(start_live_session, [str(cfg_path)])
 
         assert result.exit_code == 0, result.output
-        assert "Starting live paper session" in result.output
+        assert "Starting live session" in result.output
         assert "BTC-USD 1m close=101.25 equity=101.25 fills=0" in result.output
         assert "processed 1 market update" in result.output
         assert Feed.canceled

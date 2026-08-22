@@ -95,19 +95,19 @@ class StubServices(BacktideServices):
         }
 
     def live_sessions(self):
-        """Return deterministic persisted paper sessions."""
+        """Return deterministic persisted live sessions."""
         return [{"id": "abc123", "status": "stopped"}]
 
     def live_session(self, session_id):
-        """Return a deterministic persisted paper session."""
+        """Return a deterministic persisted live session."""
         return {"id": session_id, "status": "stopped"}
 
     def delete_live_session(self, session_id):
-        """Return a deterministic paper-session deletion result."""
+        """Return a deterministic live-session deletion result."""
         return {"deleted": session_id}
 
-    def paper_config_from_experiment(self, experiment_id):
-        """Return a deterministic paper-trading draft."""
+    def session_config_from_experiment(self, experiment_id):
+        """Return a deterministic live-simulation draft."""
         return {"experiment_id": experiment_id, "provider": "kraken"}
 
     def replay_live(self, payload):
@@ -283,7 +283,7 @@ class TestJSONRoutes:
         assert json.loads(body) == [{"search": "momentum", "limit": 10, "offset": 10}]
 
     def test_live_history_and_replay_routes(self, web_server):
-        """Paper session history routes expose persisted sessions and replay control."""
+        """Live session history routes expose persisted sessions and replay control."""
         response, body = request(web_server, "GET", "/api/live/sessions")
         assert response.status == 200
         assert json.loads(body) == [{"id": "abc123", "status": "stopped"}]
@@ -305,9 +305,9 @@ class TestJSONRoutes:
         assert response.status == 200
         assert json.loads(body) == {"deleted": "abc123"}
 
-    def test_experiment_paper_config_route(self, web_server):
+    def test_experiment_session_config_route(self, web_server):
         """Experiment promotion returns a live wizard draft."""
-        response, body = request(web_server, "GET", "/api/experiments/experiment-1/paper-config")
+        response, body = request(web_server, "GET", "/api/experiments/experiment-1/session-config")
 
         assert response.status == 200
         assert json.loads(body) == {"experiment_id": "experiment-1", "provider": "kraken"}
@@ -615,7 +615,7 @@ class TestServiceCommands:
         assert captured == {"value": instance, "name": class_name, "cfg": cfg}
 
     def test_live_instruments_uses_provider_specific_catalog(self, monkeypatch):
-        """Paper trading receives canonical symbols from the selected provider."""
+        """Live session receives canonical symbols from the selected provider."""
         import backtide.live
 
         captured = {}
@@ -778,7 +778,7 @@ class TestServiceCommands:
         assert list(folder.glob("*.tmp")) == []
 
     def test_experiment_configuration_prefills_live_trading(self, monkeypatch, tmp_path):
-        """Compatible research settings and the first non-benchmark strategy are promoted."""
+        """Shared research settings and the first non-benchmark strategy are promoted."""
         from backtide.backtest import ExperimentConfig
         import backtide.config
 
@@ -791,9 +791,7 @@ class TestServiceCommands:
                     "strategies": ["Benchmark strategy", "Momentum", "Mean reversion"],
                 },
                 "indicators": {"indicators": ["Fast SMA"]},
-                "metrics": {
-                    "metrics": ["total_return", "sharpe", "alpha"],
-                },
+                "metrics": ["total_return", "sharpe", "alpha"],
                 "engine": {"warmup_period": 120, "risk_free_rate": 2.5},
                 "exchange": {
                     "commission_type": "PercentagePlusFixed",
@@ -822,7 +820,7 @@ class TestServiceCommands:
             lambda: SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path)),
         )
 
-        result = BacktideServices().paper_config_from_experiment("experiment-1")
+        result = BacktideServices().session_config_from_experiment("experiment-1")
 
         assert result["provider"] == "kraken"
         assert result["interval"] == "5m"
@@ -857,7 +855,7 @@ class TestServiceCommands:
 
         experiment = ExperimentConfig.from_dict(
             {
-                "metrics": {"metrics": ["sharpe"]},
+                "metrics": ["sharpe"],
                 "exchange": {
                     "commission_type": "Fixed",
                     "commission_pct": 0.25,
@@ -874,7 +872,7 @@ class TestServiceCommands:
             lambda: SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path)),
         )
 
-        result = BacktideServices().paper_config_from_experiment("experiment-1")
+        result = BacktideServices().session_config_from_experiment("experiment-1")
 
         assert result["config"]["commission_pct"] == 0.0
         assert result["config"]["commission_fixed"] == 1.5
@@ -1318,7 +1316,6 @@ end_date = "2024-03-01"
         services = BacktideServices()
         result = services._primary_metric_summary(
             """
-[metrics]
 metrics = ["sharpe", "total_return", "pnl", "win_rate"]
 """,
             [{"is_benchmark": False, "metrics": {"sharpe": 1.25}}],
@@ -1911,8 +1908,8 @@ class TestLiveTradingManager:
             "backtide.live",
             SimpleNamespace(
                 LiveMarketFeed=UnsupportedFeed,
-                PaperTradingConfig=object,
-                PaperTradingSession=object,
+                SessionConfig=object,
+                Session=object,
             ),
         )
 
@@ -2001,7 +1998,7 @@ class TestLiveTradingManager:
         ]
         session_id = _persist_live_replay_source(
             {
-                "mode": "paper",
+                "mode": "live",
                 "provider": "mock",
                 "interval": "1m",
                 "symbols": ["BTC-USD"],
@@ -2018,8 +2015,8 @@ class TestLiveTradingManager:
             "backtide.live",
             SimpleNamespace(
                 MarketUpdate=Market,
-                PaperTradingConfig=Config,
-                PaperTradingSession=Session,
+                SessionConfig=Config,
+                Session=Session,
             ),
         )
         manager = LiveTradingManager()
@@ -2094,7 +2091,7 @@ class TestLiveTradingManager:
         }
         session_id = _persist_live_replay_source(
             {
-                "mode": "paper",
+                "mode": "live",
                 "provider": "mock",
                 "interval": "1m",
                 "symbols": ["BTC-USD"],
@@ -2109,8 +2106,8 @@ class TestLiveTradingManager:
             "backtide.live",
             SimpleNamespace(
                 MarketUpdate=Market,
-                PaperTradingConfig=Config,
-                PaperTradingSession=Session,
+                SessionConfig=Config,
+                Session=Session,
             ),
         )
         manager = LiveTradingManager()
@@ -2127,28 +2124,19 @@ class TestLiveTradingManager:
         manager.delete_session(replay_id)
         manager.delete_session(session_id)
 
-    def test_replay_ignores_config_fields_unsupported_by_the_loaded_engine(
+    def test_replay_rejects_unknown_config_fields(
         self,
         monkeypatch,
     ):
-        """Current session journals replay against an older compatible native config."""
-        captured = {}
+        """Replay does not silently filter unsupported session configuration."""
 
-        class LegacyConfig:
+        class Config:
             def __init__(self, initial_cash=100_000.0):
-                captured["initial_cash"] = initial_cash
-
-        class Session:
-            def __init__(self, config, strategy):
-                captured.update(config=config, strategy=strategy)
-
-            @staticmethod
-            def snapshot():
-                return None
+                self.initial_cash = initial_cash
 
         session_id = _persist_live_replay_source(
             {
-                "mode": "paper",
+                "mode": "live",
                 "strategies": [],
                 "config": {
                     "initial_cash": 25_000.0,
@@ -2161,22 +2149,15 @@ class TestLiveTradingManager:
             "backtide.live",
             SimpleNamespace(
                 MarketUpdate=SimpleNamespace,
-                PaperTradingConfig=LegacyConfig,
-                PaperTradingSession=Session,
+                SessionConfig=Config,
+                Session=SimpleNamespace,
             ),
         )
         manager = LiveTradingManager()
 
-        manager.replay(session_id)
-        thread = manager._thread
-        assert thread is not None
-        thread.join(timeout=1.0)
+        with pytest.raises(APIError, match="allowed_order_types"):
+            manager.replay(session_id)
 
-        assert captured["initial_cash"] == 25_000.0
-        assert captured["strategy"] is None
-        replay_id = manager._session_id
-        assert replay_id is not None
-        manager.delete_session(replay_id)
         manager.delete_session(session_id)
 
     def test_mock_feed_updates_session_and_stops_cleanly(self, monkeypatch):
@@ -2254,8 +2235,8 @@ class TestLiveTradingManager:
             "backtide.live",
             SimpleNamespace(
                 LiveMarketFeed=Feed,
-                PaperTradingConfig=Config,
-                PaperTradingSession=Session,
+                SessionConfig=Config,
+                Session=Session,
             ),
         )
         manager = LiveTradingManager()
@@ -2375,8 +2356,8 @@ class TestLiveTradingManager:
             "backtide.live",
             SimpleNamespace(
                 LiveMarketFeed=Feed,
-                PaperTradingConfig=lambda **_values: object(),
-                PaperTradingSession=Session,
+                SessionConfig=lambda **_values: object(),
+                Session=Session,
             ),
         )
         manager = LiveTradingManager()
@@ -2424,8 +2405,8 @@ class TestLiveTradingManager:
             "backtide.live",
             SimpleNamespace(
                 LiveMarketFeed=Feed,
-                PaperTradingConfig=lambda **_values: object(),
-                PaperTradingSession=Session,
+                SessionConfig=lambda **_values: object(),
+                Session=Session,
             ),
         )
         manager = LiveTradingManager()
@@ -2684,7 +2665,7 @@ class TestLiveTradingManager:
         )
         manager = LiveTradingManager()
         manager._prepare_session()
-        manager._config = {"mode": "paper"}
+        manager._config = {"mode": "live"}
         manager._session = SimpleNamespace(snapshot=lambda: snapshot)
 
         serialized = manager._serialize_update(update)
@@ -2704,7 +2685,7 @@ class TestLiveTradingManager:
         """Session manifests and exact market events survive manager recreation."""
         manager = LiveTradingManager()
         manager._prepare_session()
-        manager._config = {"mode": "paper", "provider": "mock", "symbols": ["BTC-USD"]}
+        manager._config = {"mode": "live", "provider": "mock", "symbols": ["BTC-USD"]}
         manager._session = SimpleNamespace(snapshot=lambda: None)
         update = {
             "market": {"symbol": "BTC-USD", "close": 101.0},
@@ -2741,7 +2722,7 @@ class TestLiveTradingManager:
         """Deleting a stopped session removes its manifest and recorded events."""
         manager = LiveTradingManager()
         manager._prepare_session()
-        manager._config = {"mode": "paper"}
+        manager._config = {"mode": "live"}
         manager._session = SimpleNamespace(snapshot=lambda: None)
         manager._persist_manifest("stopped")
         assert manager._session_id is not None
@@ -2756,13 +2737,13 @@ class TestLiveTradingManager:
         """An active worker keeps ownership of its persisted session rows."""
         manager = LiveTradingManager()
         manager._prepare_session()
-        manager._config = {"mode": "paper"}
+        manager._config = {"mode": "live"}
         manager._session = SimpleNamespace(snapshot=lambda: None)
         manager._persist_manifest("running")
         assert manager._session_id is not None
         manager._thread = threading.current_thread()
 
-        with pytest.raises(APIError, match="Stop the active paper session") as error:
+        with pytest.raises(APIError, match="Stop the active live session") as error:
             manager.delete_session(manager._session_id)
 
         assert error.value.status == 409
@@ -2774,7 +2755,7 @@ class TestLiveTradingManager:
         """Session deletion rejects malformed database identifiers."""
         manager = LiveTradingManager()
 
-        with pytest.raises(APIError, match="Paper session id is invalid") as error:
+        with pytest.raises(APIError, match="Live session id is invalid") as error:
             manager.delete_session("../outside")
 
         assert error.value.status == 400
@@ -2789,7 +2770,7 @@ class TestLiveTradingManager:
         manager = LiveTradingManager()
         manager._prepare_session()
         manager._started_at = "2026-08-13T10:00:00+00:00"
-        manager._config = {"mode": "paper"}
+        manager._config = {"mode": "live"}
         manager._session = SimpleNamespace(snapshot=lambda: None)
         manager._persist_manifest(status)
         assert manager._session_id is not None
@@ -2810,7 +2791,7 @@ class TestLiveTradingManager:
         manager = LiveTradingManager()
         manager._prepare_session()
         manager._started_at = "2026-08-13T10:00:00+00:00"
-        manager._config = {"mode": "paper"}
+        manager._config = {"mode": "live"}
         manager._session = SimpleNamespace(snapshot=lambda: None)
         manager._persist_manifest("running")
         assert manager._session_id is not None

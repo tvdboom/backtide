@@ -63,7 +63,7 @@ def serialize_order(order: Any) -> dict[str, Any]:
 
 
 def serialize_fills(values: Any) -> list[dict[str, Any]]:
-    """Convert native paper fills into journal-safe mappings."""
+    """Convert native simulated fills into journal-safe mappings."""
     fills = []
     for fill in values:
         row = public_attributes(
@@ -103,7 +103,7 @@ def serialize_market(market: Any) -> dict[str, Any]:
 
 
 def serialize_snapshot(snapshot: Any) -> dict[str, Any]:
-    """Convert a native paper account snapshot into a journal-safe mapping."""
+    """Convert a native simulated account snapshot into a journal-safe mapping."""
     if snapshot is None:
         return {}
     output = public_attributes(
@@ -138,7 +138,7 @@ def serialize_snapshot(snapshot: Any) -> dict[str, Any]:
 
 
 def serialize_update(update: Any) -> dict[str, Any]:
-    """Convert a native paper update into the persisted event shape."""
+    """Convert a native session update into the persisted event shape."""
     return clean(
         {
             "market": serialize_market(update.market),

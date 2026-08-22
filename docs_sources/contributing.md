@@ -73,7 +73,7 @@ backtide/                           # Repository root
 │   │   ├── cli.py                  # Click CLI entry point (backtide launch / download)
 │   │   ├── config.py               # Configuration re-exports
 │   │   ├── data.py                 # Data re-exports
-│   │   ├── live.py                 # Live market data and paper-trading re-exports
+│   │   ├── live.py                 # Live market data and live-session re-exports
 │   │   ├── storage.py              # Storage re-exports
 │   │   ├── core.*.pyd / .so        # Compiled Rust extension (built by maturin)
 │   │   ├── core/                   # Type stubs (.pyi) for the compiled extension
@@ -84,7 +84,7 @@ backtide/                           # Repository root
 │   │   │   ├── app.py              # Compatibility entry point
 │   │   │   ├── server.py           # Static and JSON HTTP server
 │   │   │   ├── services.py         # Data/backtest/analysis service facade
-│   │   │   ├── live.py             # Background paper-session coordinator
+│   │   │   ├── live.py             # Background live-session coordinator
 │   │   │   └── static/             # Generated production frontend bundle
 │   │   └── utils/                  # Python utility modules
 │   │       ├── constants.py
@@ -104,14 +104,14 @@ backtide/                           # Repository root
 │       │   ├── backtest/           # Backtest models, indicators & strategies
 │       │   ├── config/             # Configuration models & parsing
 │       │   ├── data/               # Data layer: models & providers (Yahoo, Binance, Kraken, Coinbase)
-│       │   ├── live/               # WebSocket feeds and deterministic paper engine
+│       │   ├── live/               # WebSocket feeds and deterministic simulation engine
 │       │   ├── storage/            # Storage layer: DuckDB backend & Storage trait
 │       │   └── utils/              # Utility functions & HTTP helpers
 │       └── benches/                # Criterion.rs benchmarks
 │           ├── storage_bench.rs    # DuckDB storage throughput / latency benchmarks
 │           ├── data_bench.rs       # Live API download latency benchmarks
 │           ├── backtest_bench.rs   # Core strategy runtime benchmarks
-│           └── live_bench.rs       # Paper-engine throughput benchmarks
+│           └── live_bench.rs       # Live simulation throughput benchmarks
 │
 ├── tests/                          # Python unit tests (pytest)
 │   ├── __init__.py

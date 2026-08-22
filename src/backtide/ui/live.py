@@ -1,7 +1,7 @@
 """Backtide.
 
 Author: Mavs
-Description: Background WebSocket paper-trading session management for the UI.
+Description: Background WebSocket live-session management for the UI.
 
 """
 
@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime
 import importlib
-import inspect
 import re
 import threading
 import time
@@ -41,7 +40,7 @@ from backtide.ui.services import APIError, dataframe_records
 
 
 class LiveTradingManager:
-    """Coordinate observable, persistent paper-trading and replay sessions."""
+    """Coordinate observable, persistent live and replay sessions."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -72,8 +71,8 @@ class LiveTradingManager:
         self._replay_warmup_source = "none"
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Validate configuration, warm strategies, and start a live paper session."""
-        from backtide.live import LiveMarketFeed, PaperTradingConfig, PaperTradingSession
+        """Validate configuration, warm strategies, and start a live session."""
+        from backtide.live import LiveMarketFeed, Session, SessionConfig
 
         provider = str(payload.get("provider", "kraken")).lower()
         interval = str(payload.get("interval", "1m"))
@@ -86,10 +85,7 @@ class LiveTradingManager:
 
         with self._lock:
             self._ensure_idle()
-            config_values = self._supported_config_values(
-                PaperTradingConfig,
-                payload.get("config") or {},
-            )
+            config_values = self._session_config_values(payload.get("config") or {})
             base_currency = str(config_values.get("base_currency", "USD")).upper()
             inferred_quotes = {symbol: symbol.rsplit("-", 1)[-1].upper() for symbol in symbols}
             self._target_quotes = inferred_quotes
@@ -109,21 +105,26 @@ class LiveTradingManager:
             strategy_names = self._strategy_names(payload)
             strategy_objects = self._load_strategies(strategy_names)
             indicators = self._load_indicators(payload.get("indicators") or [])
+            runtime_config_values = dict(config_values)
+            if "metrics" in runtime_config_values:
+                runtime_config_values["metrics"] = self._load_metrics(
+                    runtime_config_values["metrics"]
+                )
             self._sessions = {}
             try:
                 for name, strategy in strategy_objects:
-                    config = PaperTradingConfig(**config_values)
+                    config = SessionConfig(**runtime_config_values)
                     self._sessions[name] = (
-                        PaperTradingSession(config, strategy, indicators)
+                        Session(config, strategy, indicators)
                         if indicators
-                        else PaperTradingSession(config, strategy)
+                        else Session(config, strategy)
                     )
             except (RuntimeError, TypeError, ValueError) as exc:
                 self._sessions.clear()
                 raise APIError(str(exc)) from exc
             self._session = next(iter(self._sessions.values()))
             self._config = {
-                "mode": "paper",
+                "mode": "live",
                 "provider": provider,
                 "interval": interval,
                 "symbols": symbols,
@@ -145,10 +146,10 @@ class LiveTradingManager:
             except (OSError, RuntimeError, TypeError, ValueError) as exc:
                 self._session = None
                 self._sessions.clear()
-                raise APIError(f"Could not prepare paper session: {exc}") from exc
+                raise APIError(f"Could not prepare live session: {exc}") from exc
             self._thread = threading.Thread(
                 target=self._run,
-                name="backtide-paper-trading",
+                name="backtide-live-session",
                 daemon=True,
             )
             self._thread.start()
@@ -159,8 +160,8 @@ class LiveTradingManager:
         session_id: str,
         playback_speed: float | str = "max",
     ) -> dict[str, Any]:
-        """Replay recorded market events through a fresh paper engine."""
-        from backtide.live import MarketUpdate, PaperTradingConfig, PaperTradingSession
+        """Replay recorded market events through a fresh simulation engine."""
+        from backtide.live import MarketUpdate, Session, SessionConfig
 
         record = self.session(session_id)
         config = record.get("config") or {}
@@ -168,21 +169,23 @@ class LiveTradingManager:
         speed = self._playback_speed(playback_speed)
         with self._lock:
             self._ensure_idle()
-            config_values = self._supported_config_values(
-                PaperTradingConfig,
-                config.get("config") or {},
-            )
+            config_values = self._session_config_values(config.get("config") or {})
             strategy_names = [str(value) for value in config.get("strategies") or []]
             strategy_objects = self._load_strategies(strategy_names)
             indicators = self._load_indicators(config.get("indicators") or [])
+            runtime_config_values = dict(config_values)
+            if "metrics" in runtime_config_values:
+                runtime_config_values["metrics"] = self._load_metrics(
+                    runtime_config_values["metrics"]
+                )
             self._sessions = {}
             try:
                 for name, strategy in strategy_objects:
-                    paper = PaperTradingConfig(**config_values)
+                    session_config = SessionConfig(**runtime_config_values)
                     self._sessions[name] = (
-                        PaperTradingSession(paper, strategy, indicators)
+                        Session(session_config, strategy, indicators)
                         if indicators
-                        else PaperTradingSession(paper, strategy)
+                        else Session(session_config, strategy)
                     )
             except (RuntimeError, TypeError, ValueError) as exc:
                 self._sessions.clear()
@@ -269,7 +272,7 @@ class LiveTradingManager:
                 raise APIError(f"Could not prepare replay session: {exc}") from exc
             self._thread = threading.Thread(
                 target=runner,
-                name="backtide-paper-replay",
+                name="backtide-session-replay",
                 daemon=True,
             )
             self._thread.start()
@@ -352,7 +355,7 @@ class LiveTradingManager:
             }
 
     def sessions(self) -> list[dict[str, Any]]:
-        """List newest-first persisted paper and replay sessions."""
+        """List newest-first persisted live and replay sessions."""
         with self._lock:
             active_session_id = (
                 self._session_id
@@ -369,7 +372,7 @@ class LiveTradingManager:
         self._validate_session_id(session_id)
         result = query_stored_session(session_id)
         if result is None:
-            raise APIError(f"Paper session {session_id!r} was not found.", 404)
+            raise APIError(f"Live session {session_id!r} was not found.", 404)
         with self._lock:
             active_session_id = (
                 self._session_id
@@ -383,7 +386,7 @@ class LiveTradingManager:
         return result
 
     def delete_session(self, session_id: str) -> dict[str, int]:
-        """Delete one inactive persisted paper session and its event journal."""
+        """Delete one inactive persisted live session and its event journal."""
         self._validate_session_id(session_id)
         with self._lock:
             active = bool(
@@ -393,20 +396,20 @@ class LiveTradingManager:
                 and not self._stop.is_set()
             )
             if active:
-                raise APIError("Stop the active paper session before deleting it.", 409)
+                raise APIError("Stop the active live session before deleting it.", 409)
             try:
                 deleted = delete_stored_session(session_id)
             except RuntimeError as exc:
-                raise APIError(f"Could not delete paper session {session_id!r}.", 500) from exc
+                raise APIError(f"Could not delete live session {session_id!r}.", 500) from exc
             if not deleted:
-                raise APIError(f"Paper session {session_id!r} was not found.", 404)
+                raise APIError(f"Live session {session_id!r} was not found.", 404)
         return {"deleted": 1}
 
     @staticmethod
     def _validate_session_id(session_id: str) -> None:
-        """Reject malformed paper-session identifiers."""
+        """Reject malformed live-session identifiers."""
         if not re.fullmatch(r"[0-9a-f]{16}", session_id):
-            raise APIError("Paper session id is invalid.", 400)
+            raise APIError("Live session id is invalid.", 400)
 
     def _reconcile_persisted_status(
         self,
@@ -724,18 +727,11 @@ class LiveTradingManager:
         return list(dict.fromkeys(str(value) for value in values if value))
 
     @staticmethod
-    def _supported_config_values(config_type: Any, values: Any) -> dict[str, Any]:
-        """Keep only fields accepted by the loaded paper-engine configuration class."""
+    def _session_config_values(values: Any) -> dict[str, Any]:
+        """Validate and copy session configuration values."""
         if not isinstance(values, dict):
-            raise APIError("Paper-trading configuration must be an object.")
-        try:
-            parameters = inspect.signature(config_type).parameters.values()
-        except (TypeError, ValueError):
-            return dict(values)
-        if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters):
-            return dict(values)
-        accepted = {parameter.name for parameter in parameters if parameter.name != "self"}
-        return {name: value for name, value in values.items() if name in accepted}
+            raise APIError("Session configuration must be an object.")
+        return dict(values)
 
     @classmethod
     def _load_strategies(cls, names: list[str]) -> list[tuple[str, Any]]:
@@ -768,9 +764,29 @@ class LiveTradingManager:
             raise APIError(f"Saved indicator {missing[0]!r} was not found.")
         return [stored[str(name)] for name in names]
 
+    @staticmethod
+    def _load_metrics(names: Any) -> list[Any]:
+        """Resolve built-in keys and saved custom metrics into one runtime list."""
+        from backtide.config import get_config
+        from backtide.metrics import BUILTIN_METRICS
+        from backtide.metrics.utils import _load_stored_metrics
+
+        builtin = {metric.key for metric in BUILTIN_METRICS}
+        stored = _load_stored_metrics(get_config())
+        resolved = []
+        for value in names:
+            name = str(value)
+            if name in builtin:
+                resolved.append(name)
+            elif name in stored:
+                resolved.append({name: stored[name]})
+            else:
+                raise APIError(f"Metric {name!r} was not found.")
+        return resolved
+
     def _ensure_idle(self) -> None:
         if self._thread and self._thread.is_alive():
-            raise APIError("A paper-trading session is already running.", 409)
+            raise APIError("A live session is already running.", 409)
 
     @classmethod
     def _serialize_snapshot(cls, snapshot: Any) -> dict[str, Any]:

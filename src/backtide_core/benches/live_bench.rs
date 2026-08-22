@@ -1,12 +1,12 @@
-//! Paper-trading engine benchmarks.
+//! Live simulation engine benchmarks.
 //!
 //! Measures the deterministic hot paths used for every completed live candle:
 //! mark-to-market processing and market-order execution. Network latency is
 //! intentionally excluded.
 
 use backtide_core::backtest::models::{Order, OrderId, OrderType};
-use backtide_core::live::engine::PaperBroker;
-use backtide_core::live::models::{MarketUpdate, PaperTradingConfig};
+use backtide_core::live::engine::SessionBroker;
+use backtide_core::live::models::{MarketUpdate, SessionConfig};
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 
 fn market(timestamp: u64) -> MarketUpdate {
@@ -43,7 +43,7 @@ fn order() -> Order {
 fn bench_live_engine(criterion: &mut Criterion) {
     criterion.bench_function("live/process_market_update", |bencher| {
         bencher.iter_batched(
-            || PaperBroker::new(PaperTradingConfig::default()).unwrap(),
+            || SessionBroker::new(SessionConfig::default()).unwrap(),
             |mut broker| broker.process(market(1_700_000_000), Vec::new()),
             BatchSize::SmallInput,
         );
@@ -51,7 +51,7 @@ fn bench_live_engine(criterion: &mut Criterion) {
 
     criterion.bench_function("live/process_market_order", |bencher| {
         bencher.iter_batched(
-            || PaperBroker::new(PaperTradingConfig::default()).unwrap(),
+            || SessionBroker::new(SessionConfig::default()).unwrap(),
             |mut broker| broker.process(market(1_700_000_000), vec![order()]),
             BatchSize::SmallInput,
         );

@@ -25,6 +25,15 @@
         margin-bottom: 45px;
     }
 
+    .subtitle {
+        margin: -2.5em auto 2em;
+        padding: 0 1em;
+        color: var(--backtide-blue);
+        font-size: 2em;
+        font-weight: 600;
+        text-align: center;
+    }
+
     .logo {
         display: block;
         margin: 2rem auto;
@@ -105,6 +114,7 @@
     @media only screen and (max-width: 720px) {
         section {padding-bottom: 2em}
         h1 {font-size: 2em}
+        .subtitle {font-size: 1.5em}
         .logo {width: min(260px, calc(100% - 2rem)); height: auto; margin: 1rem auto}
         .description {font-size: 1.5em; width: 90%; margin-left: -45%}
     }
@@ -135,14 +145,16 @@
     </div>
 
     <img src="img/logo.png" alt="Backtide" class="logo" draggable="false">
-    <h1>A refreshingly simple trading backtester for beginner retail investors</h1>
+    <h1>Test the idea. Trade the evidence.</h1>
+    <p class="subtitle">A refreshingly simple backtesting and live simulation platform for retail investors</p>
     <div class="description">
         <p style="margin-bottom: 2em">
             Backtide is an open-source backtesting platform for Python, built for retail
             investors who want to test trading ideas without drowning in complexity. A
-            An optimized core keeps simulations fast, while sensible defaults let you go
-            from raw multi-exchange data to validated strategies in just a few lines of
-            code. Every setting can still be fine-tuned when needed, but you never have to.
+            Rust-powered core keeps simulations and simulated execution fast, while sensible
+            defaults let you go from raw multi-exchange data to validated strategies in just
+            a few lines of code. Run the same strategy objects against historical bars or
+            public exchange WebSockets, without connecting a brokerage account.
         </p>
         <a href="about" class="button">Read more</a>
         <a href="getting_started" class="button button-secondary">Get started</a>
@@ -153,13 +165,15 @@
     <h1 style="margin-bottom: -10px">Why you should use Backtide</h1>
     <div class="description-wide" style="display: flex; justify-content: center;">
         <ul style="display: inline-block; text-align: left;">
-            <li><strong>Fast</strong> &mdash; The optimized engine runs backtests in a fraction of a second.</li>
-            <li><strong>Simple</strong> &mdash; Sensible defaults mean a working backtest in minutes.</li>
+            <li><strong>Fast</strong> &mdash; Rust-powered engine runs backtests in a fraction of a second.</li>
+            <li><strong>Simple</strong> &mdash; Sensible defaults mean a working backtest in minutes, not hours of configuration.</li>
             <li><strong>Flexible</strong> &mdash; Every parameter is exposed and customizable when you need full control.</li>
-            <li><strong>Multi-asset</strong> &mdash; Stocks, ETFs, forex and crypto from Yahoo, Binance, Kraken and more.</li>
+            <li><strong>Multi-exchange</strong> &mdash; Stocks, ETFs, forex and crypto from Yahoo, Binance, Kraken and more.</li>
             <li><strong>Batteries included</strong> &mdash; Built-in strategies and technical indicators out of the box.</li>
             <li><strong>Rich analytics</strong> &mdash; 20+ plots cover PnL, returns, drawdown and more.</li>
-            <li><strong>Interactive UI</strong> &mdash; Professional UI to configure, run and analyze experiments visually.</li>
+            <li><strong>Live simulation</strong> &mdash; Apply strategies to Binance, Coinbase, or Kraken WebSocket candles with local simulated fills.</li>
+            <li><strong>Interactive UI</strong> &mdash; A packaged Vue app configures, runs, and analyzes backtests and live sessions visually.</li>
+            <li><strong>Simple installation</strong> &mdash; Python wheels include the Rust extension and production frontend; users do not need Rust or Node.js.</li>
             <li><strong>Open source</strong> &mdash; MIT-licensed, community-driven and free forever.</li>
         </ul>
     </div>

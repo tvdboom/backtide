@@ -1,7 +1,7 @@
-# PaperTradingConfig
+# SessionUpdate
 --------------------
 
-:: backtide.live:PaperTradingConfig
+:: backtide.live:SessionUpdate
     :: signature
     :: head
     :: table:
