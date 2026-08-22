@@ -116,36 +116,33 @@ nav:
     - Getting started: getting_started.md
     - User guide:
         - Overview:
-            - Introduction: user_guide/introduction.md
-            - Nomenclature: user_guide/nomenclature.md
-            - Application: user_guide/application.md
-            - Configuration: user_guide/configuration.md
-        - Research:
-            - Experiments: user_guide/experiment.md
-            - Results and plots: user_guide/plots.md
-        - Trading:
-            - Live trading: user_guide/live_trading.md
+            - Introduction: user_guide/overview/introduction.md
+            - Nomenclature: user_guide/overview/nomenclature.md
+            - Application: user_guide/overview/application.md
+            - Configuration: user_guide/overview/configuration.md
+        - Backtest:
+            - Introduction: user_guide/backtest/introduction.md
+            - Experiments: user_guide/backtest/experiment.md
+            - Results: user_guide/backtest/results.md
+            - Plots: user_guide/backtest/plots.md
+        - Live:
+            - Introduction: user_guide/live/introduction.md
+            - Paper trading: user_guide/live/paper_trading.md
         - Library:
-            - Strategies: user_guide/strategies.md
-            - Indicators: user_guide/indicators.md
-            - Metrics: user_guide/metrics.md
-            - Sizers: user_guide/sizers.md
+            - Strategies: user_guide/library/strategies.md
+            - Indicators: user_guide/library/indicators.md
+            - Metrics: user_guide/library/metrics.md
+            - Sizers: user_guide/library/sizers.md
+            - Performance: user_guide/library/performance.md
         - Data:
-            - Market data: user_guide/data.md
-            - Storage: user_guide/storage.md
+            - Market data: user_guide/data/market_data.md
+            - Storage: user_guide/data/storage.md
     - CLI:
           - launch: cli/launch.md
           - run-experiment: cli/run_experiment.md
           - start-live-session: cli/start_live_session.md
           - download: cli/download.md
     - API:
-        - Overview:
-            - Product map: api/product_map.md
-            - Application endpoints: api/application_endpoints.md
-        - Research: api/research.md
-        - Trading: api/trading.md
-        - Library: api/library.md
-        - Data: api/data.md
         - config:
             - get_config: api/config/get_config.md
             - load_config: api/config/load_config.md
@@ -295,8 +292,21 @@ nav:
             - clear_cache: api/utils/clear_cache.md
             - init_logging: api/utils/init_logging.md
     - Examples:
-        - Strategies: examples/strategies.md
-        - Indicators: examples/indicators.md
+        - Strategies:
+            - Daily reversal: examples/strategies/daily_reversal.md
+            - Moving-average trend: examples/strategies/moving_average_trend.md
+        - Indicators:
+            - Typical price: examples/indicators/typical_price.md
+            - Rolling price range: examples/indicators/rolling_price_range.md
+        - Sizers:
+            - Capped allocation: examples/sizers/capped_allocation.md
+            - Stop-risk sizing: examples/sizers/stop_risk.md
+        - Metrics:
+            - Gain to pain: examples/metrics/gain_to_pain.md
+            - Ulcer index: examples/metrics/ulcer_index.md
+        - Live:
+            - Paper-trading session: examples/live/paper_trading_session.md
+            - Inspect a market feed: examples/live/market_feed.md
     - FAQ: faq.md
     - Contributing: contributing.md
     - Dependencies: dependencies.md

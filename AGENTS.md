@@ -24,7 +24,7 @@ Node.js, or pnpm. Node/pnpm are development-only tools for rebuilding the SPA.
 |-- tox.ini                     CI environments and supported Python versions
 |-- mkdocs.yml                  Documentation navigation and MkDocs configuration
 |-- backtide.config.toml        Example/default runtime configuration
-|-- frontend/                   Vue 3 + Vite application and frontend tests
+|-- application/                Vue 3 + Vite application and frontend tests
 |-- src/
 |   |-- backtide/               Installed Python package and public Python API
 |   |   |-- analysis/           Plotly plots and Python-facing analysis helpers
@@ -89,7 +89,7 @@ exceptions: they are generated, but shipped in wheels and therefore must be kept
 - The Python UI service owns request validation, serialization, cancellation/session coordination,
   static-file serving, and calls into the public Python/backend APIs. Keep route handlers thin;
   put reusable work in the service layer.
-- `frontend/` is the source of truth for UI code. The production assets under
+- `application/` is the source of truth for UI code. The production assets under
   `src/backtide/ui/static/` are build output; rebuild them instead of editing minified files.
 - Paper trading is simulation only. Never add broker order submission, credentials, or claims of
   guaranteed execution. Live providers normalize incoming messages before the paper engine sees
@@ -272,7 +272,7 @@ Rust tests, and all frontend tests passing:
 ```text
 uv run pre-commit run --all-files --show-diff-on-failure
 just test
-pnpm --dir frontend test
+pnpm --dir application test
 ```
 
 Do not hand off with any failing hook or test. Fix every failure, including failures in code outside
@@ -294,7 +294,7 @@ uv run python scripts/generate_stubs.py --check
 uv run mkdocs build --strict
 ```
 
-For the SPA, run its package scripts from `frontend/` (install dependencies only in a development
+For the SPA, run its package scripts from `application/` (install dependencies only in a development
 checkout):
 
 ```text

@@ -1,6 +1,6 @@
 [package]
 name = "backtide_core"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "A refreshingly simple trading backtester for beginner retail investors"
 authors = ["Mavs <m.524687@gmail.com>"]

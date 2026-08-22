@@ -16,8 +16,11 @@ import backtide.live as live
 from backtide.live import (
     LiveMarketFeed,
     MarketUpdate,
+    PaperFill,
     PaperTradingConfig,
     PaperTradingSession,
+    PaperTradingSnapshot,
+    PaperTradingUpdate,
     collect_market_updates,
 )
 
@@ -37,6 +40,24 @@ def market(close: float, timestamp: int = 1_700_000_000, *, is_final: bool = Tru
         n_trades=1,
         is_final=is_final,
     )
+
+
+class TestLiveModels:
+    """Tests for public live data-model metadata."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            MarketUpdate,
+            PaperFill,
+            PaperTradingConfig,
+            PaperTradingSnapshot,
+            PaperTradingUpdate,
+        ],
+    )
+    def test_models_expose_rust_dataclass_marker(self, model):
+        """Test AutoDocs renders every live data model as a dataclass."""
+        assert model.__RUST_DATACLASS__ is True
 
 
 class TestProviderSupport:

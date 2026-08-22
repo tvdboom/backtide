@@ -156,6 +156,9 @@ impl MarketUpdate {
 
 #[pymethods]
 impl MarketUpdate {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+
     #[new]
     #[pyo3(signature = (
         symbol,

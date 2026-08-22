@@ -120,3 +120,9 @@ pub struct PaperTradingSnapshot {
     /// Live-compatible performance metrics.
     pub metrics: HashMap<String, f64>,
 }
+
+#[pymethods]
+impl PaperTradingSnapshot {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+}

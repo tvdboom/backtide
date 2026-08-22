@@ -66,3 +66,9 @@ pub struct PaperTradingUpdate {
     /// Latest configured indicator outputs by indicator and symbol.
     pub indicators: HashMap<String, HashMap<String, Vec<Vec<f64>>>>,
 }
+
+#[pymethods]
+impl PaperTradingUpdate {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+}

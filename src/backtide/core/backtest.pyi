@@ -661,7 +661,7 @@ class ExperimentConfig:
         Indicators to use in this experiment.
 
     metrics : [MetricExpConfig]
-        Metrics to compute and the main result metric.
+        Ordered metrics to compute; the first metric summarizes the result.
 
     exchange : [ExchangeExpConfig]
         Commission, slippage, order execution, margin and short-selling.

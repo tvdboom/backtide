@@ -367,6 +367,40 @@ def _load_live_strategy(name: Any, cfg: Any) -> Any:
     return strategies[name]
 
 
+def _write_cli_live_manifest(
+    session_id: str,
+    *,
+    status: str,
+    started_at: str,
+    config: dict[str, Any],
+    snapshot: Any,
+    last_message_at: str | None,
+    received_events: int,
+    error: str | None = None,
+) -> None:
+    """Persist CLI state using the UI live-session manifest contract."""
+    from backtide.live_history import serialize_snapshot, utc_now, write_manifest
+
+    write_manifest(
+        session_id,
+        {
+            "id": session_id,
+            "status": status,
+            "started_at": started_at,
+            "finished_at": utc_now() if status in {"stopped", "error"} else None,
+            "config": config,
+            "snapshot": serialize_snapshot(snapshot),
+            "health": {
+                "last_message_at": last_message_at,
+                "received_events": received_events,
+                "warmup_bars_loaded": 0,
+                "replay": None,
+            },
+            "error": error,
+        },
+    )
+
+
 @main.command(name="start-live-session")
 @click.argument(
     "config",
@@ -383,7 +417,8 @@ def start_live_session(config: Path, log_level: str | None) -> None:
     Reads a live-session configuration from a `.toml`, `.yaml`/`.yml`, or
     `.json` file, connects to the selected public exchange WebSocket, and feeds
     normalized candles into a local [PaperTradingSession]. The command runs
-    until interrupted with Ctrl+C; no real orders are submitted.
+    until interrupted with Ctrl+C; no real orders are submitted. Session state
+    and replayable events are saved to the same history used by the application.
 
     Read more in the [paper-trading guide][paper-trading].
 
@@ -468,17 +503,35 @@ def start_live_session(config: Path, log_level: str | None) -> None:
     if batch_size <= 0 or timeout_seconds <= 0:
         raise click.UsageError("batch_size and timeout_seconds must be positive.")
 
+    from backtide.live_history import (
+        append_event,
+        new_session_id,
+        serialize_combined_update,
+        utc_now,
+    )
+
     feed = None
+    session = None
+    session_id: str | None = None
+    started_at: str | None = None
+    history_config: dict[str, Any] = {}
+    last_message_at: str | None = None
+    received_events = 0
     try:
         trading_config = PaperTradingConfig(**paper)
         strategy = _load_live_strategy(values.get("strategy"), cfg)
         feed = LiveMarketFeed(provider, symbols, interval, include_partial=True)
         base_currency = str(paper.get("base_currency", "USD")).upper()
         inferred_quotes = {symbol: symbol.rsplit("-", 1)[-1].upper() for symbol in symbols}
+        target_quotes = inferred_quotes
         conversion_legs: dict[str, tuple[str, str]] = {}
         if any(quote != base_currency for quote in inferred_quotes.values()):
             feed.cancel()
-            _, conversion_legs = _live_currency_plan(provider, symbols, base_currency)
+            target_quotes, conversion_legs = _live_currency_plan(
+                provider,
+                symbols,
+                base_currency,
+            )
             feed = LiveMarketFeed(
                 provider,
                 [*symbols, *conversion_legs],
@@ -486,10 +539,40 @@ def start_live_session(config: Path, log_level: str | None) -> None:
                 include_partial=True,
             )
         session = PaperTradingSession(trading_config, strategy)
+        strategy_name = values.get("strategy")
+        strategy_label = str(strategy_name) if strategy_name else "Monitor"
+        session_id = new_session_id()
+        started_at = utc_now()
+        history_config = {
+            "mode": "paper",
+            "provider": provider,
+            "interval": interval,
+            "symbols": symbols,
+            "strategy": strategy_name,
+            "strategies": [strategy_name] if strategy_name else [],
+            "indicators": [],
+            "config": paper,
+            "target_quotes": target_quotes,
+            "conversion_legs": {
+                symbol: {"base": base, "quote": quote}
+                for symbol, (base, quote) in conversion_legs.items()
+            },
+            "warmup_bars": 0,
+        }
+        _write_cli_live_manifest(
+            session_id,
+            status="running",
+            started_at=started_at,
+            config=history_config,
+            snapshot=session.snapshot(),
+            last_message_at=last_message_at,
+            received_events=received_events,
+        )
         observed_conversion_legs: set[str] = set()
+        exchange_rates: dict[str, dict[str, Any]] = {}
         click.echo(
             f"Starting live paper session for {', '.join(symbols)} on "
-            f"{provider} ({interval}). Press Ctrl+C to stop."
+            f"{provider} ({interval}); history id {session_id}. Press Ctrl+C to stop."
         )
 
         try:
@@ -498,15 +581,30 @@ def start_live_session(config: Path, log_level: str | None) -> None:
                     max_events=batch_size,
                     timeout_seconds=timeout_seconds,
                 ):
+                    last_message_at = utc_now()
+                    received_events += 1
                     if market.symbol in conversion_legs:
                         base, quote = conversion_legs[market.symbol]
                         session.set_exchange_rate(base, quote, market.close, market.close_ts)
                         observed_conversion_legs.add(market.symbol)
+                        exchange_rates[str(market.symbol)] = {
+                            "base": base,
+                            "quote": quote,
+                            "rate": float(market.close),
+                            "timestamp": int(market.close_ts),
+                        }
                         if market.symbol not in symbols:
                             continue
                     if set(conversion_legs) - observed_conversion_legs:
                         continue
                     update = session.on_bar(market)
+                    persisted_update = serialize_combined_update(
+                        market,
+                        {strategy_label: update},
+                    )
+                    persisted_update["exchange_rates"] = dict(exchange_rates)
+                    persisted_update["received_at"] = last_message_at
+                    append_event(session_id, persisted_update)
                     if update.processed:
                         click.echo(
                             f"{market.symbol} {market.interval} close={market.close:.8g} "
@@ -516,12 +614,37 @@ def start_live_session(config: Path, log_level: str | None) -> None:
             click.echo("\nStopping live paper session...")
 
         snapshot = session.snapshot()
+        _write_cli_live_manifest(
+            session_id,
+            status="stopped",
+            started_at=started_at,
+            config=history_config,
+            snapshot=snapshot,
+            last_message_at=last_message_at,
+            received_events=received_events,
+        )
         click.echo(
             f"Stopped - processed {snapshot.processed_bars} market "
             f"update{'s' if snapshot.processed_bars != 1 else ''}; "
             f"final equity={snapshot.equity:.8g}."
         )
-    except (RuntimeError, TypeError, ValueError) as exc:
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        if session_id is not None and started_at is not None:
+            try:
+                snapshot = session.snapshot() if session is not None else None
+                _write_cli_live_manifest(
+                    session_id,
+                    status="error",
+                    started_at=started_at,
+                    config=history_config,
+                    snapshot=snapshot,
+                    last_message_at=last_message_at,
+                    received_events=received_events,
+                    error=str(exc),
+                )
+            except (OSError, RuntimeError, TypeError, ValueError):
+                # Preserve the original session failure when best-effort error recording fails.
+                pass
         raise click.ClickException(str(exc)) from exc
     finally:
         if feed is not None:

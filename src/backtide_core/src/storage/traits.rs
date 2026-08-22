@@ -88,4 +88,28 @@ pub trait Storage: Send + Sync {
 
     /// Delete a single experiment and all its child rows.
     fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64>;
+
+    /// Insert or replace one live-session manifest.
+    fn write_live_session(&self, session: &StoredLiveSession) -> StorageResult<()>;
+
+    /// Append one JSON-encoded event to a live-session journal.
+    fn append_live_session_event(&self, session_id: &str, event: &str) -> StorageResult<()>;
+
+    /// Replace the complete JSON-encoded warm-up stream for a live session.
+    fn write_live_session_warmup(&self, session_id: &str, markets: &[String]) -> StorageResult<()>;
+
+    /// Return live-session manifests newest first.
+    fn query_live_sessions(&self) -> StorageResult<Vec<StoredLiveSession>>;
+
+    /// Return one live-session manifest by id.
+    fn query_live_session(&self, session_id: &str) -> StorageResult<Option<StoredLiveSession>>;
+
+    /// Return one session's JSON-encoded events in append order.
+    fn query_live_session_events(&self, session_id: &str) -> StorageResult<Vec<String>>;
+
+    /// Return one session's JSON-encoded warm-up markets in source order.
+    fn query_live_session_warmup(&self, session_id: &str) -> StorageResult<Vec<String>>;
+
+    /// Delete one live session and all of its journal rows.
+    fn delete_live_session(&self, session_id: &str) -> StorageResult<u64>;
 }

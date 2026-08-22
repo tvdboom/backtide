@@ -69,3 +69,9 @@ pub struct PaperFill {
     /// Human-readable matching or rejection reason.
     pub reason: String,
 }
+
+#[pymethods]
+impl PaperFill {
+    #[classattr]
+    const __RUST_DATACLASS__: bool = true;
+}

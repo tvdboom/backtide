@@ -134,7 +134,7 @@ Based on comprehensive [benchmarks](https://tvdboom.github.io/backtide/latest/co
 --- | ---
 ⭐ **[About](https://tvdboom.github.io/backtide/latest/about/)** | Learn more about the package.
 🚀 **[Getting started](https://tvdboom.github.io/backtide/latest/getting_started/)** | New to backtide? Here's how to get you started!
-👨‍💻 **[User guide](https://tvdboom.github.io/backtide/latest/user_guide/introduction/)** | How to use backtide and its features.
+👨‍💻 **[User guide](https://tvdboom.github.io/backtide/latest/user_guide/overview/introduction/)** | How to use backtide and its features.
 🎛️ **[API Reference](https://tvdboom.github.io/backtide/latest/API/config/get_config/)** | The detailed reference for backtide's API.
 ❔ **[FAQ](https://tvdboom.github.io/backtide/latest/faq/)** | Get answers to frequently asked questions.
 🔧 **[Contributing](https://tvdboom.github.io/backtide/latest/contributing/)** | Do you wan to contribute to the project? Read this before creating a PR.

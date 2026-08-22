@@ -315,7 +315,10 @@ class TestStartLiveSessionCommand:
         tmp_path,
     ):
         """A TOML session processes updates and cancels its feed on Ctrl+C."""
-        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_cfg.return_value = MagicMock(
+            general=MagicMock(log_level="warn"),
+            data=SimpleNamespace(storage_path=tmp_path),
+        )
         market = SimpleNamespace(symbol="BTC-USD", interval="1m", close=101.25)
 
         class Feed:
@@ -348,7 +351,14 @@ class TestStartLiveSessionCommand:
             def on_bar(self, value):
                 assert value is market
                 snapshot = SimpleNamespace(equity=101.25)
-                return SimpleNamespace(processed=True, snapshot=snapshot, fills=[])
+                return SimpleNamespace(
+                    market=value,
+                    processed=True,
+                    snapshot=snapshot,
+                    fills=[],
+                    orders_submitted=0,
+                    indicators={},
+                )
 
             def snapshot(self):
                 return SimpleNamespace(processed_bars=1, equity=101.25)
@@ -363,6 +373,7 @@ class TestStartLiveSessionCommand:
             patch("backtide.cli.LiveMarketFeed", Feed),
             patch("backtide.cli.PaperTradingConfig", return_value="paper-config"),
             patch("backtide.cli.PaperTradingSession", Session),
+            patch("backtide.live_history.new_session_id", return_value="0123456789abcdef"),
         ):
             result = runner.invoke(start_live_session, [str(cfg_path)])
 
@@ -371,6 +382,18 @@ class TestStartLiveSessionCommand:
         assert "BTC-USD 1m close=101.25 equity=101.25 fills=0" in result.output
         assert "processed 1 market update" in result.output
         assert Feed.canceled
+        from backtide.ui.live import LiveTradingManager
+
+        manager = LiveTradingManager()
+        persisted = manager.session("0123456789abcdef")
+        manifest = persisted
+        events = persisted["updates"]
+        assert manifest["status"] == "stopped"
+        assert manifest["snapshot"]["equity"] == 101.25
+        assert manifest["health"]["received_events"] == 1
+        assert events[0]["market"]["symbol"] == "BTC-USD"
+        assert events[0]["strategies"]["Monitor"]["snapshot"]["equity"] == 101.25
+        manager.delete_session("0123456789abcdef")
         mock_logging.assert_called_once_with("warn")
 
     @patch("backtide.cli.get_config")

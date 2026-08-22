@@ -17,6 +17,67 @@ import polars as pl
 from backtide.core.backtest import RunResult
 from backtide.core.data import Instrument
 
+def _append_live_session_event(session_id, event):
+    """Append one JSON-encoded event to a live session."""
+
+def _delete_live_session(session_id):
+    """Delete one live session and all of its journal rows."""
+
+def _query_live_session(session_id):
+    """Return one stored live-session manifest by id."""
+
+def _query_live_session_events(session_id):
+    """Return one session's JSON-encoded events in append order."""
+
+def _query_live_session_warmup(session_id):
+    """Return one session's JSON-encoded warm-up markets in source order."""
+
+def _query_live_sessions():
+    """Return every stored live-session manifest newest first."""
+
+def _write_live_session(
+    session_id,
+    status,
+    started_at,
+    finished_at,
+    config,
+    snapshot,
+    health,
+    error,
+):
+    """Store the current manifest for a live paper or replay session.
+
+    Parameters
+    ----------
+    session_id : str
+        Stable live-session identifier.
+
+    status : str
+        Current session status.
+
+    started_at : str
+        UTC ISO-8601 start timestamp.
+
+    finished_at : str | None
+        UTC ISO-8601 finish timestamp for a terminal session.
+
+    config : str
+        JSON-encoded session configuration.
+
+    snapshot : str
+        JSON-encoded latest account snapshot.
+
+    health : str
+        JSON-encoded connection and replay health state.
+
+    error : str | None
+        Terminal error message.
+
+    """
+
+def _write_live_session_warmup(session_id, markets):
+    """Replace the JSON-encoded warm-up stream for a live session."""
+
 def delete_experiment(experiment_id) -> int:
     """Delete a single experiment from the database.
 

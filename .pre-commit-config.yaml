@@ -44,7 +44,7 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: cargo clippy --manifest-path src/backtide_core/Cargo.toml --all-targets --all-features -- -D warnings
+        entry: python scripts/run_cargo.py cargo clippy --manifest-path src/backtide_core/Cargo.toml --all-targets --all-features -- -D warnings
         language: system
         types: [rust]
         pass_filenames: false
@@ -58,7 +58,7 @@ repos:
 
       - id: ty
         name: ty check
-        entry: uv run ty check
+        entry: uv run --no-sync ty check
         language: system
         pass_filenames: false
         types: [python]

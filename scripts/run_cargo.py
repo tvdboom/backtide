@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import subprocess
 import sys
 import sysconfig
@@ -50,6 +51,89 @@ def _prepend(env: dict[str, str], key: str, value: str) -> None:
     """
     existing = env.get(key, "")
     env[key] = f"{value}{os.pathsep}{existing}" if existing else value
+
+
+def _get_environment_value(env: dict[str, str], key: str) -> str | None:
+    """Return an environment value using Windows-compatible key matching."""
+    folded_key = key.casefold()
+    return next((value for name, value in env.items() if name.casefold() == folded_key), None)
+
+
+def _configure_windows_msvc(env: dict[str, str]) -> None:
+    """Load the latest stable Visual Studio C++ developer environment.
+
+    Cargo fingerprints native build scripts using compiler and SDK environment
+    variables. Loading one stable MSVC environment here prevents inherited
+    ``CC``/``CXX`` values from alternating between Visual Studio installations
+    and repeatedly invalidating large native dependencies such as DuckDB.
+
+    Parameters
+    ----------
+    env : dict[str, str]
+        Child-process environment to update in place.
+
+    """
+    program_files = _get_environment_value(env, "ProgramFiles(x86)")
+    if not program_files:
+        return
+
+    vswhere = Path(program_files) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    if not vswhere.is_file():
+        return
+
+    query = subprocess.run(
+        [
+            str(vswhere),
+            "-latest",
+            "-products",
+            "*",
+            "-requires",
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "-property",
+            "installationPath",
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    installation = query.stdout.strip()
+    if not installation:
+        return
+
+    developer_command = Path(installation) / "Common7" / "Tools" / "VsDevCmd.bat"
+    if not developer_command.is_file():
+        return
+
+    configured = subprocess.run(
+        [
+            "cmd.exe",
+            "/d",
+            "/c",
+            str(developer_command),
+            "-no_logo",
+            "-arch=x64",
+            "-host_arch=x64",
+            "&&",
+            "set",
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    for line in configured.stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key:
+            env[key] = value
+
+    tools_directory = _get_environment_value(env, "VCToolsInstallDir")
+    if not tools_directory:
+        return
+    compiler = Path(tools_directory) / "bin" / "HostX64" / "x64" / "cl.exe"
+    if compiler.is_file():
+        env["CC"] = str(compiler)
+        env["CXX"] = str(compiler)
 
 
 def main(argv: list[str]) -> int:
@@ -83,6 +167,8 @@ def main(argv: list[str]) -> int:
         return 2
 
     env = os.environ.copy()
+    if os.name == "nt":
+        _configure_windows_msvc(env)
     package_dirs = dict.fromkeys(sysconfig.get_paths().get(key) for key in ("purelib", "platlib"))
     for package_dir in package_dirs:
         if package_dir and os.path.isdir(package_dir):

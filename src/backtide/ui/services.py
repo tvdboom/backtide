@@ -1643,7 +1643,7 @@ class BacktideServices:
         return [str(value) for value in enum.variants()]
 
     @staticmethod
-    def _currency_options(enum: Any) -> list[dict[str, str]]:
+    def _currency_options(enum: Any) -> list[dict[str, str | int]]:
         """Return currency display metadata sourced from the Rust enum."""
         return [
             {
@@ -1651,6 +1651,7 @@ class BacktideServices:
                 "name": currency.name,
                 "flag": currency.country.flag,
                 "country_code": currency.country.alpha2.lower(),
+                "decimals": currency.decimals,
             }
             for currency in enum.variants()
         ]

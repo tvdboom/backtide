@@ -32,6 +32,7 @@ test *args:
     uv run pytest -n=auto {{args}}
     uv run python scripts/run_cargo.py \
         cargo llvm-cov \
+            --no-clean \
             --manifest-path src/backtide_core/Cargo.toml \
             --no-cfg-coverage
 
@@ -65,15 +66,15 @@ launch:
 
 # Install frontend development dependencies (not required by package users)
 frontend-sync:
-    pnpm --dir frontend install --frozen-lockfile
+    pnpm --dir application install --frozen-lockfile
 
 # Run frontend unit tests
 frontend-test:
-    pnpm --dir frontend test
+    pnpm --dir application test
 
 # Rebuild the production SPA bundled into Python wheels
 frontend-build:
-    pnpm --dir frontend build
+    pnpm --dir application build
 
 publish:
     git --no-pager status

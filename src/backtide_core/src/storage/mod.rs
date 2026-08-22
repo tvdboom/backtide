@@ -21,6 +21,14 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(query_instruments, &m)?)?;
     m.add_function(wrap_pyfunction!(delete_symbols, &m)?)?;
     m.add_function(wrap_pyfunction!(delete_experiment, &m)?)?;
+    m.add_function(wrap_pyfunction!(_write_live_session, &m)?)?;
+    m.add_function(wrap_pyfunction!(_append_live_session_event, &m)?)?;
+    m.add_function(wrap_pyfunction!(_write_live_session_warmup, &m)?)?;
+    m.add_function(wrap_pyfunction!(_query_live_sessions, &m)?)?;
+    m.add_function(wrap_pyfunction!(_query_live_session, &m)?)?;
+    m.add_function(wrap_pyfunction!(_query_live_session_events, &m)?)?;
+    m.add_function(wrap_pyfunction!(_query_live_session_warmup, &m)?)?;
+    m.add_function(wrap_pyfunction!(_delete_live_session, &m)?)?;
 
     parent.add_submodule(&m)?;
 

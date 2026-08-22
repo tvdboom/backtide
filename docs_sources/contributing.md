@@ -59,10 +59,9 @@ backtide/                           # Repository root
 ├── uv.lock                         # Locked dependency versions (managed by uv)
 ├── justfile                        # Convenience task recipes for `just`
 ├── mkdocs.yml                      # Documentation site configuration
-├── backtide.config.toml            # Default runtime configuration file
 ├── .pre-commit-config.yaml         # Pre-commit hook definitions
 │
-├── frontend/                       # Vue 3 + Vite source and Vitest tests
+├── application/                    # Vue 3 + Vite source and Vitest tests
 │   ├── src/                        # Components, pages, styles, and API client
 │   ├── package.json                # Frontend development scripts
 │   └── pnpm-lock.yaml              # Locked frontend dependencies
@@ -165,21 +164,6 @@ backtide/                           # Repository root
 | Benchmarking   | [Criterion.rs](https://github.com/bheisler/criterion.rs)                    |
 | Task runner    | [tox](https://tox.wiki) with the [tox-uv](https://github.com/tox-dev/tox-uv) plugin · [just](https://just.systems) for local recipes |
 | Package mgmt   | [uv](https://docs.astral.sh/uv/)                                            |
-
-### DuckDB schema changes
-
-DuckDB table definitions live in `src/backtide_core/database/`, with one SQL file per table.
-`DuckDb::init` embeds and executes every definition when storage opens. Each definition must use
-`CREATE TABLE IF NOT EXISTS`: initialization creates missing tables, preserves existing rows, and
-assumes that every existing table already matches the current schema.
-
-Backtide deliberately contains no database migration machinery. Do not add migration scripts,
-schema-version tables, startup compatibility transforms, historical-schema handling, or startup
-schema alterations. Schema changes define only the complete layout of a newly created database;
-tests and development fixtures that need that layout must use a fresh database.
-
-
-<br><br>
 
 ## Development setup
 

@@ -8,25 +8,42 @@ Description: Background WebSocket paper-trading session management for the UI.
 from __future__ import annotations
 
 from collections import deque
-from datetime import UTC, datetime
+from datetime import datetime
 import importlib
 import inspect
-import json
-from pathlib import Path
 import re
-import shutil
 import threading
 import time
 from typing import Any
-import uuid
 
-from backtide.ui.services import APIError, _clean, dataframe_records, public_attributes
+from backtide.live_history import (
+    aggregate_snapshots,
+    append_event,
+    new_session_id,
+    query_manifests,
+    serialize_combined_update,
+    serialize_fills,
+    serialize_market,
+    serialize_order,
+    serialize_snapshot,
+    serialize_update,
+    utc_now,
+    write_manifest,
+    write_warmup,
+)
+from backtide.live_history import (
+    delete_session as delete_stored_session,
+)
+from backtide.live_history import (
+    query_session as query_stored_session,
+)
+from backtide.ui.services import APIError, dataframe_records
 
 
 class LiveTradingManager:
     """Coordinate observable, persistent paper-trading and replay sessions."""
 
-    def __init__(self, storage_root: Path | None = None) -> None:
+    def __init__(self) -> None:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._paused = threading.Event()
@@ -53,7 +70,6 @@ class LiveTradingManager:
         self._replay_processed_events = 0
         self._replay_source_duration = 0.0
         self._replay_warmup_source = "none"
-        self._configured_storage_root = storage_root
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate configuration, warm strategies, and start a live paper session."""
@@ -337,32 +353,22 @@ class LiveTradingManager:
 
     def sessions(self) -> list[dict[str, Any]]:
         """List newest-first persisted paper and replay sessions."""
-        records = []
-        root = self._storage_root()
-        if not root.exists():
-            return records
         with self._lock:
             active_session_id = (
                 self._session_id
                 if self._thread and self._thread.is_alive() and not self._stop.is_set()
                 else None
             )
-            for manifest in root.glob("*/manifest.json"):
-                try:
-                    record = json.loads(manifest.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    continue
-                records.append(
-                    self._reconcile_persisted_status(record, manifest, active_session_id)
-                )
-        return sorted(records, key=lambda item: str(item.get("started_at", "")), reverse=True)
+            return [
+                self._reconcile_persisted_status(record, active_session_id)
+                for record in query_manifests()
+            ]
 
     def session(self, session_id: str) -> dict[str, Any]:
         """Return one persisted session with its bounded event journal."""
         self._validate_session_id(session_id)
-        folder = self._storage_root() / session_id
-        manifest = folder / "manifest.json"
-        if not manifest.is_file():
+        result = query_stored_session(session_id)
+        if result is None:
             raise APIError(f"Paper session {session_id!r} was not found.", 404)
         with self._lock:
             active_session_id = (
@@ -371,26 +377,14 @@ class LiveTradingManager:
                 else None
             )
             result = self._reconcile_persisted_status(
-                json.loads(manifest.read_text(encoding="utf-8")),
-                manifest,
+                result,
                 active_session_id,
             )
-        updates = []
-        journal = folder / "events.jsonl"
-        if journal.is_file():
-            for line in journal.read_text(encoding="utf-8").splitlines():
-                try:
-                    updates.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-        result["updates"] = updates
-        result["warmup"] = self._read_json_lines(folder / "warmup.jsonl")
         return result
 
     def delete_session(self, session_id: str) -> dict[str, int]:
         """Delete one inactive persisted paper session and its event journal."""
         self._validate_session_id(session_id)
-        folder = self._storage_root() / session_id
         with self._lock:
             active = bool(
                 self._session_id == session_id
@@ -400,24 +394,23 @@ class LiveTradingManager:
             )
             if active:
                 raise APIError("Stop the active paper session before deleting it.", 409)
-            if not (folder / "manifest.json").is_file():
-                raise APIError(f"Paper session {session_id!r} was not found.", 404)
             try:
-                shutil.rmtree(folder)
-            except OSError as exc:
+                deleted = delete_stored_session(session_id)
+            except RuntimeError as exc:
                 raise APIError(f"Could not delete paper session {session_id!r}.", 500) from exc
+            if not deleted:
+                raise APIError(f"Paper session {session_id!r} was not found.", 404)
         return {"deleted": 1}
 
     @staticmethod
     def _validate_session_id(session_id: str) -> None:
-        """Reject identifiers that could escape the paper-session storage root."""
+        """Reject malformed paper-session identifiers."""
         if not re.fullmatch(r"[0-9a-f]{16}", session_id):
             raise APIError("Paper session id is invalid.", 400)
 
     def _reconcile_persisted_status(
         self,
         record: dict[str, Any],
-        manifest: Path,
         active_session_id: str | None,
     ) -> dict[str, Any]:
         """Close a manifest that claims activity without a matching worker."""
@@ -429,11 +422,8 @@ class LiveTradingManager:
         record = {**record, "status": "stopped"}
         record["finished_at"] = record.get("finished_at") or self._now()
         try:
-            manifest.write_text(
-                json.dumps(_clean(record), indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-        except OSError:
+            write_manifest(str(record["id"]), record)
+        except RuntimeError:
             # The history response must still reflect reality if repair cannot be persisted.
             pass
         return record
@@ -444,7 +434,7 @@ class LiveTradingManager:
         self._error = None
         self._stop.clear()
         self._paused.clear()
-        self._session_id = uuid.uuid4().hex[:16]
+        self._session_id = new_session_id()
         self._started_at = self._now()
         self._last_message_at = None
         self._received_events = 0
@@ -784,172 +774,36 @@ class LiveTradingManager:
 
     @classmethod
     def _serialize_snapshot(cls, snapshot: Any) -> dict[str, Any]:
-        if snapshot is None:
-            return {}
-        output = public_attributes(
-            snapshot,
-            (
-                "latest_prices",
-                "equity",
-                "realized_pnl",
-                "unrealized_pnl",
-                "processed_bars",
-                "gross_exposure",
-                "net_exposure",
-                "leverage",
-                "buying_power",
-                "drawdown",
-                "peak_equity",
-                "total_costs",
-                "trading_halted",
-                "halt_reason",
-                "metrics",
-            ),
-        )
-        portfolio = getattr(snapshot, "portfolio", None)
-        if portfolio:
-            output["portfolio"] = public_attributes(portfolio, ("cash", "positions"))
-            output["portfolio"]["orders"] = [
-                cls._serialize_order(order) for order in getattr(portfolio, "orders", [])
-            ]
-        else:
-            output["portfolio"] = {}
-        return _clean(output)
+        return serialize_snapshot(snapshot)
 
     @classmethod
     def _serialize_update(cls, update: Any) -> dict[str, Any]:
-        market = cls._serialize_market(update.market)
-        fills = cls._serialize_fills(update.fills)
-        return _clean(
-            {
-                "market": market,
-                "fills": fills,
-                "orders_submitted": update.orders_submitted,
-                "processed": update.processed,
-                "snapshot": cls._serialize_snapshot(update.snapshot),
-                "indicators": getattr(update, "indicators", {}),
-            }
-        )
+        return serialize_update(update)
 
     @classmethod
     def _serialize_combined_update(cls, market: Any, results: dict[str, Any]) -> dict[str, Any]:
-        serialized = {name: cls._serialize_update(update) for name, update in results.items()}
-        snapshots = {name: value["snapshot"] for name, value in serialized.items()}
-        fills = []
-        for name, value in serialized.items():
-            fills.extend({**fill, "strategy": name} for fill in value["fills"])
-        first = next(iter(serialized.values()))
-        return {
-            "market": cls._serialize_market(market),
-            "fills": fills,
-            "orders_submitted": sum(value["orders_submitted"] for value in serialized.values()),
-            "processed": any(value["processed"] for value in serialized.values()),
-            "snapshot": cls._aggregate_snapshots(snapshots),
-            "strategies": serialized,
-            "indicators": first.get("indicators", {}),
-        }
+        return serialize_combined_update(market, results)
 
     @staticmethod
     def _serialize_market(market: Any) -> dict[str, Any]:
-        return _clean(
-            public_attributes(
-                market,
-                (
-                    "symbol",
-                    "quote_currency",
-                    "interval",
-                    "open_ts",
-                    "close_ts",
-                    "open",
-                    "high",
-                    "low",
-                    "close",
-                    "volume",
-                    "n_trades",
-                    "is_final",
-                    "provider",
-                    "received_ts",
-                ),
-            )
-        )
+        return serialize_market(market)
 
     @staticmethod
     def _serialize_fills(values: Any) -> list[dict[str, Any]]:
-        fills = []
-        for fill in values:
-            row = public_attributes(
-                fill,
-                ("timestamp", "status", "fill_price", "commission", "realized_pnl", "reason"),
-            )
-            if row.get("status") is not None:
-                row["status"] = str(row["status"])
-            row["order"] = LiveTradingManager._serialize_order(fill.order)
-            fills.append(_clean(row))
-        return fills
+        return serialize_fills(values)
 
     @staticmethod
     def _serialize_order(order: Any) -> dict[str, Any]:
         """Convert a native order and its enum type into journal-safe values."""
-        row = public_attributes(
-            order,
-            ("id", "symbol", "order_type", "quantity", "price", "limit_price"),
-        )
-        if row.get("order_type") is not None:
-            row["order_type"] = str(row["order_type"])
-        return row
+        return serialize_order(order)
 
     @staticmethod
     def _aggregate_snapshots(snapshots: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        if not snapshots:
-            return {}
-        if len(snapshots) == 1:
-            return dict(next(iter(snapshots.values())))
-        values = list(snapshots.values())
-        cash: dict[str, float] = {}
-        positions: dict[str, float] = {}
-        prices: dict[str, float] = {}
-        for snapshot in values:
-            prices.update(snapshot.get("latest_prices") or {})
-            for currency, amount in (snapshot.get("portfolio", {}).get("cash") or {}).items():
-                cash[currency] = cash.get(currency, 0.0) + float(amount)
-            for symbol, amount in (snapshot.get("portfolio", {}).get("positions") or {}).items():
-                positions[symbol] = positions.get(symbol, 0.0) + float(amount)
-        equity = sum(float(value.get("equity") or 0.0) for value in values)
-        gross = sum(float(value.get("gross_exposure") or 0.0) for value in values)
-        return {
-            "latest_prices": prices,
-            "equity": equity,
-            "realized_pnl": sum(float(value.get("realized_pnl") or 0.0) for value in values),
-            "unrealized_pnl": sum(float(value.get("unrealized_pnl") or 0.0) for value in values),
-            "processed_bars": max(int(value.get("processed_bars") or 0) for value in values),
-            "gross_exposure": gross,
-            "net_exposure": sum(float(value.get("net_exposure") or 0.0) for value in values),
-            "leverage": gross / equity if equity > 0.0 else 0.0,
-            "buying_power": sum(float(value.get("buying_power") or 0.0) for value in values),
-            "drawdown": min(float(value.get("drawdown") or 0.0) for value in values),
-            "peak_equity": sum(float(value.get("peak_equity") or 0.0) for value in values),
-            "total_costs": sum(float(value.get("total_costs") or 0.0) for value in values),
-            "trading_halted": any(bool(value.get("trading_halted")) for value in values),
-            "halt_reason": "; ".join(
-                str(value["halt_reason"]) for value in values if value.get("halt_reason")
-            )
-            or None,
-            "metrics": {},
-            "portfolio": {"cash": cash, "positions": positions, "orders": []},
-        }
-
-    def _storage_root(self) -> Path:
-        if self._configured_storage_root is not None:
-            return self._configured_storage_root
-        from backtide.config import get_config
-
-        return Path(get_config().data.storage_path) / "paper_sessions"
+        return aggregate_snapshots(snapshots)
 
     def _persist_manifest(self, status: str) -> None:
         if not self._session_id:
             return
-        folder = self._storage_root() / self._session_id
-        folder.mkdir(parents=True, exist_ok=True)
         value = {
             "id": self._session_id,
             "status": status,
@@ -965,46 +819,22 @@ class LiveTradingManager:
             },
             "error": self._error,
         }
-        (folder / "manifest.json").write_text(
-            json.dumps(_clean(value), indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        write_manifest(self._session_id, value)
 
     def _append_event(self, update: dict[str, Any]) -> None:
         if not self._session_id:
             return
-        folder = self._storage_root() / self._session_id
-        folder.mkdir(parents=True, exist_ok=True)
-        with (folder / "events.jsonl").open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(_clean(update), separators=(",", ":")) + "\n")
+        append_event(self._session_id, update)
 
     def _persist_warmup(self, markets: list[Any]) -> None:
         """Persist the exact warm-up stream used to initialize a live session."""
         if not self._session_id:
             return
-        folder = self._storage_root() / self._session_id
-        folder.mkdir(parents=True, exist_ok=True)
-        with (folder / "warmup.jsonl").open("w", encoding="utf-8") as stream:
-            for market in markets:
-                stream.write(
-                    json.dumps(self._serialize_market(market), separators=(",", ":")) + "\n"
-                )
-
-    @staticmethod
-    def _read_json_lines(path: Path) -> list[dict[str, Any]]:
-        """Read valid JSON objects from a persisted line-delimited journal."""
-        if not path.is_file():
-            return []
-        values = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                value = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(value, dict):
-                values.append(value)
-        return values
+        write_warmup(
+            self._session_id,
+            [self._serialize_market(market) for market in markets],
+        )
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(UTC).isoformat()
+        return utc_now()

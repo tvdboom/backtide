@@ -42,8 +42,9 @@ __pycache__/
 .Python
 env/
 venv*/
-frontend/dist/
-frontend/node_modules/
+application/dist/
+application/node_modules/
+/node_modules/
 .pnpm-store/
 build/
 develop-eggs/

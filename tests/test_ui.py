@@ -18,9 +18,44 @@ from typing import Any
 
 import pytest
 
+from backtide.live_history import (
+    append_event,
+    new_session_id,
+    utc_now,
+    write_manifest,
+    write_warmup,
+)
 from backtide.ui.live import LiveTradingManager
 from backtide.ui.server import create_server
 from backtide.ui.services import APIError, BacktideServices, JobStore, dataframe_records
+
+
+def _persist_live_replay_source(
+    config: dict[str, Any],
+    *,
+    events: list[dict[str, Any]] | None = None,
+    warmup: list[dict[str, Any]] | None = None,
+) -> str:
+    """Store one complete deterministic source session for replay tests."""
+    session_id = new_session_id()
+    now = utc_now()
+    write_manifest(
+        session_id,
+        {
+            "id": session_id,
+            "status": "stopped",
+            "started_at": now,
+            "finished_at": now,
+            "config": config,
+            "snapshot": {},
+            "health": {},
+            "error": None,
+        },
+    )
+    for event in events or []:
+        append_event(session_id, event)
+    write_warmup(session_id, warmup or [])
+    return session_id
 
 
 class StubServices(BacktideServices):
@@ -347,6 +382,7 @@ class TestSerialization:
             "name": "United States Dollar",
             "flag": "🇺🇸",
             "country_code": "us",
+            "decimals": 2,
         }
 
     @pytest.mark.parametrize(
@@ -1906,7 +1942,6 @@ class TestLiveTradingManager:
     def test_replay_pause_blocks_without_consuming_the_next_event(
         self,
         monkeypatch,
-        tmp_path,
     ):
         """Paused playback waits instead of dropping recorded market events."""
         delay_started = threading.Event()
@@ -1946,26 +1981,6 @@ class TestLiveTradingManager:
             def snapshot():
                 return None
 
-        session_id = "0123456789abcdef"
-        folder = tmp_path / session_id
-        folder.mkdir()
-        (folder / "manifest.json").write_text(
-            json.dumps(
-                {
-                    "id": session_id,
-                    "config": {
-                        "mode": "paper",
-                        "provider": "mock",
-                        "interval": "1m",
-                        "symbols": ["BTC-USD"],
-                        "strategies": [],
-                        "warmup_bars": 0,
-                        "config": {"initial_cash": 10_000.0},
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
         markets = [
             {
                 "symbol": "BTC-USD",
@@ -1984,13 +1999,19 @@ class TestLiveTradingManager:
             }
             for timestamp in (1_700_000_000, 1_700_000_001)
         ]
-        (folder / "events.jsonl").write_text(
-            "\n".join(
-                json.dumps({"market": market, "received_at": market["received_ts"]})
-                for market in markets
-            )
-            + "\n",
-            encoding="utf-8",
+        session_id = _persist_live_replay_source(
+            {
+                "mode": "paper",
+                "provider": "mock",
+                "interval": "1m",
+                "symbols": ["BTC-USD"],
+                "strategies": [],
+                "warmup_bars": 0,
+                "config": {"initial_cash": 10_000.0},
+            },
+            events=[
+                {"market": market, "received_at": market["received_ts"]} for market in markets
+            ],
         )
         monkeypatch.setitem(
             sys.modules,
@@ -2001,7 +2022,7 @@ class TestLiveTradingManager:
                 PaperTradingSession=Session,
             ),
         )
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
 
         def wait_for_delay(seconds):
             replay_delays.append(seconds)
@@ -2024,11 +2045,14 @@ class TestLiveTradingManager:
         manager._thread.join(timeout=1.0)
         assert manager._replay_processed_events == 2
         assert replay_delays == [1.0]
+        replay_id = manager._session_id
+        assert replay_id is not None
+        manager.delete_session(replay_id)
+        manager.delete_session(session_id)
 
     def test_replay_restores_recorded_warmup_without_querying_storage(
         self,
         monkeypatch,
-        tmp_path,
     ):
         """Replay initializes strategies from the exact persisted warm-up stream."""
         warmed = []
@@ -2053,26 +2077,6 @@ class TestLiveTradingManager:
             def snapshot():
                 return None
 
-        session_id = "0123456789abcdef"
-        folder = tmp_path / session_id
-        folder.mkdir()
-        (folder / "manifest.json").write_text(
-            json.dumps(
-                {
-                    "id": session_id,
-                    "config": {
-                        "mode": "paper",
-                        "provider": "mock",
-                        "interval": "1m",
-                        "symbols": ["BTC-USD"],
-                        "strategies": [],
-                        "warmup_bars": 1,
-                        "config": {"initial_cash": 10_000.0},
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
         warmup = {
             "symbol": "BTC-USD",
             "interval": "1m",
@@ -2088,9 +2092,17 @@ class TestLiveTradingManager:
             "provider": "mock",
             "received_ts": 1_700_000_060,
         }
-        (folder / "warmup.jsonl").write_text(
-            json.dumps(warmup) + "\n",
-            encoding="utf-8",
+        session_id = _persist_live_replay_source(
+            {
+                "mode": "paper",
+                "provider": "mock",
+                "interval": "1m",
+                "symbols": ["BTC-USD"],
+                "strategies": [],
+                "warmup_bars": 1,
+                "config": {"initial_cash": 10_000.0},
+            },
+            warmup=[warmup],
         )
         monkeypatch.setitem(
             sys.modules,
@@ -2101,7 +2113,7 @@ class TestLiveTradingManager:
                 PaperTradingSession=Session,
             ),
         )
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
 
         manager.replay(session_id)
         assert manager._thread is not None
@@ -2110,11 +2122,14 @@ class TestLiveTradingManager:
         assert [market.symbol for market in warmed] == ["BTC-USD"]
         assert manager._warmup_loaded == 1
         assert manager.status()["replay"]["warmup_source"] == "recorded"
+        replay_id = manager._session_id
+        assert replay_id is not None
+        manager.delete_session(replay_id)
+        manager.delete_session(session_id)
 
     def test_replay_ignores_config_fields_unsupported_by_the_loaded_engine(
         self,
         monkeypatch,
-        tmp_path,
     ):
         """Current session journals replay against an older compatible native config."""
         captured = {}
@@ -2131,24 +2146,15 @@ class TestLiveTradingManager:
             def snapshot():
                 return None
 
-        session_id = "0123456789abcdef"
-        folder = tmp_path / session_id
-        folder.mkdir()
-        (folder / "manifest.json").write_text(
-            json.dumps(
-                {
-                    "id": session_id,
-                    "config": {
-                        "mode": "paper",
-                        "strategies": [],
-                        "config": {
-                            "initial_cash": 25_000.0,
-                            "allowed_order_types": ["Market"],
-                        },
-                    },
-                }
-            ),
-            encoding="utf-8",
+        session_id = _persist_live_replay_source(
+            {
+                "mode": "paper",
+                "strategies": [],
+                "config": {
+                    "initial_cash": 25_000.0,
+                    "allowed_order_types": ["Market"],
+                },
+            }
         )
         monkeypatch.setitem(
             sys.modules,
@@ -2159,7 +2165,7 @@ class TestLiveTradingManager:
                 PaperTradingSession=Session,
             ),
         )
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
 
         manager.replay(session_id)
         thread = manager._thread
@@ -2168,8 +2174,12 @@ class TestLiveTradingManager:
 
         assert captured["initial_cash"] == 25_000.0
         assert captured["strategy"] is None
+        replay_id = manager._session_id
+        assert replay_id is not None
+        manager.delete_session(replay_id)
+        manager.delete_session(session_id)
 
-    def test_mock_feed_updates_session_and_stops_cleanly(self, monkeypatch, tmp_path):
+    def test_mock_feed_updates_session_and_stops_cleanly(self, monkeypatch):
         """A mocked WebSocket batch is processed, serialized, and canceled on stop."""
         processed = threading.Event()
         instances = []
@@ -2248,7 +2258,7 @@ class TestLiveTradingManager:
                 PaperTradingSession=Session,
             ),
         )
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
 
         manager.start(
             {
@@ -2270,7 +2280,7 @@ class TestLiveTradingManager:
         assert instances[0].canceled.is_set()
         assert instances[1].canceled.is_set()
 
-    def test_conversion_updates_seed_accounts_before_target_processing(self, tmp_path):
+    def test_conversion_updates_seed_accounts_before_target_processing(self):
         """Conversion legs are observed before a foreign-quoted target reaches a strategy."""
         processed = []
         rates = []
@@ -2314,7 +2324,7 @@ class TestLiveTradingManager:
                 received_ts=1_700_000_061,
             )
 
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
         manager._sessions = {"Monitor": Session()}
         manager._session = manager._sessions["Monitor"]
         manager._config = {"symbols": ["AAVE-ETH"]}
@@ -2329,7 +2339,7 @@ class TestLiveTradingManager:
         assert processed == ["AAVE-ETH"]
         assert manager.status()["updates"][0]["exchange_rates"]["ETH-EUR"]["rate"] == 4_000.0
 
-    def test_mock_feed_failure_sets_terminal_error(self, monkeypatch, tmp_path):
+    def test_mock_feed_failure_sets_terminal_error(self, monkeypatch):
         """A mocked WebSocket failure stops the worker and exposes its message."""
         failed = threading.Event()
 
@@ -2369,7 +2379,7 @@ class TestLiveTradingManager:
                 PaperTradingSession=Session,
             ),
         )
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
 
         manager.start({"provider": "binance", "symbols": ["BTC-USDT"]})
         assert failed.wait(timeout=1.0)
@@ -2384,7 +2394,6 @@ class TestLiveTradingManager:
     def test_worker_initialization_failure_updates_the_running_manifest(
         self,
         monkeypatch,
-        tmp_path,
     ):
         """A feed that fails in the worker cannot leave a running history entry."""
         failed = threading.Event()
@@ -2419,7 +2428,7 @@ class TestLiveTradingManager:
                 PaperTradingSession=Session,
             ),
         )
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
 
         manager.start({"provider": "binance", "symbols": ["BTC-USDT"]})
         assert failed.wait(timeout=1.0)
@@ -2431,16 +2440,14 @@ class TestLiveTradingManager:
         assert status["status"] == "error"
         assert status["error"] == "mock connection failed"
         assert manager._session_id is not None
-        manifest = json.loads(
-            (tmp_path / manager._session_id / "manifest.json").read_text(encoding="utf-8")
-        )
+        manifest = manager.session(manager._session_id)
         assert manifest["status"] == "error"
         assert manifest["finished_at"] is not None
+        manager.delete_session(manager._session_id)
 
     def test_combines_independent_strategy_accounts_with_fill_attribution(
         self,
         monkeypatch,
-        tmp_path,
     ):
         """Multiple strategies keep separate accounts and expose attributed fills."""
         market = SimpleNamespace(
@@ -2518,7 +2525,7 @@ class TestLiveTradingManager:
             def snapshot(self):
                 return self.value
 
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
         manager._sessions = {
             "Momentum": Session("momentum", 1_010.0),
             "Mean reversion": Session("mean", 990.0),
@@ -2544,7 +2551,7 @@ class TestLiveTradingManager:
         assert status["recent_order_outcomes"]["Momentum"][0]["order"]["id"] == ("momentum-order")
         assert status["updates"][0]["received_at"] == "2026-08-13T10:12:58.123456+00:00"
 
-    def test_recent_order_outcomes_survive_market_update_eviction(self, tmp_path):
+    def test_recent_order_outcomes_survive_market_update_eviction(self):
         """Completed orders remain visible independently of buffered market updates."""
         market = SimpleNamespace(
             symbol="BTC-USD",
@@ -2609,7 +2616,7 @@ class TestLiveTradingManager:
             def snapshot():
                 return snapshot
 
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
         manager._sessions = {"Buy & Hold": Session()}
         manager._session = manager._sessions["Buy & Hold"]
         manager._prepare_session()
@@ -2625,7 +2632,7 @@ class TestLiveTradingManager:
         assert len(outcomes) == 1
         assert outcomes[0]["order"]["id"] == "buy-order"
 
-    def test_native_order_values_are_json_safe_in_session_journal(self, tmp_path):
+    def test_native_order_values_are_json_safe_in_session_journal(self):
         """Native order enums and resting orders are normalized before persistence."""
         from backtide.backtest import Order, OrderStatus, OrderType
 
@@ -2675,32 +2682,37 @@ class TestLiveTradingManager:
             snapshot=snapshot,
             indicators={},
         )
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
         manager._prepare_session()
+        manager._config = {"mode": "paper"}
+        manager._session = SimpleNamespace(snapshot=lambda: snapshot)
 
         serialized = manager._serialize_update(update)
         manager._append_event(serialized)
+        manager._persist_manifest("stopped")
 
         assert manager._session_id is not None
-        persisted = json.loads(
-            (tmp_path / manager._session_id / "events.jsonl").read_text(encoding="utf-8")
-        )
+        persisted = manager.session(manager._session_id)["updates"][0]
         assert persisted["fills"][0]["status"] == str(OrderStatus.Filled)
         assert persisted["fills"][0]["order"]["order_type"] == str(OrderType.Limit)
         assert persisted["snapshot"]["portfolio"]["orders"][0]["order_type"] == str(
             OrderType.Limit
         )
+        manager.delete_session(manager._session_id)
 
-    def test_persists_and_reads_a_replayable_session_journal(self, tmp_path):
+    def test_persists_and_reads_a_replayable_session_journal(self):
         """Session manifests and exact market events survive manager recreation."""
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
         manager._prepare_session()
         manager._config = {"mode": "paper", "provider": "mock", "symbols": ["BTC-USD"]}
         manager._session = SimpleNamespace(snapshot=lambda: None)
         update = {
             "market": {"symbol": "BTC-USD", "close": 101.0},
             "fills": [],
-            "snapshot": {"equity": 1_001.0},
+            "snapshot": {
+                "equity": 1_001.0,
+                "metrics": {"custom_score": 4.25},
+            },
         }
 
         manager._append_event(update)
@@ -2715,52 +2727,52 @@ class TestLiveTradingManager:
         )
         manager._persist_manifest("stopped")
 
-        sessions = LiveTradingManager(tmp_path).sessions()
+        sessions = LiveTradingManager().sessions()
         assert manager._session_id is not None
-        restored = LiveTradingManager(tmp_path).session(manager._session_id)
-        assert sessions[0]["id"] == manager._session_id
+        restored = LiveTradingManager().session(manager._session_id)
+        assert any(value["id"] == manager._session_id for value in sessions)
         assert restored["status"] == "stopped"
         assert restored["updates"] == [update]
+        assert restored["updates"][0]["snapshot"]["metrics"]["custom_score"] == 4.25
         assert restored["warmup"][0]["symbol"] == "BTC-USD"
+        manager.delete_session(manager._session_id)
 
-    def test_deletes_an_inactive_persisted_session(self, tmp_path):
+    def test_deletes_an_inactive_persisted_session(self):
         """Deleting a stopped session removes its manifest and recorded events."""
-        session_id = "0123456789abcdef"
-        folder = tmp_path / session_id
-        folder.mkdir()
-        (folder / "manifest.json").write_text(
-            json.dumps({"id": session_id, "status": "stopped"}),
-            encoding="utf-8",
-        )
-        (folder / "events.jsonl").write_text("{}\n", encoding="utf-8")
+        manager = LiveTradingManager()
+        manager._prepare_session()
+        manager._config = {"mode": "paper"}
+        manager._session = SimpleNamespace(snapshot=lambda: None)
+        manager._persist_manifest("stopped")
+        assert manager._session_id is not None
 
-        result = LiveTradingManager(tmp_path).delete_session(session_id)
+        result = manager.delete_session(manager._session_id)
 
         assert result == {"deleted": 1}
-        assert not folder.exists()
+        with pytest.raises(APIError, match="was not found"):
+            manager.session(manager._session_id)
 
-    def test_rejects_deleting_the_active_session(self, tmp_path):
-        """An active worker keeps ownership of its persisted session directory."""
-        session_id = "0123456789abcdef"
-        folder = tmp_path / session_id
-        folder.mkdir()
-        (folder / "manifest.json").write_text(
-            json.dumps({"id": session_id, "status": "running"}),
-            encoding="utf-8",
-        )
-        manager = LiveTradingManager(tmp_path)
-        manager._session_id = session_id
+    def test_rejects_deleting_the_active_session(self):
+        """An active worker keeps ownership of its persisted session rows."""
+        manager = LiveTradingManager()
+        manager._prepare_session()
+        manager._config = {"mode": "paper"}
+        manager._session = SimpleNamespace(snapshot=lambda: None)
+        manager._persist_manifest("running")
+        assert manager._session_id is not None
         manager._thread = threading.current_thread()
 
         with pytest.raises(APIError, match="Stop the active paper session") as error:
-            manager.delete_session(session_id)
+            manager.delete_session(manager._session_id)
 
         assert error.value.status == 409
-        assert folder.exists()
+        assert manager.session(manager._session_id)["status"] == "running"
+        manager._thread = None
+        manager.delete_session(manager._session_id)
 
-    def test_rejects_an_invalid_session_id_before_deletion(self, tmp_path):
-        """Session deletion cannot address a path outside its storage directory."""
-        manager = LiveTradingManager(tmp_path)
+    def test_rejects_an_invalid_session_id_before_deletion(self):
+        """Session deletion rejects malformed database identifiers."""
+        manager = LiveTradingManager()
 
         with pytest.raises(APIError, match="Paper session id is invalid") as error:
             manager.delete_session("../outside")
@@ -2771,67 +2783,52 @@ class TestLiveTradingManager:
     def test_session_history_closes_orphaned_active_manifests(
         self,
         monkeypatch,
-        tmp_path,
         status,
     ):
         """History repairs active states that have no live worker in this process."""
-        session_id = "0123456789abcdef"
-        folder = tmp_path / session_id
-        folder.mkdir()
-        manifest_path = folder / "manifest.json"
-        manifest_path.write_text(
-            json.dumps(
-                {
-                    "id": session_id,
-                    "status": status,
-                    "started_at": "2026-08-13T10:00:00+00:00",
-                    "finished_at": None,
-                }
-            ),
-            encoding="utf-8",
-        )
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
+        manager._prepare_session()
+        manager._started_at = "2026-08-13T10:00:00+00:00"
+        manager._config = {"mode": "paper"}
+        manager._session = SimpleNamespace(snapshot=lambda: None)
+        manager._persist_manifest(status)
+        assert manager._session_id is not None
         monkeypatch.setattr(manager, "_now", lambda: "2026-08-13T10:30:00+00:00")
 
         sessions = manager.sessions()
+        stored = next(value for value in sessions if value["id"] == manager._session_id)
 
-        assert sessions[0]["status"] == "stopped"
-        assert sessions[0]["finished_at"] == "2026-08-13T10:30:00+00:00"
-        persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert stored["status"] == "stopped"
+        assert stored["finished_at"] == "2026-08-13T10:30:00+00:00"
+        persisted = manager.session(manager._session_id)
         assert persisted["status"] == "stopped"
         assert persisted["finished_at"] == "2026-08-13T10:30:00+00:00"
+        manager.delete_session(manager._session_id)
 
-    def test_session_history_preserves_the_current_active_manifest(self, tmp_path):
+    def test_session_history_preserves_the_current_active_manifest(self):
         """The worker-owned manifest remains active and offers an Open action."""
-        session_id = "0123456789abcdef"
-        folder = tmp_path / session_id
-        folder.mkdir()
-        manifest_path = folder / "manifest.json"
-        manifest_path.write_text(
-            json.dumps(
-                {
-                    "id": session_id,
-                    "status": "running",
-                    "started_at": "2026-08-13T10:00:00+00:00",
-                    "finished_at": None,
-                }
-            ),
-            encoding="utf-8",
-        )
-        manager = LiveTradingManager(tmp_path)
-        manager._session_id = session_id
+        manager = LiveTradingManager()
+        manager._prepare_session()
+        manager._started_at = "2026-08-13T10:00:00+00:00"
+        manager._config = {"mode": "paper"}
+        manager._session = SimpleNamespace(snapshot=lambda: None)
+        manager._persist_manifest("running")
+        assert manager._session_id is not None
         manager._thread = threading.current_thread()
 
         sessions = manager.sessions()
+        stored = next(value for value in sessions if value["id"] == manager._session_id)
 
-        assert sessions[0]["status"] == "running"
-        assert sessions[0]["finished_at"] is None
-        persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert stored["status"] == "running"
+        assert stored["finished_at"] is None
+        persisted = manager.session(manager._session_id)
         assert persisted["status"] == "running"
+        manager._thread = None
+        manager.delete_session(manager._session_id)
 
-    def test_pause_and_resume_update_observable_state(self, tmp_path):
+    def test_pause_and_resume_update_observable_state(self):
         """Pause control is reflected in health without discarding the session."""
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
         manager._session = SimpleNamespace(snapshot=lambda: None)
 
         manager.pause()
@@ -2842,7 +2839,6 @@ class TestLiveTradingManager:
     def test_flatten_remains_pending_until_a_market_update_is_processed(
         self,
         monkeypatch,
-        tmp_path,
     ):
         """A partial candle cannot consume a flatten request that it does not process."""
 
@@ -2900,7 +2896,7 @@ class TestLiveTradingManager:
 
         monkeypatch.setitem(sys.modules, "backtide.backtest", SimpleNamespace(Order=Order))
         session = Session()
-        manager = LiveTradingManager(tmp_path)
+        manager = LiveTradingManager()
         manager._sessions = {"Buy & Hold": session}
         manager._session = session
         manager._prepare_session()

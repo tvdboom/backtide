@@ -5,7 +5,7 @@
 
 Backtide is an open-source backtesting platform for Python, built for retail
 investors who want to test trading ideas without drowning in infrastructure.
-It combines a fast Rust simulation engine with a friendly Python API, interactive
+It combines a fast simulation engine with a friendly Python API, interactive
 UI, local storage, market-data integrations, built-in indicators, strategy
 templates, position sizers and analysis plots.
 
@@ -26,7 +26,7 @@ functionalities.
 <div class="row">
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/application" draggable="false">
+      <a href="../user_guide/overview/application" draggable="false">
         <img src="../img/icons/application.svg" alt="Application" draggable="false">
         <figcaption style="margin-top: -8px"><strong>Application</strong></figcaption>
       </a>
@@ -34,7 +34,7 @@ functionalities.
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/data" draggable="false">
+      <a href="../user_guide/data/market_data" draggable="false">
         <img src="../img/icons/market_data.svg" alt="Market data" draggable="false">
         <figcaption style="margin-top: -8px"><strong>Market data</strong></figcaption>
       </a>
@@ -42,7 +42,7 @@ functionalities.
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/experiment" draggable="false">
+      <a href="../user_guide/backtest/experiment" draggable="false">
           <img src="../img/icons/experiments.svg" alt="Experiments" draggable="false">
           <figcaption style="margin-top: -8px"><strong>Experiments</strong></figcaption>
       </a>
@@ -50,7 +50,7 @@ functionalities.
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/strategies" draggable="false">
+      <a href="../user_guide/library/strategies" draggable="false">
         <img src="../img/icons/strategies.svg" alt="Strategies" draggable="false">
         <figcaption style="margin-top: -8px"><strong>Strategies</strong></figcaption>
       </a>
@@ -60,7 +60,7 @@ functionalities.
 <div class="row">
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/strategies#performance" draggable="false">
+      <a href="../user_guide/library/performance" draggable="false">
         <img src="../img/icons/performance.svg" alt="Performance" draggable="false">
         <figcaption style="margin-top: -8px"><strong>Performance</strong></figcaption>
       </a>
@@ -68,7 +68,7 @@ functionalities.
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/plots" draggable="false">
+      <a href="../user_guide/backtest/plots" draggable="false">
         <img src="../img/icons/plots.svg" alt="Plots" draggable="false">
         <figcaption style="margin-top: -8px"><strong>Plots</strong></figcaption>
       </a>
@@ -76,7 +76,7 @@ functionalities.
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/storage" draggable="false">
+      <a href="../user_guide/data/storage" draggable="false">
         <img src="../img/icons/storage.svg" alt="Storage" draggable="false">
         <figcaption style="margin-top: -8px"><strong>Storage</strong></figcaption>
       </a>
@@ -84,7 +84,7 @@ functionalities.
   </div>
   <div class="column">
     <div class="icon">
-      <a href="../user_guide/configuration" draggable="false">
+      <a href="../user_guide/overview/configuration" draggable="false">
         <img src="../img/icons/configuration.svg" alt="Configuration" draggable="false">
         <figcaption style="margin-top: -8px"><strong>Configuration</strong></figcaption>
       </a>
@@ -139,28 +139,28 @@ contributors with a set of developer tools free of charge.
 <div class="row">
   <div class="column">
     <div class="logo">
-      <a href="../user_guide/data/#yahoo-finance" draggable="false">
+      <a href="../user_guide/data/market_data/#yahoo-finance" draggable="false">
         <img src="../img/integrations/yahoo.png" alt="yahoo" draggable="false">
       </a>
     </div>
   </div>
   <div class="column">
     <div class="logo">
-      <a href="../user_guide/data/#binance" draggable="false">
+      <a href="../user_guide/data/market_data/#binance" draggable="false">
         <img src="../img/integrations/binance.png" alt="binance" draggable="false">
       </a>
     </div>
   </div>
   <div class="column">
     <div class="logo">
-      <a href="../user_guide/data/#kraken" draggable="false">
+      <a href="../user_guide/data/market_data/#kraken" draggable="false">
         <img src="../img/integrations/kraken.png" alt="kraken" draggable="false">
       </a>
     </div>
   </div>
   <div class="column">
     <div class="logo">
-      <a href="../user_guide/data/#coinbase" draggable="false">
+      <a href="../user_guide/data/market_data/#coinbase" draggable="false">
         <img src="../img/integrations/coinbase.png" alt="coinbase" draggable="false">
       </a>
     </div>

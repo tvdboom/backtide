@@ -1,0 +1,223 @@
+Sizers
+------
+
+Position sizing determines how many units a strategy buys or sells when it
+emits a trading signal. In Backtide, this logic is represented by sizers:
+small objects that calculate an order quantity from portfolio equity, price,
+and optional risk inputs. Backtide provides a set of built-in sizers as well
+as a framework for creating custom sizers.
+
+<br>
+
+## How they work
+
+Every sizer inherits from [`BaseSizer`] and implements
+`calculate(self, equity, price, stop_distance=None, atr=None)`:
+
+- `equity` — `float`. Current portfolio equity in the same currency as `price`. For example,
+  `equity * 0.02` is a two-percent risk budget.
+- `price` — `float`. Current instrument price. For example, `equity / price` converts a cash
+  allocation into units.
+- `stop_distance` — `float | None`, default `None`. Distance from entry to stop in price units.
+  For example, `risk_budget / stop_distance` sizes the loss at the stop.
+- `atr` — `float | None`, default `None`. Current Average True Range in price units. For example,
+  `risk_budget / (2 * atr)` uses a two-ATR risk unit.
+- Return value — `int | float`. The number of units to trade; for example, `100.0` requests a
+  100-unit entry. Return `0.0` when the inputs cannot produce a valid order.
+
+The method's annotated shape is:
+
+```python
+def calculate(
+    self,
+    equity: float,
+    price: float,
+    stop_distance: float | None = None,
+    atr: float | None = None,
+) -> int | float:
+    ...
+```
+
+The output is a number of units. Most built-in sizers return a positive entry
+quantity; exits are usually submitted with a numeric negative quantity or a
+[`SettlePosition`][ordertype] order.
+
+When you attach a sizer directly to an `Order`, the engine resolves it just
+before the order is queued. It computes portfolio equity, converts that equity
+to the target instrument's quote currency, reads the symbol's latest close, and
+then calls `calculate(...)`.
+
+If the portfolio base currency differs from the instrument quote currency, the
+engine converts equity first. For example, in an EUR-based portfolio trading a
+USD-quoted stock, the sizer receives equity in USD.
+
+### Equity vs cash
+
+The built-in sizers use equity as a mean of calculating the quantity to trade.
+This means they compute the total current portfolio equity, not just idle cash.
+For an attached sizer, the engine first computes all cash balances across currencies,
+plus the mark-to-market value of all open positions, and convert it into the order
+instrument's quote currency. That converted total is what gets passed as `equity`
+into `calculate(equity, price, stop_distance, atr)`.
+
+However, orders are still paid for with cash, not with unrealized position value.
+After the sizer returns a quantity, the engine checks whether the trade can actually
+be funded. For buys, it attempts to pay from:
+
+1. Cash already held in the instrument's quote currency,
+2. Base-currency cash converted at the current FX rate,
+3. Any other positive cash buckets that can be converted.
+
+If there still is not enough cash, the engine shrinks the order to the largest
+quantity that fits, or rejects it if nothing fits.
+
+If you want strictly cash-only sizing, compute the quantity yourself from
+`portfolio.cash` or implement a custom sizer with that policy.
+
+!!! note
+    If you call `calculate()` manually inside a custom strategy, you are
+    responsible for passing the arguments in consistent currencies.
+
+<br>
+
+## Built-in sizers
+
+| Sizer                | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| [`EqualWeight`]      | Splits equity equally across a fixed number of positions.                |
+| [`FixedFractional`]  | Allocates a fixed percentage of current equity per trade.                |
+| [`FixedNotional`]    | Spends a fixed cash amount per trade, independent of portfolio size.     |
+| [`FixedQuantity`]    | Trades an exact number of units regardless of equity or price.           |
+| [`KellyCriterion`]   | Sizes from win rate, average win/loss and a fractional Kelly multiplier. |
+| [`RiskBased`]        | Risks a fixed fraction of equity based on distance to a stop level.      |
+| [`VolatilityScaled`] | Risks a fixed fraction of equity using ATR as the risk unit.             |
+
+<br>
+
+## Using sizers in custom strategies
+
+Custom strategies can use sizers in two ways.
+
+### Attach a sizer to an order
+
+This is the simplest option. The engine supplies current equity and price, then
+resolves the concrete quantity before validation and fill processing.
+
+```python
+from backtide.backtest import Order
+from backtide.sizers import FixedFractional
+from backtide.strategies import BaseStrategy
+
+
+class FractionalTrend(BaseStrategy):
+    def evaluate(self, data, portfolio, state, indicators):
+        symbol = "AAPL"
+        if symbol not in data:
+            return []
+
+        close = data[symbol]["close"].iloc[-1]
+        previous = data[symbol]["close"].iloc[-2]
+        current_qty = portfolio.positions.get(symbol, 0.0)
+
+        if close > previous and current_qty <= 0:
+            return [Order(symbol=symbol, quantity=FixedFractional(0.10))]
+
+        if close < previous and current_qty > 0:
+            return [Order(symbol=symbol, quantity=-current_qty)]
+
+        return []
+```
+
+For [`RiskBased`], set the order's `price` to your stop level. The engine derives
+`stop_distance = abs(current_close - price)` and passes it to the sizer.
+
+```python
+from backtide.backtest import Order
+from backtide.sizers import RiskBased
+
+entry = Order(
+    symbol="AAPL",
+    quantity=RiskBased(0.01),
+    price=close * 0.95,
+)
+```
+
+### Calculate the quantity yourself
+
+Use this option when the sizer needs inputs the engine cannot infer, such as
+`atr` for [`VolatilityScaled`], or when you need custom rounding before creating
+the order.
+
+```python
+from math import floor
+
+from backtide.backtest import Order
+from backtide.indicators import AverageTrueRange
+from backtide.sizers import VolatilityScaled
+from backtide.strategies import BaseStrategy
+
+
+class AtrSizedBreakout(BaseStrategy):
+    def required_indicators(self):
+        return [AverageTrueRange(14)]
+
+    def evaluate(self, data, portfolio, state, indicators):
+        symbol = "AAPL"
+        if symbol not in data:
+            return []
+
+        close = data[symbol]["close"].iloc[-1]
+        atr = indicators["ATR_14"][symbol].iloc[-1]
+        if atr <= 0:
+            return []
+
+        # Manual examples should keep equity and price in the same currency.
+        # Summing `portfolio.cash.values()` is only reasonable when all cash
+        # buckets are already in the same currency as `close`. In
+        # multi-currency portfolios, convert cash first; production strategies
+        # may also want full mark-to-market equity including open positions.
+        equity = sum(portfolio.cash.values())
+        quantity = floor(VolatilityScaled(0.01).calculate(equity=equity, price=close, atr=atr))
+
+        if quantity <= 0:
+            return []
+
+        return [Order(symbol=symbol, order_type="market", quantity=quantity)]
+```
+
+<br>
+
+## Custom sizers
+
+A custom sizer only needs a `calculate` method. Subclass [`BaseSizer`] for a clear
+interface.
+
+```python
+from backtide.sizers import BaseSizer
+
+
+class HalfCashSizer(BaseSizer):
+    def calculate(self, equity, price, stop_distance=None, atr=None):
+        if equity <= 0 or price <= 0:
+            return 0.0
+        return (equity * 0.5) / price
+```
+
+You can attach it to an order exactly like a built-in sizer:
+
+```python
+Order(symbol="AAPL", quantity=HalfCashSizer())
+```
+
+See [Capped allocation](../../examples/sizers/capped_allocation.md) and
+[Stop-risk sizing](../../examples/sizers/stop_risk.md) for complete custom sizers. Sizers are usually
+too small to benefit from compilation; see [Performance](performance.md#sizer-performance) for
+the tradeoff.
+
+In all cases, test sizing parameters carefully. A strategy's entries and exits
+determine *when* you trade; the sizer determines *how much* risk each trade adds
+to the portfolio.
+
+!!! tip
+    Only cryptos accept non-integer quantities. Make sure to return whole units for
+    all other instrument types to avoid unexpected sizes.

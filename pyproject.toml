@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "backtide"
-version = "0.2.0"
+version = "0.2.1"
 description = "A refreshingly simple trading backtester for beginner retail investors"
 authors = [{name = "Mavs", email = "m.524687@gmail.com"}]
 license = "MIT"
@@ -95,7 +95,7 @@ module-name = "backtide.core"
 manifest-path = "src/backtide_core/Cargo.toml"
 include = [
     { path = "tests/**/*", format = ["sdist"] },
-    { path = "frontend/**/*", format = ["sdist"] },
+    { path = "application/**/*", format = ["sdist"] },
     { path = "src/backtide/ui/static/**/*", format = ["sdist", "wheel"] },
 ]
 

@@ -80,7 +80,7 @@ required for any of its functionalities. These libraries are only necessary to
 **Frontend**
 
 The released wheel contains a prebuilt web application, so package users do not
-need these tools. Contributors rebuilding `frontend/` use Node.js with pnpm,
+need these tools. Contributors rebuilding `application/` use Node.js with pnpm,
 Vue, Vite, Vitest, Plotly.js, Lucide, and Inter.
 
 <br><br>
@@ -101,7 +101,6 @@ Vue, Vite, Vitest, Plotly.js, Lucide, and Inter.
 * **[moka](https://crates.io/crates/moka)** (0.12.15)
 * **[pyo3](https://crates.io/crates/pyo3)** (0.28.3)
 * **[pythonize](https://crates.io/crates/pythonize)** (0.28.0)
-* **[rayon](https://crates.io/crates/rayon)** (1.12.0)
 * **[reqwest](https://crates.io/crates/reqwest)** (0.13.3)
 * **[serde](https://crates.io/crates/serde)** (1.0.228)
 * **[serde_json](https://crates.io/crates/serde_json)** (1.0.149)

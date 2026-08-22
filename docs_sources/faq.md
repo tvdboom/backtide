@@ -60,7 +60,7 @@ a new [discussion](https://github.com/tvdboom/backtide/discussions)!
     WebSockets and run strategies through its local paper-trading engine. It never
     submits real broker orders. Yahoo Finance has no official market-data WebSocket,
     so it remains available for historical downloads but not live sessions. See
-    the [paper trading guide](user_guide/live_trading.md).
+    the [paper trading guide](user_guide/live/paper_trading.md).
 
 ??? faq "How do I launch the interactive UI?"
     Run `backtide launch` from the command line. This starts a local

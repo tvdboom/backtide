@@ -24,6 +24,8 @@ const TABLE_SCHEMAS: &[&str] = &[
     include_str!("../../database/experiment_equity.sql"),
     include_str!("../../database/experiment_orders.sql"),
     include_str!("../../database/experiment_trades.sql"),
+    include_str!("../../database/live_sessions.sql"),
+    include_str!("../../database/live_session_events.sql"),
 ];
 
 pub struct DuckDb {
@@ -1019,6 +1021,139 @@ impl Storage for DuckDb {
         Ok(out)
     }
 
+    fn write_live_session(&self, session: &StoredLiveSession) -> StorageResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO live_sessions
+             (id, status, started_at, finished_at, config, snapshot, health, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                session.id,
+                session.status,
+                session.started_at,
+                session.finished_at,
+                session.config,
+                session.snapshot,
+                session.health,
+                session.error,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn append_live_session_event(&self, session_id: &str, event: &str) -> StorageResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO live_session_events (session_id, kind, event_index, payload)
+             SELECT ?, 'event', COALESCE(MAX(event_index), -1) + 1, ?
+             FROM live_session_events
+             WHERE session_id = ? AND kind = 'event'",
+            params![session_id, event, session_id],
+        )?;
+        Ok(())
+    }
+
+    fn write_live_session_warmup(&self, session_id: &str, markets: &[String]) -> StorageResult<()> {
+        self.run_transaction(|conn| {
+            conn.execute(
+                "DELETE FROM live_session_events WHERE session_id = ? AND kind = 'warmup'",
+                params![session_id],
+            )?;
+            let mut stmt = conn.prepare(
+                "INSERT INTO live_session_events (session_id, kind, event_index, payload)
+                 VALUES (?, 'warmup', ?, ?)",
+            )?;
+            for (sequence, market) in markets.iter().enumerate() {
+                stmt.execute(params![session_id, sequence as i64, market])?;
+            }
+            Ok(())
+        })
+    }
+
+    fn query_live_sessions(&self) -> StorageResult<Vec<StoredLiveSession>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, status, started_at, finished_at, config, snapshot, health, error
+             FROM live_sessions
+             ORDER BY started_at DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(StoredLiveSession {
+                    id: row.get(0)?,
+                    status: row.get(1)?,
+                    started_at: row.get(2)?,
+                    finished_at: row.get(3)?,
+                    config: row.get(4)?,
+                    snapshot: row.get(5)?,
+                    health: row.get(6)?,
+                    error: row.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn query_live_session(&self, session_id: &str) -> StorageResult<Option<StoredLiveSession>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, status, started_at, finished_at, config, snapshot, health, error
+             FROM live_sessions
+             WHERE id = ?",
+        )?;
+        let mut rows = stmt.query_map(params![session_id], |row| {
+            Ok(StoredLiveSession {
+                id: row.get(0)?,
+                status: row.get(1)?,
+                started_at: row.get(2)?,
+                finished_at: row.get(3)?,
+                config: row.get(4)?,
+                snapshot: row.get(5)?,
+                health: row.get(6)?,
+                error: row.get(7)?,
+            })
+        })?;
+        rows.next().transpose().map_err(StorageError::from)
+    }
+
+    fn query_live_session_events(&self, session_id: &str) -> StorageResult<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT payload FROM live_session_events
+             WHERE session_id = ? AND kind = 'event'
+             ORDER BY event_index",
+        )?;
+        let rows = stmt
+            .query_map(params![session_id], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn query_live_session_warmup(&self, session_id: &str) -> StorageResult<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT payload FROM live_session_events
+             WHERE session_id = ? AND kind = 'warmup'
+             ORDER BY event_index",
+        )?;
+        let rows = stmt
+            .query_map(params![session_id], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn delete_live_session(&self, session_id: &str) -> StorageResult<u64> {
+        self.run_transaction(|conn| {
+            conn.execute(
+                "DELETE FROM live_session_events WHERE session_id = ?",
+                params![session_id],
+            )?;
+            let removed =
+                conn.execute("DELETE FROM live_sessions WHERE id = ?", params![session_id])?;
+            Ok(removed as u64)
+        })
+    }
+
     fn delete_experiment(&self, experiment_id: &str) -> StorageResult<u64> {
         self.run_transaction(|conn| {
             // Delete dependent rows first (no FK cascade in DuckDB).
@@ -1074,6 +1209,46 @@ mod tests {
             volume: 1_000_000.0,
             n_trades: Some(500),
         }
+    }
+
+    #[test]
+    fn live_session_storage_round_trips_and_deletes_related_rows() {
+        let (_dir, db) = make_db();
+        let session = StoredLiveSession {
+            id: "0123456789abcdef".into(),
+            status: "running".into(),
+            started_at: "2026-08-21T10:00:00+00:00".into(),
+            finished_at: None,
+            config: r#"{"mode":"paper"}"#.into(),
+            snapshot: r#"{"equity":1000.0,"metrics":{"custom_score":4.25}}"#.into(),
+            health: r#"{"received_events":2}"#.into(),
+            error: None,
+        };
+
+        db.write_live_session(&session).unwrap();
+        db.append_live_session_event(&session.id, r#"{"close":100.0}"#).unwrap();
+        db.append_live_session_event(&session.id, r#"{"close":101.0}"#).unwrap();
+        db.write_live_session_warmup(
+            &session.id,
+            &[r#"{"close":98.0}"#.into(), r#"{"close":99.0}"#.into()],
+        )
+        .unwrap();
+
+        assert_eq!(db.query_live_sessions().unwrap(), vec![session.clone()]);
+        assert_eq!(db.query_live_session(&session.id).unwrap(), Some(session.clone()));
+        assert_eq!(
+            db.query_live_session_events(&session.id).unwrap(),
+            vec![r#"{"close":100.0}"#, r#"{"close":101.0}"#]
+        );
+        assert_eq!(
+            db.query_live_session_warmup(&session.id).unwrap(),
+            vec![r#"{"close":98.0}"#, r#"{"close":99.0}"#]
+        );
+
+        assert_eq!(db.delete_live_session(&session.id).unwrap(), 1);
+        assert_eq!(db.query_live_session(&session.id).unwrap(), None);
+        assert!(db.query_live_session_events(&session.id).unwrap().is_empty());
+        assert!(db.query_live_session_warmup(&session.id).unwrap().is_empty());
     }
 
     fn sample_instrument(symbol: &str) -> Instrument {
@@ -1181,6 +1356,8 @@ mod tests {
             "experiment_equity",
             "experiment_orders",
             "experiment_trades",
+            "live_sessions",
+            "live_session_events",
         ] {
             let count: i64 = conn
                 .query_row(

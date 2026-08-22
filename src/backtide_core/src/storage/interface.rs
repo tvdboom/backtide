@@ -3,6 +3,7 @@
 use crate::backtest::models::RunResult;
 use crate::data::models::{Exchange, Instrument, InstrumentType, Interval, Provider};
 use crate::engine::Engine;
+use crate::storage::models::StoredLiveSession;
 use crate::utils::python::dict_to_dataframe;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -40,9 +41,125 @@ macro_rules! to_df {
     }};
 }
 
+type LiveSessionRow =
+    (String, String, String, Option<String>, String, String, String, Option<String>);
+
+fn live_session_row(value: StoredLiveSession) -> LiveSessionRow {
+    (
+        value.id,
+        value.status,
+        value.started_at,
+        value.finished_at,
+        value.config,
+        value.snapshot,
+        value.health,
+        value.error,
+    )
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Public interface
 // ────────────────────────────────────────────────────────────────────────────
+
+/// Store the current manifest for a live paper or replay session.
+///
+/// Parameters
+/// ----------
+/// session_id : str
+///     Stable live-session identifier.
+///
+/// status : str
+///     Current session status.
+///
+/// started_at : str
+///     UTC ISO-8601 start timestamp.
+///
+/// finished_at : str | None
+///     UTC ISO-8601 finish timestamp for a terminal session.
+///
+/// config : str
+///     JSON-encoded session configuration.
+///
+/// snapshot : str
+///     JSON-encoded latest account snapshot.
+///
+/// health : str
+///     JSON-encoded connection and replay health state.
+///
+/// error : str | None
+///     Terminal error message.
+#[pyfunction]
+#[pyo3(signature = (session_id: "str", status: "str", started_at: "str", finished_at: "str | None", config: "str", snapshot: "str", health: "str", error: "str | None"))]
+pub fn _write_live_session(
+    session_id: &str,
+    status: &str,
+    started_at: &str,
+    finished_at: Option<&str>,
+    config: &str,
+    snapshot: &str,
+    health: &str,
+    error: Option<&str>,
+) -> PyResult<()> {
+    Engine::get()?.db.write_live_session(&StoredLiveSession {
+        id: session_id.to_owned(),
+        status: status.to_owned(),
+        started_at: started_at.to_owned(),
+        finished_at: finished_at.map(str::to_owned),
+        config: config.to_owned(),
+        snapshot: snapshot.to_owned(),
+        health: health.to_owned(),
+        error: error.map(str::to_owned),
+    })?;
+    Ok(())
+}
+
+/// Append one JSON-encoded event to a live session.
+#[pyfunction]
+#[pyo3(signature = (session_id: "str", event: "str"))]
+pub fn _append_live_session_event(session_id: &str, event: &str) -> PyResult<()> {
+    Ok(Engine::get()?.db.append_live_session_event(session_id, event)?)
+}
+
+/// Replace the JSON-encoded warm-up stream for a live session.
+#[pyfunction]
+#[pyo3(signature = (session_id: "str", markets: "list[str]"))]
+pub fn _write_live_session_warmup(session_id: &str, markets: Vec<String>) -> PyResult<()> {
+    Ok(Engine::get()?.db.write_live_session_warmup(session_id, &markets)?)
+}
+
+/// Return every stored live-session manifest newest first.
+#[pyfunction]
+pub fn _query_live_sessions() -> PyResult<Vec<LiveSessionRow>> {
+    Ok(Engine::get()?.db.query_live_sessions()?.into_iter().map(live_session_row).collect())
+}
+
+/// Return one stored live-session manifest by id.
+#[pyfunction]
+#[pyo3(signature = (session_id: "str"))]
+pub fn _query_live_session(session_id: &str) -> PyResult<Option<LiveSessionRow>> {
+    Ok(Engine::get()?.db.query_live_session(session_id)?.map(live_session_row))
+}
+
+/// Return one session's JSON-encoded events in append order.
+#[pyfunction]
+#[pyo3(signature = (session_id: "str"))]
+pub fn _query_live_session_events(session_id: &str) -> PyResult<Vec<String>> {
+    Ok(Engine::get()?.db.query_live_session_events(session_id)?)
+}
+
+/// Return one session's JSON-encoded warm-up markets in source order.
+#[pyfunction]
+#[pyo3(signature = (session_id: "str"))]
+pub fn _query_live_session_warmup(session_id: &str) -> PyResult<Vec<String>> {
+    Ok(Engine::get()?.db.query_live_session_warmup(session_id)?)
+}
+
+/// Delete one live session and all of its journal rows.
+#[pyfunction]
+#[pyo3(signature = (session_id: "str"))]
+pub fn _delete_live_session(session_id: &str) -> PyResult<u64> {
+    Ok(Engine::get()?.db.delete_live_session(session_id)?)
+}
 
 /// Delete a single experiment from the database.
 ///
