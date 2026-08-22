@@ -291,6 +291,8 @@ nav:
             - clear_cache: api/utils/clear_cache.md
             - init_logging: api/utils/init_logging.md
     - Examples:
+        - Backtesting:
+            - Run and inspect an experiment: examples/backtest/run_experiment.md
         - Strategies:
             - Daily reversal: examples/strategies/daily_reversal.md
             - Moving-average trend: examples/strategies/moving_average_trend.md

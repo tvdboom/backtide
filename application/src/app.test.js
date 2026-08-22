@@ -76,6 +76,15 @@ describe('App theme control', () => {
     expect(wrapper.text()).toContain('Indicators')
     expect(wrapper.text()).toContain('Metrics')
     expect(wrapper.text()).toContain('Sizers')
+
+    const dataLabel = wrapper.findAll('.nav-label').find(label => label.text() === 'Data')
+    const dataItems = []
+    let sibling = dataLabel.element.nextElementSibling
+    while (sibling && !sibling.classList.contains('nav-label')) {
+      dataItems.push(sibling.textContent.trim())
+      sibling = sibling.nextElementSibling
+    }
+    expect(dataItems).toEqual(['Download', 'Storage', 'Analysis'])
     wrapper.unmount()
   })
 

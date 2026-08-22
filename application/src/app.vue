@@ -170,8 +170,7 @@ const navigation = [
     label: 'Backtest',
     items: [
       { id: 'experiment', label: 'New experiment', icon: FlaskConical, component: markRaw(ExperimentPage), guide: `${docsBaseUrl}/backtest/experiment/` },
-      { id: 'results', label: 'Results', icon: Gauge, component: markRaw(ResultsPage), guide: `${docsBaseUrl}/backtest/results/` },
-      { id: 'analysis', label: 'Analysis', icon: BarChart3, component: markRaw(AnalysisPage), guide: `${docsBaseUrl}/backtest/plots/` }
+      { id: 'results', label: 'Results', icon: Gauge, component: markRaw(ResultsPage), guide: `${docsBaseUrl}/backtest/results/` }
     ]
   },
   {
@@ -194,7 +193,8 @@ const navigation = [
     label: 'Data',
     items: [
       { id: 'download', label: 'Download', icon: CloudDownload, component: markRaw(DownloadPage), guide: `${docsBaseUrl}/data/market_data/` },
-      { id: 'storage', label: 'Storage', icon: Database, component: markRaw(StoragePage), guide: `${docsBaseUrl}/data/storage/` }
+      { id: 'storage', label: 'Storage', icon: Database, component: markRaw(StoragePage), guide: `${docsBaseUrl}/data/storage/` },
+      { id: 'analysis', label: 'Analysis', icon: BarChart3, component: markRaw(AnalysisPage), guide: `${docsBaseUrl}/backtest/plots/` }
     ]
   }
 ]
