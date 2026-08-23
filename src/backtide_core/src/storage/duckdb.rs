@@ -13,7 +13,7 @@ use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 use std::fs::create_dir_all;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 const TABLE_SCHEMAS: &[&str] = &[
     include_str!("../../database/instruments.sql"),
@@ -42,6 +42,10 @@ impl DuckDb {
         })
     }
 
+    fn connection(&self) -> StorageResult<MutexGuard<'_, Connection>> {
+        self.conn.lock().map_err(|_| StorageError::LockPoisoned)
+    }
+
     fn begin_transaction(conn: &Connection) -> StorageResult<()> {
         match conn.execute_batch("BEGIN TRANSACTION") {
             Ok(()) => Ok(()),
@@ -64,7 +68,7 @@ impl DuckDb {
     where
         F: FnOnce(&Connection) -> StorageResult<T>,
     {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
         Self::begin_transaction(&conn)?;
 
         match f(&conn) {
@@ -86,7 +90,7 @@ impl DuckDb {
 impl Storage for DuckDb {
     /// Create every missing table from its canonical schema file.
     fn init(&self) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
 
         for schema in TABLE_SCHEMAS {
             conn.execute_batch(schema)?;
@@ -97,7 +101,7 @@ impl Storage for DuckDb {
 
     /// Get all stored ranges in a single query, keyed by (symbol, interval, provider).
     fn query_bar_ranges(&self) -> StorageResult<HashMap<(String, String, String), (u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
         let mut stmt = conn.prepare(
             "SELECT symbol, interval, provider, MIN(open_ts), MAX(open_ts)
              FROM bars
@@ -120,7 +124,7 @@ impl Storage for DuckDb {
 
     /// Return a pre-aggregated summary of stored bars, enriched with instrument metadata.
     fn query_bars_summary(&self) -> StorageResult<Vec<BarSummary>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
 
         // Phase 1: Grouped summary with a LEFT JOIN to instruments for metadata.
         let mut stmt = conn.prepare(
@@ -203,7 +207,7 @@ impl Storage for DuckDb {
         providers: Option<&[Provider]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredBar>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
 
         let mut sql = "SELECT symbol, interval, provider,
                     open_ts, close_ts, open_ts_exchange,
@@ -277,7 +281,7 @@ impl Storage for DuckDb {
         providers: Option<&[Provider]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredDividend>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
 
         let mut sql = "SELECT symbol, provider, ex_date, amount
              FROM dividends"
@@ -334,7 +338,7 @@ impl Storage for DuckDb {
         exchanges: Option<&[Exchange]>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<Instrument>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
 
         let mut sql = "SELECT symbol, provider, instrument_type, name, base, quote, exchange
              FROM instruments"
@@ -376,25 +380,51 @@ impl Storage for DuckDb {
         }
 
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt
+        let rows: Vec<(
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )> = stmt
             .query_map(params_from_iter(params.iter()), |row| {
-                let it_str: String = row.get(2)?;
-                let it = it_str.parse::<InstrumentType>().unwrap();
-                let prov_str: String = row.get(1)?;
-                let prov = prov_str.parse::<Provider>().unwrap();
-                Ok(Instrument {
-                    symbol: row.get(0)?,
-                    name: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    base: row.get(4)?,
-                    quote: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                    instrument_type: it,
-                    exchange: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                    provider: prov,
-                })
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(rows)
+        rows.into_iter()
+            .map(|(symbol, provider, instrument_type, name, base, quote, exchange)| {
+                let instrument_type = instrument_type.parse().map_err(|_| {
+                    StorageError::CorruptData(format!(
+                        "invalid instrument type {instrument_type:?} for {symbol:?}"
+                    ))
+                })?;
+                let provider = provider.parse().map_err(|_| {
+                    StorageError::CorruptData(format!(
+                        "invalid provider {provider:?} for {symbol:?}"
+                    ))
+                })?;
+                Ok(Instrument {
+                    symbol,
+                    name: name.unwrap_or_default(),
+                    base,
+                    quote: quote.unwrap_or_default(),
+                    instrument_type,
+                    exchange: exchange.unwrap_or_default(),
+                    provider,
+                })
+            })
+            .collect()
     }
 
     /// Upsert instrument metadata rows.
@@ -446,8 +476,16 @@ impl Storage for DuckDb {
             for s in &non_empty {
                 let iv = s.interval.to_string();
                 let prov = s.provider.to_string();
-                let min_ts = s.bars.iter().map(|b| b.open_ts).min().unwrap();
-                let max_ts = s.bars.iter().map(|b| b.open_ts).max().unwrap();
+                let Some(first) = s.bars.first() else {
+                    continue;
+                };
+                let (min_ts, max_ts) = s
+                    .bars
+                    .iter()
+                    .skip(1)
+                    .fold((first.open_ts, first.open_ts), |(min_ts, max_ts), bar| {
+                        (min_ts.min(bar.open_ts), max_ts.max(bar.open_ts))
+                    });
                 conn.execute(
                     "DELETE FROM bars
                      WHERE symbol = ? AND interval = ? AND provider = ?
@@ -497,8 +535,15 @@ impl Storage for DuckDb {
         self.run_transaction(|conn| {
             for s in &non_empty {
                 let prov = s.provider.to_string();
-                let min_ts = s.dividends.iter().map(|d| d.ex_date).min().unwrap();
-                let max_ts = s.dividends.iter().map(|d| d.ex_date).max().unwrap();
+                let Some(first) = s.dividends.first() else {
+                    continue;
+                };
+                let (min_ts, max_ts) = s.dividends.iter().skip(1).fold(
+                    (first.ex_date, first.ex_date),
+                    |(min_ts, max_ts), dividend| {
+                        (min_ts.min(dividend.ex_date), max_ts.max(dividend.ex_date))
+                    },
+                );
                 conn.execute(
                     "DELETE FROM dividends
                      WHERE symbol = ? AND provider = ?
@@ -750,7 +795,7 @@ impl Storage for DuckDb {
         search: Option<&str>,
         limit: Option<usize>,
     ) -> StorageResult<Vec<StoredExperiment>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
 
         let mut sql = String::from(
             "SELECT e.id, e.name, e.icon, e.tags, e.description, e.started_at, e.finished_at, e.status,
@@ -819,8 +864,10 @@ impl Storage for DuckDb {
         &self,
         experiment_id: &str,
         include_equity_curve: bool,
+        include_trades: bool,
+        include_orders: bool,
     ) -> StorageResult<Vec<RunResult>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
 
         let mut stmt = conn.prepare(
             "SELECT id, strategy_id, strategy_name, metrics, base_currency, error, is_benchmark
@@ -903,10 +950,6 @@ impl Storage for DuckDb {
                 Vec::new()
             };
 
-            let mut o_stmt = conn.prepare(
-                "SELECT order_id, ts, symbol, order_type, quantity, price, limit_price, status, fill_price, reason, commission, pnl
-                 FROM experiment_orders WHERE run_id = ? ORDER BY ts",
-            )?;
             type StoredOrderRow = (
                 OrderId,
                 i64,
@@ -921,89 +964,101 @@ impl Storage for DuckDb {
                 f64,
                 Option<f64>,
             );
-            let order_rows: Vec<StoredOrderRow> = o_stmt
-                .query_map(params![run_id], |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                        row.get(8)?,
-                        row.get(9)?,
-                        row.get(10)?,
-                        row.get(11)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            let orders = order_rows
-                .into_iter()
-                .map(
-                    |(
-                        id,
-                        timestamp,
-                        symbol,
-                        order_type,
-                        quantity,
-                        price,
-                        limit_price,
-                        status,
-                        fill_price,
-                        reason,
-                        commission,
-                        pnl,
-                    )| {
-                        let parsed_order_type: OrderType = order_type.parse().map_err(|e| {
-                            StorageError::CorruptData(format!(
-                                "order type {order_type:?} for strategy run {run_id}: {e}"
-                            ))
-                        })?;
-                        let parsed_status: OrderStatus = status.parse().map_err(|e| {
-                            StorageError::CorruptData(format!(
-                                "order status {status:?} for strategy run {run_id}: {e}"
-                            ))
-                        })?;
-                        Ok(OrderRecord {
-                            order: Order {
-                                id,
-                                symbol,
-                                order_type: parsed_order_type,
-                                quantity,
-                                price,
-                                limit_price,
-                                sizer: None,
-                            },
+            let orders = if include_orders {
+                let mut o_stmt = conn.prepare(
+                    "SELECT order_id, ts, symbol, order_type, quantity, price, limit_price, status, fill_price, reason, commission, pnl
+                     FROM experiment_orders WHERE run_id = ? ORDER BY ts",
+                )?;
+                let order_rows: Vec<StoredOrderRow> = o_stmt
+                    .query_map(params![run_id], |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                            row.get(8)?,
+                            row.get(9)?,
+                            row.get(10)?,
+                            row.get(11)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                order_rows
+                    .into_iter()
+                    .map(
+                        |(
+                            id,
                             timestamp,
-                            status: parsed_status,
+                            symbol,
+                            order_type,
+                            quantity,
+                            price,
+                            limit_price,
+                            status,
                             fill_price,
                             reason,
                             commission,
                             pnl,
-                        })
-                    },
-                )
-                .collect::<StorageResult<Vec<_>>>()?;
+                        )| {
+                            let parsed_order_type: OrderType = order_type.parse().map_err(|e| {
+                                StorageError::CorruptData(format!(
+                                    "order type {order_type:?} for strategy run {run_id}: {e}"
+                                ))
+                            })?;
+                            let parsed_status: OrderStatus = status.parse().map_err(|e| {
+                                StorageError::CorruptData(format!(
+                                    "order status {status:?} for strategy run {run_id}: {e}"
+                                ))
+                            })?;
+                            Ok(OrderRecord {
+                                order: Order {
+                                    id,
+                                    symbol,
+                                    order_type: parsed_order_type,
+                                    quantity,
+                                    price,
+                                    limit_price,
+                                    sizer: None,
+                                },
+                                timestamp,
+                                status: parsed_status,
+                                fill_price,
+                                reason,
+                                commission,
+                                pnl,
+                            })
+                        },
+                    )
+                    .collect::<StorageResult<Vec<_>>>()?
+            } else {
+                Vec::new()
+            };
 
-            let mut t_stmt = conn.prepare(
-                "SELECT symbol, quantity, entry_ts, exit_ts, entry_price, exit_price, pnl
-                 FROM experiment_trades WHERE run_id = ? ORDER BY entry_ts",
-            )?;
-            let trades = t_stmt
-                .query_map(params![run_id], |row| {
-                    Ok(Trade {
-                        symbol: row.get(0)?,
-                        quantity: row.get(1)?,
-                        entry_ts: row.get(2)?,
-                        exit_ts: row.get(3)?,
-                        entry_price: row.get(4)?,
-                        exit_price: row.get(5)?,
-                        pnl: row.get(6)?,
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
+            let trades = if include_trades {
+                let mut t_stmt = conn.prepare(
+                    "SELECT symbol, quantity, entry_ts, exit_ts, entry_price, exit_price, pnl
+                     FROM experiment_trades WHERE run_id = ? ORDER BY entry_ts",
+                )?;
+                t_stmt
+                    .query_map(params![run_id], |row| {
+                        Ok(Trade {
+                            symbol: row.get(0)?,
+                            quantity: row.get(1)?,
+                            entry_ts: row.get(2)?,
+                            exit_ts: row.get(3)?,
+                            entry_price: row.get(4)?,
+                            exit_price: row.get(5)?,
+                            pnl: row.get(6)?,
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                Vec::new()
+            };
 
             out.push(RunResult {
                 strategy_id,
@@ -1022,7 +1077,7 @@ impl Storage for DuckDb {
     }
 
     fn write_live_session(&self, session: &StoredLiveSession) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
         conn.execute(
             "INSERT OR REPLACE INTO live_sessions
              (id, status, started_at, finished_at, config, snapshot, health, error)
@@ -1042,7 +1097,7 @@ impl Storage for DuckDb {
     }
 
     fn append_live_session_event(&self, session_id: &str, event: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
         conn.execute(
             "INSERT INTO live_session_events (session_id, kind, event_index, payload)
              SELECT ?, 'event', COALESCE(MAX(event_index), -1) + 1, ?
@@ -1071,7 +1126,7 @@ impl Storage for DuckDb {
     }
 
     fn query_live_sessions(&self) -> StorageResult<Vec<StoredLiveSession>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
         let mut stmt = conn.prepare(
             "SELECT id, status, started_at, finished_at, config, snapshot, health, error
              FROM live_sessions
@@ -1095,7 +1150,7 @@ impl Storage for DuckDb {
     }
 
     fn query_live_session(&self, session_id: &str) -> StorageResult<Option<StoredLiveSession>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
         let mut stmt = conn.prepare(
             "SELECT id, status, started_at, finished_at, config, snapshot, health, error
              FROM live_sessions
@@ -1117,7 +1172,7 @@ impl Storage for DuckDb {
     }
 
     fn query_live_session_events(&self, session_id: &str) -> StorageResult<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
         let mut stmt = conn.prepare(
             "SELECT payload FROM live_session_events
              WHERE session_id = ? AND kind = 'event'
@@ -1130,7 +1185,7 @@ impl Storage for DuckDb {
     }
 
     fn query_live_session_warmup(&self, session_id: &str) -> StorageResult<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection()?;
         let mut stmt = conn.prepare(
             "SELECT payload FROM live_session_events
              WHERE session_id = ? AND kind = 'warmup'
@@ -1393,6 +1448,18 @@ mod tests {
     }
 
     #[test]
+    fn test_poisoned_connection_lock_returns_storage_error() {
+        let (_dir, db) = make_db();
+        let panic_result = std::panic::catch_unwind(|| {
+            let _connection = db.conn.lock().unwrap();
+            panic!("poison connection lock");
+        });
+
+        assert!(panic_result.is_err());
+        assert!(matches!(db.init(), Err(StorageError::LockPoisoned)));
+    }
+
+    #[test]
     fn test_write_and_query_experiment() {
         let (_dir, db) = make_db();
         let cfg = sample_experiment_config();
@@ -1406,7 +1473,7 @@ mod tests {
         assert_eq!(experiments.len(), 1);
         assert_eq!(experiments[0].id, result.experiment_id);
 
-        let runs = db.query_strategy_runs(&result.experiment_id, true).unwrap();
+        let runs = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].strategy_name, "CustomSma");
         assert_eq!(runs[0].equity_curve.len(), 1);
@@ -1421,12 +1488,29 @@ mod tests {
         let result = sample_experiment_result();
         db.write_experiment(&cfg, &result).unwrap();
 
-        let runs = db.query_strategy_runs(&result.experiment_id, false).unwrap();
+        let runs = db.query_strategy_runs(&result.experiment_id, false, true, true).unwrap();
 
         assert_eq!(runs.len(), 1);
         assert!(runs[0].equity_curve.is_empty());
         assert_eq!(runs[0].orders.len(), 1);
         assert_eq!(runs[0].trades.len(), 1);
+    }
+
+    #[test]
+    fn test_query_strategy_runs_can_skip_all_histories() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        db.write_experiment(&cfg, &result).unwrap();
+
+        let runs = db.query_strategy_runs(&result.experiment_id, false, false, false).unwrap();
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].strategy_name, "CustomSma");
+        assert!(runs[0].equity_curve.is_empty());
+        assert!(runs[0].orders.is_empty());
+        assert!(runs[0].trades.is_empty());
+        assert!(!runs[0].metrics.is_empty());
     }
 
     #[test]
@@ -1443,7 +1527,7 @@ mod tests {
         db.write_experiment(&cfg, &result).unwrap();
         db.write_experiment(&cfg, &result).unwrap();
 
-        let runs = db.query_strategy_runs(&result.experiment_id, true).unwrap();
+        let runs = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].orders.len(), 1);
     }
@@ -1469,7 +1553,7 @@ mod tests {
             .query_experiments(Some(std::slice::from_ref(&original.experiment_id)), None, None)
             .unwrap();
         assert_eq!(experiments[0].name, "Original");
-        let runs = db.query_strategy_runs(&original.experiment_id, true).unwrap();
+        let runs = db.query_strategy_runs(&original.experiment_id, true, true, true).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].equity_curve.len(), 1);
         assert_eq!(runs[0].orders.len(), 1);
@@ -1492,7 +1576,7 @@ mod tests {
             )
             .unwrap();
         }
-        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        let error = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap_err();
         assert!(error.to_string().contains("order type"));
 
         // The failed decode returned normally, so the storage mutex remains usable.
@@ -1506,7 +1590,7 @@ mod tests {
             )
             .unwrap();
         }
-        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        let error = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap_err();
         assert!(error.to_string().contains("order status"));
         assert_eq!(db.query_experiments(None, None, None).unwrap().len(), 1);
     }
@@ -1527,7 +1611,7 @@ mod tests {
             )
             .unwrap();
         }
-        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        let error = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap_err();
         assert!(error.to_string().contains("metrics"));
 
         {
@@ -1538,7 +1622,7 @@ mod tests {
             )
             .unwrap();
         }
-        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        let error = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap_err();
         assert!(error.to_string().contains("base currency"));
 
         {
@@ -1554,7 +1638,7 @@ mod tests {
             )
             .unwrap();
         }
-        let error = db.query_strategy_runs(&result.experiment_id, true).unwrap_err();
+        let error = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap_err();
         assert!(error.to_string().contains("cash"));
     }
 
@@ -2193,6 +2277,26 @@ mod tests {
         assert!(instruments.is_empty());
     }
 
+    #[test]
+    fn test_query_instruments_reports_corrupt_enum_values() {
+        let (_dir, db) = make_db();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO instruments (symbol, provider, instrument_type)
+                 VALUES ('BROKEN', 'not-a-provider', 'stocks')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let error = db.query_instruments(None, None, None, None).unwrap_err();
+
+        assert!(
+            matches!(error, StorageError::CorruptData(message) if message.contains("provider"))
+        );
+    }
+
     // ── query_experiments search + limit ────────────────────────────────
 
     #[test]
@@ -2289,7 +2393,10 @@ mod tests {
                 .len(),
             1
         );
-        assert_eq!(db.query_strategy_runs(&result.experiment_id, true).unwrap().len(), 1);
+        assert_eq!(
+            db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap().len(),
+            1
+        );
 
         let removed = db.delete_experiment(&result.experiment_id).unwrap();
         assert_eq!(removed, 1);
@@ -2299,7 +2406,10 @@ mod tests {
             .query_experiments(Some(std::slice::from_ref(&result.experiment_id)), None, None)
             .unwrap()
             .is_empty());
-        assert!(db.query_strategy_runs(&result.experiment_id, true).unwrap().is_empty());
+        assert!(db
+            .query_strategy_runs(&result.experiment_id, true, true, true)
+            .unwrap()
+            .is_empty());
     }
 
     // ── query_strategy_runs scalar-cash backward compat ─────────────────
@@ -2307,7 +2417,7 @@ mod tests {
     #[test]
     fn test_query_strategy_runs_empty_for_missing_experiment() {
         let (_dir, db) = make_db();
-        let runs = db.query_strategy_runs("none", true).unwrap();
+        let runs = db.query_strategy_runs("none", true, true, true).unwrap();
         assert!(runs.is_empty());
     }
 
@@ -2320,7 +2430,7 @@ mod tests {
         result.strategies[0].error = Some("strategy crashed".to_owned());
         db.write_experiment(&cfg, &result).unwrap();
 
-        let runs = db.query_strategy_runs(&result.experiment_id, true).unwrap();
+        let runs = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].error.as_deref(), Some("strategy crashed"));
     }
@@ -2333,7 +2443,7 @@ mod tests {
         result.strategies[0].is_benchmark = true;
         db.write_experiment(&cfg, &result).unwrap();
 
-        let runs = db.query_strategy_runs(&result.experiment_id, true).unwrap();
+        let runs = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap();
         assert_eq!(runs.len(), 1);
         assert!(runs[0].is_benchmark);
     }

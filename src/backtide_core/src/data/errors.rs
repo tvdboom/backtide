@@ -46,6 +46,10 @@ pub enum DataError {
     #[error("Unsupported instrument type: {0}")]
     UnsupportedInstrumentType(InstrumentType),
 
+    /// No provider was configured for an instrument type.
+    #[error("No provider configured for instrument type: {0}")]
+    ProviderNotConfigured(InstrumentType),
+
     /// The interval is not supported by the provider.
     #[error("Unsupported interval: {0}")]
     UnsupportedInterval(Interval),

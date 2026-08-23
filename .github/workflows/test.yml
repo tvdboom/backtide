@@ -112,7 +112,7 @@ jobs:
       - name: Run tests
         run: |
           uv sync --locked --no-install-project --no-default-groups --group tox
-          uv run --no-sync tox -m unit -p auto --parallel-no-spinner
+          uv run --no-sync tox -m unit
       - name: Upload coverage reports to Codecov
         if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: codecov/codecov-action@v5

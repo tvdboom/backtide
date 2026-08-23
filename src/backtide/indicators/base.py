@@ -44,7 +44,7 @@ class BaseIndicator(ABC):
         Parameters
         ----------
         data : pd.DataFrame | pl.DataFrame
-            Historical OHLCV data. The type depends on the [`dataframe_library `][dataconfig]
+            Historical OHLCV data. The type depends on the [`dataframe_library`][dataconfig]
             configuration.
 
         Returns

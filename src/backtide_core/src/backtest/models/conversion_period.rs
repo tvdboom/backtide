@@ -55,29 +55,9 @@ impl ConversionPeriod {
         let cls = py.get_type::<Self>().into_any();
         Ok((cls, (self.to_string(),)))
     }
-
-    /// Return the default variant.
-    ///
-    /// Returns
-    /// -------
-    /// self
-    ///     The default variant.
-    #[staticmethod]
-    fn get_default(py: Python<'_>) -> Py<Self> {
-        Py::new(py, Self::default()).unwrap()
-    }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
 }
+
+impl_python_enum_variants!(ConversionPeriod, default);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for ConversionPeriod {
     type Error = PyErr;

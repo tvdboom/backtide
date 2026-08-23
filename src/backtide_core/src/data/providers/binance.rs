@@ -246,11 +246,10 @@ impl DataProvider for Binance {
                 Err(_) => break, // no more data
             };
 
-            if bars.is_empty() {
+            let Some(last) = bars.last() else {
                 break;
-            }
-
-            let last_open_ts = bars.last().unwrap().open_time;
+            };
+            let last_open_ts = last.open_time;
 
             for k in bars {
                 let bar = Bar::from(k);

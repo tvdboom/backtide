@@ -377,7 +377,13 @@ def query_instruments(
 
     """
 
-def query_strategy_runs(experiment_id, *, include_equity_curve=True) -> list[RunResult]:
+def query_strategy_runs(
+    experiment_id,
+    *,
+    include_equity_curve=True,
+    include_trades=True,
+    include_orders=True,
+) -> list[RunResult]:
     """Return every per-strategy result for a given experiment.
 
     Parameters
@@ -386,8 +392,14 @@ def query_strategy_runs(experiment_id, *, include_equity_curve=True) -> list[Run
         The experiment id (as stored in the `experiments` table).
 
     include_equity_curve : bool, default=True
-        Include each strategy's per-bar equity history. Set this to `False` when only metrics,
-        trades, and orders are needed to reduce database work and memory use.
+        Include each strategy's per-bar equity history.
+
+    include_trades : bool, default=True
+        Include each strategy's completed-trade history.
+
+    include_orders : bool, default=True
+        Include each strategy's complete order history. Set history flags to `False` when only
+        metrics are needed to reduce database work and memory use.
 
     Returns
     -------

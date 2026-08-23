@@ -5,34 +5,47 @@ Description: Utilities for stored custom metrics.
 
 """
 
-import ast
 import inspect
 import logging
 import math
 from pathlib import Path
 from typing import Any
 
-import cloudpickle
 import pandas as pd
 
 from backtide.config import Config
 from backtide.metrics.base import BaseMetric
+from backtide.utils.library import _build_custom_instance, _load_pickles, _save_pickle
 
 logger = logging.getLogger(__name__)
 
 
+def _metric_greater_is_better(metric: BaseMetric) -> bool:
+    """Return the metric ranking direction, including the legacy attribute."""
+    custom_classes: list[type[Any]] = []
+    for cls in type(metric).__mro__:
+        if cls is BaseMetric:
+            break
+        custom_classes.append(cls)
+    for attribute in ("greater_is_better", "higher_is_better"):
+        for cls in custom_classes:
+            if attribute in cls.__dict__:
+                value = cls.__dict__[attribute]
+                if not isinstance(value, bool):
+                    raise TypeError("Metric `greater_is_better` must be a bool.")
+                return value
+    return True
+
+
 def _build_custom_metric(code: str) -> BaseMetric:
     """Execute code and return the final metric instance."""
-    tree = ast.parse(code)
-    if not tree.body or not isinstance(tree.body[-1], ast.Expr):
-        raise ValueError("The last statement must be an instantiation of the metric.")
-    namespace: dict[str, Any] = {}
-    exec(compile(tree, "<metric>", "exec"), namespace)
-    instance = eval(compile(ast.Expression(tree.body[-1].value), "<metric>", "eval"), namespace)
-    if not isinstance(instance, BaseMetric):
-        raise TypeError(f"Expected a subclass of BaseMetric, got {type(instance).__name__}.")
-    instance._source_code = code
-    return instance
+    return _build_custom_instance(
+        code,
+        filename="<metric>",
+        expected_type=BaseMetric,
+        missing_expression="The last statement must be an instantiation of the metric.",
+        type_error=lambda value: f"Expected a subclass of BaseMetric, got {type(value).__name__}.",
+    )
 
 
 def _check_metric_code(code: str) -> str | None:
@@ -49,8 +62,10 @@ def _check_metric_code(code: str) -> str | None:
         return "Metric class must define a docstring used as its description."
     if not isinstance(instance.percentage, bool):
         return "Metric `percentage` must be a bool."
-    if not isinstance(instance.higher_is_better, bool):
-        return "Metric `higher_is_better` must be a bool."
+    try:
+        _metric_greater_is_better(instance)
+    except TypeError as ex:
+        return str(ex)
     equity = pd.DataFrame(
         {"timestamp": [0, 86_400], "equity": [100.0, 101.0], "drawdown": [0.0, 0.0]}
     )
@@ -76,19 +91,18 @@ def _check_metric_code(code: str) -> str | None:
 
 def _load_stored_metrics(cfg: Config) -> dict[str, BaseMetric]:
     """Load custom metric objects from local storage."""
-    values: dict[str, BaseMetric] = {}
-    for file in sorted((Path(cfg.data.storage_path) / "metrics").glob("*.pkl")):
-        try:
-            with file.open("rb") as stream:
-                values[file.stem] = cloudpickle.load(stream)
-        except Exception as ex:  # noqa: BLE001
-            logger.warning("Failed to load metric %s: %s", file.stem, ex)
-    return values
+    return _load_pickles(
+        Path(cfg.data.storage_path) / "metrics",
+        logger=logger,
+        item_name="metric",
+    )
 
 
 def _save_metric(metric: BaseMetric, name: str, cfg: Config) -> None:
     """Persist a custom metric instance."""
-    path = Path(cfg.data.storage_path) / "metrics"
-    path.mkdir(parents=True, exist_ok=True)
-    with (path / f"{name}.pkl").open("wb") as stream:
-        cloudpickle.dump(metric, stream)
+    _save_pickle(
+        metric,
+        Path(cfg.data.storage_path) / "metrics",
+        name,
+        temporary_prefix=".metric-",
+    )

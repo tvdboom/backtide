@@ -48,4 +48,20 @@ describe('benchmark-select', () => {
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     wrapper.unmount()
   })
+
+  it('preserves mixed-case names in single-selection mode', async () => {
+    const wrapper = mount(BenchmarkSelect, {
+      props: {
+        modelValue: '',
+        options: ['Custom crossover'],
+        uppercaseValue: false,
+        selectionName: 'strategy'
+      }
+    })
+
+    await wrapper.get('input').trigger('focus')
+    await wrapper.get('[role="option"]').trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['Custom crossover']])
+  })
 })

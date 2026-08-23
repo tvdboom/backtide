@@ -78,7 +78,7 @@ body:
         Traceback (most recent call last):
           File "script.py", line 10, in <module>
             result = run_experiment(config)
-          File "backtide/backtest.py", line 73, in run_experiment
+          File "backtide/backtest/experiment.py", line 73, in run_experiment
             ...
         ValueError: Invalid strategy configuration
         ```

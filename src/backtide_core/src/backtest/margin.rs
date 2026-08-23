@@ -42,9 +42,9 @@ pub fn accrue_margin_costs(
     fx: &FxTable,
     ts: i64,
     bar_seconds: i64,
-) {
+) -> Result<(), String> {
     if bar_seconds <= 0 {
-        return;
+        return Ok(());
     }
 
     let base_str = base_ccy.to_string();
@@ -57,7 +57,7 @@ pub fn accrue_margin_costs(
             if *amt < 0.0 {
                 borrowed_base -= fx
                     .convert(*amt, &ccy.to_string(), &base_str, ts)
-                    .unwrap_or_else(|| panic!("Unable to convert currency {ccy} to {base_ccy}"));
+                    .ok_or_else(|| format!("Unable to convert currency {ccy} to {base_ccy}"))?;
             }
         }
 
@@ -87,6 +87,8 @@ pub fn accrue_margin_costs(
             *cash.entry(base_ccy).or_insert(0.0) -= cost;
         }
     }
+
+    Ok(())
 }
 
 /// Validate an order against the configured position-size and leverage limits.
@@ -650,7 +652,8 @@ mod tests {
             &fx,
             0,
             86400,
-        );
+        )
+        .unwrap();
         assert_eq!(*cash.get(&Currency::USD).unwrap(), 10000.0);
     }
 
@@ -680,7 +683,8 @@ mod tests {
             &fx,
             0,
             0,
-        );
+        )
+        .unwrap();
         assert_eq!(*cash.get(&Currency::USD).unwrap(), -5000.0);
     }
 
@@ -710,12 +714,44 @@ mod tests {
             &fx,
             0,
             bar_seconds,
-        );
+        )
+        .unwrap();
 
         let expected_cost = 10000.0 * 10.0 / 100.0 * (86400.0 / SECS_PER_YEAR);
         let cash_after = *cash.get(&Currency::USD).unwrap();
         // Cash should be more negative by the cost amount
         assert!((cash_after - (-10000.0 - expected_cost)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn accrue_margin_interest_reports_missing_conversion() {
+        let exchange = ExchangeExpConfig {
+            margin_interest: 10.0,
+            ..Default::default()
+        };
+        let cfg = cfg_with_exchange(exchange);
+        let mut cash = Cash::from([(Currency::EUR, -1_000.0)]);
+        let positions = Positions::new();
+        let aligned = HashMap::new();
+        let quote_ccy = HashMap::new();
+        let fx = FxTable::new("USD");
+
+        let error = accrue_margin_costs(
+            &cfg,
+            &mut cash,
+            &positions,
+            &aligned,
+            0,
+            &quote_ccy,
+            Currency::USD,
+            &fx,
+            0,
+            86_400,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "Unable to convert currency EUR to USD");
+        assert_eq!(cash[&Currency::EUR], -1_000.0);
     }
 
     #[test]
@@ -764,7 +800,8 @@ mod tests {
             &fx,
             0,
             bar_seconds,
-        );
+        )
+        .unwrap();
 
         // Short value = 100 * 152 = 15200
         let expected_cost = 15200.0 * 5.0 / 100.0 * (86400.0 / SECS_PER_YEAR);
@@ -797,7 +834,8 @@ mod tests {
             &fx,
             0,
             86400,
-        );
+        )
+        .unwrap();
         // No borrowed cash → no interest charged
         assert_eq!(*cash.get(&Currency::USD).unwrap(), 10000.0);
     }
@@ -846,7 +884,8 @@ mod tests {
             &fx,
             0,
             86400,
-        );
+        )
+        .unwrap();
         assert_eq!(*cash.get(&Currency::USD).unwrap(), 10000.0);
     }
 
@@ -875,7 +914,8 @@ mod tests {
             &fx,
             0,
             -100,
-        );
+        )
+        .unwrap();
         assert_eq!(*cash.get(&Currency::USD).unwrap(), -5000.0);
     }
 

@@ -16,6 +16,9 @@ Usage
     # Check that stubs are up-to-date (for CI / pre-commit)
     python scripts/generate_stubs.py --check
 
+    # Build and inspect an isolated wheel (safe with a running Backtide process)
+    python scripts/generate_stubs.py --isolated-build --check
+
 The stubs are written to:
     backtide/core/__init__.pyi
     backtide/core/backtest.pyi
@@ -36,10 +39,14 @@ import argparse
 import difflib
 import importlib
 import inspect
+import os
 from pathlib import Path
 import re
+import subprocess
 import sys
+import tempfile
 from types import ModuleType
+import zipfile
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -685,6 +692,54 @@ def generate_init_stub() -> str:
     return "".join(lines)
 
 
+def _run_with_isolated_wheel(*, check: bool) -> int:
+    """Build a temporary wheel and rerun this script against its extension."""
+    env = os.environ.copy()
+    env.setdefault("CARGO_BUILD_JOBS", "12")
+
+    with tempfile.TemporaryDirectory(prefix="backtide-stubs-") as temporary_directory:
+        wheel_directory = Path(temporary_directory) / "wheel"
+        subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "run_cargo.py"),
+                sys.executable,
+                "-m",
+                "maturin",
+                "build",
+                "--profile",
+                "dev",
+                "--interpreter",
+                sys.executable,
+                "--out",
+                str(wheel_directory),
+            ],
+            check=True,
+            cwd=ROOT,
+            env=env,
+        )
+
+        wheels = list(wheel_directory.glob("*.whl"))
+        if len(wheels) != 1:
+            msg = f"Expected one wheel in {wheel_directory}, found {len(wheels)}"
+            raise RuntimeError(msg)
+
+        package_directory = Path(temporary_directory) / "site-packages"
+        with zipfile.ZipFile(wheels[0]) as wheel:
+            wheel.extractall(package_directory)
+
+        existing_path = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            f"{package_directory}{os.pathsep}{existing_path}"
+            if existing_path
+            else str(package_directory)
+        )
+        command = [sys.executable, str(Path(__file__).resolve())]
+        if check:
+            command.append("--check")
+        return subprocess.call(command, cwd=ROOT, env=env)
+
+
 def main():
     """Entry point: generate all stub files."""
     parser = argparse.ArgumentParser(description="Generate .pyi stubs for backtide.core")
@@ -694,7 +749,15 @@ def main():
         help="Verify that existing stubs match what would be generated. "
         "Exits with code 1 if any file is out of date (useful for CI / pre-commit).",
     )
+    parser.add_argument(
+        "--isolated-build",
+        action="store_true",
+        help="Build a temporary wheel and generate or check stubs against that exact extension.",
+    )
     args = parser.parse_args()
+
+    if args.isolated_build:
+        raise SystemExit(_run_with_isolated_wheel(check=args.check))
 
     sys.path.insert(0, str(ROOT))
     STUB_DIR.mkdir(parents=True, exist_ok=True)

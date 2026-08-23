@@ -75,28 +75,6 @@ impl InstrumentType {
         }
     }
 
-    /// Return the default variant.
-    ///
-    /// Returns
-    /// -------
-    /// self
-    ///     The default variant.
-    #[staticmethod]
-    fn get_default(py: Python<'_>) -> Py<Self> {
-        Py::new(py, Self::default()).unwrap()
-    }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
-
     /// Whether the instrument type has ownership stakes (true for stocks and etf).
     #[getter]
     pub fn is_equity(&self) -> bool {
@@ -124,6 +102,8 @@ impl InstrumentType {
         }
     }
 }
+
+impl_python_enum_variants!(InstrumentType, default);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for InstrumentType {
     type Error = PyErr;

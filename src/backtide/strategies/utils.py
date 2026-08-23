@@ -12,35 +12,25 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import cloudpickle
-
 from backtide.config import Config
 from backtide.indicators import BaseIndicator, _indicator_deterministic_name
 from backtide.strategies.base import BaseStrategy
+from backtide.utils.library import _build_custom_instance, _load_pickles, _save_pickle
 
 logger = logging.getLogger(__name__)
 
 
 def _build_custom_strategy(code: str) -> BaseStrategy:
     """Execute code and return the last expression."""
-    tree = ast.parse(code)
-
-    if not tree.body or not isinstance(tree.body[-1], ast.Expr):
-        raise ValueError("The last statement must be an instantiation of the strategy.")
-
-    # Exec everything except the last statement, eval the last
-    ns = {}
-    exec(compile(tree, "<strategy>", "exec"), ns)
-    instance = eval(compile(ast.Expression(body=tree.body[-1].value), "<strategy>", "eval"), ns)
-
-    if not isinstance(instance, BaseStrategy):
-        raise TypeError(f"Expected a subclass of BaseStrategy, got {type(instance).__name__}.")
-
-    # Can't reliably recover source code from an unpickled object
-    # so we add the source code to the instance
-    instance._source_code = code
-
-    return instance
+    return _build_custom_instance(
+        code,
+        filename="<strategy>",
+        expected_type=BaseStrategy,
+        missing_expression="The last statement must be an instantiation of the strategy.",
+        type_error=lambda value: (
+            f"Expected a subclass of BaseStrategy, got {type(value).__name__}."
+        ),
+    )
 
 
 def _check_strategy_code(code: str) -> str | None:
@@ -112,17 +102,11 @@ def _is_builtin_strategy(strat: Any) -> bool:
 
 def _load_stored_strategies(cfg: Config) -> dict[str, Any]:
     """Load and return the strategy objects from storage."""
-    path = Path(cfg.data.storage_path) / "strategies"
-
-    strategies = {}
-    for f in sorted(path.glob("*.pkl")):
-        try:
-            with f.open("rb") as fh:
-                strategies[f.stem] = cloudpickle.load(fh)
-        except Exception as ex:  # noqa: BLE001
-            logger.warning("Failed to load strategy %s: %s", f.stem, ex)
-
-    return strategies
+    return _load_pickles(
+        Path(cfg.data.storage_path) / "strategies",
+        logger=logger,
+        item_name="strategy",
+    )
 
 
 def _resolve_auto_indicators(strats: Sequence[Any]) -> list[tuple[str, BaseIndicator, str]]:
@@ -151,10 +135,11 @@ def _resolve_auto_indicators(strats: Sequence[Any]) -> list[tuple[str, BaseIndic
     return out
 
 
-def _save_strategy(strat: Any, name: str, cfg: Config):
+def _save_strategy(strat: Any, name: str, cfg: Config) -> None:
     """Pickle a strategy instance to disk."""
-    path = Path(cfg.data.storage_path) / "strategies"
-    path.mkdir(parents=True, exist_ok=True)
-
-    with (path / f"{name}.pkl").open("wb") as f:
-        cloudpickle.dump(strat, f)
+    _save_pickle(
+        strat,
+        Path(cfg.data.storage_path) / "strategies",
+        name,
+        temporary_prefix=".strategy-",
+    )

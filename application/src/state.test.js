@@ -3,6 +3,7 @@ import {
   cloneApiState,
   configuredPlotlyDateTimeFormat,
   configuredCurrencyDecimals,
+  consumeCompletedJobResult,
   consumeExperimentDraft,
   consumeResultsOverviewRequest,
   defaultExperimentBenchmark,
@@ -18,6 +19,7 @@ import {
   formatResultMetric,
   instrumentLogoUrl,
   sessionEquitySeries,
+  requestJobResult,
   requestResultsOverview,
   resolvePage,
   symbolsForAnalysis
@@ -85,10 +87,31 @@ describe('result and route state', () => {
     expect(consumeResultsOverviewRequest(storage)).toBe(false)
   })
 
+  it('resolves a queued result after its background job succeeds', () => {
+    const values = new Map()
+    const storage = {
+      getItem: key => values.get(key) || null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: key => values.delete(key)
+    }
+
+    requestJobResult(storage, 'job-1')
+
+    expect(consumeCompletedJobResult(storage, [
+      { id: 'job-1', status: 'running', result: null }
+    ])).toBeNull()
+    expect(consumeCompletedJobResult(storage, [
+      { id: 'job-1', status: 'success', result: { experiment_id: 'experiment-2' } }
+    ])).toBe('experiment-2')
+    expect(consumeCompletedJobResult(storage, [])).toBeNull()
+  })
+
   it('formats fractional and already-percent result metrics', () => {
     expect(formatResultMetric(0.125, true)).toBe('12.50%')
     expect(formatResultMetric(12.5, true)).toBe('12.50%')
     expect(formatResultMetric(undefined, true)).toBe('—')
+    expect(formatResultMetric(1.0571915779234942e144, true)).toBe('1.06e+144%')
+    expect(formatResultMetric(1.0571915779234942e144)).toBe('1.06e+144')
   })
 
   it('falls back to home for an unknown route', () => {

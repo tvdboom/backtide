@@ -65,7 +65,7 @@ class GainToPain(BaseMetric):
     """Return gross winning PnL divided by gross losing PnL."""
 
     percentage = False
-    higher_is_better = True
+    greater_is_better = True
 
     def compute(self, equity_curve, trades):
         pnl = trades["pnl"]
@@ -80,8 +80,9 @@ GainToPain()
 The class docstring is used as the metric description in the library and experiment builder;
 there is no separate `description` attribute. The last expression must instantiate the metric,
 and the returned value must convert to a finite `float`. Set `percentage = True` when the returned
-value is a fraction such as `0.12`, and set `higher_is_better = False` for metrics where the
-smallest value should be considered best.
+value is a fraction such as `0.12`. Backtide already knows whether larger or smaller values are
+preferred for built-in metrics. For a custom metric, set `greater_is_better = False` when the
+smallest value should be considered best; it defaults to `True` when omitted.
 
 Built-in keys and custom Python objects belong in the same config list. This is the only place
 metrics are specified: there is no separate metrics parameter on [`Experiment`] or [`Session`].
@@ -90,7 +91,7 @@ class name is used. Serialization stores the resolved names while an in-memory r
 Python implementations:
 
 ```python
-from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig
+from backtide import DataExpConfig, Experiment, ExperimentConfig
 
 config = ExperimentConfig(
     data=DataExpConfig(symbols=["AAPL"]),

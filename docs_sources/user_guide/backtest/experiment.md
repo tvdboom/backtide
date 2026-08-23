@@ -13,7 +13,7 @@ configuration first and runtime strategy and indicator objects separately, just 
 [`SessionConfig`] followed by its runtime strategy and indicators:
 
 ```python
-from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig
+from backtide import DataExpConfig, Experiment, ExperimentConfig
 from backtide.indicators import SimpleMovingAverage
 from backtide.strategies import BuyAndHold
 
@@ -83,7 +83,18 @@ tabs in the application's experiment page.
 
 The full TOML representation is what's stored next to every experiment under
 `<storage_path>/experiments/<id>/config.toml`. You can re-create a config from
-disk with `ExperimentConfig.from_toml(...)`.
+disk with `ExperimentConfig.from_toml(...)`. Selected metrics have their own section immediately
+after indicators:
+
+```toml
+[indicators]
+indicators = []
+
+[metrics]
+selected = ["sharpe", "total_return", "max_dd"]
+```
+
+Older files with a root-level `metrics = [...]` list remain readable.
 
 <br>
 
@@ -123,7 +134,7 @@ Margin is controlled through [`ExchangeExpConfig`]. By default, it is **disabled
 | `raise_on_margin_limit` | `False` | When `True`, the engine raises an error if an order would breach `max_leverage` or if equity falls below `maintenance_margin`. When `False`, orders are auto-shrunk or rejected with a warning instead. |
 
 ```python
-from backtide.backtest import (
+from backtide import (
     DataExpConfig,
     ExchangeExpConfig,
     Experiment,
@@ -197,7 +208,7 @@ symbol it does not currently hold. The engine:
    simulation.
 
 ```python
-from backtide.backtest import DataExpConfig, ExchangeExpConfig, Experiment, ExperimentConfig, Order
+from backtide import DataExpConfig, ExchangeExpConfig, Experiment, ExperimentConfig, Order
 from backtide.indicators import RelativeStrengthIndex
 from backtide.strategies import BaseStrategy
 

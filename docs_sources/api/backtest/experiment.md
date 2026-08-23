@@ -1,7 +1,7 @@
 # Experiment
 ------------
 
-:: backtide.backtest:Experiment
+:: backtide.backtest.experiment:Experiment
     :: signature
     :: head
     :: table:

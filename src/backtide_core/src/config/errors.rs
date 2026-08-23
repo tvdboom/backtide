@@ -27,6 +27,10 @@ pub enum ConfigError {
     /// [`set_config`] was called after the singleton was set.
     #[error("The configuration has already been used; set_config cannot be called anymore.")]
     AlreadySet,
+
+    /// The process-wide configuration could not be initialized.
+    #[error("The process-wide configuration could not be initialized.")]
+    Initialization,
 }
 
 pub type ConfigResult<T> = Result<T, ConfigError>;

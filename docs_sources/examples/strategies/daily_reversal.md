@@ -6,7 +6,7 @@ after a daily rise of at least two percent. It works with pandas and Polars data
 ```python
 from math import isfinite
 
-from backtide.backtest import Order
+from backtide import Order
 from backtide.strategies import BaseStrategy
 
 

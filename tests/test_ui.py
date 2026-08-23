@@ -73,6 +73,18 @@ class StubServices(BacktideServices):
         """Return the experiment paging arguments for route assertions."""
         return [{"search": search, "limit": limit, "offset": offset}]
 
+    def start_study(self, payload):
+        """Return a deterministic accepted study job."""
+        return {"id": "study-job", "study": payload["study"]}
+
+    def reuse_study_setup(self, payload):
+        """Return a deterministic best-candidate experiment draft."""
+        return {"general": {"name": payload["study_id"]}, "strategy": {}}
+
+    def rerun_study(self, payload):
+        """Return a deterministic complete study draft."""
+        return {"general": {}, "_study": {"study_id": payload["study_id"]}}
+
     def live_instruments(self, provider, limit=10_000):
         """Return deterministic live-provider symbols for route assertions."""
         return [{"symbol": "ADA-USD", "provider": provider, "limit": limit}]
@@ -282,6 +294,54 @@ class TestJSONRoutes:
         assert response.status == 200
         assert json.loads(body) == [{"search": "momentum", "limit": 10, "offset": 10}]
 
+    def test_study_route_starts_an_accepted_background_job(self, web_server):
+        """Studies have a dedicated asynchronous command endpoint."""
+        response, body = request(
+            web_server,
+            "POST",
+            "/api/studies",
+            {
+                "config": {"general": {"name": "SMA parameter study"}},
+                "study": {"parameter_space": {"period": [10, 20]}},
+            },
+        )
+
+        assert response.status == 202
+        assert json.loads(body) == {
+            "id": "study-job",
+            "study": {"parameter_space": {"period": [10, 20]}},
+        }
+
+    def test_study_reuse_route_returns_a_normal_experiment_draft(self, web_server):
+        """The best candidate can be promoted through its dedicated command endpoint."""
+        response, body = request(
+            web_server,
+            "POST",
+            "/api/studies/reuse",
+            {"study_id": "experiment-1"},
+        )
+
+        assert response.status == 200
+        assert json.loads(body) == {
+            "general": {"name": "experiment-1"},
+            "strategy": {},
+        }
+
+    def test_study_rerun_route_returns_the_complete_study_draft(self, web_server):
+        """Saved study settings have a dedicated builder-draft endpoint."""
+        response, body = request(
+            web_server,
+            "POST",
+            "/api/studies/rerun",
+            {"study_id": "experiment-1"},
+        )
+
+        assert response.status == 200
+        assert json.loads(body) == {
+            "general": {},
+            "_study": {"study_id": "experiment-1"},
+        }
+
     def test_live_history_and_replay_routes(self, web_server):
         """Live session history routes expose persisted sessions and replay control."""
         response, body = request(web_server, "GET", "/api/live/sessions")
@@ -326,7 +386,17 @@ class TestJobStore:
     def test_successful_job_exposes_result(self):
         """Completed work transitions to success and keeps its result."""
         jobs = JobStore()
-        job = jobs.start("test", lambda: {"value": 42})
+
+        def work(progress):
+            progress(4, 10)
+            return {"value": 42}
+
+        job = jobs.start(
+            "test",
+            work,
+            name="Momentum research",
+            progress_unit="items",
+        )
 
         for _ in range(1000):
             snapshot = jobs.get(job["id"])
@@ -334,12 +404,17 @@ class TestJobStore:
                 break
 
         assert snapshot["result"] == {"value": 42}
+        assert snapshot["name"] == "Momentum research"
+        assert snapshot["progress_completed"] == 4
+        assert snapshot["progress_total"] == 10
+        assert snapshot["progress_unit"] == "items"
+        assert snapshot["progress_started_at"]
 
     def test_failed_job_exposes_safe_error(self):
         """A worker exception is captured without losing the job."""
         jobs = JobStore()
 
-        def fail():
+        def fail(_progress):
             raise ValueError("invalid work")
 
         job = jobs.start("test", fail)
@@ -523,6 +598,88 @@ class TestSerialization:
 
 class TestServiceCommands:
     """Tests for command validation and backend dispatch."""
+
+    def test_reuse_study_setup_promotes_only_the_best_candidate(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ):
+        """Best-candidate reuse saves its exact constructor and returns a normal draft."""
+        from backtide import config as config_module
+        from backtide import storage as storage_module
+        from backtide.backtest.study import WalkForwardConfig
+        from backtide.strategies import utils as strategy_utils
+
+        class Strategy:
+            def __init__(self, fast=10, slow=100):
+                self.fast = fast
+                self.slow = slow
+
+        experiment_root = tmp_path / "experiments" / "experiment-1"
+        experiment_root.mkdir(parents=True)
+        (experiment_root / "config.toml").write_text(
+            '[general]\nname = "Study"\n\n[strategy]\nstrategies = ["Original"]\n',
+            encoding="utf-8",
+        )
+        cfg = SimpleNamespace(data=SimpleNamespace(storage_path=str(tmp_path)))
+        best = SimpleNamespace(
+            strategy_name="C002 · fast=20, slow=200",
+            parameters={"fast": 20, "slow": 200},
+        )
+        study = SimpleNamespace(
+            name="Study",
+            strategy_name="Original",
+            best_candidate=best,
+            parameter_space={"fast": [10, 20], "slow": [100, 200]},
+            min_trades=12,
+            max_drawdown=0.25,
+            walk_forward=WalkForwardConfig(
+                training_days=730,
+                test_days=180,
+                step_days=90,
+                anchored=True,
+            ),
+            folds=[],
+        )
+        saved = {}
+        monkeypatch.setattr(config_module, "get_config", lambda: cfg)
+        monkeypatch.setattr(
+            storage_module,
+            "query_study",
+            lambda _experiment_id: study,
+        )
+        monkeypatch.setattr(
+            strategy_utils,
+            "_load_stored_strategies",
+            lambda _cfg: {"Original": Strategy()},
+        )
+        monkeypatch.setattr(
+            strategy_utils,
+            "_save_strategy",
+            lambda value, name, _cfg: saved.update(value=value, name=name),
+        )
+
+        result = BacktideServices().reuse_study_setup({"study_id": "experiment-1"})
+
+        assert result["general"]["name"] == "Study · C002"
+        assert result["strategy"]["strategies"] == ["Original · C002"]
+        assert saved["name"] == "Original · C002"
+        assert (saved["value"].fast, saved["value"].slow) == (20, 200)
+
+        rerun = BacktideServices().rerun_study({"study_id": "experiment-1"})
+
+        assert rerun["strategy"]["strategies"] == ["Original"]
+        assert rerun["_study"] == {
+            "parameter_space": {"fast": [10, 20], "slow": [100, 200]},
+            "min_trades": 12,
+            "max_drawdown": 0.25,
+            "walk_forward": {
+                "training_days": 730,
+                "test_days": 180,
+                "step_days": 90,
+                "anchored": True,
+            },
+        }
 
     @pytest.mark.parametrize(
         (
@@ -769,7 +926,7 @@ class TestServiceCommands:
         def fail_dump(_value, _stream):
             raise TypeError("simulated pickle failure")
 
-        monkeypatch.setattr(utils.cloudpickle, "dump", fail_dump)
+        monkeypatch.setattr("backtide.utils.library.cloudpickle.dump", fail_dump)
 
         with pytest.raises(TypeError, match="simulated pickle failure"):
             utils._save_sizer(FixedFractional(0.1), "Allocation", cfg)
@@ -1039,13 +1196,31 @@ end_date = "2024-03-01"
             trades=[],
             orders=[],
         )
+        benchmark = SimpleNamespace(
+            strategy_id="benchmark-1",
+            strategy_name="Benchmark",
+            base_currency="USD",
+            is_benchmark=True,
+            metrics={"return": 0.08},
+            error=None,
+            trades=[],
+            orders=[],
+        )
 
-        def query_strategy_runs(experiment_id, *, include_equity_curve=True):
+        def query_strategy_runs(
+            experiment_id,
+            *,
+            include_equity_curve=True,
+            include_trades=True,
+            include_orders=True,
+        ):
             captured.update(
                 experiment_id=experiment_id,
                 include_equity_curve=include_equity_curve,
+                include_trades=include_trades,
+                include_orders=include_orders,
             )
-            return [run]
+            return [run, benchmark]
 
         monkeypatch.setitem(
             sys.modules,
@@ -1064,6 +1239,7 @@ end_date = "2024-03-01"
                     {"id": "exp-1", "name": "Test", "status": "Success"}
                 ],
                 query_strategy_runs=query_strategy_runs,
+                query_study=lambda _experiment_id: None,
             ),
         )
 
@@ -1072,13 +1248,23 @@ end_date = "2024-03-01"
 
         result = services.experiment("exp-1")
 
-        assert captured == {"experiment_id": "exp-1", "include_equity_curve": False}
-        assert "equity_curve" not in result["runs"][0]
-        assert result["runs"][0]["metrics"] == {"return": 0.1}
-        assert "orders" not in result["runs"][0]
-        assert result["runs"][0]["order_count"] == 0
+        assert captured == {
+            "experiment_id": "exp-1",
+            "include_equity_curve": False,
+            "include_trades": False,
+            "include_orders": False,
+        }
+        assert [item["strategy_name"] for item in result["runs"]] == [
+            "Benchmark",
+            "Momentum",
+        ]
+        assert "equity_curve" not in result["runs"][1]
+        assert result["runs"][1]["metrics"] == {"return": 0.1}
+        assert "orders" not in result["runs"][1]
+        assert result["runs"][1]["order_count"] == 0
         assert result["config_metadata"] == {
             "symbols": 2,
+            "symbol_values": ["AAPL", "MSFT"],
             "instrument_type": "stocks",
             "interval": "OneDay",
             "full_history": False,
@@ -1109,7 +1295,11 @@ end_date = "2024-03-01"
         ]
         run = SimpleNamespace(strategy_id="run-1", orders=orders)
         services = BacktideServices()
-        monkeypatch.setattr(services, "_query_result_runs", lambda _experiment_id: [run])
+        monkeypatch.setattr(
+            services,
+            "_query_result_runs",
+            lambda _experiment_id, **_kwargs: [run],
+        )
 
         first = services.experiment_orders("exp-1", "run-1")
         last = services.experiment_orders("exp-1", "run-1", offset=200, limit=100)
@@ -1149,6 +1339,7 @@ end_date = "2024-03-01"
                     {"id": "exp-1", "name": "Test", "status": "Success"}
                 ],
                 query_strategy_runs=lambda _experiment_id, **_kwargs: [],
+                query_study=lambda _experiment_id: None,
             ),
         )
 
@@ -1189,6 +1380,7 @@ end_date = "2024-03-01"
                     {"id": "exp-1", "name": "Test", "status": "Success"}
                 ],
                 query_strategy_runs=lambda _experiment_id, **_kwargs: [],
+                query_study=lambda _experiment_id: None,
             ),
         )
 
@@ -1274,8 +1466,8 @@ end_date = "2024-03-01"
             error=None,
         )
 
-        def query_strategy_runs(experiment_id, *, include_equity_curve=True):
-            captured.append((experiment_id, include_equity_curve))
+        def query_strategy_runs(experiment_id, **kwargs):
+            captured.append((experiment_id, kwargs))
             return [run]
 
         monkeypatch.setitem(
@@ -1286,6 +1478,7 @@ end_date = "2024-03-01"
                     {"id": "exp-1", "name": "Momentum study", "icon": "🎯"}
                 ],
                 query_strategy_runs=query_strategy_runs,
+                query_study=lambda _experiment_id: None,
             ),
         )
 
@@ -1298,7 +1491,16 @@ end_date = "2024-03-01"
 
         result = services.experiments()
 
-        assert captured == [("exp-1", False)]
+        assert captured == [
+            (
+                "exp-1",
+                {
+                    "include_equity_curve": False,
+                    "include_trades": False,
+                    "include_orders": False,
+                },
+            )
+        ]
         assert result[0]["n_symbols"] == 2
         assert result[0]["runs"] == [
             {
@@ -1325,7 +1527,7 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
                         "key": "sharpe",
                         "name": "Sharpe ratio",
                         "percentage": False,
-                        "higher_is_better": True,
+                        "greater_is_better": True,
                     }
                 ],
                 "saved": [],
@@ -1341,6 +1543,129 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
         ]
         assert result["primary_metric_value"] == 1.25
 
+    def test_primary_metric_summary_reads_the_metrics_section(self):
+        """The canonical metrics section retains configured ordering in result summaries."""
+        result = BacktideServices()._primary_metric_summary(
+            '[metrics]\nselected = ["total_return", "sharpe"]\n',
+            [{"is_benchmark": False, "metrics": {"total_return": 0.2}}],
+            {
+                "builtin": [
+                    {
+                        "key": "total_return",
+                        "name": "Total return",
+                        "percentage": True,
+                        "greater_is_better": True,
+                    }
+                ],
+                "saved": [],
+            },
+        )
+
+        assert result["primary_metric"] == "total_return"
+        assert result["selected_metrics"] == ["total_return", "sharpe"]
+        assert result["primary_metric_value"] == 0.2
+
+    def test_study_runs_use_compact_names_and_parameter_metadata(self):
+        """Saved candidate parameters stay out of labels and remain available to the UI."""
+        runs = [{"strategy_id": "run-2", "strategy_name": "C002 · fast=20 · slow=100"}]
+        study = SimpleNamespace(
+            candidates=[
+                SimpleNamespace(
+                    strategy_id="run-2",
+                    strategy_name="C002 · fast=20 · slow=100",
+                    parameters={"fast": 20, "slow": 100},
+                )
+            ]
+        )
+
+        BacktideServices._apply_study_run_metadata(runs, study)
+
+        assert runs == [
+            {
+                "strategy_id": "run-2",
+                "strategy_name": "C002",
+                "parameters": {"fast": 20, "slow": 100},
+            }
+        ]
+
+    def test_plot_payloads_replace_legacy_parameter_heavy_candidate_names(self):
+        """Plot legends and hover labels use compact candidate names for saved studies."""
+        payload = {
+            "data": [
+                {
+                    "name": "C002 · fast=20 · slow=100",
+                    "legendgroup": "C002 · fast=20 · slow=100",
+                    "hovertemplate": "C002 · fast=20 · slow=100: %{y}",
+                }
+            ]
+        }
+
+        result = BacktideServices._replace_figure_candidate_names(
+            payload,
+            {"C002 · fast=20 · slow=100": "C002"},
+        )
+
+        assert result["data"] == [
+            {
+                "name": "C002",
+                "legendgroup": "C002",
+                "hovertemplate": "C002: %{y}",
+            }
+        ]
+
+    def test_study_runs_put_benchmark_before_top_three_in_rank_order(self):
+        """Study summaries and charts put the benchmark before the three best candidates."""
+        benchmark = SimpleNamespace(strategy_id="benchmark", is_benchmark=True)
+        candidates = [
+            SimpleNamespace(
+                strategy_id=f"run-{rank}",
+                strategy_name=f"C{rank:03d}",
+                rank=rank,
+            )
+            for rank in range(1, 6)
+        ]
+        runs = [
+            *(
+                SimpleNamespace(strategy_id=f"run-{rank}", is_benchmark=False)
+                for rank in range(1, 6)
+            ),
+            benchmark,
+        ]
+
+        selected = BacktideServices._study_detail_runs(
+            runs,
+            SimpleNamespace(candidates=candidates),
+        )
+
+        assert [run.strategy_id for run in selected] == [
+            "benchmark",
+            "run-1",
+            "run-2",
+            "run-3",
+        ]
+
+    def test_study_summary_uses_the_best_eligible_candidate(self):
+        """A constrained study headline cannot be taken from an excluded candidate."""
+        study = SimpleNamespace(
+            objective="sharpe",
+            best_candidate=SimpleNamespace(metrics={"sharpe": 1.1}),
+        )
+
+        result = BacktideServices._study_metric_summary(
+            study,
+            {
+                "builtin": [{"key": "sharpe", "name": "Sharpe ratio", "percentage": False}],
+                "saved": [],
+            },
+        )
+
+        assert result == {
+            "primary_metric": "sharpe",
+            "primary_metric_name": "Sharpe ratio",
+            "primary_metric_value": 1.1,
+            "primary_metric_percentage": False,
+        }
+
     def test_experiment_summaries_only_enrich_the_requested_page(self, monkeypatch):
         """Experiment paging fetches and enriches only the requested ten-item slice."""
         captured = {}
@@ -1351,8 +1676,8 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
             captured.update(kwargs)
             return rows[: kwargs["limit"]]
 
-        def query_strategy_runs(experiment_id, *, include_equity_curve=True):
-            enriched.append((experiment_id, include_equity_curve))
+        def query_strategy_runs(experiment_id, **kwargs):
+            enriched.append((experiment_id, kwargs))
             return []
 
         monkeypatch.setitem(
@@ -1361,6 +1686,7 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
             SimpleNamespace(
                 query_experiments=query_experiments,
                 query_strategy_runs=query_strategy_runs,
+                query_study=lambda _experiment_id: None,
             ),
         )
         services = BacktideServices()
@@ -1371,7 +1697,17 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
 
         assert captured == {"search": "study", "limit": 20}
         assert [item["id"] for item in result] == [f"exp-{index}" for index in range(10, 15)]
-        assert enriched == [(f"exp-{index}", False) for index in range(10, 15)]
+        assert enriched == [
+            (
+                f"exp-{index}",
+                {
+                    "include_equity_curve": False,
+                    "include_trades": False,
+                    "include_orders": False,
+                },
+            )
+            for index in range(10, 15)
+        ]
 
     def test_required_indicator_catalog_exposes_auto_injected_metadata(self, monkeypatch):
         """Saved strategies describe indicators that the engine injects automatically."""
@@ -1407,7 +1743,7 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
         experiment.mkdir(parents=True)
         (experiment / "config.toml").write_text("[general]\nname='test'", encoding="utf-8")
         run = SimpleNamespace(strategy_id="run-1")
-        captured: dict[str, Any] = {"queries": 0, "plots": []}
+        captured: dict[str, Any] = {"queries": [], "plots": []}
 
         class Figure:
             def to_json(self):
@@ -1424,8 +1760,8 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
             )
             return Figure()
 
-        def query_strategy_runs(_experiment_id):
-            captured["queries"] += 1
+        def query_strategy_runs(_experiment_id, **kwargs):
+            captured["queries"].append(kwargs)
             return [run]
 
         analysis = SimpleNamespace(plot_pnl=plot_pnl)
@@ -1453,6 +1789,7 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
             SimpleNamespace(
                 query_bars=lambda *_args, **_kwargs: [],
                 query_strategy_runs=query_strategy_runs,
+                query_study=lambda _experiment_id: None,
             ),
         )
 
@@ -1475,7 +1812,13 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
 
         assert result["layout"]["title"] == "PnL"
         assert captured == {
-            "queries": 1,
+            "queries": [
+                {
+                    "include_equity_curve": True,
+                    "include_trades": False,
+                    "include_orders": False,
+                }
+            ],
             "plots": [
                 {
                     "runs": [run],
@@ -1616,7 +1959,8 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
             SimpleNamespace(
                 query_bars=lambda *_args, **_kwargs: [],
                 query_dividends=query_dividends,
-                query_strategy_runs=lambda _experiment_id: [run],
+                query_strategy_runs=lambda _experiment_id, **_kwargs: [run],
+                query_study=lambda _experiment_id: None,
             ),
         )
 
@@ -1677,7 +2021,10 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
             "backtide.storage",
             SimpleNamespace(
                 query_bars=lambda *_args, **_kwargs: [],
-                query_strategy_runs=lambda _experiment_id: [SimpleNamespace(strategy_id="run-1")],
+                query_strategy_runs=lambda _experiment_id, **_kwargs: [
+                    SimpleNamespace(strategy_id="run-1")
+                ],
+                query_study=lambda _experiment_id: None,
             ),
         )
 

@@ -1,5 +1,18 @@
 # BaseMetric
+----------
+
+:: backtide.metrics:BaseMetric
+    :: signature
+    :: head
+    :: table:
+        - attributes
+    :: see also
 
 <br>
 
-::: backtide.metrics:BaseMetric
+## Methods
+
+:: methods:
+    toc_only: False
+    include:
+        - compute

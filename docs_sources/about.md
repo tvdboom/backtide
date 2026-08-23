@@ -129,13 +129,13 @@ contributors with a set of developer tools free of charge.
 
 <div class="support-logos">
   <a href="https://www.jetbrains.com/community/opensource/#support">
-    <img src="img/support/jetbrains.png" alt="JetBrains">
+    <img src="../img/support/jetbrains.png" alt="JetBrains">
   </a>
   <a href="https://www.jetbrains.com/rustrover/">
-    <img src="img/support/rustrover.png" alt="RustRover">
+    <img src="../img/support/rustrover.png" alt="RustRover">
   </a>
   <a href="https://www.jetbrains.com/pycharm/">
-    <img src="img/support/pycharm.png" alt="PyCharm">
+    <img src="../img/support/pycharm.png" alt="PyCharm">
   </a>
 </div>
 

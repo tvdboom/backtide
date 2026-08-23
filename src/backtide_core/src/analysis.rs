@@ -188,11 +188,12 @@ pub fn compute_series_stats(
     };
 
     // Sortino.
-    let downside: Vec<f64> = returns.iter().copied().filter(|&r| r < 0.0).collect();
-    let sortino = if downside.len() > 1 {
-        let ds_mean = downside.iter().sum::<f64>() / downside.len() as f64;
-        let ds_var = downside.iter().map(|r| (r - ds_mean).powi(2)).sum::<f64>()
-            / (downside.len() - 1) as f64;
+    let downside_count = returns.iter().filter(|&&r| r < 0.0).count();
+    let sortino = if downside_count > 1 {
+        let ds_mean = returns.iter().filter(|&&r| r < 0.0).sum::<f64>() / downside_count as f64;
+        let ds_var =
+            returns.iter().filter(|&&r| r < 0.0).map(|r| (r - ds_mean).powi(2)).sum::<f64>()
+                / (downside_count - 1) as f64;
         let ds_std = ds_var.sqrt();
         if ds_std > 0.0 {
             excess / ds_std * ann.sqrt()

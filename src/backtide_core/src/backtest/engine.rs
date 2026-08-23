@@ -4,12 +4,13 @@
 //! multi-currency portfolio bookkeeping and result aggregation.
 
 use crate::backtest::fx::*;
-use crate::backtest::interface::check_abort;
+use crate::backtest::interface::{check_abort, ProgressReporter};
 use crate::backtest::margin::*;
 use crate::backtest::models::*;
 use crate::backtest::orders::*;
 use crate::backtest::utils::*;
 use crate::constants::*;
+use crate::data::errors::DataError;
 use crate::data::models::*;
 use crate::engine::Engine;
 use crate::errors::{EngineError, EngineResult};
@@ -27,7 +28,6 @@ use pyo3::prelude::*;
 use pyo3::Py;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn, Span};
 use uuid::Uuid;
@@ -41,6 +41,7 @@ impl Engine {
         strategy_overrides: &HashMap<String, Py<PyAny>>,
         indicator_overrides: &HashMap<String, Py<PyAny>>,
         metric_overrides: &HashMap<String, Py<PyAny>>,
+        progress: Option<&ProgressReporter>,
     ) -> EngineResult<ExperimentResult> {
         let started_instant = Instant::now();
         let started_at =
@@ -188,7 +189,7 @@ impl Engine {
                 .data
                 .providers
                 .get(&config.data.instrument_type)
-                .expect("provider configured for instrument type"),
+                .ok_or(DataError::ProviderNotConfigured(config.data.instrument_type))?,
             start_clamp,
             end_clamp,
         )?;
@@ -201,8 +202,8 @@ impl Engine {
         }
 
         // Build a master timeline (union of all symbol timestamps, sorted).
-        let mut all_ts: Vec<i64> =
-            bar_map.values().flat_map(|bars| bars.iter().map(|b| b.open_ts as i64)).collect();
+        let mut all_ts = Vec::with_capacity(total_bars);
+        all_ts.extend(bar_map.values().flat_map(|bars| bars.iter().map(|b| b.open_ts as i64)));
         all_ts.sort_unstable();
         all_ts.dedup();
 
@@ -236,7 +237,12 @@ impl Engine {
 
         let mut fx = FxTable::new(config.portfolio.base_currency.to_string());
         for leg in &leg_profiles {
-            let provider = self.config.data.providers.get(&leg.instrument.instrument_type).unwrap();
+            let provider = self
+                .config
+                .data
+                .providers
+                .get(&leg.instrument.instrument_type)
+                .ok_or(DataError::ProviderNotConfigured(leg.instrument.instrument_type))?;
             let leg_sym = vec![leg.instrument.symbol.clone()];
             let leg_bars = match self.load_bars(
                 &leg_sym,
@@ -399,10 +405,19 @@ impl Engine {
         // ── Run strategies ──────────────────────────────────────────────────
 
         let n_strategies = strategy_objs.len() as u64;
-        let pb = verbose
-            .then(|| progress_bar(n_strategies, format!("Running {n_strategies} strategies...")));
-
-        let pb_mutex = pb.as_ref().map(Mutex::new);
+        let timeline_steps = all_ts.len() as u64;
+        let total_simulation_steps = n_strategies.saturating_mul(timeline_steps);
+        let pb = verbose.then(|| {
+            progress_bar(
+                total_simulation_steps,
+                format!(
+                    "Simulating {n_strategies} strategies across {timeline_steps} timeline steps..."
+                ),
+            )
+        });
+        if let Some(progress) = progress {
+            progress.set_total(total_simulation_steps);
+        }
 
         let (custom, builtin): (Vec<_>, Vec<_>) =
             strategy_objs.into_iter().partition(|(_, _, is_custom)| *is_custom);
@@ -429,7 +444,7 @@ impl Engine {
             par_span.in_scope(|| {
                 info!("▶ Running strategy {:?}...", name);
 
-                let result = run_one_strategy(
+                let result = run_one_strategy_with_progress(
                     &name,
                     obj,
                     config,
@@ -439,6 +454,8 @@ impl Engine {
                     &all_ts,
                     &fx,
                     py_cache.as_ref(),
+                    pb.as_ref(),
+                    progress,
                 );
 
                 info!(
@@ -447,10 +464,6 @@ impl Engine {
                     result.trades.len(),
                     result.equity_curve.len()
                 );
-
-                if let Some(pb) = &pb_mutex {
-                    pb.lock().unwrap().inc(1);
-                }
 
                 result
             })
@@ -463,7 +476,11 @@ impl Engine {
         );
         results.extend(custom_results);
 
+        if let Some(progress) = progress {
+            progress.finish();
+        }
         if let Some(p) = pb {
+            p.set_position(total_simulation_steps);
             p.finish_and_clear();
         }
 
@@ -771,6 +788,7 @@ impl Engine {
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Execute one strategy through the entire timeline.
+#[cfg(test)]
 fn run_one_strategy(
     name: &str,
     strategy: Py<PyAny>,
@@ -781,6 +799,25 @@ fn run_one_strategy(
     timeline: &[i64],
     fx: &FxTable,
     py_cache: Option<&(DataT, IndicatorsT)>,
+) -> RunResult {
+    run_one_strategy_with_progress(
+        name, strategy, cfg, aligned, indicators, profiles, timeline, fx, py_cache, None, None,
+    )
+}
+
+/// Execute one strategy and publish throttled simulation-step progress.
+fn run_one_strategy_with_progress(
+    name: &str,
+    strategy: Py<PyAny>,
+    cfg: &ExperimentConfig,
+    aligned: &HashMap<Symbol, Vec<Option<Bar>>>,
+    indicators: &HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>>,
+    profiles: &[InstrumentProfile],
+    timeline: &[i64],
+    fx: &FxTable,
+    py_cache: Option<&(DataT, IndicatorsT)>,
+    progress_bar: Option<&indicatif::ProgressBar>,
+    progress: Option<&ProgressReporter>,
 ) -> RunResult {
     let benchmark = cfg.strategy.benchmark.as_deref().unwrap_or("").trim();
     let is_benchmark_run = name == benchmark || name == BENCHMARK;
@@ -912,7 +949,7 @@ fn run_one_strategy(
             (timeline[bar_index] - timeline[bar_index - 1]).max(0)
         };
 
-        accrue_margin_costs(
+        if let Err(error) = accrue_margin_costs(
             cfg,
             &mut cash,
             &positions,
@@ -923,7 +960,10 @@ fn run_one_strategy(
             fx,
             ts,
             bar_seconds,
-        );
+        ) {
+            warn!(strategy = %name, "Margin cost accrual failed: {error}");
+            run_error.get_or_insert(error);
+        }
 
         // ── Resolve open orders against the current bar ─────────────────────
 
@@ -950,7 +990,20 @@ fn run_one_strategy(
                 }
             }
 
-            let it = *it_map.get(order.symbol.as_str()).unwrap();
+            let Some(&it) = it_map.get(order.symbol.as_str()) else {
+                let reason = format!("instrument metadata unavailable for {:?}", order.symbol);
+                warn!(strategy = %name, order_id = %order.id, "{reason}");
+                order_records.push(OrderRecord {
+                    order,
+                    timestamp: ts,
+                    status: OrderStatus::Rejected,
+                    fill_price: None,
+                    reason,
+                    commission: 0.0,
+                    pnl: None,
+                });
+                continue;
+            };
 
             // Get the bar for the symbol for which the order was called.
             let bar = match aligned.get(&order.symbol).and_then(|r| r[bar_index]) {
@@ -1220,6 +1273,29 @@ fn run_one_strategy(
                                 + cfg.exchange.commission_fixed
                         },
                     };
+
+                    // The first debit failed because the submitted quantity did not fit.
+                    // Debit the recalculated cash-fit amount before granting the position.
+                    // Without this retry, partially filled buys create shares without reducing
+                    // cash and can make equity grow exponentially across repeated entries.
+                    if !try_debit(&mut cash, order_ccy, notional + commission, base_ccy, fx, ts) {
+                        warn!(
+                            strategy=%name, order_id=%order.id,
+                            "Cash-fit buy could not be debited, skipping order."
+                        );
+
+                        order_records.push(OrderRecord {
+                            order,
+                            timestamp: ts,
+                            status: OrderStatus::Rejected,
+                            fill_price: None,
+                            reason: "insufficient funds after cash-fit sizing".into(),
+                            commission: 0.0,
+                            pnl: None,
+                        });
+
+                        continue;
+                    }
 
                     fill_reason = if fill_reason.is_empty() {
                         "partial: shrunk to fit cash".to_owned()
@@ -1582,7 +1658,23 @@ fn run_one_strategy(
                         }
 
                         if !matches!(o.order_type, OrderType::Cancel | OrderType::SettlePosition) {
-                            let it = *it_map.get(o.symbol.as_str()).unwrap();
+                            let Some(&it) = it_map.get(o.symbol.as_str()) else {
+                                let reason = format!(
+                                    "instrument metadata unavailable for {:?}",
+                                    o.symbol
+                                );
+                                warn!(strategy = %name, order_id = %o.id, "{reason}");
+                                order_records.push(OrderRecord {
+                                    order: o.clone(),
+                                    timestamp: ts,
+                                    status: OrderStatus::Rejected,
+                                    fill_price: None,
+                                    reason,
+                                    commission: 0.0,
+                                    pnl: None,
+                                });
+                                return false;
+                            };
                             if let Some(reason) = validate_qty(o.quantity, it) {
                                 warn!(strategy=%name, "Invalid order quantity: {}. Reason: {reason}. The order has been rejected.", o.quantity);
                                 order_records.push(OrderRecord {
@@ -1762,6 +1854,13 @@ fn run_one_strategy(
             }
 
             positions.retain(|_, q| is_significant(*q));
+        }
+
+        if let Some(progress_bar) = progress_bar {
+            progress_bar.inc(1);
+        }
+        if let Some(progress) = progress {
+            progress.advance(1);
         }
     }
 
@@ -2245,6 +2344,43 @@ mod tests {
     }
 
     #[test]
+    fn cash_fit_buy_debits_the_reduced_fill_cost() {
+        let mut cfg = base_config();
+        cfg.portfolio.initial_cash = 10_000;
+        cfg.exchange.commission_pct = 0.0;
+        cfg.exchange.slippage = 1.0;
+        cfg.engine.trade_on_close = false;
+
+        let timestamp = 1_000_000_000;
+        let next_timestamp = timestamp + 3_600;
+        let aligned = make_aligned(
+            "AAPL",
+            vec![Some(make_bar(timestamp, 100.0)), Some(make_bar(next_timestamp, 100.0))],
+        );
+        let indicators = HashMap::new();
+        let profiles = vec![make_profile("AAPL")];
+        let timeline = vec![timestamp as i64, next_timestamp as i64];
+        let fx = FxTable::new("USD");
+
+        let result = run_one_strategy(
+            "bah",
+            bah_strategy(),
+            &cfg,
+            &aligned,
+            &indicators,
+            &profiles,
+            &timeline,
+            &fx,
+            None,
+        );
+
+        assert_eq!(result.orders[0].status, OrderStatus::Filled);
+        assert_eq!(result.orders[0].order.quantity, 99.0);
+        assert!((result.equity_curve[1].cash.amount(&Currency::USD) - 1.0).abs() < 1e-9);
+        assert!((result.equity_curve[1].equity - 9_901.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn run_one_strategy_multiple_bars_correct_curve_length() {
         let cfg = base_config();
         let n = 10usize;
@@ -2725,8 +2861,14 @@ mod tests {
         let (engine, _tmp) = make_engine();
         let cfg = base_config(); // symbols = ["AAPL"], but no data downloaded
 
-        let result =
-            engine.run_experiment(&cfg, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        let result = engine.run_experiment(
+            &cfg,
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
 
         // resolve_profiles will call provider which returns NotFound → cascade error
         // OR no-bars → empty timeline → ExperimentStatus::Error
@@ -2748,8 +2890,14 @@ mod tests {
         let mut cfg = base_config();
         cfg.data.symbols = vec![]; // explicitly empty
 
-        let result =
-            engine.run_experiment(&cfg, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        let result = engine.run_experiment(
+            &cfg,
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
         assert!(result.is_err());
     }
 }

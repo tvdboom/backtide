@@ -52,18 +52,9 @@ impl DataFrameLibrary {
             DataFrameLibrary::Polars => "pl.DataFrame",
         }
     }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
 }
+
+impl_python_enum_variants!(DataFrameLibrary);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for DataFrameLibrary {
     type Error = PyErr;

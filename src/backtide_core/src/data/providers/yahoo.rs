@@ -459,7 +459,7 @@ impl DataProvider for YahooFinance {
     async fn fetch_range(&self, instr: Instrument, interval: Interval) -> DataResult<(u64, u64)> {
         let symbol = Self::parse_canonical_symbol(&instr.symbol, instr.instrument_type)?;
 
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let lookback = match interval {
             Interval::OneWeek => 14 * 24 * 3600,
@@ -670,7 +670,7 @@ impl DataProvider for YahooFinance {
 
         // Clamp `start` to the provider's rolling window at download time, since
         // `fetch_range` may have been called much earlier.
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let buffer = interval.minutes() * 60;
         let start = match interval {
             Interval::OneMinute => start.max(now.saturating_sub(7 * 24 * 3600 - buffer)),

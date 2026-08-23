@@ -326,8 +326,7 @@ pub fn sweep_foreign_to_base(
 /// conversion period. Two timestamps falling into different buckets
 /// trigger an end-of-period sweep.
 pub fn period_bucket(ts: i64, period: ConversionPeriod) -> i64 {
-    let dt = DateTime::<Utc>::from_timestamp(ts, 0)
-        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap());
+    let dt = DateTime::<Utc>::from_timestamp(ts, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
 
     match period {
         ConversionPeriod::Day => ts.div_euclid(86_400),

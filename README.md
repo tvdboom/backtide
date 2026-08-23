@@ -58,6 +58,7 @@ public exchange WebSockets, without connecting a brokerage account.
 - **Flexible** — Every parameter is exposed and customizable when you need full control.
 - **Multi-exchange** — Stocks, ETFs, forex and crypto from Yahoo, Binance, Kraken and more.
 - **Batteries included** — Built-in strategies and technical indicators out of the box.
+- **Strategy studies** — Rank parameter combinations and validate them with walk-forward testing.
 - **Rich analytics** — 20+ plots cover PnL, returns, drawdown and more.
 - **Live simulation** — Apply strategies to Binance, Coinbase, or Kraken WebSocket candles with local simulated fills.
 - **Interactive UI** — A packaged Vue app configures, runs, and analyzes backtests and live sessions visually.

@@ -51,14 +51,14 @@ repos:
 
       - id: check-stubs
         name: check pyi stubs
-        entry: python scripts/generate_stubs.py --check
+        entry: uv run --no-sync python scripts/generate_stubs.py --isolated-build --check
         language: system
         pass_filenames: false
         types_or: [rust, pyi]
 
       - id: ty
         name: ty check
-        entry: uv run --no-sync ty check
+        entry: ty check
         language: system
         pass_filenames: false
         types: [python]

@@ -1,4 +1,4 @@
-# Run and inspect an experiment
+# Run an experiment
 
 This example runs two built-in strategies over the same historical data, compares their summary
 metrics, inspects the best run's records, and plots normalized profit and loss. Missing market data
@@ -8,7 +8,7 @@ is downloaded automatically, and the completed experiment is persisted to local 
 import pandas as pd
 
 from backtide.analysis import plot_pnl
-from backtide.backtest import (
+from backtide import (
     DataExpConfig,
     Experiment,
     ExperimentConfig,

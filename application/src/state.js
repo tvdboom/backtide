@@ -62,10 +62,26 @@ export function consumeExperimentDraft(storage) {
 }
 
 const RESULTS_OVERVIEW_KEY = 'backtide:results-overview'
+const RESULT_JOB_KEY = 'backtide:result-job-id'
 
 export function requestResultsOverview(storage) {
   storage.setItem(RESULTS_OVERVIEW_KEY, 'true')
   storage.removeItem('backtide:result-id')
+}
+
+export function requestJobResult(storage, jobId) {
+  requestResultsOverview(storage)
+  storage.setItem(RESULT_JOB_KEY, jobId)
+}
+
+export function consumeCompletedJobResult(storage, jobs) {
+  const jobId = storage.getItem(RESULT_JOB_KEY)
+  if (!jobId) return null
+  const job = jobs.find(item => item.id === jobId)
+  if (!job || ['queued', 'running'].includes(job.status)) return null
+  storage.removeItem(RESULT_JOB_KEY)
+  if (job.status !== 'success') return null
+  return job.result?.experiment_id || job.result?.study_id || null
 }
 
 export function consumeResultsOverviewRequest(storage) {
@@ -124,7 +140,11 @@ export function sessionEquitySeries(updates) {
 export function formatResultMetric(raw, percent = false) {
   const numeric = Number(raw)
   if (!Number.isFinite(numeric)) return '—'
-  if (percent) return `${(numeric * (Math.abs(numeric) <= 2 ? 100 : 1)).toFixed(2)}%`
+  if (percent) {
+    const scaled = numeric * (Math.abs(numeric) <= 2 ? 100 : 1)
+    return `${Math.abs(scaled) >= 1_000_000 ? scaled.toExponential(2) : scaled.toFixed(2)}%`
+  }
+  if (Math.abs(numeric) >= 1_000_000_000) return numeric.toExponential(2)
   return numeric.toLocaleString('en', { maximumFractionDigits: 2 })
 }
 

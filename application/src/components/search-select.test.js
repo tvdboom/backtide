@@ -28,6 +28,27 @@ describe('search-select', () => {
     expect(wrapper.emitted('update:modelValue')[0]).toEqual([[]])
   })
 
+  it('reorders selected tags by dragging when enabled', async () => {
+    let wrapper
+    wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: ['Sharpe', 'Return', 'PNL'],
+        options: [],
+        reorderable: true,
+        'onUpdate:modelValue': value => wrapper.setProps({ modelValue: value })
+      }
+    })
+    const dataTransfer = { effectAllowed: '', setData: () => {} }
+
+    await wrapper.findAll('.tag')[0].trigger('dragstart', { dataTransfer })
+    const target = wrapper.findAll('.tag')[2]
+    target.element.getBoundingClientRect = () => ({ left: 50, width: 50 })
+    await target.trigger('dragover', { clientX: 80 })
+
+    expect(dataTransfer.effectAllowed).toBe('move')
+    expect(wrapper.emitted('update:modelValue').at(-1)).toEqual([['Return', 'PNL', 'Sharpe']])
+  })
+
   it('shows an available instrument logo in the selected tag', () => {
     const wrapper = mount(SearchSelect, {
       props: {
@@ -38,6 +59,8 @@ describe('search-select', () => {
     })
 
     expect(wrapper.get('.tag img').attributes('src')).toBe('https://example.test/asml.png')
+    expect(wrapper.get('.tag img').attributes('fetchpriority')).toBe('high')
+    expect(wrapper.get('.tag img').attributes('loading')).toBe('eager')
     expect(wrapper.get('.tag').text()).toContain('ASML')
   })
 
@@ -163,6 +186,30 @@ describe('search-select', () => {
 
     expect(wrapper.findAll('.search-menu button')).toHaveLength(100)
     expect(wrapper.get('.search-menu button small').text()).toBe('INGA.AS')
+  })
+
+  it('does not queue off-screen logo requests ahead of a selected symbol', async () => {
+    const options = Array.from({ length: 100 }, (_, index) => `ITEM${index}`)
+    const logos = Object.fromEntries(options.map(option => [
+      option,
+      `https://example.test/${option}.png`
+    ]))
+    const wrapper = mount(SearchSelect, {
+      props: { modelValue: [], options, logos }
+    })
+
+    await wrapper.get('input').trigger('focus')
+
+    const images = wrapper.findAll('.search-menu img')
+    expect(images).toHaveLength(12)
+    expect(images.every(image => image.attributes('fetchpriority') === 'low')).toBe(true)
+    expect(images.every(image => image.attributes('loading') === 'lazy')).toBe(true)
+
+    await wrapper.get('input').setValue('ITEM99')
+
+    expect(wrapper.get('.search-menu img').attributes('src')).toBe(
+      'https://example.test/ITEM99.png'
+    )
   })
 
   it('retries a selected logo even if its menu image failed', async () => {

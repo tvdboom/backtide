@@ -1,5 +1,9 @@
 # MetricDefinition
+------------------
 
-<br>
-
-::: backtide.metrics:MetricDefinition
+:: backtide.metrics:MetricDefinition
+    :: signature
+    :: head
+    :: table:
+        - attributes
+    :: see also

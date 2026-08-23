@@ -135,29 +135,9 @@ impl OrderType {
             Self::Cancel => "Cancels a previously submitted order, identified by its id.",
         }
     }
-
-    /// Return the default variant.
-    ///
-    /// Returns
-    /// -------
-    /// self
-    ///     The default variant.
-    #[staticmethod]
-    fn get_default(py: Python<'_>) -> Py<Self> {
-        Py::new(py, Self::default()).unwrap()
-    }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
 }
+
+impl_python_enum_variants!(OrderType, default);
 
 impl FromStr for OrderType {
     type Err = String;

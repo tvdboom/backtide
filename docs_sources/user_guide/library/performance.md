@@ -103,7 +103,7 @@ def ulcer(values):
 
 
 class UlcerIndex(BaseMetric):
-    higher_is_better = False
+    greater_is_better = False
 
     def compute(self, equity_curve, trades):
         del trades

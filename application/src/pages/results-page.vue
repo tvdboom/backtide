@@ -5,7 +5,25 @@
       <button class="primary" @click="$emit('navigate', 'experiment')"><Plus :size="16" /> New experiment</button>
     </section>
     <section v-if="activeJobs.length" class="panel running-banner">
-      <span class="spinner"/><div><strong>{{ activeJobs.length }} experiment{{ activeJobs.length === 1 ? '' : 's' }} running</strong><small>Results appear here automatically when processing completes.</small></div>
+      <span class="spinner" aria-hidden="true"/>
+      <div class="running-banner-content">
+        <strong>{{ runningBannerTitle }}</strong>
+        <div v-for="job in activeJobs" :key="job.id" class="running-job">
+          <span v-if="activeJobs.length > 1" class="running-job-name">{{ jobName(job) }}</span>
+          <small>{{ jobKindLabel(job) }} {{ job.status }} · {{ jobTiming(job) }}</small>
+          <div
+            class="running-job-progress"
+            role="progressbar"
+            :aria-label="`${jobName(job)} progress`"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-valuenow="jobProgressTotal(job) ? Math.round(jobProgressPercent(job)) : undefined"
+            :aria-valuetext="jobProgressLabel(job)"
+          ><span :style="{ width: `${jobProgressPercent(job)}%` }" /></div>
+          <small class="running-job-progress-label">{{ jobProgressLabel(job) }}</small>
+        </div>
+        <small class="running-job-note">Results appear here automatically when processing completes.</small>
+      </div>
       <button class="danger secondary" @click="abort"><Square :size="14"/> Abort</button>
     </section>
     <section v-if="!selectedId" class="results-overview">
@@ -22,12 +40,13 @@
             <div class="experiment-result-identity">
               <span class="experiment-avatar" aria-hidden="true">{{ item.icon || '🧪' }}</span>
               <div class="experiment-result-copy">
-                <div class="experiment-result-title-line"><h3>{{ item.name }}</h3></div>
+                <div class="experiment-result-title-line"><h3>{{ item.name }}</h3><span v-if="item.kind === 'study'" class="badge neutral study-badge">Study</span></div>
                 <div v-if="tags(item.tags).length" class="experiment-result-tags"><span v-for="tag in tags(item.tags)" :key="tag" class="result-tag">{{ tag }}</span></div>
                 <div class="experiment-result-meta">
                   <span><CalendarDays :size="14" />{{ dateTime(item.started_at) }}</span>
                   <span><Medal :size="14" />{{ item.primary_metric_name || 'Sharpe' }} <strong :class="tone(item.primary_metric_value ?? item.best_sharpe)">{{ formatResultMetric(item.primary_metric_value ?? item.best_sharpe, item.primary_metric_percentage) }}</strong></span>
-                  <span><BrainCircuit :size="14" />{{ item.n_strategies || item.runs?.length || 0 }} {{ (item.n_strategies || item.runs?.length) === 1 ? 'strategy' : 'strategies' }}</span>
+                  <span v-if="item.kind === 'study'"><BrainCircuit :size="14" />{{ (item.study?.candidate_count || 0).toLocaleString() }} candidate{{ item.study?.candidate_count === 1 ? '' : 's' }}</span>
+                  <span v-else><BrainCircuit :size="14" />{{ item.n_strategies || item.runs?.length || 0 }} {{ (item.n_strategies || item.runs?.length) === 1 ? 'strategy' : 'strategies' }}</span>
                   <span><ChartNoAxesCombined :size="14" />{{ item.n_symbols || 0 }} {{ item.n_symbols === 1 ? 'symbol' : 'symbols' }}</span>
                   <span class="experiment-result-status"><Activity :size="14" /><strong :class="statusTone(item.status)">{{ item.status || 'Unknown' }}</strong></span>
                 </div>
@@ -41,7 +60,7 @@
           </header>
           <div v-if="expandedId === item.id" class="experiment-breakdown">
             <article v-for="run in item.runs" :key="run.strategy_id" class="run-breakdown-card">
-              <header><span class="run-kind-icon" :class="{ benchmark: run.is_benchmark }"><BarChart3 v-if="run.is_benchmark" :size="17" /><BrainCircuit v-else :size="17" /></span><span><strong>{{ run.strategy_name }}</strong></span></header>
+              <header><span class="run-kind-icon" :class="{ benchmark: run.is_benchmark }"><BarChart3 v-if="run.is_benchmark" :size="17" /><BrainCircuit v-else :size="17" /></span><span class="run-breakdown-name"><strong>{{ candidateRunName(run, item.kind === 'study') }}</strong><FieldInfo v-if="run.parameters" class="candidate-parameters-info" :text="`Parameters: ${formatParameters(run.parameters)}`" /></span></header>
               <div v-if="run.error" class="run-summary-error">{{ run.error }}</div>
               <div v-else class="run-summary-metrics">
                 <div v-for="metricItem in runSummaryMetrics(item, run)" :key="metricItem.key"><span>{{ metricItem.label }}</span><strong :class="metricItem.tone">{{ metricItem.value }}</strong></div>
@@ -65,14 +84,17 @@
           <section class="panel result-summary-panel">
             <article class="result-heading">
               <div class="result-heading-copy">
-                <span class="experiment-avatar result-heading-icon" aria-hidden="true">{{ detail.experiment.icon || '🧪' }}</span>
-                <div><h2>{{ detail.experiment.name }}</h2>
+                <div class="result-heading-title-line">
+                  <span class="experiment-avatar result-heading-icon" aria-hidden="true">{{ detail.experiment.icon || '🧪' }}</span>
+                  <h2>{{ detail.experiment.name }}</h2>
+                </div>
                 <div v-if="tags(detail.experiment.tags).length" class="result-title"><span v-for="tag in tags(detail.experiment.tags)" :key="tag" class="badge neutral">{{ tag }}</span></div>
-                <p v-if="experimentDescription">{{ experimentDescription }}</p></div>
+                <p v-if="experimentDescription">{{ experimentDescription }}</p>
               </div>
               <div class="result-actions">
-                <button class="secondary" :disabled="!detail.config" @click="reuseSetup"><CopyPlus :size="15"/> Reuse setup</button>
-                <button class="secondary" :disabled="!detail.config" @click="openLiveTrading"><Activity :size="15"/> Live session</button>
+                <button v-if="detail.study" class="secondary" :disabled="!detail.config" @click="rerunStudy"><RefreshCcw :size="15"/> Rerun study</button>
+                <button class="secondary" :disabled="!detail.config" @click="reuseSetup"><CopyPlus :size="15"/> {{ detail.study ? 'Reuse best setup' : 'Reuse setup' }}</button>
+                <button v-if="!detail.study" class="secondary" :disabled="!detail.config" @click="openLiveTrading"><Activity :size="15"/> Live session</button>
                 <button class="secondary" :disabled="!detail.config" @click="openDocument('config')"><FileCode2 :size="15"/> Config</button>
                 <button class="secondary" :disabled="detail.logs == null" @click="openDocument('logs')"><ScrollText :size="15"/> Logs</button>
                 <button class="icon-button danger" aria-label="Delete experiment" @click="requestDelete()"><Trash2 :size="17"/></button>
@@ -97,9 +119,83 @@
             </section>
           </section>
 
-          <div class="result-section-heading">
-            <div><span class="eyebrow">Full result</span><h3>Experiment overview</h3></div>
-            <p>Every strategy is shown together so performance and risk remain directly comparable.</p>
+          <section v-if="detail.study" class="study-results">
+            <div class="result-section-heading study-section-heading">
+              <div><span class="eyebrow">Study</span><h3>Parameter stability</h3></div>
+              <p>This study contains multiple experiments that test the strategy's robustness across parameter values and out-of-sample folds.</p>
+            </div>
+            <article class="panel study-workspace">
+              <div class="study-result-tabs" role="tablist" aria-label="Study results">
+                <button v-for="item in studyTabs" :key="item.id" role="tab" :aria-selected="studyTab === item.id" :class="{ active: studyTab === item.id }" @click="studyTab = item.id"><component :is="item.icon" :size="17"/><strong>{{ item.label }}</strong></button>
+              </div>
+
+              <section v-if="studyTab === 'sweep'" class="study-tab-panel">
+                <header class="study-sweep-heading">
+                  <div><span class="eyebrow">Parameter sweep</span><h3>All {{ studyCandidates.length.toLocaleString() }} candidate results</h3></div>
+                  <p>Candidates ranked by {{ metricLabel(detail.study.objective) }}; only eligible candidates receive a rank.</p>
+                </header>
+                <div class="study-summary-grid">
+                  <article><span>Best {{ metricLabel(detail.study.objective) }}</span><strong :class="tone(bestCandidateObjective)">{{ formatStudyMetric(bestCandidateObjective) }}</strong></article>
+                  <article><span>Eligible / total candidates</span><strong>{{ eligibleCandidates.length.toLocaleString() }} / {{ studyCandidates.length.toLocaleString() }}</strong></article>
+                  <article><span>Parameters swept</span><strong>{{ sweepParameterNames.length.toLocaleString() }}</strong></article>
+                </div>
+                <div v-if="sweepParameterNames.length === 2" class="study-heatmap-section">
+                  <header class="study-heatmap-heading">
+                    <strong>{{ metricLabel(detail.study.objective) }} heatmap</strong>
+                    <div class="heatmap-key">
+                      <small v-if="heatmapNeedsScroll" id="heatmap-scroll-hint" class="heatmap-scroll-hint">{{ heatmapCombinationCount.toLocaleString() }} combinations · scroll to explore</small>
+                      <span class="heatmap-scale"><small>Low</small><i aria-hidden="true"/><small>High</small></span>
+                    </div>
+                  </header>
+                  <div class="study-heatmap-wrap">
+                    <div class="heatmap-y-label">{{ sweepParameterNames[1] }}</div>
+                    <div
+                      class="study-heatmap-scroll"
+                      role="region"
+                      tabindex="0"
+                      :aria-label="`${metricLabel(detail.study.objective)} by parameter combination`"
+                      :aria-describedby="heatmapNeedsScroll ? 'heatmap-scroll-hint' : undefined"
+                    >
+                      <div class="study-heatmap" :style="heatmapStyle">
+                        <template v-for="yValue in sweepYValues" :key="String(yValue)">
+                          <span class="heatmap-axis-value">{{ formatParameter(yValue) }}</span>
+                          <div v-for="xValue in sweepXValues" :key="`${yValue}-${xValue}`" class="heatmap-cell" :class="{ winner: heatmapCandidate(xValue, yValue)?.rank === 1, ineligible: heatmapCandidate(xValue, yValue) && !heatmapCandidate(xValue, yValue).eligible, empty: !heatmapCandidate(xValue, yValue) }" :style="heatmapCellStyle(xValue, yValue)">
+                            <strong>{{ formatStudyMetric(candidateObjective(heatmapCandidate(xValue, yValue))) }}</strong>
+                            <small v-if="heatmapCandidate(xValue, yValue)?.rank">#{{ heatmapCandidate(xValue, yValue).rank }}</small>
+                          </div>
+                        </template>
+                        <span class="heatmap-axis-corner" />
+                        <span v-for="xValue in sweepXValues" :key="`axis-${xValue}`" class="heatmap-axis-value x-axis">{{ formatParameter(xValue) }}</span>
+                      </div>
+                    </div>
+                    <div class="heatmap-x-label">{{ sweepParameterNames[0] }}</div>
+                  </div>
+                </div>
+                <div v-else class="data-table-wrap study-table-wrap">
+                  <table class="data-table"><thead><tr><th>Rank</th><th>Candidate</th><th>Parameters</th><th>{{ metricLabel(detail.study.objective) }}</th></tr></thead><tbody><tr v-for="candidate in studyCandidates" :key="candidate.candidate_id"><td>{{ candidate.rank || '—' }}</td><td>{{ candidateName(candidate) }}</td><td class="parameter-cell"><ParameterSummary :parameters="candidate.parameters" /></td><td>{{ formatStudyMetric(candidateObjective(candidate)) }}</td></tr></tbody></table>
+                </div>
+              </section>
+
+              <section v-else-if="studyTab === 'candidates'" class="study-tab-panel">
+                <div class="data-table-wrap study-table-wrap"><table class="data-table"><thead><tr><th>Rank</th><th>Candidate</th><th>Parameters</th><th>{{ metricLabel(detail.study.objective) }}</th><th>Trades</th><th><span class="eligibility-heading">Status<FieldInfo text="Eligible candidates completed successfully, produced a finite main metric, meet the minimum-trade requirement, and stay within the optional maximum-drawdown limit. Only eligible candidates can be ranked first." /></span></th></tr></thead><tbody><tr v-for="candidate in studyCandidates" :key="candidate.candidate_id"><td>{{ candidate.rank || '—' }}</td><td>{{ candidateName(candidate) }}</td><td class="parameter-cell"><ParameterSummary :parameters="candidate.parameters" /></td><td>{{ formatStudyMetric(candidateObjective(candidate)) }}</td><td>{{ candidate.trade_count.toLocaleString() }}</td><td><span class="status-pill" :class="candidate.eligible ? 'success' : 'error'">{{ candidate.error || (candidate.eligible ? 'Eligible' : 'Excluded') }}</span></td></tr></tbody></table></div>
+              </section>
+
+              <section v-else-if="studyTab === 'walk-forward'" class="study-tab-panel">
+                <div v-if="detail.study.folds.length" class="data-table-wrap study-table-wrap"><table class="data-table"><thead><tr><th>Fold</th><th>Training</th><th>Test</th><th>Candidate</th><th>Parameters</th><th>Training metric</th><th>Test metric</th><th>Trades</th></tr></thead><tbody><tr v-for="fold in detail.study.folds" :key="fold.fold"><td>{{ fold.fold }}</td><td>{{ fold.training_start }} → {{ fold.training_end }}</td><td>{{ fold.test_start }} → {{ fold.test_end }}</td><td>{{ foldCandidateName(fold) }}</td><td class="parameter-cell"><ParameterSummary :parameters="fold.parameters" /></td><td>{{ formatStudyMetric(fold.training_objective) }}</td><td>{{ formatStudyMetric(fold.test_objective) }}</td><td>{{ fold.trade_count.toLocaleString() }}</td></tr></tbody></table></div>
+                <div v-else class="empty-state"><CalendarRange :size="28"/><h3>No walk-forward validation</h3><p>This study contains a full-sample sweep only.</p></div>
+              </section>
+
+              <section v-else class="study-tab-panel study-report">
+                <article v-if="bestCandidate" class="best-candidate-card"><span class="eyebrow">Best candidate</span><h3>{{ candidateName(bestCandidate) }}</h3><p>{{ formatParameters(bestCandidate.parameters) }}</p><strong :class="tone(bestCandidateObjective)">{{ metricLabel(detail.study.objective) }} {{ formatStudyMetric(bestCandidateObjective) }}</strong></article>
+                <article><span class="eyebrow">Selection constraints</span><h3>{{ detail.study.min_trades.toLocaleString() }} minimum trades</h3><p>{{ detail.study.max_drawdown == null ? 'No drawdown exclusion was applied.' : `Maximum drawdown ${formatPercent(detail.study.max_drawdown)}.` }}</p></article>
+                <article><span class="eyebrow">Out-of-sample evidence</span><h3>{{ favorableFolds }} of {{ validFolds.length }} favorable folds</h3><p>{{ detail.study.folds.length ? `${validFolds.length} folds completed without an error.` : 'Walk-forward validation was not requested.' }}</p></article>
+              </section>
+            </article>
+          </section>
+
+          <div class="result-section-heading" :class="{ 'study-section-heading': detail.study }">
+            <div><span class="eyebrow">Full result</span><h3>{{ detail.study ? 'Top candidate runs' : 'Experiment overview' }}</h3></div>
+            <p>{{ detail.study ? 'The three highest-ranked eligible candidates remain available for detailed chart and execution inspection.' : 'Every strategy is shown together so performance and risk remain directly comparable.' }}</p>
           </div>
           <article class="panel chart-workspace result-workspace">
             <div class="result-plot-tabs" role="tablist" aria-label="Experiment plots"><button v-for="tabItem in overviewTabs" :key="tabItem.id" role="tab" :aria-selected="overviewTab === tabItem.id" :class="{ active: overviewTab === tabItem.id }" @click="overviewTab = tabItem.id"><component :is="tabItem.icon" :size="18"/><strong>{{ tabItem.label }}</strong></button></div>
@@ -121,7 +217,7 @@
             <div><span class="eyebrow">Run details</span><h3>Strategies</h3></div>
             <p>Select a strategy to inspect its own metrics, execution history, and chart annotations.</p>
           </div>
-          <div class="strategy-switcher"><button v-for="(run, index) in detail.runs" :key="run.strategy_id" :class="{ active: strategy === index, 'benchmark-run': run.is_benchmark }" @click="strategy = index"><BarChart3 v-if="run.is_benchmark" :size="15" aria-hidden="true"/><span>{{ run.strategy_name }}</span></button></div>
+          <div class="strategy-switcher"><button v-for="(run, index) in detail.runs" :key="run.strategy_id" :class="{ active: strategy === index, 'benchmark-run': run.is_benchmark }" @click="strategy = index"><BarChart3 v-if="run.is_benchmark" :size="15" aria-hidden="true"/><span>{{ candidateRunName(run, Boolean(detail.study)) }}</span><FieldInfo v-if="run.parameters" class="candidate-parameters-info" :text="`Parameters: ${formatParameters(run.parameters)}`" /></button></div>
           <section v-if="activeRun" class="metric-grid result-metrics">
             <article v-for="metricItem in headlineMetrics" :key="metricItem.label" class="metric-card"><span>{{ metricItem.label }}</span><strong :class="tone(metricItem.raw)">{{ metricItem.value }}</strong></article>
           </section>
@@ -160,14 +256,16 @@
 </template>
 
 <script setup>
-import { Activity, ArrowLeft, ArrowRightLeft, BarChart3, BrainCircuit, CalendarDays, CalendarRange, ChartLine, ChartNoAxesCombined, ChevronDown, CircleDollarSign, Clock3, Coins, CopyPlus, Download, FileChartColumn, FileCode2, FlaskConical, Gauge, Layers3, Medal, Plus, ReceiptText, Scale, ScrollText, Search, SlidersHorizontal, Square, TableProperties, Timer, Trash2, TriangleAlert, WalletCards, X } from 'lucide-vue-next'
+import { Activity, ArrowLeft, ArrowRightLeft, BarChart3, BrainCircuit, CalendarDays, CalendarRange, ChartLine, ChartNoAxesCombined, ChevronDown, CircleDollarSign, Clock3, Coins, CopyPlus, Download, FileChartColumn, FileCode2, FlaskConical, Gauge, Layers3, Medal, Plus, ReceiptText, RefreshCcw, Scale, ScrollText, Search, SlidersHorizontal, Square, TableProperties, Timer, Trash2, TriangleAlert, WalletCards, X } from 'lucide-vue-next'
 import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, post, query, remove } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import ConfirmationModal from '../components/confirmation-modal.vue'
 import ExecutionStatus from '../components/execution-status.vue'
+import FieldInfo from '../components/field-info.vue'
+import ParameterSummary from '../components/parameter-summary.vue'
 import ToggleField from '../components/toggle-field.vue'
-import { configuredCurrencyDecimals, consumeResultsOverviewRequest, formatConfiguredDate, formatConfiguredDateTime, formatIntervalLabel, formatResultMetric, instrumentLogoUrl } from '../state'
+import { configuredCurrencyDecimals, consumeCompletedJobResult, consumeResultsOverviewRequest, formatConfiguredDate, formatConfiguredDateTime, formatIntervalLabel, formatResultMetric, instrumentLogoUrl } from '../state'
 
 const props = defineProps({ bootstrap: Object })
 const emit = defineEmits(['navigate', 'toast'])
@@ -183,6 +281,7 @@ const deleting = ref(false)
 const pendingDelete = ref(null)
 const overviewTab = ref('pnl'), overviewFigure = ref(null), overviewLoading = ref(false), overviewError = ref('')
 const strategyTab = ref('metrics'), strategyFigure = ref(null), strategyLoading = ref(false), strategyError = ref('')
+const studyTab = ref('sweep')
 const overviewOptions = reactive({ normalize: false, drawdown: true, window: 30, bins: 40, unit: 'auto' })
 const strategyOptions = reactive({ symbol: '' })
 const failedSymbolLogos = ref(new Set())
@@ -208,14 +307,59 @@ const strategyTabs = [
   { id: 'price', label: 'Trades on price', icon: ChartLine, description: 'Price action with strategy context.' },
   { id: 'orders', label: 'Orders', icon: ReceiptText, description: 'Every submitted order, including fills, cancellations, and execution PNL.' }
 ]
+const studyTabs = [
+  { id: 'sweep', label: 'Sweep', icon: ChartNoAxesCombined },
+  { id: 'candidates', label: 'Candidates', icon: TableProperties },
+  { id: 'walk-forward', label: 'Walk-forward', icon: CalendarRange },
+  { id: 'report', label: 'Report', icon: Medal }
+]
 const strategyPlotIds = new Set(['mae_mfe', 'position_size', 'price'])
 let pollTimer, searchTimer, experimentObserver, experimentLoadVersion = 0
 let activatedOnce = false
-const activeJobs = computed(() => jobs.value.filter(job => job.kind === 'experiment' && ['queued', 'running'].includes(job.status)))
+const activeJobs = computed(() => jobs.value.filter(job =>
+  ['experiment', 'study'].includes(job.kind) && ['queued', 'running'].includes(job.status)))
+const runningBannerTitle = computed(() => activeJobs.value.length === 1
+  ? jobName(activeJobs.value[0])
+  : `${activeJobs.value.length} research jobs running`)
 const visibleExperiments = computed(() => statusFilter.value === 'All'
   ? experiments.value
   : experiments.value.filter(item => String(item.status).toLowerCase() === statusFilter.value.toLowerCase()))
 const activeRun = computed(() => detail.value?.runs?.[strategy.value])
+const studyCandidates = computed(() => [...(detail.value?.study?.candidates || [])]
+  .sort((left, right) => (left.rank ?? Number.MAX_SAFE_INTEGER) - (right.rank ?? Number.MAX_SAFE_INTEGER)))
+const eligibleCandidates = computed(() => studyCandidates.value.filter(candidate => candidate.eligible))
+const bestCandidate = computed(() => studyCandidates.value.find(candidate =>
+  candidate.candidate_id === detail.value?.study?.best_candidate_id) || null)
+const bestCandidateObjective = computed(() => candidateObjective(bestCandidate.value))
+const sweepParameterNames = computed(() => Object.keys(detail.value?.study?.parameter_space || {}))
+const sweepXValues = computed(() => detail.value?.study?.parameter_space?.[sweepParameterNames.value[0]] || [])
+const sweepYValues = computed(() => detail.value?.study?.parameter_space?.[sweepParameterNames.value[1]] || [])
+const heatmapCombinationCount = computed(() => sweepXValues.value.length * sweepYValues.value.length)
+const heatmapNeedsScroll = computed(() => sweepXValues.value.length > 12 || sweepYValues.value.length > 7)
+const heatmapStyle = computed(() => ({
+  '--heatmap-columns': sweepXValues.value.length,
+  '--heatmap-width': `${Math.max(520, 50 + sweepXValues.value.length * 77)}px`
+}))
+const heatmapCandidates = computed(() => {
+  const [xName, yName] = sweepParameterNames.value
+  return new Map(studyCandidates.value.map(candidate => [
+    JSON.stringify([String(candidate.parameters?.[xName]), String(candidate.parameters?.[yName])]),
+    candidate
+  ]))
+})
+const heatmapMetricRange = computed(() => {
+  const values = studyCandidates.value
+    .map(candidate => candidateObjective(candidate))
+    .filter(value => value !== null && value !== '' && Number.isFinite(Number(value)))
+    .map(Number)
+  return values.length ? { min: Math.min(...values), max: Math.max(...values) } : null
+})
+const validFolds = computed(() => (detail.value?.study?.folds || []).filter(fold =>
+  !fold.error && Number.isFinite(Number(fold.test_objective))))
+const favorableFolds = computed(() => validFolds.value.filter(fold =>
+  detail.value?.study?.maximize
+    ? Number(fold.test_objective) > 0
+    : Number(fold.test_objective) < 0).length)
 const activeOrderKey = computed(() => activeRun.value ? `${selectedId.value}:${activeRun.value.strategy_id}` : '')
 const activeOrderPage = computed(() => orderPages.value[activeOrderKey.value] || {
   orders: [], total: Number(activeRun.value?.order_count || 0), hasMore: true, initialized: false
@@ -235,7 +379,10 @@ const hasOverviewOptions = computed(() => ['pnl', 'pnl_histogram', 'rolling_retu
 const activeOverviewTab = computed(() => overviewTabs.find(item => item.id === overviewTab.value) || overviewTabs[0])
 const activeStrategyTab = computed(() => strategyTabs.find(item => item.id === strategyTab.value) || strategyTabs[0])
 const strategyTabLabel = computed(() => strategyTabs.find(item => item.id === strategyTab.value)?.label || '')
-const tradedSymbols = computed(() => [...new Set((activeRun.value?.trades || []).map(item => item.symbol))])
+const tradedSymbols = computed(() => {
+  const symbols = (activeRun.value?.trades || []).map(item => item.symbol)
+  return [...new Set(symbols.length ? symbols : (detail.value?.config_metadata?.symbol_values || []))]
+})
 const logPreview = computed(() => {
   const text = String(detail.value?.logs || '')
   const lines = text.split(/\r?\n/)
@@ -264,7 +411,9 @@ const experimentContextMetrics = computed(() => {
   const metadata = detail.value?.config_metadata || {}
   const experiment = detail.value?.experiment || {}
   return [
-    { label: 'Strategies', value: Number(experiment.n_strategies || detail.value?.runs?.length || 0).toLocaleString(), icon: BrainCircuit },
+    detail.value?.study
+      ? { label: 'Candidates', value: studyCandidates.value.length.toLocaleString(), icon: BrainCircuit }
+      : { label: 'Strategies', value: Number(experiment.n_strategies || detail.value?.runs?.length || 0).toLocaleString(), icon: BrainCircuit },
     { label: 'Symbols', value: Number(metadata.symbols || 0).toLocaleString(), icon: ChartNoAxesCombined },
     { label: 'Started at', value: dateTime(experiment.started_at), icon: CalendarDays },
     { label: 'Duration', value: duration(experiment.started_at, experiment.finished_at), icon: Clock3 }
@@ -279,7 +428,7 @@ const headlineMetrics = computed(() => {
       const definition = metricDefinition(key)
       const raw = runMetricValue(metrics, key)
       return metric(
-        key === 'pnl' ? 'PNL' : definition?.name || enumLabel(key),
+        key === 'pnl' ? 'PNL' : metricLabel(key),
         raw,
         Boolean(definition?.percentage),
         key === 'pnl'
@@ -317,7 +466,7 @@ const tableRows = computed(() => {
     .map(key => {
       const definition = metricDefinition(key)
       return {
-        metric: key === 'pnl' ? 'PNL' : definition?.name || enumLabel(key),
+        metric: key === 'pnl' ? 'PNL' : metricLabel(key),
         value: formatResultMetric(runMetricValue(metrics, key), Boolean(definition?.percentage))
       }
     })
@@ -334,6 +483,51 @@ function metric(labelText, raw, percent, currencyValue = false) {
   }
 }
 function metricDefinition(key) { return [...(props.bootstrap?.metrics?.builtin || []), ...(props.bootstrap?.metrics?.saved || [])].find(item => item.key === key) }
+function metricLabel(key) {
+  if (['max_dd', 'max_drawdown'].includes(key)) return 'Maximum DD'
+  return metricDefinition(key)?.name || label(key)
+}
+function candidateObjective(candidate) {
+  return candidate?.metrics?.[detail.value?.study?.objective]
+}
+function formatStudyMetric(value) {
+  const definition = metricDefinition(detail.value?.study?.objective)
+  return formatResultMetric(value, Boolean(definition?.percentage))
+}
+function formatParameter(value) {
+  return typeof value === 'number'
+    ? value.toLocaleString(undefined, { maximumFractionDigits: 8 })
+    : String(value ?? '—')
+}
+function formatParameters(parameters = {}) {
+  return Object.entries(parameters).map(([name, value]) => `${name}=${formatParameter(value)}`).join(' · ') || '—'
+}
+function candidateName(candidate) {
+  const storedName = String(candidate?.strategy_name || '').split(' · ', 1)[0]
+  const storedNumber = storedName.match(/^C0*(\d+)$/i)?.[1]
+  if (storedNumber) return `C${Number(storedNumber)}`
+  if (storedName) return storedName
+  const suffix = String(candidate?.candidate_id || '').replace(/^candidate-/, '')
+  return suffix ? `C${/^\d+$/.test(suffix) ? Number(suffix) : suffix}` : '—'
+}
+function candidateRunName(run, study) {
+  return study ? candidateName(run) : run?.strategy_name || '—'
+}
+function foldCandidateName(fold) {
+  return candidateName(studyCandidates.value.find(candidate => candidate.candidate_id === fold?.candidate_id) || fold)
+}
+function formatPercent(value) { return formatResultMetric(value, true) }
+function heatmapCandidate(xValue, yValue) {
+  return heatmapCandidates.value.get(JSON.stringify([String(xValue), String(yValue)]))
+}
+function heatmapCellStyle(xValue, yValue) {
+  const range = heatmapMetricRange.value
+  const raw = candidateObjective(heatmapCandidate(xValue, yValue))
+  if (!range || raw === null || raw === '' || !Number.isFinite(Number(raw))) return {}
+  const value = Number(raw)
+  const score = range.max === range.min ? 0.5 : (value - range.min) / (range.max - range.min)
+  return { '--heatmap-score': score.toFixed(4) }
+}
 const tone = value => Number(value) > 0 ? 'positive' : Number(value) < 0 ? 'negative' : ''
 const metricAliases = {
   max_dd: ['max_drawdown'],
@@ -409,7 +603,7 @@ function runSummaryMetric(key, run) {
   const raw = runMetricValue(metrics, key)
   return {
     key,
-    label: key === 'pnl' ? 'PNL' : definition?.name || enumLabel(key),
+    label: key === 'pnl' ? 'PNL' : metricLabel(key),
     value: currencyMetrics.has(key)
       ? money(raw, run.base_currency)
       : formatResultMetric(raw, Boolean(definition?.percentage)),
@@ -443,9 +637,9 @@ function dateTime(value) { return formatConfiguredDateTime(value, props.bootstra
 function duration(start, finish) {
   const seconds = Math.max(0, Number(finish || 0) - Number(start || 0))
   if (!Number.isFinite(seconds)) return '—'
-  if (seconds < 60) return `${Math.round(seconds)} s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} m ${Math.round(seconds % 60)} s`
-  return `${Math.floor(seconds / 3600)} h ${Math.round((seconds % 3600) / 60)} m`
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+  return `${Math.floor(seconds / 3600)}h ${Math.round((seconds % 3600) / 60)}m`
 }
 function period(metadata = {}) {
   if (metadata.full_history) return 'Full history'
@@ -538,6 +732,7 @@ async function open(id) {
   strategyFigure.value = null
   detailError.value = ''
   strategy.value = 0
+  studyTab.value = 'sweep'
   orderPages.value = {}
   orderErrors.value = {}
   orderLoadingKeys.clear()
@@ -625,7 +820,16 @@ async function loadStrategyPlot() {
 }
 async function reuseSetup() {
   try {
-    const config = await post('/api/config/parse', { suffix: '.toml', text: detail.value.config })
+    const config = detail.value.study
+      ? await post('/api/studies/reuse', { study_id: selectedId.value })
+      : await post('/api/config/parse', { suffix: '.toml', text: detail.value.config })
+    sessionStorage.setItem('backtide:experiment-config', JSON.stringify(config))
+    emit('navigate', 'experiment')
+  } catch (error) { emit('toast', error.message, 'error') }
+}
+async function rerunStudy() {
+  try {
+    const config = await post('/api/studies/rerun', { study_id: selectedId.value })
     sessionStorage.setItem('backtide:experiment-config', JSON.stringify(config))
     emit('navigate', 'experiment')
   } catch (error) { emit('toast', error.message, 'error') }
@@ -655,7 +859,58 @@ async function destroy() {
   finally { deleting.value = false }
 }
 async function abort() { await post('/api/experiments/abort'); emit('toast', 'Abort requested.') }
-async function pollJobs() { const previous = activeJobs.value.length; jobs.value = await api('/api/jobs'); if (previous && !activeJobs.value.length) await load(); pollTimer = setTimeout(pollJobs, 1500) }
+async function pollJobs() {
+  const previous = activeJobs.value.length
+  jobs.value = await api('/api/jobs')
+  const requestedResultId = consumeCompletedJobResult(sessionStorage, jobs.value)
+  if (requestedResultId) await open(requestedResultId)
+  else if (previous && !activeJobs.value.length) await load()
+  pollTimer = setTimeout(pollJobs, 1500)
+}
+function jobName(job) {
+  return String(job?.name || '').trim() || `Unnamed ${job?.kind === 'study' ? 'study' : 'experiment'}`
+}
+function jobKindLabel(job) { return job?.kind === 'study' ? 'Study' : 'Experiment' }
+function jobTiming(job) {
+  const startedAt = Date.parse(job?.started_at || '')
+  if (!Number.isFinite(startedAt)) return 'Waiting to start'
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+  const elapsed = `${formatJobDuration(elapsedSeconds)} elapsed`
+  const completed = jobProgressCompleted(job)
+  const total = jobProgressTotal(job)
+  if (!total) return `${elapsed} · Preparing simulation…`
+  if (completed >= total) return `${elapsed} · Finalizing results…`
+  const progressStartedAt = Date.parse(job?.progress_started_at || '')
+  if (completed <= 0 || !Number.isFinite(progressStartedAt)) {
+    return `${elapsed} · Estimating time remaining…`
+  }
+  const progressSeconds = Math.max(1, (Date.now() - progressStartedAt) / 1000)
+  const remainingSeconds = Math.ceil(progressSeconds * (total - completed) / completed)
+  return `${elapsed} · ~${formatJobDuration(remainingSeconds)} remaining`
+}
+function formatJobDuration(value) {
+  const elapsedSeconds = Math.max(0, Math.floor(Number(value) || 0))
+  const hours = Math.floor(elapsedSeconds / 3600)
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60)
+  const seconds = elapsedSeconds % 60
+  return hours
+    ? `${hours}h ${minutes}m ${seconds}s`
+    : minutes ? `${minutes}m ${seconds}s` : `${seconds}s`
+}
+function jobProgressCompleted(job) { return Math.max(0, Number(job?.progress_completed) || 0) }
+function jobProgressTotal(job) { return Math.max(0, Number(job?.progress_total) || 0) }
+function jobProgressPercent(job) {
+  const total = jobProgressTotal(job)
+  return total ? Math.min(100, jobProgressCompleted(job) / total * 100) : 0
+}
+function formatJobWork(value) {
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })
+}
+function jobProgressLabel(job) {
+  const total = jobProgressTotal(job)
+  if (!total) return 'Preparing data and simulation…'
+  return `${formatJobWork(jobProgressCompleted(job))} of ${formatJobWork(total)} ${job.progress_unit || 'steps'} · ${jobProgressPercent(job).toFixed(1)}%`
+}
 watch(overviewTab, loadOverviewPlot)
 watch([strategyTab, strategy], () => {
   strategyOptions.symbol = tradedSymbols.value[0] || ''

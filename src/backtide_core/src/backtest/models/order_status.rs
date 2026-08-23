@@ -66,18 +66,9 @@ impl OrderStatus {
             Self::Pending => "The order has been submitted but not yet matched.",
         }
     }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
 }
+
+impl_python_enum_variants!(OrderStatus);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for OrderStatus {
     type Error = PyErr;

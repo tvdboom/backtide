@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, ref } from 'vue'
 import AnalysisPage from './analysis-page.vue'
@@ -13,6 +13,7 @@ vi.mock('../api', () => ({ api, post }))
 vi.mock('../components/chart-panel.vue', () => ({
   default: { template: '<div class="chart-stub" />' }
 }))
+enableAutoUnmount(afterEach)
 
 describe('analysis page', () => {
   beforeEach(() => {

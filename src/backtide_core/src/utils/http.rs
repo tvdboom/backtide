@@ -143,7 +143,7 @@ impl HttpClient {
     ) -> Result<Response, HttpError> {
         self.retry(|| async {
             self.throttle().await;
-            let _permit = self.semaphore.acquire().await.expect("semaphore closed");
+            let _permit = self.semaphore.acquire().await.ok();
             let mut req = self.inner.get(url);
             if let Some(p) = params {
                 req = req.query(p);
@@ -162,7 +162,7 @@ impl HttpClient {
     ) -> Result<Response, HttpError> {
         self.retry(|| async {
             self.throttle().await;
-            let _permit = self.semaphore.acquire().await.expect("semaphore closed");
+            let _permit = self.semaphore.acquire().await.ok();
             self.inner.post(url).query(params).json(body).send().await
         })
         .await
@@ -272,7 +272,9 @@ impl HttpClient {
             }
         }
 
-        Err(last_err.expect("loop runs at least once"))
+        Err(last_err.unwrap_or_else(|| {
+            HttpError::UnexpectedPayload("HTTP retry loop completed without an attempt".to_owned())
+        }))
     }
 
     /// Try to extract a human-readable error message from a JSON error body.
@@ -303,6 +305,10 @@ where
     F: FnMut(usize, usize) -> Fut,
     Fut: Future<Output = Result<Vec<T>, E>>,
 {
+    if limit == 0 || page_size == 0 {
+        return Ok(Vec::new());
+    }
+
     let mut results = Vec::with_capacity(limit);
     let mut offset = 0;
 
@@ -310,7 +316,7 @@ where
         let batch = page_size.min(limit - results.len());
         let page = fetch_page(batch, offset).await?;
         let n = page.len();
-        results.extend(page);
+        results.extend(page.into_iter().take(limit - results.len()));
         offset += n;
         if n < batch {
             break;
@@ -423,6 +429,29 @@ mod tests {
         let result: Result<Vec<usize>, String> =
             paginate(10, 5, |_batch, _offset| async move { Err("fail".to_owned()) }).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_paginate_zero_page_size_returns_without_fetching() {
+        let mut called = false;
+
+        let result = paginate::<i32, (), _, _>(10, 0, |_, _| {
+            called = true;
+            async { Ok(vec![1]) }
+        })
+        .await
+        .unwrap();
+
+        assert!(result.is_empty());
+        assert!(!called);
+    }
+
+    #[tokio::test]
+    async fn test_paginate_truncates_an_overfull_page() {
+        let result =
+            paginate::<i32, (), _, _>(2, 2, |_, _| async { Ok(vec![1, 2, 3]) }).await.unwrap();
+
+        assert_eq!(result, vec![1, 2]);
     }
 
     #[tokio::test]

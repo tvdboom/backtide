@@ -13,7 +13,7 @@ class UlcerIndex(BaseMetric):
     """Return the root mean square percentage drawdown."""
 
     percentage = True
-    higher_is_better = False
+    greater_is_better = False
 
     def compute(self, equity_curve, trades):
         del trades

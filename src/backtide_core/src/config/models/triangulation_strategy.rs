@@ -37,18 +37,9 @@ impl TriangulationStrategy {
     fn __repr__(&self) -> String {
         self.to_string().to_lowercase()
     }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
 }
+
+impl_python_enum_variants!(TriangulationStrategy);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for TriangulationStrategy {
     type Error = PyErr;

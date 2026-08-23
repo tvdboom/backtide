@@ -69,7 +69,10 @@ backtide/                           # Repository root
 ├── src/                            # Python package + Rust crate live under src/
 │   ├── backtide/                   # Python package (public API)
 │   │   ├── __init__.py
-│   │   ├── backtest.py             # Backtest model re-exports
+│   │   ├── backtest/               # Backtest experiments, studies, and model re-exports
+│   │   │   ├── __init__.py
+│   │   │   ├── experiment.py
+│   │   │   └── study.py
 │   │   ├── cli.py                  # Click CLI entry point (backtide launch / download)
 │   │   ├── config.py               # Configuration re-exports
 │   │   ├── data.py                 # Data re-exports
@@ -118,6 +121,7 @@ backtide/                           # Repository root
 │   ├── conftest.py                 # Shared fixtures
 │   ├── test_analysis.py
 │   ├── test_backtest.py
+│   ├── test_backtest_study.py
 │   ├── test_cli.py
 │   ├── test_config.py
 │   ├── test_data.py

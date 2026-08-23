@@ -78,12 +78,14 @@ pub trait Storage: Send + Sync {
 
     /// Load every persisted [`RunResult`] for a given experiment.
     ///
-    /// Set `include_equity_curve` to `false` for metadata and tabular result views that do not
-    /// consume the potentially large per-bar equity history.
+    /// Set the history flags to `false` for metadata and tabular result views that do not consume
+    /// the corresponding potentially large child collections.
     fn query_strategy_runs(
         &self,
         experiment_id: &str,
         include_equity_curve: bool,
+        include_trades: bool,
+        include_orders: bool,
     ) -> StorageResult<Vec<RunResult>>;
 
     /// Delete a single experiment and all its child rows.

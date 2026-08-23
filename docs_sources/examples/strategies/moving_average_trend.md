@@ -6,7 +6,7 @@ passes it to `evaluate()` under the indicator-name-first mapping.
 ```python
 from math import isfinite
 
-from backtide.backtest import Order
+from backtide import Order
 from backtide.indicators import SimpleMovingAverage
 from backtide.strategies import BaseStrategy
 

@@ -6,6 +6,7 @@ Description: Module containing the automatic example rendering.
 """
 
 import ast
+import atexit
 from base64 import b64encode
 from code import InteractiveInterpreter
 from io import StringIO
@@ -20,7 +21,7 @@ from markdown import Markdown
 from pandas.io.formats.style import Styler
 from pymdownx.superfences import SuperFencesException
 
-from backtide.backtest import (
+from backtide import (
     DataExpConfig,
     Experiment,
     ExperimentConfig,
@@ -54,9 +55,9 @@ def bootstrap_docs_experiment():
 
 bootstrap_docs_experiment()
 
-# Directory in which to store all plots from the examples
-shutil.rmtree(DIR_EXAMPLES := "docs_sources/img/examples/", ignore_errors=True)
-os.makedirs(DIR_EXAMPLES, exist_ok=True)
+# Keep generated plots outside docs_sources so mkdocs serve does not rebuild in a loop.
+DIR_EXAMPLES = tempfile.mkdtemp(prefix="backtide_docs_examples_")
+atexit.register(shutil.rmtree, DIR_EXAMPLES, ignore_errors=True)
 
 # Cached output (same across code blocks)
 cached_last_value = None
@@ -138,7 +139,8 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
             # Inject filename parameter to plot call to save the figure
             if re.search(r"plot_\w+\(", line):
                 f, arguments = block[0].split("(", 1)
-                inject = f"filename='{DIR_EXAMPLES}{uuid4()}', figsize=(830, 600), display=None"
+                filename = os.path.join(DIR_EXAMPLES, str(uuid4()))
+                inject = f"filename={filename!r}, figsize=(830, 600), display=None"
                 if arguments.startswith(")"):
                     # There are no other arguments
                     block[0] = f"{f}({inject})"
@@ -190,10 +192,12 @@ def execute(src: str) -> tuple[list[list[str]], list[str]]:
 
                     if latest_file := get_latest_file():
                         if latest_file.endswith(".html"):
-                            with open(f"{DIR_EXAMPLES}{latest_file}", encoding="utf-8") as pio_f:
+                            with open(
+                                os.path.join(DIR_EXAMPLES, latest_file), encoding="utf-8"
+                            ) as pio_f:
                                 figures.append(pio_f.read())
                         else:
-                            with open(f"{DIR_EXAMPLES}{latest_file}", mode="rb") as mpl_f:
+                            with open(os.path.join(DIR_EXAMPLES, latest_file), mode="rb") as mpl_f:
                                 img = b64encode(mpl_f.read()).decode("utf-8")
 
                             figures.append(

@@ -135,9 +135,20 @@ Follow the existing code and `pyproject.toml` exactly.
   explanation, then only the applicable `Parameters`, `Attributes`, `Returns`, `Raises`,
   `See Also`, and `Examples` sections. Keep the blank line between parameter entries used by the
   current API. State defaults in the type line (for example, `bool, default=True`).
+- Every public class docstring must include a `See Also` section with exactly three entries in
+  `- module:object` form. Sort the entries case-insensitively by the terminal function or class
+  name, ignoring the module path, and choose the three closest related public APIs.
 - Documentation is Markdown-aware. Use `[Type]` or `[label][anchor]` for internal documentation
-  references, backticks for values/identifiers, and fenced `python`/`pycon` examples. Examples must
-  be short, runnable, and use the public import path.
+  references and backticks for values/identifiers. API docstring `Examples` sections must use a
+  fenced `pycon` block, never `python`, and must be short, runnable, and use the public import
+  path. Include meaningful, deterministic output; a setup-only example is incomplete. Mark only
+  an external, destructive, or prohibitively expensive statement with `# norun`, while keeping
+  the rest of the example executable by the documentation hook.
+- In docstring prose and section type declarations, surround every reference to an existing
+  Backtide class with brackets so it becomes an internal API link: use `[ExperimentConfig]`,
+  `[StudyResult] | None`, or `list[[Order]]`, never a bare class name. Use `[label][anchor]` when
+  the displayed label and documentation anchor differ. This rule does not apply inside code
+  fences.
 - Private helpers still need a concise docstring when their purpose, mutation, units, or shape is
   not obvious. Comments explain why or a domain invariant, not a line-by-line translation.
 - Prefer explicit validation and specific exceptions. Do not use bare `except`, silently discard
@@ -170,7 +181,14 @@ Follow `rustfmt.toml`, Cargo lints, and the conventions of the surrounding featu
 - Python-visible `#[pyclass]`, `#[pymethods]`, and `#[pyfunction]` documentation is also the Python
   docstring and stub source. Use the same NumPy-style sections and cross-reference syntax as the
   Python API. Keep `#[pyo3(signature = (...))]` defaults and inspect annotations synchronized with
-  the implementation and docs.
+  the implementation and docs. The three-entry `See Also` and executable `pycon` rules above apply
+  unchanged to Python-visible Rust classes.
+- A Python-visible Rust `#[pyclass]` that represents a Python dataclass-like value object must
+  expose `#[classattr] const __RUST_DATACLASS__: bool = true;` from its `#[pymethods]` block. A
+  Python-visible Rust enum must likewise expose
+  `#[classattr] const __RUST_ENUM__: bool = true;`. The documentation renderer reads these exact
+  marker names to classify data models and enums; do not add them to stateful service classes that
+  are documented as regular classes.
 - Use `thiserror` feature-specific enums and `Result` aliases. Add context at the layer that knows
   it and convert errors to `PyErr` only at the Python boundary. Production paths must not
   `unwrap`, `expect`, or `panic` on provider data, persisted data, lock poisoning, user input, or
@@ -251,6 +269,10 @@ without inspecting the semantic change.
   pages in `docs_sources/api/`. Add a page to `mkdocs.yml` navigation when it should be reachable.
 - API reference pages use the existing `:: module:object` directives. Their content comes from
   Python/Rust docstrings, so fix source documentation instead of duplicating it in generated text.
+- Every public class API page must render its docstring cross-references with `:: see also`.
+- Within every `API` > `models` subsection in `mkdocs.yml`, keep all page entries alphabetized
+  case-insensitively by their displayed function or class name. Insert new pages directly in their
+  sorted position instead of appending them.
 - Use repository-relative Markdown links and existing source anchors for internal pages. Do not
   embed local filesystem paths; verify moved/renamed pages and media with the strict MkDocs build.
 - MkDocs hooks execute examples and render Plotly output. Keep examples safe, reproducible, and
@@ -298,7 +320,7 @@ exact command and failure in that case.
 Additional focused and release-oriented validation commands include:
 
 ```text
-uv run pytest -n=auto tests/<focused-file>.py
+uv run pytest -n=12 tests/<focused-file>.py
 cargo test --manifest-path src/backtide_core/Cargo.toml --no-default-features <focused-test>
 cargo fmt --manifest-path src/backtide_core/Cargo.toml -- --check
 cargo clippy --manifest-path src/backtide_core/Cargo.toml --all-targets --all-features -- -D warnings

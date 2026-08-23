@@ -80,28 +80,6 @@ impl Interval {
         self.to_string()
     }
 
-    /// Return the default variant.
-    ///
-    /// Returns
-    /// -------
-    /// self
-    ///     The default variant.
-    #[staticmethod]
-    fn get_default(py: Python<'_>) -> Py<Self> {
-        Py::new(py, Self::default()).unwrap()
-    }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
-
     /// Whether the interval is smaller than one day.
     ///
     /// Returns
@@ -131,6 +109,8 @@ impl Interval {
         }
     }
 }
+
+impl_python_enum_variants!(Interval, default);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Interval {
     type Error = PyErr;

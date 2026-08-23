@@ -753,6 +753,84 @@ impl Default for ExperimentConfigInner {
     }
 }
 
+/// TOML-only wrapper that gives metric selection its own named section.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+struct MetricExpConfig {
+    selected: MetricSelection,
+}
+
+impl Default for MetricExpConfig {
+    fn default() -> Self {
+        Self {
+            selected: default_experiment_metrics(),
+        }
+    }
+}
+
+/// Canonical TOML layout. Field order controls the human-readable section order.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+struct ExperimentConfigToml {
+    general: GeneralExpConfig,
+    data: DataExpConfig,
+    portfolio: PortfolioExpConfig,
+    strategy: StrategyExpConfig,
+    indicators: IndicatorExpConfig,
+    metrics: MetricExpConfig,
+    exchange: ExchangeExpConfig,
+    engine: EngineExpConfig,
+}
+
+impl From<&ExperimentConfigInner> for ExperimentConfigToml {
+    fn from(config: &ExperimentConfigInner) -> Self {
+        Self {
+            general: config.general.clone(),
+            data: config.data.clone(),
+            portfolio: config.portfolio.clone(),
+            strategy: config.strategy.clone(),
+            indicators: config.indicators.clone(),
+            metrics: MetricExpConfig {
+                selected: config.metrics.clone(),
+            },
+            exchange: config.exchange.clone(),
+            engine: config.engine.clone(),
+        }
+    }
+}
+
+impl From<ExperimentConfigToml> for ExperimentConfigInner {
+    fn from(config: ExperimentConfigToml) -> Self {
+        Self {
+            general: config.general,
+            data: config.data,
+            portfolio: config.portfolio,
+            strategy: config.strategy,
+            indicators: config.indicators,
+            metrics: config.metrics.selected,
+            exchange: config.exchange,
+            engine: config.engine,
+        }
+    }
+}
+
+impl ExperimentConfigInner {
+    /// Serialize using the canonical sectioned TOML layout.
+    pub(crate) fn to_toml(&self) -> Result<String, toml::ser::Error> {
+        toml::to_string_pretty(&ExperimentConfigToml::from(self))
+    }
+
+    /// Deserialize canonical TOML and the legacy root-level metric list.
+    pub(crate) fn from_toml(text: &str) -> Result<Self, toml::de::Error> {
+        let root: toml::Table = toml::from_str(text)?;
+        if matches!(root.get("metrics"), Some(toml::Value::Array(_))) {
+            toml::from_str(text)
+        } else {
+            toml::from_str::<ExperimentConfigToml>(text).map(Self::from)
+        }
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // ExperimentConfig (Python-facing)
 // ────────────────────────────────────────────────────────────────────────────
@@ -845,12 +923,33 @@ mod tests {
     fn deserializes_partial_sections_with_current_defaults() {
         let text = "[exchange]\ncommission_pct = 0.25\n\n[engine]\nwarmup_period = 12\n";
 
-        let parsed: ExperimentConfigInner = toml::from_str(text).expect("partial configuration");
+        let parsed = ExperimentConfigInner::from_toml(text).expect("partial configuration");
 
         assert_eq!(parsed.exchange.commission_pct, 0.25);
         assert!(!parsed.exchange.raise_on_short_violation);
         assert_eq!(parsed.engine.warmup_period, 12);
         assert_eq!(parsed.engine.empty_bar_policy, Default::default());
+    }
+
+    #[test]
+    fn serializes_metrics_section_immediately_after_indicators() {
+        let text = ExperimentConfigInner::default().to_toml().expect("configuration serialization");
+
+        let indicators = text.find("[indicators]").expect("indicators section");
+        let metrics = text.find("[metrics]").expect("metrics section");
+        let exchange = text.find("[exchange]").expect("exchange section");
+        assert!(indicators < metrics && metrics < exchange);
+        assert!(text.contains("[metrics]\nselected = ["));
+    }
+
+    #[test]
+    fn deserializes_legacy_root_level_metrics() {
+        let text = "metrics = [\"total_return\"]\n\n[general]\nname = \"legacy\"\n";
+
+        let parsed = ExperimentConfigInner::from_toml(text).expect("legacy configuration");
+
+        assert_eq!(parsed.general.name, "legacy");
+        assert_eq!(parsed.metrics.first().map(String::as_str), Some("total_return"));
     }
 }
 
@@ -922,8 +1021,8 @@ impl ExperimentConfig {
 
     /// Build an `ExperimentConfig` from a (possibly nested) dictionary.
     ///
-    /// The dict may use the same nested structure produced by `to_toml`
-    /// (with `general`, `data`, `portfolio`, etc. sections) **or**
+    /// The dict may use the nested API structure produced by `to_dict`
+    /// (with `general`, `data`, `portfolio`, etc. keys) **or**
     /// a flat key-value mapping. Missing keys silently fall back to defaults.
     ///
     /// Parameters
@@ -944,7 +1043,7 @@ impl ExperimentConfig {
     /// Serialise the configuration to a TOML string.
     ///
     /// The output is grouped into `[general]`, `[data]`,
-    /// `[portfolio]`, `[strategy]`, `[indicators]`,
+    /// `[portfolio]`, `[strategy]`, `[indicators]`, `[metrics]`,
     /// `[exchange]` and `[engine]` sections.
     ///
     /// Returns
@@ -952,7 +1051,7 @@ impl ExperimentConfig {
     /// str
     ///     TOML representation of the config.
     pub fn to_toml(&self, py: Python<'_>) -> PyResult<String> {
-        toml::to_string_pretty(&self.to_inner(py)).map_err(|e| PyValueError::new_err(e.to_string()))
+        self.to_inner(py).to_toml().map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     /// Build an `ExperimentConfig` from a TOML string.
@@ -968,8 +1067,8 @@ impl ExperimentConfig {
     ///     The created instance.
     #[staticmethod]
     fn from_toml(py: Python<'_>, text: &str) -> PyResult<Self> {
-        let inner: ExperimentConfigInner =
-            toml::from_str(text).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let inner = ExperimentConfigInner::from_toml(text)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Self::from_inner(py, inner)
     }
 }

@@ -2550,7 +2550,9 @@ impl BuiltinStrategy {
                 return false;
             }
 
-            let it = it_map.get(o.symbol.as_str()).unwrap();
+            let Some(it) = it_map.get(o.symbol.as_str()) else {
+                return false;
+            };
 
             if !it.allows_fractional_quantities() && o.quantity.fract() != 0. {
                 let whole_abs = o.quantity.abs().floor();

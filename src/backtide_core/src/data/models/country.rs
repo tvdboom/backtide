@@ -393,21 +393,17 @@ impl Country {
     pub fn flag(&self) -> String {
         self.alpha2()
             .chars()
-            .map(|c| char::from_u32(0x1F1E6 + (c as u32 - 'A' as u32)).unwrap())
+            .map(|c| {
+                (c as u32)
+                    .checked_sub('A' as u32)
+                    .and_then(|offset| char::from_u32(0x1F1E6 + offset))
+                    .unwrap_or(char::REPLACEMENT_CHARACTER)
+            })
             .collect()
     }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
 }
+
+impl_python_enum_variants!(Country);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Country {
     type Error = PyErr;

@@ -14,7 +14,15 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 import pytest
 
-from backtide.cli import download, launch, main, run_experiment_command, start_live_session
+from backtide.backtest import ExperimentAborted, WalkForwardConfig
+from backtide.cli import (
+    download,
+    launch,
+    main,
+    run_experiment_command,
+    run_study_command,
+    start_live_session,
+)
 
 
 @pytest.fixture
@@ -301,6 +309,169 @@ class TestRunExperimentCommand:
         result = runner.invoke(run_experiment_command, [str(cfg_path), "--log_level", "debug"])
         assert result.exit_code == 0
         mock_logging.assert_called_once_with("debug")
+
+
+class TestRunStudyCommand:
+    """Tests for the `run-study` CLI subcommand."""
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.Study")
+    def test_toml_study_runs_and_reports_result(
+        self,
+        mock_study,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+    ):
+        """A TOML study config constructs and runs the public Study API."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_study.return_value.run.return_value = SimpleNamespace(
+            study_id="study-1",
+            candidates=[object(), object()],
+            folds=[object()],
+            best_candidate_id="candidate-2",
+            warnings=[],
+        )
+        cfg_path = tmp_path / "study.toml"
+        cfg_path.write_text(
+            """
+[config]
+metrics = ["sharpe"]
+[config.general]
+name = "Study test"
+[config.strategy]
+strategies = ["Saved strategy"]
+[study]
+min_trades = 2
+max_drawdown = 0.25
+[study.parameter_space]
+lookback = [10, 20]
+[study.walk_forward]
+training_days = 100
+test_days = 20
+""".strip(),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(run_study_command, [str(cfg_path), "--no-verbose"])
+
+        assert result.exit_code == 0, result.output
+        assert "study study-1 completed (2 candidates, 1 walk-forward fold)" in result.output
+        assert "Best candidate: candidate-2" in result.output
+        mock_logging.assert_called_once_with("warn")
+        mock_study.return_value.run.assert_called_once_with(verbose=False)
+        assert mock_study.call_args.kwargs["parameter_space"] == {"lookback": [10, 20]}
+        assert mock_study.call_args.kwargs["min_trades"] == 2
+        assert mock_study.call_args.kwargs["max_drawdown"] == 0.25
+        assert mock_study.call_args.kwargs["walk_forward"] == WalkForwardConfig(
+            training_days=100,
+            test_days=20,
+        )
+
+    @pytest.mark.parametrize(
+        ("filename", "contents"),
+        [
+            (
+                "study.json",
+                json.dumps(
+                    {
+                        "config": {"metrics": ["sharpe"]},
+                        "study": {"parameter_space": {"lookback": [10, 20]}},
+                    }
+                ),
+            ),
+            (
+                "study.yaml",
+                (
+                    "config:\n  metrics: [sharpe]\n"
+                    "study:\n  parameter_space:\n    lookback: [10, 20]\n"
+                ),
+            ),
+        ],
+    )
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.Study")
+    def test_json_and_yaml_configs(
+        self,
+        mock_study,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+        filename,
+        contents,
+    ):
+        """JSON and YAML study files use the same command schema."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_study.return_value.run.return_value = SimpleNamespace(
+            study_id="study-1",
+            candidates=[object(), object()],
+            folds=[],
+            best_candidate_id="candidate-1",
+            warnings=[],
+        )
+        cfg_path = tmp_path / filename
+        cfg_path.write_text(contents, encoding="utf-8")
+
+        result = runner.invoke(run_study_command, [str(cfg_path)])
+
+        assert result.exit_code == 0, result.output
+        assert mock_study.call_args.kwargs["parameter_space"] == {"lookback": [10, 20]}
+        mock_logging.assert_called_once_with("warn")
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    def test_requires_config_and_study_mappings(
+        self,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+    ):
+        """A malformed top-level file reports an actionable usage error."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        cfg_path = tmp_path / "study.toml"
+        cfg_path.write_text("[study.parameter_space]\nlookback = [10, 20]\n", encoding="utf-8")
+
+        result = runner.invoke(run_study_command, [str(cfg_path)])
+
+        assert result.exit_code == 2
+        assert "require config and study mappings" in result.output
+        mock_logging.assert_called_once_with("warn")
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.Study")
+    def test_abort_exits_with_shell_interrupt_status(
+        self,
+        mock_study,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+    ):
+        """An interrupted study exits with status 130."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_study.return_value.run.side_effect = ExperimentAborted("stopped")
+        cfg_path = tmp_path / "study.json"
+        cfg_path.write_text(
+            json.dumps(
+                {
+                    "config": {"metrics": ["sharpe"]},
+                    "study": {"parameter_space": {"lookback": [10]}},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(run_study_command, [str(cfg_path)])
+
+        assert result.exit_code == 130
+        assert "Study aborted" in result.output
+        mock_logging.assert_called_once_with("warn")
 
 
 class TestStartLiveSessionCommand:

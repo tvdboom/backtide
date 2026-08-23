@@ -10,17 +10,18 @@ env:
   PYTHON_VERSION: "3.14"
 
 jobs:
-  # Check that the tag matches the version in pyproject.toml
+  # Check that the tag matches the source-of-truth version in Cargo.toml
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate tag matches pyproject version
+      - name: Validate tag matches Cargo version
         run: |
           VERSION=$(python - <<'PY'
           import pathlib, tomllib
-          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
-          print(data["project"]["version"])
+          path = pathlib.Path("src/backtide_core/Cargo.toml")
+          data = tomllib.loads(path.read_text(encoding="utf-8"))
+          print(data["package"]["version"])
           PY
           )
           test "${GITHUB_REF_NAME}" = "v${VERSION}"

@@ -237,6 +237,7 @@ describe('live page', () => {
     await wrapper.findAll('.live-form-tabs button')[3].trigger('click')
 
     const selectedKeys = () => wrapper.getComponent(SearchSelect).props('modelValue')
+    expect(wrapper.getComponent(SearchSelect).props('reorderable')).toBe(true)
     expect(selectedKeys()).toEqual([
       'total_return', 'n_trades', 'final_equity', 'sharpe', 'Custom score'
     ])

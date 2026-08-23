@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import logging
 import mimetypes
 from pathlib import Path
+import shutil
 import threading
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -140,6 +141,9 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 "/api/downloads": self.services.start_download,
                 "/api/downloads/plan": self.services.download_plan,
                 "/api/experiments": self.services.start_experiment,
+                "/api/studies": self.services.start_study,
+                "/api/studies/reuse": self.services.reuse_study_setup,
+                "/api/studies/rerun": self.services.rerun_study,
                 "/api/analysis": lambda value: self.services.analysis_plot(
                     str(value.pop("plot", "")), value
                 ),
@@ -168,7 +172,7 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 raise APIError("Endpoint not found.", 404)
             else:
                 result = routes[path](body)
-            accepted = path in {"/api/downloads", "/api/experiments"}
+            accepted = path in {"/api/downloads", "/api/experiments", "/api/studies"}
             self._json(result, HTTPStatus.ACCEPTED if accepted else HTTPStatus.OK)
         except APIError as exc:
             self._error(exc.status, str(exc))
@@ -272,7 +276,8 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
         self.end_headers()
-        self.wfile.write(path.read_bytes())
+        with path.open("rb") as file:
+            shutil.copyfileobj(file, self.wfile)
 
     def _json(self, value: Any, status: int = HTTPStatus.OK) -> None:
         body = json_bytes(value)

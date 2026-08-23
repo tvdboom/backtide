@@ -64,18 +64,9 @@ impl Provider {
             _ => Interval::iter().collect(),
         }
     }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
 }
+
+impl_python_enum_variants!(Provider);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Provider {
     type Error = PyErr;

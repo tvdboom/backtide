@@ -193,3 +193,15 @@ class TestQueryStrategyRuns:
     def test_equity_history_can_be_skipped(self):
         """Callers can request lightweight results without per-bar equity history."""
         assert query_strategy_runs("__missing__", include_equity_curve=False) == []
+
+    def test_all_histories_can_be_skipped(self):
+        """Callers can request metrics without any persisted child histories."""
+        assert (
+            query_strategy_runs(
+                "__missing__",
+                include_equity_curve=False,
+                include_trades=False,
+                include_orders=False,
+            )
+            == []
+        )

@@ -62,7 +62,7 @@ impl Config {
             Ok(cfg)
         } else {
             let _ = CONFIG.set(fetch_config()?);
-            Ok(CONFIG.get().unwrap())
+            CONFIG.get().ok_or(ConfigError::Initialization)
         }
     }
 }
@@ -183,8 +183,8 @@ impl PyConfig {
     /// -------
     /// dict
     ///     Self as dict.
-    pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self.to_rust(py)).unwrap().unbind()
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, &self.to_rust(py))?.unbind())
     }
 }
 
@@ -306,8 +306,8 @@ impl GeneralConfig {
     /// -------
     /// dict
     ///     Self as dict.
-    pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self).unwrap().unbind()
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, &self)?.unbind())
     }
 }
 
@@ -410,8 +410,8 @@ impl DataConfig {
     /// -------
     /// dict
     ///     Self as dict.
-    pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self).unwrap().unbind()
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, &self)?.unbind())
     }
 }
 
@@ -547,8 +547,8 @@ impl DisplayConfig {
     /// -------
     /// dict
     ///     Self as dict.
-    pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self).unwrap().unbind()
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, &self)?.unbind())
     }
 }
 
@@ -677,8 +677,8 @@ impl PlotsConfig {
     /// -------
     /// dict
     ///     Self as dict.
-    pub fn to_dict(&self, py: Python<'_>) -> Py<PyAny> {
-        pythonize(py, &self).unwrap().unbind()
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(py, &self)?.unbind())
     }
 }
 

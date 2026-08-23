@@ -264,11 +264,10 @@ impl DataProvider for Kraken {
                 Err(_) => break,
             };
 
-            if bars.is_empty() {
+            let Some(last) = bars.last() else {
                 break;
-            }
-
-            let last_time = bars.last().unwrap().time;
+            };
+            let last_time = last.time;
             let mut added = false;
 
             for k in bars {

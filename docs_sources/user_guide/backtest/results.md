@@ -4,7 +4,7 @@
 warnings plus one [`RunResult`] for each strategy (and the benchmark, when configured).
 
 ```python
-from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig, GeneralExpConfig
+from backtide import DataExpConfig, Experiment, ExperimentConfig, GeneralExpConfig
 from backtide.strategies import BuyAndHold
 
 config = ExperimentConfig(

@@ -4,6 +4,7 @@ use crate::config::models::TriangulationStrategy;
 use crate::constants::{Symbol, CIRCUIT_BREAKER_THRESHOLD, MAX_CONCURRENT_REQUESTS, TASK_TIMEOUT};
 use crate::data::errors::{DataError, DataResult};
 use crate::data::models::*;
+use crate::data::providers::DataProvider;
 use crate::engine::Engine;
 use crate::errors::EngineResult;
 use crate::storage::models::{BarSeries, DividendSeries};
@@ -51,12 +52,9 @@ impl Engine {
         let pb =
             verbose.then(|| progress_spinner(format!("Listing {instrument_type} instruments...")));
 
+        let provider = self.data_provider(instrument_type)?;
         let instruments =
-            self.rt.block_on(self.providers.get(&instrument_type).unwrap().list_instruments(
-                instrument_type,
-                exchanges,
-                limit,
-            ))?;
+            self.rt.block_on(provider.list_instruments(instrument_type, exchanges, limit))?;
 
         if let Some(ref pb) = pb {
             pb.finish_and_clear();
@@ -94,10 +92,14 @@ impl Engine {
             for profile in profiles {
                 let symbol = &profile.instrument.symbol;
                 let instrument_type = profile.instrument.instrument_type;
-                let provider = self.provider(instrument_type);
+                let provider = self.configured_provider(instrument_type)?;
 
                 for (interval, meta_start) in &profile.earliest_ts {
-                    let meta_end = profile.latest_ts.get(interval).unwrap();
+                    let meta_end = profile.latest_ts.get(interval).ok_or_else(|| {
+                        DataError::UnexpectedResponse(format!(
+                            "Missing latest timestamp for {symbol} at interval {interval}"
+                        ))
+                    })?;
 
                     // Clamp to the user-requested range when provided.
                     let start = start.map_or(*meta_start, |s| s.max(*meta_start));
@@ -170,7 +172,12 @@ impl Engine {
                             );
                         }
 
-                        let provider = self.providers.get(&it).unwrap();
+                        let provider = match self.data_provider(it) {
+                            Ok(provider) => provider,
+                            Err(error) => {
+                                return (idx, symbol, it, interval, Err(error));
+                            },
+                        };
                         info!(%symbol, ?interval, start, end, "Downloading...");
 
                         let result = tokio::time::timeout(
@@ -231,7 +238,7 @@ impl Engine {
             let mut outcomes: Vec<(usize, String, Interval, Result<usize, String>)> = Vec::new();
 
             for (idx, symbol, it, interval, result) in downloaded {
-                let provider_enum = self.provider(it);
+                let provider_enum = self.configured_provider(it)?;
                 match result {
                     Ok(download) => {
                         let n_bars = download.bars.len();
@@ -471,8 +478,20 @@ impl Engine {
     // ────────────────────────────────────────────────────────────────────────
 
     /// Resolve the [`Provider`] for a given instrument type from config.
-    fn provider(&self, instrument_type: InstrumentType) -> Provider {
-        *self.config.data.providers.get(&instrument_type).unwrap()
+    fn configured_provider(&self, instrument_type: InstrumentType) -> DataResult<Provider> {
+        self.config
+            .data
+            .providers
+            .get(&instrument_type)
+            .copied()
+            .ok_or(DataError::ProviderNotConfigured(instrument_type))
+    }
+
+    /// Return the process-wide provider client for an instrument type.
+    fn data_provider(&self, instrument_type: InstrumentType) -> DataResult<&Arc<dyn DataProvider>> {
+        self.providers
+            .get(&instrument_type)
+            .ok_or(DataError::ProviderNotConfigured(instrument_type))
     }
 
     /// Resolve an instrument using the engine's cache.
@@ -486,7 +505,7 @@ impl Engine {
             return Ok(instr.as_ref().clone());
         }
 
-        let provider = self.providers.get(&instrument_type).unwrap();
+        let provider = self.data_provider(instrument_type)?;
         let instr = provider.fetch_instrument(symbol, instrument_type).await?;
         self.cache.instrument_cache.insert(symbol.clone(), Arc::new(instr.clone())).await;
         debug!(%symbol, "Instrument cached");
@@ -499,7 +518,7 @@ impl Engine {
         instrument: &Instrument,
         intervals: &[Interval],
     ) -> DataResult<(HashMap<Interval, u64>, HashMap<Interval, u64>)> {
-        let provider = self.providers.get(&instrument.instrument_type).unwrap();
+        let provider = self.data_provider(instrument.instrument_type)?;
 
         let ranges = try_join_all(intervals.iter().map(|&iv| async move {
             let key = (instrument.symbol.clone(), iv);
@@ -818,6 +837,16 @@ mod tests {
     }
 
     #[test]
+    fn list_instruments_reports_missing_provider() {
+        let (mut engine, _tmp) = test_engine(MockProvider::new(test_instrument()));
+        engine.providers.remove(&InstrumentType::Crypto);
+
+        let error = engine.list_instruments(InstrumentType::Crypto, None, 10, false).unwrap_err();
+
+        assert!(matches!(error, DataError::ProviderNotConfigured(InstrumentType::Crypto)));
+    }
+
+    #[test]
     fn fetch_instruments_caches_result() {
         let inst = test_instrument();
         let (engine, _tmp) = test_engine(MockProvider::new(inst.clone()));
@@ -918,6 +947,22 @@ mod tests {
         let result = engine.download_bars(&[], None, None, false).unwrap();
         assert_eq!(result.n_succeeded, 0);
         assert_eq!(result.n_failed, 0);
+    }
+
+    #[test]
+    fn download_bars_reports_missing_latest_timestamp() {
+        let instrument = usd_quote_instrument();
+        let (engine, _tmp) = test_engine(MockProvider::new(instrument.clone()));
+        let profiles = vec![InstrumentProfile {
+            instrument,
+            earliest_ts: HashMap::from([(Interval::OneDay, 1_700_000_000)]),
+            latest_ts: HashMap::new(),
+            legs: vec![],
+        }];
+
+        let error = engine.download_bars(&profiles, None, None, false).unwrap_err();
+
+        assert!(error.to_string().contains("Missing latest timestamp"));
     }
 
     #[test]

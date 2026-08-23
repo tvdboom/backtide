@@ -1,3 +1,47 @@
+macro_rules! impl_python_enum_variants {
+    ($enum_type:ty) => {
+        #[pymethods]
+        impl $enum_type {
+            /// Return all variants.
+            ///
+            /// Returns
+            /// -------
+            /// list[self]
+            ///     All variants of this type.
+            #[staticmethod]
+            fn variants(py: Python<'_>) -> PyResult<Vec<Py<Self>>> {
+                Self::iter().map(|variant| Py::new(py, variant)).collect()
+            }
+        }
+    };
+    ($enum_type:ty, default) => {
+        #[pymethods]
+        impl $enum_type {
+            /// Return the default variant.
+            ///
+            /// Returns
+            /// -------
+            /// self
+            ///     The default variant.
+            #[staticmethod]
+            fn get_default(py: Python<'_>) -> PyResult<Py<Self>> {
+                Py::new(py, Self::default())
+            }
+
+            /// Return all variants.
+            ///
+            /// Returns
+            /// -------
+            /// list[self]
+            ///     All variants of this type.
+            #[staticmethod]
+            fn variants(py: Python<'_>) -> PyResult<Vec<Py<Self>>> {
+                Self::iter().map(|variant| Py::new(py, variant)).collect()
+            }
+        }
+    };
+}
+
 pub mod analysis;
 pub mod backtest;
 pub mod config;

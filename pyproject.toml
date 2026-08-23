@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "backtide"
-version = "0.2.1"
+dynamic = ["version"]
 description = "A refreshingly simple trading backtester for beginner retail investors"
 authors = [{name = "Mavs", email = "m.524687@gmail.com"}]
 license = "MIT"
@@ -38,6 +38,7 @@ full = ["polars>=1.43.2"]
 [dependency-groups]
 # Utilities for the developer or for the IDE's language server
 dev = [
+    {include-group = "coverage"},
     {include-group = "docs"},
     {include-group = "lint"},
     {include-group = "pre-commit"},
@@ -55,6 +56,9 @@ docs = [
     "pymdown-extensions>=11.0.1",
     "pyyaml>=6.0.3",
     "regex>=2026.7.19",
+]
+coverage = [
+    "maturin>=1.14.1,<2.0",
 ]
 lint = [
     "ruff>=0.16.3",
@@ -159,7 +163,6 @@ force-sort-within-sections = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Unused imports
-"backtest.py" = ["F401"]  # Unused imports
 "config.py" = ["F401"]  # Unused imports
 "data.py" = ["F401"]  # Unused imports
 "storage.py" = ["F401"]  # Unused imports
@@ -172,6 +175,7 @@ force-sort-within-sections = true
     "INP001",  # Part of an implicit namespace package
     "T201",  # Use print statement
 ]
+"rust_coverage.py" = ["INP001"]  # Part of an implicit namespace package
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
@@ -181,4 +185,3 @@ exclude_also = [
     "if TYPE_CHECKING:",
     "@(abc\\.)?abstractmethod",
 ]
-environment = { PATH = "$HOME/.cargo/bin:$PATH" }

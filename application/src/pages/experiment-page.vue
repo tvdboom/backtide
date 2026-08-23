@@ -9,6 +9,13 @@
       </label>
     </section>
     <form class="panel experiment-builder" novalidate @keydown.enter="preventImplicitSubmit" @submit.prevent="run">
+      <section class="experiment-mode" aria-label="Experiment mode">
+        <span><strong>Run mode</strong><small>Run one experiment or a study containing multiple experiments to assess strategy robustness.</small></span>
+        <div class="mode-switch">
+          <button type="button" :class="{ active: experimentMode === 'single' }" @click="experimentMode = 'single'">Single run</button>
+          <button id="study-mode" type="button" :class="{ active: experimentMode === 'study' }" @click="experimentMode = 'study'">Study</button>
+        </div>
+      </section>
       <div class="tabs" role="tablist">
         <button v-for="(item, index) in tabs" :key="item" type="button" :class="{ active: tab === index }" @click="tab = index"><span>{{ index + 1 }}</span>{{ item }}</button>
       </div>
@@ -90,13 +97,53 @@
         <div class="section-copy"><h3>Trading logic</h3><p>Select saved strategies, optional indicators and a benchmark.</p></div>
         <div class="form-grid two">
           <div class="field-label wide benchmark-field"><span>Benchmark</span><FieldInfo text="Choose a passive reference instrument used to compare experiment performance." /><small class="field-help">Compare performance against a passive benchmark for this asset class.</small><BenchmarkSelect :model-value="config.strategy.benchmark" :options="benchmarkSymbols" :descriptions="symbolNames" :logos="symbolLogos" label="Experiment benchmark" :placeholder="benchmarkPlaceholder" @update:model-value="setBenchmark" /></div>
-          <div class="field-label wide"><span>Strategies</span><FieldInfo text="Select the saved trading strategies to run against the same market data." /><SearchSelect v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></div>
+          <div class="field-label wide"><span>Strategies</span><FieldInfo text="Select the saved trading strategies to run against the same market data." /><BenchmarkSelect v-if="experimentMode === 'study'" :model-value="config.strategy.strategies[0] || ''" :options="savedStrategies" :descriptions="strategyOptionDetails" :uppercase-value="false" icon="strategy" selection-name="strategy" label="Experiment strategy" placeholder="Search saved strategies…" @update:model-value="setStudyStrategy" /><SearchSelect v-else v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></div>
           <section v-if="selectedStrategies.length" class="selection-insights wide" aria-label="Selected strategy details">
             <article v-for="item in selectedStrategies" :key="item.name" class="asset-selection-card">
               <header><span class="metric-icon"><LibraryAssetIcon kind="strategy" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ catalogTypeLabel(item.type) }}</small></span></header>
               <p>{{ item.description }}</p>
               <div v-if="item.required_indicators?.length" class="required-indicators"><strong>Injected indicators</strong><div class="indicator-chip-list"><span v-for="indicator in item.required_indicators" :key="indicator.name" class="indicator-chip" :title="indicator.description"><Shapes :size="14" />{{ indicator.name }}</span></div></div>
             </article>
+          </section>
+          <section v-if="experimentMode === 'study'" class="study-setup wide" aria-label="Study settings">
+            <header>
+              <span><strong>Parameter sweep</strong><small>Select one strategy and vary its numeric constructor parameters. All other constructor values stay fixed.</small></span>
+              <span class="candidate-count">{{ candidateCount.toLocaleString() }} candidates</span>
+            </header>
+            <div v-if="config.strategy.strategies.length !== 1" class="inline-notice">Choose exactly one saved strategy to configure its sweep.</div>
+            <div v-else-if="!sweepParameters.length" class="inline-notice">This strategy has no numeric constructor parameters available to sweep.</div>
+            <div v-else class="sweep-parameter-list">
+              <article v-for="parameter in sweepParameters" :key="parameter.name" class="sweep-parameter-row" :class="{ enabled: sweepRanges[parameter.name].enabled }">
+                <ToggleField v-model="sweepRanges[parameter.name].enabled" :label="`Sweep ${parameter.label}`" :description="`Current: ${parameter.default}`" help="Include this constructor parameter in the Cartesian parameter sweep." />
+                <template v-if="sweepRanges[parameter.name].enabled">
+                  <label>Minimum<FieldInfo text="Set the smallest constructor value included in this sweep." /><input :id="`sweep-${parameter.name}-min`" v-model.number="sweepRanges[parameter.name].min" type="number" step="any" @input="sweepRanges[parameter.name].values = null" /></label>
+                  <label>Maximum<FieldInfo text="Set the largest constructor value included in this sweep." /><input v-model.number="sweepRanges[parameter.name].max" type="number" step="any" @input="sweepRanges[parameter.name].values = null" /></label>
+                  <label>Step<FieldInfo text="Set the positive increment between constructor values." /><input v-model.number="sweepRanges[parameter.name].step" type="number" min="0" step="any" @input="sweepRanges[parameter.name].values = null" /></label>
+                </template>
+              </article>
+            </div>
+            <fieldset class="settings-group">
+              <legend>Selection rules</legend>
+              <div class="form-grid two">
+                <label>Minimum trades<FieldInfo text="Exclude candidates with fewer completed round-trip trades." /><input id="study-min-trades" v-model.number="study.min_trades" type="number" min="0" step="1" /></label>
+                <label>Maximum drawdown (%)<FieldInfo text="Optionally exclude candidates whose drawdown magnitude exceeds this percentage." /><input id="study-max-drawdown" v-model.number="study.max_drawdown" type="number" min="0" max="100" step="1" placeholder="No limit" /></label>
+              </div>
+            </fieldset>
+            <fieldset class="settings-group">
+              <legend>Walk-forward validation</legend>
+              <div class="walk-forward-toggles">
+                <ToggleField v-model="study.walk_forward.enabled" label="Validate out of sample" description="Select on training windows, then test unseen periods." help="Run the full sweep on each training window and evaluate only its winner on the following test window." />
+                <ToggleField v-if="study.walk_forward.enabled" v-model="study.walk_forward.anchored" label="Anchored training" description="Keep the first training date fixed as the window expands." help="Use an expanding training window instead of a rolling fixed-length window." />
+              </div>
+              <div v-if="study.walk_forward.enabled" class="form-grid three walk-forward-window-row">
+                <label>Training days<FieldInfo text="Set the number of calendar days used to select a candidate in each fold." /><input id="study-training-days" v-model.number="study.walk_forward.training_days" type="number" min="1" step="1" /></label>
+                <label>Test days<FieldInfo text="Set the number of untouched calendar days evaluated after each training window." /><input v-model.number="study.walk_forward.test_days" type="number" min="1" step="1" /></label>
+                <label>Step days<FieldInfo text="Set the days between folds; leave empty to advance by the test-window length." /><input v-model.number="study.walk_forward.step_days" type="number" min="1" step="1" placeholder="Same as test days" /></label>
+              </div>
+              <p v-if="study.walk_forward.enabled && walkForwardWindowSummary" class="walk-forward-window-summary" aria-live="polite">
+                {{ walkForwardWindowSummary }}
+              </p>
+            </fieldset>
           </section>
           <div class="field-label wide"><span>Indicators</span><FieldInfo text="Add optional indicators that will be calculated and supplied during the simulation." /><SearchSelect v-model="config.indicators.indicators" :options="savedIndicators" :descriptions="indicatorOptionDetails" :option-icons="indicatorOptionIcons" option-name-first label="Experiment indicators" placeholder="Search saved indicators…" /></div>
           <section v-if="selectedIndicators.length" class="selection-insights wide" aria-label="Selected indicator details">
@@ -111,7 +158,7 @@
       <div v-if="tab === 4" class="form-section">
         <div class="section-copy"><h3>Performance metrics</h3><p>Choose which built-in and custom metrics to compute, then drag them into order. The first metric is used for the experiment headline.</p></div>
         <div class="form-grid two">
-          <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /><button type="button" class="text-button metric-clear-button" aria-label="Clear all metrics" :disabled="config.metrics.length === 0" @click="clearMetrics"><X :size="14" /> Clear all metrics</button></div>
+          <div class="field-label wide"><span>Metrics</span><FieldInfo text="Choose the performance measures calculated for every strategy result." /><SearchSelect v-model="config.metrics" :options="metricOptions" :descriptions="metricOptionDetails" :option-icons="metricOptionIcons" option-name-first reorderable input-id="experiment-metrics" label="Experiment metrics" placeholder="Search built-in and custom metrics..." /><button type="button" class="text-button metric-clear-button" aria-label="Clear all metrics" :disabled="config.metrics.length === 0" @click="clearMetrics"><X :size="14" /> Clear all metrics</button></div>
           <TransitionGroup v-if="selectedMetrics.length" tag="section" name="metric-reorder" class="selection-insights metric-selection-list wide" aria-label="Selected metric details">
             <article v-for="(item, index) in selectedMetrics" :key="item.key" class="asset-selection-card compact-card metric-selection-card" :class="{ dragging: draggedMetricKey === item.key, 'drop-target': dragOverMetricKey === item.key }" draggable="true" @dragstart="startMetricDrag($event, item.key)" @dragover.prevent="dragOverMetric($event, item.key)" @drop.prevent="finishMetricDrag" @dragend="finishMetricDrag">
               <header>
@@ -212,7 +259,7 @@
         <button v-if="tab" type="button" class="secondary" @click="tab--"><ChevronLeft :size="16" /> Back</button>
         <span class="form-spacer" />
         <button v-if="tab < tabs.length - 1" type="button" class="secondary" @click="tab++">Continue <ChevronRight :size="16" /></button>
-        <button type="submit" class="primary" :disabled="running"><span v-if="running" class="spinner small" /><Play v-else :size="16" /> {{ running ? 'Launching…' : 'Run experiment' }}</button>
+        <button type="submit" class="primary" :disabled="running"><span v-if="running" class="spinner small" /><Play v-else :size="16" /> {{ running ? 'Launching…' : experimentMode === 'study' ? 'Run study' : 'Run experiment' }}</button>
       </div>
     </form>
   </div>
@@ -257,7 +304,7 @@ import {
   defaultExperimentBenchmark,
   experimentOptionValue,
   instrumentLogoUrl,
-  requestResultsOverview
+  requestJobResult
 } from '../state'
 
 const props = defineProps({ bootstrap: Object })
@@ -291,6 +338,8 @@ const defaultMetricImportance = [
 ]
 const enums = props.bootstrap.enums
 const savedDraft = consumeExperimentDraft(sessionStorage)
+const savedStudyDraft = savedDraft?._study || null
+if (savedDraft) delete savedDraft._study
 const config = reactive(normalizedExperimentConfig(
   savedDraft || props.bootstrap.defaults,
   { prioritizeDefaults: !savedDraft }
@@ -300,6 +349,7 @@ const intervalValues = Object.fromEntries(
   enums.intervals.map(item => [item, optionValue('interval', item)])
 )
 const tab = ref(0)
+const experimentMode = ref(savedStudyDraft ? 'study' : 'single')
 const running = ref(false)
 const issue = ref(null)
 const draggedMetricKey = ref('')
@@ -310,6 +360,18 @@ let issueTimer
 const instruments = ref([])
 const loadingInstruments = ref(false)
 const positions = ref(Object.entries(config.portfolio.starting_positions || {}).map(([symbol, quantity]) => ({ symbol, quantity })))
+const sweepRanges = reactive({})
+const study = reactive({
+  min_trades: 0,
+  max_drawdown: null,
+  walk_forward: {
+    enabled: false,
+    training_days: 1095,
+    test_days: 365,
+    step_days: null,
+    anchored: false
+  }
+})
 const symbols = computed(() => instruments.value.map(item => item.symbol))
 const symbolNames = computed(() => Object.fromEntries(instruments.value.map(item => [item.symbol, item.name])))
 const symbolLogos = computed(() => {
@@ -368,6 +430,44 @@ const selectedIndicators = computed(() => config.indicators.indicators
 const selectedMetrics = computed(() => config.metrics
   .map(key => metricCatalog.value.find(item => item.key === key))
   .filter(Boolean))
+const sweepParameters = computed(() => {
+  if (selectedStrategies.value.length !== 1) return []
+  return (selectedStrategies.value[0].parameters || []).filter(parameter =>
+    parameter.kind === 'number' && Number.isFinite(Number(parameter.default)))
+})
+if (savedStudyDraft) restoreStudyDraft(savedStudyDraft)
+const candidateCount = computed(() => {
+  const enabled = sweepParameters.value.filter(parameter => sweepRanges[parameter.name]?.enabled)
+  if (!enabled.length) return 0
+  return enabled.reduce((count, parameter) => {
+    const range = sweepRanges[parameter.name]
+    const values = parameterValues(range)
+    return values.length ? count * values.length : 0
+  }, 1)
+})
+const walkForwardWindowCount = computed(() => {
+  if (config.data.full_history || !config.data.start_date || !config.data.end_date) return null
+  const start = Date.parse(`${config.data.start_date}T00:00:00Z`)
+  const end = Date.parse(`${config.data.end_date}T00:00:00Z`)
+  const trainingDays = Number(study.walk_forward.training_days)
+  const testDays = Number(study.walk_forward.test_days)
+  const stepDays = Number(study.walk_forward.step_days || testDays)
+  if (![start, end, trainingDays, testDays, stepDays].every(Number.isFinite) ||
+    end < start || trainingDays < 1 || testDays < 1 || stepDays < 1) return 0
+  const availableDays = Math.floor((end - start) / 86400000) + 1
+  const firstWindowDays = trainingDays + testDays
+  if (availableDays < firstWindowDays) return 0
+  return Math.floor((availableDays - firstWindowDays) / stepDays) + 1
+})
+const walkForwardWindowSummary = computed(() => {
+  const count = walkForwardWindowCount.value
+  if (count === null) {
+    return ''
+  }
+  const windows = `${count.toLocaleString()} ${count === 1 ? 'window' : 'windows'}`
+  const experiments = `${count.toLocaleString()} training ${count === 1 ? 'experiment' : 'experiments'} per parameter set`
+  return `${windows} · ${experiments} · one winner test per window.`
+})
 const automaticBenchmark = computed(() => defaultExperimentBenchmark(
   config.portfolio.base_currency,
   config.data.instrument_type,
@@ -431,6 +531,79 @@ function catalogTypeLabel(value) {
   return enumLabel(value).replace(/\b(Macd|Rsi|Roc|Rsrs|Sma|Ema|Vwap)\b/g, token => token.toUpperCase())
 }
 function metricLabel(key) { return metricCatalog.value.find(item => item.key === key)?.name || enumLabel(key) }
+function defaultSweepRange(value) {
+  const current = Number(value)
+  const magnitude = Math.abs(current) || 1
+  const step = Number.isInteger(current)
+    ? Math.max(1, Math.round(magnitude / 2))
+    : magnitude / 2
+  return {
+    enabled: false,
+    min: current >= 0 ? Math.max(0, current - step) : current - step,
+    max: current + step,
+    step
+  }
+}
+function parameterValues(range) {
+  if (Array.isArray(range.values)) return [...range.values]
+  const minimum = Number(range.min)
+  const maximum = Number(range.max)
+  const step = Number(range.step)
+  if (![minimum, maximum, step].every(Number.isFinite) || step <= 0 || maximum < minimum) return []
+  const count = Math.floor((maximum - minimum) / step + 1e-9) + 1
+  if (count < 1 || count > 10000) return []
+  return Array.from({ length: count }, (_value, index) =>
+    Number((minimum + index * step).toPrecision(12)))
+}
+function restoreStudyDraft(draft) {
+  if (!draft) {
+    experimentMode.value = 'single'
+    return
+  }
+  experimentMode.value = 'study'
+  study.min_trades = Number(draft.min_trades || 0)
+  study.max_drawdown = draft.max_drawdown == null
+    ? null
+    : Number(draft.max_drawdown) * 100
+  const walkForward = draft.walk_forward
+  Object.assign(study.walk_forward, {
+    enabled: Boolean(walkForward),
+    training_days: Number(walkForward?.training_days || 1095),
+    test_days: Number(walkForward?.test_days || 365),
+    step_days: walkForward?.step_days == null ? null : Number(walkForward.step_days),
+    anchored: Boolean(walkForward?.anchored)
+  })
+  syncSweepRanges()
+  for (const [name, rawValues] of Object.entries(draft.parameter_space || {})) {
+    const values = [...rawValues]
+    if (!values.length || !sweepRanges[name]) continue
+    const numeric = values.map(Number)
+    const step = numeric.length > 1 ? numeric[1] - numeric[0] : 1
+    Object.assign(sweepRanges[name], {
+      enabled: true,
+      min: numeric[0],
+      max: numeric.at(-1),
+      step,
+      values
+    })
+  }
+}
+function syncSweepRanges() {
+  const names = new Set(sweepParameters.value.map(parameter => parameter.name))
+  for (const name of Object.keys(sweepRanges)) {
+    if (!names.has(name)) delete sweepRanges[name]
+  }
+  for (const parameter of sweepParameters.value) {
+    if (!sweepRanges[parameter.name]) {
+      sweepRanges[parameter.name] = defaultSweepRange(parameter.default)
+    }
+  }
+}
+function parameterSpace() {
+  return Object.fromEntries(sweepParameters.value
+    .filter(parameter => sweepRanges[parameter.name]?.enabled)
+    .map(parameter => [parameter.name, parameterValues(sweepRanges[parameter.name])]))
+}
 function moveMetric(key, direction) {
   const from = config.metrics.indexOf(key)
   const to = from + direction
@@ -552,6 +725,9 @@ function setBenchmark(value) {
   config.strategy.benchmark = value
   removeUnavailableAlpha()
 }
+function setStudyStrategy(value) {
+  config.strategy.strategies = value ? [value] : []
+}
 function removeUnavailableAlpha() {
   if (config.strategy.benchmark || !config.metrics.includes('alpha')) return
   config.metrics = config.metrics.filter(key => key !== 'alpha')
@@ -601,6 +777,31 @@ function validationIssue() {
   }
   if (!config.strategy.strategies.length) {
     return { tab: 3, selector: '#experiment-strategies', message: 'Select at least one strategy.' }
+  }
+  if (experimentMode.value === 'study') {
+    if (config.strategy.strategies.length !== 1) {
+      return { tab: 3, selector: '#experiment-strategies', message: 'Choose exactly one strategy for a study.' }
+    }
+    const space = parameterSpace()
+    if (!Object.keys(space).length) {
+      return { tab: 3, selector: '.sweep-parameter-list input', message: 'Enable at least one valid constructor-parameter sweep.' }
+    }
+    if (!candidateCount.value || candidateCount.value > 10000) {
+      return { tab: 3, selector: '.sweep-parameter-list input', message: 'Use valid ranges totaling no more than 10,000 candidates.' }
+    }
+    if (!Number.isInteger(study.min_trades) || study.min_trades < 0) {
+      return { tab: 3, selector: '#study-min-trades', message: 'Minimum trades must be a whole number of zero or greater.' }
+    }
+    if (study.max_drawdown !== null && study.max_drawdown !== '' &&
+      (!Number.isFinite(study.max_drawdown) || study.max_drawdown < 0 || study.max_drawdown > 100)) {
+      return { tab: 3, selector: '#study-max-drawdown', message: 'Maximum drawdown must be between 0% and 100%.' }
+    }
+    if (study.walk_forward.enabled) {
+      if (![study.walk_forward.training_days, study.walk_forward.test_days]
+        .every(value => Number.isInteger(value) && value > 0)) {
+        return { tab: 3, selector: '#study-training-days', message: 'Walk-forward training and test days must be positive whole numbers.' }
+      }
+    }
   }
   if (!config.metrics.length) {
     return { tab: 4, selector: '#experiment-metrics', message: 'Select at least one metric.' }
@@ -669,6 +870,16 @@ function resetExperiment() {
   benchmarkIsAutomatic.value = true
   applyAutomaticBenchmark()
   positions.value = []
+  experimentMode.value = 'single'
+  study.min_trades = 0
+  study.max_drawdown = null
+  Object.assign(study.walk_forward, {
+    enabled: false,
+    training_days: 1095,
+    test_days: 365,
+    step_days: null,
+    anchored: false
+  })
   tab.value = 0
   dismissIssue()
 }
@@ -676,6 +887,8 @@ function resetExperiment() {
 async function applyPendingExperimentDraft() {
   const pendingDraft = consumeExperimentDraft(sessionStorage)
   if (!pendingDraft) return false
+  const pendingStudy = pendingDraft._study || null
+  delete pendingDraft._study
   const nextConfig = normalizedExperimentConfig(pendingDraft)
   for (const key of Object.keys(config)) {
     if (!(key in nextConfig)) delete config[key]
@@ -685,6 +898,7 @@ async function applyPendingExperimentDraft() {
     .filter(([symbol]) => config.data.symbols.includes(symbol))
     .map(([symbol, quantity]) => ({ symbol, quantity }))
   benchmarkIsAutomatic.value = false
+  restoreStudyDraft(pendingStudy)
   removeUnavailableAlpha()
   tab.value = 0
   dismissIssue()
@@ -708,10 +922,32 @@ async function run() {
     const payload = cloneApiState(config)
     payload.exchange.commission_type = 'PercentagePlusFixed'
     payload.portfolio.starting_positions = parsePositions()
-    const job = await post('/api/experiments', payload)
+    const isStudy = experimentMode.value === 'study'
+    const requestPayload = isStudy
+      ? {
+          config: payload,
+          study: {
+            strategy: config.strategy.strategies[0],
+            parameter_space: parameterSpace(),
+            min_trades: study.min_trades,
+            max_drawdown: study.max_drawdown === null || study.max_drawdown === ''
+              ? null
+              : study.max_drawdown / 100,
+            walk_forward: study.walk_forward.enabled
+              ? {
+                  training_days: study.walk_forward.training_days,
+                  test_days: study.walk_forward.test_days,
+                  step_days: study.walk_forward.step_days || null,
+                  anchored: study.walk_forward.anchored
+                }
+              : null
+          }
+        }
+      : payload
+    const job = await post(isStudy ? '/api/studies' : '/api/experiments', requestPayload)
     resetExperiment()
-    requestResultsOverview(sessionStorage)
-    emit('toast', `Experiment queued · ${job.id}`)
+    requestJobResult(sessionStorage, job.id)
+    emit('toast', `${isStudy ? 'Study' : 'Experiment'} queued · ${job.id}`)
     emit('navigate', 'results')
   } catch (error) { await showIssue(error.message) }
   finally { running.value = false }
@@ -738,6 +974,12 @@ async function importConfig(event) {
 }
 watch(() => [...config.data.symbols], selected => {
   positions.value = positions.value.filter(position => selected.includes(position.symbol))
+})
+watch(() => config.strategy.strategies.join('\u0000'), syncSweepRanges, { immediate: true })
+watch(experimentMode, mode => {
+  if (mode === 'study' && config.strategy.strategies.length > 1) {
+    config.strategy.strategies = config.strategy.strategies.slice(0, 1)
+  }
 })
 watch(config, () => {
   if (!issue.value?.correctable) return

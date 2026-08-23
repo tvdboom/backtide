@@ -11,10 +11,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import cloudpickle
-
 from backtide.config import Config
 from backtide.indicators import BaseIndicator
+from backtide.utils.library import _build_custom_instance, _load_pickles, _save_pickle
 from backtide.utils.utils import _make_dummy_bars
 
 logger = logging.getLogger(__name__)
@@ -22,24 +21,15 @@ logger = logging.getLogger(__name__)
 
 def _build_custom_indicator(code: str) -> BaseIndicator:
     """Execute code and return the last expression."""
-    tree = ast.parse(code)
-
-    if not tree.body or not isinstance(tree.body[-1], ast.Expr):
-        raise ValueError("The last statement must be an instantiation of the indicator.")
-
-    # Exec everything except the last statement, eval the last
-    ns = {}
-    exec(compile(tree, "<indicator>", "exec"), ns)
-    instance = eval(compile(ast.Expression(body=tree.body[-1].value), "<indicator>", "eval"), ns)
-
-    if not isinstance(instance, BaseIndicator):
-        raise TypeError(f"Expected a subclass of BaseIndicator, got {type(instance).__name__}.")
-
-    # Can't reliably recover source code from an unpickled object
-    # so we add the source code to the instance
-    instance._source_code = code
-
-    return instance
+    return _build_custom_instance(
+        code,
+        filename="<indicator>",
+        expected_type=BaseIndicator,
+        missing_expression="The last statement must be an instantiation of the indicator.",
+        type_error=lambda value: (
+            f"Expected a subclass of BaseIndicator, got {type(value).__name__}."
+        ),
+    )
 
 
 def _check_indicator_code(code: str, cfg: Config) -> str | None:
@@ -95,23 +85,18 @@ def _is_builtin_indicator(ind: Any) -> bool:
 
 def _load_stored_indicators(cfg: Config) -> dict[str, Any]:
     """Load and return the indicator objects from storage."""
-    path = Path(cfg.data.storage_path) / "indicators"
-
-    indicators = {}
-    for f in sorted(path.glob("*.pkl")):
-        try:
-            with f.open("rb") as fh:
-                indicators[f.stem] = cloudpickle.load(fh)
-        except Exception as ex:  # noqa: BLE001
-            logger.warning("Failed to load indicator %s: %s", f.stem, ex)
-
-    return indicators
+    return _load_pickles(
+        Path(cfg.data.storage_path) / "indicators",
+        logger=logger,
+        item_name="indicator",
+    )
 
 
-def _save_indicator(ind: Any, name: str, cfg: Config):
+def _save_indicator(ind: Any, name: str, cfg: Config) -> None:
     """Pickle an indicator instance to disk."""
-    path = Path(cfg.data.storage_path) / "indicators"
-    path.mkdir(parents=True, exist_ok=True)
-
-    with (path / f"{name}.pkl").open("wb") as f:
-        cloudpickle.dump(ind, f)
+    _save_pickle(
+        ind,
+        Path(cfg.data.storage_path) / "indicators",
+        name,
+        temporary_prefix=".indicator-",
+    )

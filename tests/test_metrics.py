@@ -17,6 +17,7 @@ from backtide.metrics.utils import (
     _build_custom_metric,
     _check_metric_code,
     _load_stored_metrics,
+    _metric_greater_is_better,
     _save_metric,
 )
 from backtide.strategies import BuyAndHold
@@ -73,7 +74,7 @@ class TestMetricCatalog:
                         "key": "risk_score",
                         "name": "Risk score",
                         "percentage": False,
-                        "higher_is_better": False,
+                        "greater_is_better": False,
                     }
                 ],
             },
@@ -105,7 +106,7 @@ class AveragePnl(BaseMetric):
     '''Return the average realized trade PnL.'''
 
     percentage = False
-    higher_is_better = True
+    greater_is_better = True
 
     def compute(self, equity_curve, trades):
         return float(trades["pnl"].mean()) if len(trades) else 0.0
@@ -120,6 +121,18 @@ AveragePnl()
             """Return a fixed scalar."""
             del equity_curve, trades
             return 7.0
+
+    def test_greater_is_better_defaults_to_true(self):
+        """Custom metrics rank larger values first when no direction is declared."""
+        assert _metric_greater_is_better(self.ConstantMetric()) is True
+
+    def test_greater_is_better_can_rank_smaller_values_first(self):
+        """A custom metric can explicitly rank smaller values first."""
+
+        class RiskMetric(self.ConstantMetric):
+            greater_is_better = False
+
+        assert _metric_greater_is_better(RiskMetric()) is False
 
     def test_one_experiment_config_list_holds_builtin_and_custom_metrics(self):
         """Experiment metrics are specified only on ExperimentConfig."""

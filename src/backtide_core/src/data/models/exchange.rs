@@ -251,18 +251,9 @@ impl Exchange {
     pub fn currency(&self) -> Currency {
         self.data().4
     }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
 }
+
+impl_python_enum_variants!(Exchange);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Exchange {
     type Error = PyErr;

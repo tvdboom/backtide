@@ -4,7 +4,7 @@
 
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
-version := shell("uv run --no-sync python -c \"import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])\"")
+version := shell("uv run --no-sync python -c \"import tomllib, pathlib; print(tomllib.loads(pathlib.Path('src/backtide_core/Cargo.toml').read_text(encoding='utf-8'))['package']['version'])\"")
 
 # List available recipes
 [private]
@@ -16,26 +16,27 @@ sync:
 
 # Build the Rust extension and regenerate stubs
 build:
-    uv run python scripts/run_cargo.py uv pip install -e .
+    uv run --no-sync python scripts/run_cargo.py uv pip install -e .
     @just stubs
 
 # Generate stub files from the compiled module
 stubs:
-    uv run python scripts/generate_stubs.py
+    uv run --no-sync python scripts/generate_stubs.py
 
 # Verify stubs are in sync with the compiled module
 check:
-    uv run python scripts/generate_stubs.py --check
+    uv run --no-sync python scripts/generate_stubs.py --check
 
 # Run the Python test suite
 python-test *args:
-    uv run pytest -n=auto {{args}}
+    uv run --no-sync tox -e python-test -- {{args}}
 
 # Run the Rust test suite
 rust-test *args:
-    uv run python scripts/run_cargo.py \
+    uv run --no-sync python scripts/run_cargo.py \
         cargo llvm-cov \
             --no-clean \
+            --jobs 12 \
             --manifest-path src/backtide_core/Cargo.toml \
             --no-cfg-coverage
 
@@ -46,7 +47,7 @@ test *args:
 
 # Run Rust benchmarks
 bench *args:
-    uv run python scripts/run_cargo.py \
+    uv run --no-sync python scripts/run_cargo.py \
         cargo bench \
             --manifest-path src/backtide_core/Cargo.toml \
             --no-default-features \
@@ -54,14 +55,14 @@ bench *args:
 
 # Run pre-commit hooks on all files
 lint:
-    uv run pre-commit run --all-files
+    uv run --no-sync pre-commit run --all-files
 
 # Run the full CI pipeline locally via tox
 tox:
-    uv run tox
+    uv run --no-sync tox
 
 ty:
-    uv run ty check
+    uv run --no-sync ty check
 
 # Serve documentation from the existing development environment without syncing it.
 docs dev_addr="127.0.0.1:8001":

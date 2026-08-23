@@ -5,19 +5,15 @@ Description: Utilities for persisted built-in and custom position sizers.
 
 """
 
-import ast
 import inspect
 import logging
 import math
-import os
 from pathlib import Path
-import tempfile
 from typing import Any
-
-import cloudpickle
 
 from backtide.config import Config
 from backtide.sizers import BaseSizer
+from backtide.utils.library import _build_custom_instance, _load_pickles, _save_pickle
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +37,13 @@ BUILTIN_SIZER_DEFAULTS: dict[str, dict[str, int | float]] = {
 
 def _build_custom_sizer(code: str) -> BaseSizer:
     """Execute source and return the final sizer instance."""
-    tree = ast.parse(code)
-    if not tree.body or not isinstance(tree.body[-1], ast.Expr):
-        raise ValueError("The last statement must instantiate the sizer.")
-    namespace: dict[str, Any] = {}
-    exec(compile(tree, "<sizer>", "exec"), namespace)
-    instance = eval(compile(ast.Expression(tree.body[-1].value), "<sizer>", "eval"), namespace)
-    if not isinstance(instance, BaseSizer):
-        raise TypeError(f"Expected a BaseSizer subclass, got {type(instance).__name__}.")
-    instance._source_code = code
-    return instance
+    return _build_custom_instance(
+        code,
+        filename="<sizer>",
+        expected_type=BaseSizer,
+        missing_expression="The last statement must instantiate the sizer.",
+        type_error=lambda value: f"Expected a BaseSizer subclass, got {type(value).__name__}.",
+    )
 
 
 def _check_sizer_code(code: str) -> str | None:
@@ -79,42 +72,23 @@ def _is_builtin_sizer(value: Any) -> bool:
 
 def _load_stored_sizers(cfg: Config) -> dict[str, Any]:
     """Load valid saved sizers from the configured storage directory."""
-    values = {}
-    for file in sorted((Path(cfg.data.storage_path) / "sizers").glob("*.pkl")):
-        try:
-            if file.stat().st_size == 0:
-                file.unlink()
-                continue
-            with file.open("rb") as stream:
-                value = cloudpickle.load(stream)
-            values[file.stem] = _restore_sizer(value)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to load sizer %s: %s", file.stem, exc)
-    return values
+    return _load_pickles(
+        Path(cfg.data.storage_path) / "sizers",
+        logger=logger,
+        item_name="sizer",
+        restore=_restore_sizer,
+        remove_empty=True,
+    )
 
 
 def _save_sizer(value: Any, name: str, cfg: Config) -> None:
     """Persist one validated sizer with an atomic file replacement."""
-    folder = Path(cfg.data.storage_path) / "sizers"
-    folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{name}.pkl"
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            dir=folder,
-            prefix=".sizer-",
-            suffix=".tmp",
-            delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-            cloudpickle.dump(_stored_sizer(value), stream)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary.replace(target)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    _save_pickle(
+        _stored_sizer(value),
+        Path(cfg.data.storage_path) / "sizers",
+        name,
+        temporary_prefix=".sizer-",
+    )
 
 
 def _stored_sizer(value: Any) -> Any:

@@ -36,7 +36,7 @@ it('shows built-ins and opens a custom-only metric editor', async () => {
   expect(wrapper.text()).toContain('BaseMetric')
   expect(wrapper.text()).toContain('"""Describe what this metric measures."""')
   expect(wrapper.text()).toContain('percentage = False')
-  expect(wrapper.text()).toContain('higher_is_better = True')
+  expect(wrapper.text()).toContain('greater_is_better = True')
   expect(wrapper.text()).toContain('return result')
   expect(wrapper.text()).not.toContain('description =')
   expect(wrapper.find('.library-editor-mode').exists()).toBe(false)

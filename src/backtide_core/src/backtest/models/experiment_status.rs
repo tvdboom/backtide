@@ -64,18 +64,9 @@ impl ExperimentStatus {
             Self::Error => "All strategies failed or the experiment could not run.",
         }
     }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
 }
+
+impl_python_enum_variants!(ExperimentStatus);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for ExperimentStatus {
     type Error = PyErr;

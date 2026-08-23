@@ -200,7 +200,7 @@ impl ForexPair {
     /// Support Python pickle serialization.
     pub fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (String,))> {
         let cls = py.get_type::<Self>().into_any();
-        Ok((cls, (self.to_string(),)))
+        Ok((cls, (format!("{self:?}"),)))
     }
     fn __repr__(&self) -> String {
         self.to_string()
@@ -219,5 +219,20 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ForexPair {
         // Else parse from string
         let s: String = obj.extract()?;
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown forex pair {s:?}.")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pickle_reconstructor_receives_parseable_symbol() {
+        Python::attach(|py| {
+            let (_, (symbol,)) = ForexPair::EURUSD.__reduce__(py).unwrap();
+
+            assert_eq!(symbol, "EURUSD");
+            assert_eq!(symbol.parse::<ForexPair>().unwrap(), ForexPair::EURUSD);
+        });
     }
 }

@@ -1,11 +1,12 @@
 """Backtide.
 
 Author: Mavs
-Description: Public Python interface for the backtest module.
+Description: Public Python interface for backtest experiments.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import threading
 from typing import Any
 import uuid
@@ -103,7 +104,7 @@ class Experiment:
     Examples
     --------
     ```pycon
-    from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig
+    from backtide import DataExpConfig, Experiment, ExperimentConfig
     from backtide.strategies import BuyAndHold
 
     config = ExperimentConfig(
@@ -146,8 +147,29 @@ class Experiment:
 
         return elements, overrides
 
-    def run(self, *, verbose: bool = True) -> ExperimentResult:
-        """Run the configured experiment and return its persisted result."""
+    def run(
+        self,
+        *,
+        verbose: bool = True,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> ExperimentResult:
+        """Run the configured experiment and return its persisted result.
+
+        Parameters
+        ----------
+        verbose : bool, default=True
+            Show determinate simulation progress in the terminal.
+
+        progress_callback : Callable[[int, int], None] | None, default=None
+            Receive throttled `(completed, total)` simulation-step updates. A
+            step is one timeline bar processed by one strategy.
+
+        Returns
+        -------
+        ExperimentResult
+            Persisted result for every configured strategy.
+
+        """
         strategy_values = (
             self.config.strategy.strategies if self.strategies is None else self.strategies
         )
@@ -182,11 +204,16 @@ class Experiment:
             raise ValueError("Experiment configuration has no strategies.")
 
         try:
-            result = _run_experiment(
+            arguments = (
                 config,
                 verbose,
                 strategy_overrides,
                 indicator_overrides,
+            )
+            result = (
+                _run_experiment(*arguments, progress_callback)
+                if progress_callback is not None
+                else _run_experiment(*arguments)
             )
         except KeyboardInterrupt:
             _cleanup_experiment(None, config.general.name)
@@ -196,3 +223,34 @@ class Experiment:
             _cleanup_experiment(result.experiment_id, config.general.name)
             raise ExperimentAborted("Experiment aborted by user.")
         return result
+
+
+__all__ = [
+    "CommissionType",
+    "ConversionPeriod",
+    "CurrencyConversionMode",
+    "DataExpConfig",
+    "EmptyBarPolicy",
+    "EngineExpConfig",
+    "EquitySample",
+    "ExchangeExpConfig",
+    "Experiment",
+    "ExperimentAborted",
+    "ExperimentConfig",
+    "ExperimentResult",
+    "ExperimentStatus",
+    "GeneralExpConfig",
+    "IndicatorExpConfig",
+    "Order",
+    "OrderRecord",
+    "OrderStatus",
+    "OrderType",
+    "Portfolio",
+    "PortfolioExpConfig",
+    "RunResult",
+    "State",
+    "StrategyExpConfig",
+    "Trade",
+    "experiment_log",
+    "request_abort",
+]

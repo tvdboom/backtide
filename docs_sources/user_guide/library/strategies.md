@@ -52,7 +52,7 @@ An order is a trade instruction. Each order is an [`Order`] object with a symbol
 a signed quantity, an order type, and — depending on the type — one or two price fields.
 
 ```python
-from backtide.backtest import Order
+from backtide import Order
 
 # Buy 50 shares of AAPL at market price
 Order(symbol="AAPL", order_type="market", quantity=50)
@@ -172,7 +172,7 @@ If you didn't assign a custom `id` when submitting the order, the engine
 auto-generates one. You can retrieve it from the portfolio:
 
 ```python
-from backtide.backtest import OrderType
+from backtide import OrderType
 
 # Cancel all pending stop-loss orders for AAPL
 for pending in portfolio.orders:
@@ -227,9 +227,17 @@ You can create your own strategies by subclassing `BaseStrategy`. Custom
 strategies can be written directly in the [application's][application] code
 editor or uploaded as `.py` files.
 
+### Preserve constructor configuration {#constructor-configuration}
+
+Store every constructor parameter on an instance attribute with the same name. This lets Backtide
+recreate a saved strategy with its configured values and safely substitute numeric values during a
+parameter study. If a required parameter does not need to be persisted, give it a constructor
+default instead. The example below follows this practice by assigning `cash_fraction` to
+`self.cash_fraction`.
+
 ??? example
     ```python title="Inside-bar breakout strategy"
-    from backtide.backtest import Order
+    from backtide import Order
     from backtide.sizers import EqualWeight
     from backtide.strategies import BaseStrategy
 

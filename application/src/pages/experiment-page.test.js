@@ -2,6 +2,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, markRaw, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import BenchmarkSelect from '../components/benchmark-select.vue'
 import IntervalPicker from '../components/interval-picker.vue'
 import SearchSelect from '../components/search-select.vue'
 import ExperimentPage from './experiment-page.vue'
@@ -129,6 +130,7 @@ describe('experiment page', () => {
     await wrapper.findAll('.tabs button')[4].trigger('click')
 
     const selectedKeys = () => wrapper.getComponent(SearchSelect).props('modelValue')
+    expect(wrapper.getComponent(SearchSelect).props('reorderable')).toBe(true)
     expect(selectedKeys()).toEqual([
       'sharpe', 'total_return', 'pnl', 'max_dd', 'win_rate', 'final_equity'
     ])
@@ -256,6 +258,155 @@ describe('experiment page', () => {
       await tabButton.trigger('click')
       expect(wrapper.get('button[type="submit"]').text()).toContain('Run experiment')
     }
+  })
+
+  it('hides the walk-forward window summary for full-history studies', async () => {
+    const wrapper = mount(ExperimentPage, { props: { bootstrap } })
+    await flushPromises()
+
+    await wrapper.get('#study-mode').trigger('click')
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+    await wrapper.get('.walk-forward-toggles input.toggle').setValue(true)
+
+    expect(wrapper.find('.walk-forward-window-summary').exists()).toBe(false)
+  })
+
+  it('runs custom-strategy sweeps without hiding any experiment settings', async () => {
+    post.mockResolvedValue({ id: 'study-1' })
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.defaults.general.name = 'Custom study'
+    pageBootstrap.defaults.data.symbols = ['AAPL']
+    pageBootstrap.defaults.data.full_history = false
+    pageBootstrap.defaults.data.start_date = '2019-01-01'
+    pageBootstrap.defaults.data.end_date = '2023-12-31'
+    pageBootstrap.defaults.strategy.strategies = ['Custom crossover']
+    pageBootstrap.strategies.saved = [{
+      name: 'Custom crossover',
+      type: 'CustomCrossover',
+      builtin: false,
+      description: 'Sweep a custom constructor.',
+      required_indicators: [],
+      params: { period: 20, enabled: true },
+      parameters: [
+        { name: 'period', label: 'Period', kind: 'number', default: 20, required: false },
+        { name: 'enabled', label: 'Enabled', kind: 'boolean', default: true, required: false }
+      ]
+    }]
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+
+    await wrapper.get('#study-mode').trigger('click')
+    expect(wrapper.findAll('.tabs button')).toHaveLength(8)
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+    expect(wrapper.get('[aria-label="Study settings"]').text()).toContain('Period')
+    expect(wrapper.get('[aria-label="Study settings"]').text()).not.toContain('Sweep Enabled')
+    expect(wrapper.find('#study-objective').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Maximize objective')
+    expect(wrapper.find('.main-metric-notice').exists()).toBe(false)
+    expect(wrapper.findAll('.sweep-parameter-row input[type="number"]')).toHaveLength(0)
+    const strategySelect = wrapper.findAllComponents(BenchmarkSelect)
+      .find(component => component.props('label') === 'Experiment strategy')
+    expect(strategySelect.props('modelValue')).toBe('Custom crossover')
+    expect(strategySelect.props('uppercaseValue')).toBe(false)
+
+    await wrapper.get('.sweep-parameter-row input.toggle').setValue(true)
+    expect(wrapper.findAll('.sweep-parameter-row input[type="number"]')).toHaveLength(3)
+    await wrapper.get('#sweep-period-min').setValue(10)
+    const rangeInputs = wrapper.findAll('.sweep-parameter-row input[type="number"]')
+    await rangeInputs[1].setValue(30)
+    await rangeInputs[2].setValue(10)
+    await wrapper.get('#study-min-trades').setValue(12)
+    await wrapper.get('#study-max-drawdown').setValue(25)
+    await wrapper.findAll('input.toggle')[1].setValue(true)
+    expect(wrapper.findAll('.walk-forward-window-row input[type="number"]')).toHaveLength(3)
+    expect(wrapper.get('.walk-forward-window-summary').text()).toBe(
+      '2 windows · 2 training experiments per parameter set · one winner test per window.'
+    )
+    expect(wrapper.get('.candidate-count').text()).toBe('3 candidates')
+
+    await wrapper.get('button[type="submit"]').trigger('submit')
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith('/api/studies', {
+      config: expect.objectContaining({
+        general: expect.objectContaining({ name: 'Custom study' }),
+        data: expect.objectContaining({ symbols: ['AAPL'] }),
+        strategy: expect.objectContaining({ strategies: ['Custom crossover'] })
+      }),
+      study: {
+        strategy: 'Custom crossover',
+        parameter_space: { period: [10, 20, 30] },
+        min_trades: 12,
+        max_drawdown: 0.25,
+        walk_forward: {
+          training_days: 1095,
+          test_days: 365,
+          step_days: null,
+          anchored: false
+        }
+      }
+    })
+    expect(wrapper.emitted('navigate')).toEqual([['results']])
+  })
+
+  it('restores an exact saved study draft', async () => {
+    post.mockResolvedValue({ id: 'study-2' })
+    const pageBootstrap = structuredClone(bootstrap)
+    pageBootstrap.strategies.saved = [{
+      name: 'Custom crossover',
+      type: 'CustomCrossover',
+      builtin: false,
+      description: 'Sweep a custom constructor.',
+      required_indicators: [],
+      parameters: [
+        { name: 'period', label: 'Period', kind: 'number', default: 20, required: false }
+      ]
+    }]
+    const draft = structuredClone(pageBootstrap.defaults)
+    draft.general.name = 'Saved study'
+    draft.data.symbols = ['AAPL']
+    draft.strategy.strategies = ['Custom crossover']
+    draft._study = {
+      parameter_space: { period: [10, 17, 30] },
+      min_trades: 12,
+      max_drawdown: 0.25,
+      walk_forward: {
+        training_days: 730,
+        test_days: 180,
+        step_days: 90,
+        anchored: true
+      }
+    }
+    sessionStorage.setItem('backtide:experiment-config', JSON.stringify(draft))
+
+    const wrapper = mount(ExperimentPage, { props: { bootstrap: pageBootstrap } })
+    await flushPromises()
+    expect(wrapper.get('#study-mode').classes()).toContain('active')
+    await wrapper.findAll('.tabs button')[3].trigger('click')
+    expect(wrapper.get('.candidate-count').text()).toBe('3 candidates')
+    expect(wrapper.get('#study-min-trades').element.value).toBe('12')
+    expect(wrapper.get('#study-max-drawdown').element.value).toBe('25')
+    expect(wrapper.get('#study-training-days').element.value).toBe('730')
+    expect(wrapper.findAll('.walk-forward-window-row input[type="number"]')[1].element.value).toBe('180')
+    expect(wrapper.findAll('.walk-forward-window-row input[type="number"]')[2].element.value).toBe('90')
+
+    await wrapper.get('button[type="submit"]').trigger('submit')
+    await flushPromises()
+
+    expect(post).toHaveBeenCalledWith('/api/studies', expect.objectContaining({
+      study: {
+        strategy: 'Custom crossover',
+        parameter_space: { period: [10, 17, 30] },
+        min_trades: 12,
+        max_drawdown: 0.25,
+        walk_forward: {
+          training_days: 730,
+          test_days: 180,
+          step_days: 90,
+          anchored: true
+        }
+      }
+    }))
   })
 
   it('clears the symbol search when the instrument type changes', async () => {
@@ -634,6 +785,7 @@ describe('experiment page', () => {
     }))
     expect(wrapper.emitted('navigate')).toEqual([['results']])
     expect(sessionStorage.getItem('backtide:results-overview')).toBe('true')
+    expect(sessionStorage.getItem('backtide:result-job-id')).toBe('experiment-1')
     expect(wrapper.get('.tabs button.active').text()).toContain('General')
     expect(wrapper.get('#experiment-name').element.value).toBe('')
 

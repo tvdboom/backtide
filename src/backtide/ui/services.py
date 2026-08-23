@@ -95,26 +95,50 @@ class JobStore:
         self._max_completed = max_completed
         self._lock = threading.RLock()
 
-    def start(self, kind: str, work: Callable[[], Any]) -> dict[str, Any]:
-        """Start work in a daemon thread and return its initial snapshot."""
+    def start(
+        self,
+        kind: str,
+        work: Callable[[Callable[[float, float], None]], Any],
+        *,
+        name: str | None = None,
+        progress_unit: str | None = None,
+    ) -> dict[str, Any]:
+        """Start named work in a daemon thread and return its initial snapshot."""
         job_id = uuid.uuid4().hex[:16]
         job = {
             "id": job_id,
             "kind": kind,
+            "name": name,
             "status": "queued",
             "created_at": datetime.now().astimezone().isoformat(),
+            "progress_completed": 0.0,
+            "progress_total": None,
+            "progress_unit": progress_unit,
             "result": None,
             "error": None,
         }
         with self._lock:
             self._jobs[job_id] = job
 
+        def update_progress(completed: float, total: float) -> None:
+            """Store one bounded progress update without allowing regression."""
+            completed_value = max(0.0, float(completed))
+            total_value = max(0.0, float(total))
+            if total_value <= 0.0:
+                return
+            with self._lock:
+                previous = float(job.get("progress_completed") or 0.0)
+                job["progress_completed"] = max(previous, min(completed_value, total_value))
+                job["progress_total"] = total_value
+                if "progress_started_at" not in job:
+                    job["progress_started_at"] = datetime.now().astimezone().isoformat()
+
         def runner() -> None:
             with self._lock:
                 job["status"] = "running"
                 job["started_at"] = datetime.now().astimezone().isoformat()
             try:
-                result = work()
+                result = work(update_progress)
             except Exception as exc:  # noqa: BLE001
                 with self._lock:
                     job["status"] = "error"
@@ -174,7 +198,7 @@ class BacktideServices:
 
     def __init__(self, jobs: JobStore | None = None):
         self.jobs = jobs or JobStore()
-        self._result_runs_cache: tuple[str, list[Any]] | None = None
+        self._result_runs_cache: tuple[tuple[str, bool, bool, bool], list[Any]] | None = None
         self._result_runs_lock = threading.Lock()
 
     def bootstrap(self) -> dict[str, Any]:
@@ -335,7 +359,7 @@ class BacktideServices:
         start = self._date_boundary(payload.get("start"), end=False)
         end = self._date_boundary(payload.get("end"), end=True)
 
-        def work() -> dict[str, Any]:
+        def work(_progress: Callable[[float, float], None]) -> dict[str, Any]:
             from backtide.data import download_bars, resolve_profiles
 
             profiles = resolve_profiles(
@@ -490,7 +514,7 @@ class BacktideServices:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Return one page of persisted experiment summaries with lightweight run metrics."""
-        from backtide.storage import query_experiments, query_strategy_runs
+        from backtide.storage import query_experiments, query_strategy_runs, query_study
 
         bounded_limit = max(1, min(int(limit), 100))
         bounded_offset = max(0, int(offset))
@@ -502,11 +526,13 @@ class BacktideServices:
         experiment_root = Path(get_config().data.storage_path) / "experiments"
         metric_catalog = self.metric_catalog()
         for experiment in experiments:
-            runs = query_strategy_runs(
+            stored_runs = query_strategy_runs(
                 experiment["id"],
                 include_equity_curve=False,
+                include_trades=False,
+                include_orders=False,
             )
-            experiment["runs"] = [
+            all_runs = [
                 _clean(
                     public_attributes(
                         run,
@@ -520,34 +546,53 @@ class BacktideServices:
                         ),
                     )
                 )
-                for run in runs
+                for run in stored_runs
             ]
+            all_runs.sort(key=lambda run: not bool(run.get("is_benchmark")))
             config_text = self._read_text(
                 experiment_root / experiment["id"] / "config.toml", max_bytes=500_000
             )
-            self._apply_benchmark_display_name(config_text, experiment["runs"])
+            self._apply_benchmark_display_name(config_text, all_runs)
             config_metadata = self._experiment_config_metadata(config_text) or {}
             experiment["n_symbols"] = int(config_metadata.get("symbols", 0))
-            experiment.update(
-                self._primary_metric_summary(config_text, experiment["runs"], metric_catalog)
-            )
+            experiment.update(self._primary_metric_summary(config_text, all_runs, metric_catalog))
+            study = query_study(experiment["id"])
+            if study is None:
+                experiment["runs"] = all_runs
+                continue
+            self._apply_study_run_metadata(all_runs, study)
+            experiment.update(self._study_metric_summary(study, metric_catalog))
+            experiment["runs"] = self._study_detail_runs(all_runs, study)
+            experiment["kind"] = "study"
+            experiment["study"] = {
+                "candidate_count": len(study.candidates),
+                "fold_count": len(study.folds),
+                "objective": study.objective,
+                "best_candidate_id": study.best_candidate_id,
+            }
         return experiments
 
     def experiment(self, experiment_id: str) -> dict[str, Any]:
         """Return experiment details without embedding large order histories."""
         from backtide.config import get_config
-        from backtide.storage import query_experiments, query_strategy_runs
+        from backtide.storage import query_experiments, query_strategy_runs, query_study
 
         rows = dataframe_records(query_experiments(experiment_id))
         if not rows:
             raise APIError("Experiment not found.", 404)
-        runs = [
-            self._serialize_run(run, include_orders=False)
-            for run in query_strategy_runs(
-                experiment_id,
-                include_equity_curve=False,
-            )
-        ]
+        stored_runs = query_strategy_runs(
+            experiment_id,
+            include_equity_curve=False,
+            include_trades=False,
+            include_orders=False,
+        )
+        study = query_study(experiment_id)
+        if study is None:
+            selected_runs = stored_runs
+        else:
+            selected_runs = self._study_detail_runs(stored_runs, study)
+        runs = [self._serialize_run(run, include_orders=False) for run in selected_runs]
+        runs.sort(key=lambda run: not bool(run.get("is_benchmark")))
         root = Path(get_config().data.storage_path) / "experiments" / experiment_id
         config_text = self._read_text(root / "config.toml", max_bytes=500_000)
         log_text, logs_truncated = self._read_log_tail(
@@ -558,9 +603,13 @@ class BacktideServices:
         experiment = rows[0]
         self._apply_benchmark_display_name(config_text, runs)
         experiment.update(self._primary_metric_summary(config_text, runs))
+        if study is not None:
+            self._apply_study_run_metadata(runs, study)
+            experiment.update(self._study_metric_summary(study, self.metric_catalog()))
         return {
             "experiment": experiment,
             "runs": runs,
+            "study": study.to_dict() if study is not None else None,
             "config": config_text,
             "config_metadata": self._experiment_config_metadata(config_text),
             "logs": log_text,
@@ -579,7 +628,15 @@ class BacktideServices:
             raise APIError("Order offset must be zero or greater.")
         if limit < 1 or limit > 500:
             raise APIError("Order limit must be between 1 and 500.")
-        runs = self._query_result_runs(experiment_id)
+        runs = sorted(
+            self._query_result_runs(
+                experiment_id,
+                include_equity_curve=False,
+                include_trades=False,
+                include_orders=True,
+            ),
+            key=lambda result: not bool(getattr(result, "is_benchmark", False)),
+        )
         if not runs:
             raise APIError("Experiment runs were not found.", 404)
         run = self._select_run(runs, strategy_id)
@@ -618,13 +675,28 @@ class BacktideServices:
         from backtide import analysis
         from backtide.backtest import ExperimentConfig
         from backtide.config import get_config
-        from backtide.storage import query_bars
+        from backtide.storage import query_bars, query_study
 
         experiment_id = str(payload.get("experiment_id") or "")
         plot_name = str(payload.get("plot") or "")
-        runs = self._query_result_runs(experiment_id)
+        equity_plots = {"pnl", "cash", "rolling_returns", "rolling_sharpe"}
+        trade_plots = {"pnl_histogram", "trade_duration", "trade_pnl", "mae_mfe", "price"}
+        order_plots = {"position_size"}
+        runs = self._query_result_runs(
+            experiment_id,
+            include_equity_curve=plot_name in equity_plots,
+            include_trades=plot_name in trade_plots,
+            include_orders=plot_name in order_plots,
+        )
         if not runs:
             raise APIError("Experiment runs were not found.", 404)
+        study = query_study(experiment_id)
+        if study is not None:
+            runs = self._study_detail_runs(runs, study)
+        runs = sorted(
+            runs,
+            key=lambda result: not bool(getattr(result, "is_benchmark", False)),
+        )
         root = Path(get_config().data.storage_path) / "experiments" / experiment_id
         config_text = self._read_text(root / "config.toml", max_bytes=500_000)
         if not config_text:
@@ -706,7 +778,15 @@ class BacktideServices:
             raise APIError("Unknown result plot.", 404)
         if figure is None:
             raise APIError("The plot could not be generated.", 422)
-        return json.loads(figure.to_json())
+        figure_data = json.loads(figure.to_json())
+        if study is not None:
+            replacements = {
+                candidate.strategy_name: candidate.strategy_name.split(" · ", 1)[0]
+                for candidate in study.candidates
+                if " · " in candidate.strategy_name
+            }
+            figure_data = self._replace_figure_candidate_names(figure_data, replacements)
+        return figure_data
 
     def start_experiment(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate an experiment configuration and run it in the background."""
@@ -714,8 +794,8 @@ class BacktideServices:
 
         config = ExperimentConfig.from_dict(payload)
 
-        def work() -> dict[str, Any]:
-            result = Experiment(config).run(verbose=False)
+        def work(progress: Callable[[float, float], None]) -> dict[str, Any]:
+            result = Experiment(config).run(verbose=False, progress_callback=progress)
             return public_attributes(
                 result,
                 (
@@ -729,7 +809,134 @@ class BacktideServices:
                 ),
             )
 
-        return self.jobs.start("experiment", work)
+        return self.jobs.start(
+            "experiment",
+            work,
+            name=config.general.name.strip() or "Unnamed experiment",
+            progress_unit="simulation steps",
+        )
+
+    def start_study(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate and run a study in the background."""
+        from backtide.backtest import ExperimentConfig
+        from backtide.backtest.study import Study, WalkForwardConfig
+
+        config_value = payload.get("config")
+        study_value = payload.get("study")
+        if not isinstance(config_value, dict) or not isinstance(study_value, dict):
+            raise APIError("Study requests require config and study objects.")
+        config = ExperimentConfig.from_dict(config_value)
+        parameter_space = study_value.get("parameter_space")
+        if not isinstance(parameter_space, dict):
+            raise APIError("Study parameter_space must be an object.")
+        walk_forward_value = study_value.get("walk_forward")
+        if walk_forward_value is not None and not isinstance(walk_forward_value, dict):
+            raise APIError("walk_forward must be an object when provided.")
+        walk_forward = (
+            WalkForwardConfig(**walk_forward_value) if walk_forward_value is not None else None
+        )
+        study = Study(
+            config,
+            strategy=study_value.get("strategy"),
+            parameter_space=parameter_space,
+            min_trades=int(study_value.get("min_trades", 0)),
+            max_drawdown=(
+                float(study_value["max_drawdown"])
+                if study_value.get("max_drawdown") is not None
+                else None
+            ),
+            walk_forward=walk_forward,
+        )
+
+        def work(progress: Callable[[float, float], None]) -> dict[str, Any]:
+            result = study.run(verbose=False, progress_callback=progress)
+            return {
+                "study_id": result.study_id,
+                "name": result.name,
+                "candidate_count": len(result.candidates),
+                "fold_count": len(result.folds),
+                "best_candidate_id": result.best_candidate_id,
+            }
+
+        return self.jobs.start(
+            "study",
+            work,
+            name=config.general.name.strip() or "Unnamed study",
+            progress_unit="candidate runs",
+        )
+
+    def reuse_study_setup(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create a normal-experiment draft using a study's best candidate."""
+        from backtide.backtest import ExperimentConfig
+        from backtide.config import get_config
+        from backtide.storage import query_study
+        from backtide.strategies.utils import _load_stored_strategies, _save_strategy
+
+        study_id = str(payload.get("study_id") or "").strip()
+        if not study_id:
+            raise APIError("Study id is required.")
+        study = query_study(study_id)
+        if study is None:
+            raise APIError("Study not found.", 404)
+        candidate = study.best_candidate
+        if candidate is None:
+            raise APIError("This study has no eligible candidate to reuse.", 422)
+
+        cfg = get_config()
+        stored = _load_stored_strategies(cfg)
+        template = stored.get(study.strategy_name)
+        if template is None:
+            raise APIError(f"Saved strategy {study.strategy_name!r} was not found.", 404)
+        try:
+            strategy = type(template)(**candidate.parameters)
+        except Exception as exc:
+            raise APIError(f"Best candidate could not be reconstructed: {exc}", 422) from exc
+
+        compact_name = candidate.strategy_name.split(" · ", 1)[0]
+        saved_name = f"{study.strategy_name} · {compact_name}"
+        _save_strategy(strategy, saved_name, cfg)
+
+        root = Path(cfg.data.storage_path) / "experiments" / study_id
+        text = self._read_text(root / "config.toml", max_bytes=500_000)
+        if not text:
+            raise APIError("The experiment configuration was not found.", 404)
+        config = ExperimentConfig.from_toml(text)
+        draft = config.to_dict()
+        draft["general"]["name"] = f"{study.name} · {compact_name}"
+        draft["strategy"]["strategies"] = [saved_name]
+        return draft
+
+    def rerun_study(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return a builder draft containing the complete saved study setup."""
+        from backtide.backtest import ExperimentConfig
+        from backtide.config import get_config
+        from backtide.storage import query_study
+        from backtide.strategies.utils import _load_stored_strategies
+
+        study_id = str(payload.get("study_id") or "").strip()
+        if not study_id:
+            raise APIError("Study id is required.")
+        study = query_study(study_id)
+        if study is None:
+            raise APIError("Study not found.", 404)
+
+        cfg = get_config()
+        if study.strategy_name not in _load_stored_strategies(cfg):
+            raise APIError(f"Saved strategy {study.strategy_name!r} was not found.", 404)
+        root = Path(cfg.data.storage_path) / "experiments" / study_id
+        text = self._read_text(root / "config.toml", max_bytes=500_000)
+        if not text:
+            raise APIError("The experiment configuration was not found.", 404)
+        config = ExperimentConfig.from_toml(text)
+        draft = config.to_dict()
+        draft["strategy"]["strategies"] = [study.strategy_name]
+        draft["_study"] = {
+            "parameter_space": dict(study.parameter_space),
+            "min_trades": study.min_trades,
+            "max_drawdown": study.max_drawdown,
+            "walk_forward": self._saved_walk_forward_settings(study),
+        }
+        return draft
 
     def parse_experiment_config(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Parse an uploaded TOML, YAML or JSON experiment configuration."""
@@ -845,6 +1052,7 @@ class BacktideServices:
         saved = []
         for name, value in _load_stored_strategies(get_config()).items():
             builtin = _is_builtin_strategy(value)
+            params = self._constructor_values(value)
             saved.append(
                 {
                     "name": name,
@@ -853,7 +1061,8 @@ class BacktideServices:
                     "description": self._catalog_description(value),
                     "required_indicators": self._required_indicator_catalog(value),
                     "source": getattr(value, "_source_code", None),
-                    "params": self._constructor_values(value) if builtin else {},
+                    "parameters": self._constructor_parameters(type(value), defaults=params),
+                    "params": params,
                 }
             )
         return {"builtin": builtins, "saved": saved}
@@ -1021,7 +1230,7 @@ class BacktideServices:
         """Return Rust built-in metrics and saved custom Python metrics."""
         from backtide.config import get_config
         from backtide.metrics import BUILTIN_METRICS
-        from backtide.metrics.utils import _load_stored_metrics
+        from backtide.metrics.utils import _load_stored_metrics, _metric_greater_is_better
 
         builtins = [
             {
@@ -1031,6 +1240,7 @@ class BacktideServices:
                 "builtin": True,
                 "description": value.description,
                 "percentage": value.percentage,
+                "greater_is_better": value.higher_is_better,
                 "higher_is_better": value.higher_is_better,
             }
             for value in BUILTIN_METRICS
@@ -1043,7 +1253,7 @@ class BacktideServices:
                 "builtin": False,
                 "description": self._custom_metric_description(value),
                 "percentage": bool(getattr(value, "percentage", False)),
-                "higher_is_better": bool(getattr(value, "higher_is_better", True)),
+                "greater_is_better": _metric_greater_is_better(value),
                 "source": getattr(value, "_source_code", None),
             }
             for name, value in _load_stored_metrics(get_config()).items()
@@ -1515,6 +1725,8 @@ class BacktideServices:
         selected_metrics: list[str] = []
         try:
             configured_metrics = tomllib.loads(config_text or "").get("metrics", [])
+            if isinstance(configured_metrics, dict):
+                configured_metrics = configured_metrics.get("selected", [])
             if isinstance(configured_metrics, list):
                 selected_metrics = list(
                     dict.fromkeys(str(metric) for metric in configured_metrics if metric)
@@ -1537,8 +1749,17 @@ class BacktideServices:
             for run in candidates
             if run.get("metrics", {}).get(metric_key) is not None
         ]
-        higher_is_better = bool(definition.get("higher_is_better", True)) if definition else True
-        best = (max(values) if higher_is_better else min(values)) if values else None
+        greater_is_better = (
+            bool(
+                definition.get(
+                    "greater_is_better",
+                    definition.get("higher_is_better", True),
+                )
+            )
+            if definition
+            else True
+        )
+        best = (max(values) if greater_is_better else min(values)) if values else None
         return {
             "primary_metric": metric_key,
             "selected_metrics": selected_metrics,
@@ -1551,15 +1772,152 @@ class BacktideServices:
             else False,
         }
 
-    def _query_result_runs(self, experiment_id: str) -> list[Any]:
-        """Load and retain one full result so adjacent plot requests reuse it."""
+    @staticmethod
+    def _study_metric_summary(
+        study: Any,
+        catalog: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Return the objective for the study's highest-ranked eligible candidate."""
+        definition = next(
+            (
+                item
+                for item in catalog["builtin"] + catalog["saved"]
+                if item.get("key") == study.objective
+            ),
+            None,
+        )
+        best = study.best_candidate
+        return {
+            "primary_metric": study.objective,
+            "primary_metric_name": (
+                definition.get("name", study.objective) if definition else study.objective
+            ),
+            "primary_metric_value": (
+                best.metrics.get(study.objective) if best is not None else None
+            ),
+            "primary_metric_percentage": (
+                bool(definition.get("percentage", False)) if definition else False
+            ),
+        }
+
+    @staticmethod
+    def _apply_study_run_metadata(runs: list[dict[str, Any]], study: Any) -> None:
+        """Attach compact candidate names and parameters to serialized runs."""
+        candidates = {
+            candidate.strategy_id: candidate
+            for candidate in study.candidates
+            if candidate.strategy_id
+        }
+        for run in runs:
+            candidate = candidates.get(run.get("strategy_id"))
+            if candidate is None:
+                continue
+            run["strategy_name"] = candidate.strategy_name.split(" · ", 1)[0]
+            run["parameters"] = dict(candidate.parameters)
+
+    @staticmethod
+    def _study_detail_runs(runs: list[Any], study: Any) -> list[Any]:
+        """Return the benchmark followed by the three highest-ranked eligible candidates."""
+
+        def run_value(run: Any, name: str) -> Any:
+            """Read a run field from either a serialized mapping or a result object."""
+            return run.get(name) if isinstance(run, dict) else getattr(run, name, None)
+
+        benchmark_runs = [run for run in runs if bool(run_value(run, "is_benchmark"))]
+        runs_by_strategy_id = {
+            run_value(run, "strategy_id"): run
+            for run in runs
+            if not bool(run_value(run, "is_benchmark"))
+        }
+        ranked_candidates = sorted(
+            (
+                candidate
+                for candidate in study.candidates
+                if candidate.strategy_id
+                and candidate.rank is not None
+                and candidate.rank <= 3
+                and candidate.strategy_id in runs_by_strategy_id
+            ),
+            key=lambda candidate: candidate.rank,
+        )
+        return [
+            *benchmark_runs,
+            *(runs_by_strategy_id[candidate.strategy_id] for candidate in ranked_candidates),
+        ]
+
+    @classmethod
+    def _replace_figure_candidate_names(
+        cls,
+        value: Any,
+        replacements: dict[str, str],
+    ) -> Any:
+        """Replace legacy parameter-heavy candidate names throughout a Plotly payload."""
+        if isinstance(value, dict):
+            return {
+                key: cls._replace_figure_candidate_names(item, replacements)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [cls._replace_figure_candidate_names(item, replacements) for item in value]
+        if isinstance(value, str):
+            for stored_name, compact_name in replacements.items():
+                value = value.replace(stored_name, compact_name)
+        return value
+
+    @staticmethod
+    def _saved_walk_forward_settings(study: Any) -> dict[str, Any] | None:
+        """Return persisted settings or infer legacy settings from completed folds."""
+        if study.walk_forward is not None:
+            return asdict(study.walk_forward)
+        folds = list(study.folds)
+        if not folds:
+            return None
+        first = folds[0]
+        training_days = (
+            date.fromisoformat(first.training_end) - date.fromisoformat(first.training_start)
+        ).days + 1
+        test_days = (
+            date.fromisoformat(first.test_end) - date.fromisoformat(first.test_start)
+        ).days + 1
+        step_days = test_days
+        if len(folds) > 1:
+            step_days = (
+                date.fromisoformat(folds[1].test_start) - date.fromisoformat(first.test_start)
+            ).days
+        return {
+            "training_days": training_days,
+            "test_days": test_days,
+            "step_days": step_days,
+            "anchored": all(fold.training_start == first.training_start for fold in folds),
+        }
+
+    def _query_result_runs(
+        self,
+        experiment_id: str,
+        *,
+        include_equity_curve: bool = True,
+        include_trades: bool = True,
+        include_orders: bool = True,
+    ) -> list[Any]:
+        """Load and retain one result projection so repeated plot requests reuse it."""
         from backtide.storage import query_strategy_runs
 
+        cache_key = (
+            experiment_id,
+            include_equity_curve,
+            include_trades,
+            include_orders,
+        )
         with self._result_runs_lock:
-            if self._result_runs_cache and self._result_runs_cache[0] == experiment_id:
+            if self._result_runs_cache and self._result_runs_cache[0] == cache_key:
                 return self._result_runs_cache[1]
-            runs = query_strategy_runs(experiment_id)
-            self._result_runs_cache = (experiment_id, runs)
+            runs = query_strategy_runs(
+                experiment_id,
+                include_equity_curve=include_equity_curve,
+                include_trades=include_trades,
+                include_orders=include_orders,
+            )
+            self._result_runs_cache = (cache_key, runs)
             return runs
 
     @staticmethod
@@ -1709,6 +2067,9 @@ class BacktideServices:
         symbols = data.get("symbols")
         return {
             "symbols": len(symbols) if isinstance(symbols, list) else 0,
+            "symbol_values": [str(symbol) for symbol in symbols]
+            if isinstance(symbols, list)
+            else [],
             "instrument_type": str(data.get("instrument_type") or ""),
             "interval": str(data.get("interval") or "—"),
             "full_history": bool(data.get("full_history", False)),
@@ -1785,8 +2146,19 @@ class BacktideServices:
 
     @staticmethod
     def _constructor_values(value: Any) -> dict[str, Any]:
-        """Return the constructor values stored in a built-in library object."""
-        return {name: getattr(value, name) for name in inspect.signature(type(value)).parameters}
+        """Return reconstructable constructor values stored on a library object."""
+        values = {}
+        for name, parameter in inspect.signature(type(value)).parameters.items():
+            if parameter.kind in {
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            }:
+                continue
+            if hasattr(value, name):
+                values[name] = getattr(value, name)
+            elif parameter.default is not inspect.Parameter.empty:
+                values[name] = parameter.default
+        return values
 
     @staticmethod
     def _build_library_asset(

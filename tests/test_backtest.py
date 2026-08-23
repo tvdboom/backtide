@@ -10,7 +10,6 @@ from typing import Any, cast
 import pandas as pd
 import pytest
 
-import backtide.backtest as backtest_module
 from backtide.backtest import (
     CommissionType,
     ConversionPeriod,
@@ -32,6 +31,7 @@ from backtide.backtest import (
     RunResult,
     Trade,
 )
+import backtide.backtest.experiment as backtest_module
 from backtide.indicators import SimpleMovingAverage
 from backtide.strategies import BaseStrategy, BuyAndHold
 
@@ -210,8 +210,21 @@ class TestExperimentConfig:
         )
         toml_str = ec.to_toml()
         ec2 = ExperimentConfig.from_toml(toml_str)
+        assert toml_str.index("[indicators]") < toml_str.index("[metrics]")
+        assert toml_str.index("[metrics]") < toml_str.index("[exchange]")
+        assert "[metrics]\nselected = [" in toml_str
         assert ec2.general.name == "roundtrip"
         assert ec2.data.symbols == ["AAPL"]
+        assert ec2.metrics == ec.metrics
+
+    def test_from_toml_accepts_legacy_root_level_metrics(self):
+        """Test compatibility with configurations saved before the metrics section."""
+        config = ExperimentConfig.from_toml(
+            'metrics = ["total_return"]\n\n[general]\nname = "legacy"\n'
+        )
+
+        assert config.general.name == "legacy"
+        assert config.metrics == ["total_return"]
 
     def test_to_dict_from_dict_roundtrip(self):
         """Test dict round-trip serialization."""
@@ -373,6 +386,16 @@ class TestResultModels:
         assert RunResult is not None
         assert ExperimentResult is not None
 
+    def test_headline_types_are_available_from_all_public_paths(self):
+        """Experiments and studies are importable from Backtide and its backtest package."""
+        from backtide import Experiment as TopLevelExperiment
+        from backtide import Study as TopLevelStudy
+        from backtide.backtest.experiment import Experiment as ModuleExperiment
+        from backtide.backtest.study import Study as ModuleStudy
+
+        assert TopLevelExperiment is Experiment is ModuleExperiment
+        assert TopLevelStudy is ModuleStudy
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Experiment
@@ -459,6 +482,27 @@ class TestExperiment:
         assert captured["strategies"] == {"Runtime strategy": strategy}
         assert captured["indicators"] == {"Runtime indicator": indicator}
         assert captured["verbose"] is False
+
+    def test_progress_callback_is_forwarded(self, monkeypatch):
+        """A progress callback reaches the low-level simulation engine."""
+        captured = None
+
+        def fake_run(_config, _verbose, _strategies, _indicators, progress_callback):
+            nonlocal captured
+            captured = progress_callback
+            progress_callback(4, 10)
+            return object()
+
+        updates = []
+        monkeypatch.setattr(backtest_module, "_run_experiment", fake_run)
+
+        Experiment(_fixture_config(), strategies=[BuyAndHold()]).run(
+            verbose=False,
+            progress_callback=lambda completed, total: updates.append((completed, total)),
+        )
+
+        assert captured is not None
+        assert updates == [(4, 10)]
 
     def test_blank_name_is_generated(self, monkeypatch):
         """A blank name is replaced before dispatch."""
@@ -614,7 +658,7 @@ class TestCleanupExperiment:
         """A known experiment id is deleted directly."""
         from unittest.mock import patch
 
-        with patch("backtide.backtest._delete_experiment") as delete:
+        with patch("backtide.backtest.experiment._delete_experiment") as delete:
             backtest_module._cleanup_experiment("exp-123", "name")
             delete.assert_called_once_with("exp-123")
 
@@ -623,9 +667,12 @@ class TestCleanupExperiment:
         from unittest.mock import patch
 
         with (
-            patch("backtide.backtest._query_experiments") as query,
-            patch("backtide.backtest._to_pandas", return_value=pd.DataFrame({"id": ["exp-456"]})),
-            patch("backtide.backtest._delete_experiment") as delete,
+            patch("backtide.backtest.experiment._query_experiments") as query,
+            patch(
+                "backtide.backtest.experiment._to_pandas",
+                return_value=pd.DataFrame({"id": ["exp-456"]}),
+            ),
+            patch("backtide.backtest.experiment._delete_experiment") as delete,
         ):
             backtest_module._cleanup_experiment(None, "name")
             query.assert_called_once_with(search="name", limit=1)
@@ -635,7 +682,10 @@ class TestCleanupExperiment:
         """Cleanup remains best effort."""
         from unittest.mock import patch
 
-        with patch("backtide.backtest._query_experiments", side_effect=RuntimeError("failed")):
+        with patch(
+            "backtide.backtest.experiment._query_experiments",
+            side_effect=RuntimeError("failed"),
+        ):
             backtest_module._cleanup_experiment(None, "name")
 
 

@@ -1,7 +1,18 @@
 <template>
   <div class="search-select">
     <div class="tag-field" :class="{ focused }" @click="input?.focus()">
-      <span v-for="item in modelValue" :key="item" class="tag" :class="{ detailed: showSelectedDescription }">
+      <span
+        v-for="item in modelValue"
+        :key="item"
+        class="tag"
+        :class="{ detailed: showSelectedDescription, reorderable, dragging: draggedTag === item, 'drop-target': dragOverTag === item }"
+        :draggable="reorderable"
+        :title="reorderable ? `Drag ${item} to reorder` : undefined"
+        @dragstart.stop="startTagDrag($event, item)"
+        @dragover.stop.prevent="reorderTag($event, item)"
+        @drop.stop.prevent="finishTagDrag"
+        @dragend="finishTagDrag"
+      >
         <span v-if="hasLogoEntry(item)" class="selected-symbol-logo" aria-hidden="true">
           <ChartCandlestick v-if="!loadedSelectedLogos.has(item)" :size="13" />
           <img
@@ -9,6 +20,9 @@
             :class="{ loaded: loadedSelectedLogos.has(item) }"
             :src="selectedLogoSource(item)"
             alt=""
+            decoding="async"
+            fetchpriority="high"
+            loading="eager"
             @load="selectedLogoLoaded(item)"
             @error="selectedLogoFailed(item)"
           />
@@ -42,7 +56,7 @@
     </div>
     <div v-else-if="focused && filtered.length" class="search-menu">
       <button
-        v-for="option in filtered"
+        v-for="(option, index) in filtered"
         :key="option"
         type="button"
         :class="{ 'plain-option': plainOptions }"
@@ -56,9 +70,12 @@
         <template v-else>
           <span class="search-option-logo">
             <img
-              v-if="logos[option] && !failedMenuLogos.has(option)"
+              v-if="index < menuLogoRequestLimit && logos[option] && !failedMenuLogos.has(option)"
               :src="logos[option]"
               alt=""
+              decoding="async"
+              fetchpriority="low"
+              loading="lazy"
               @error="logoFailed(option)"
             />
             <component :is="optionIconFor(option)" v-else-if="optionIconFor(option)" :size="18" aria-hidden="true" />
@@ -93,6 +110,7 @@ const props = defineProps({
   optionIcons: { type: Object, default: () => ({}) },
   optionNameFirst: Boolean,
   plainOptions: Boolean,
+  reorderable: Boolean,
   removable: { type: Boolean, default: true },
   resultLimit: { type: Number, default: 100 },
   showSelectedDescription: Boolean,
@@ -103,9 +121,12 @@ const emit = defineEmits(['update:modelValue'])
 const input = ref(null)
 const needle = ref('')
 const focused = ref(false)
+const draggedTag = ref('')
+const dragOverTag = ref('')
 const failedMenuLogos = reactive(new Set())
 const loadedSelectedLogos = reactive(new Set())
 const selectedLogoFailures = reactive(new Map())
+const menuLogoRequestLimit = 12
 let closeTimer
 const filtered = computed(() => {
   const search = needle.value.trim().toLowerCase()
@@ -189,6 +210,39 @@ function open() {
 }
 function remove(value) {
   emit('update:modelValue', props.modelValue.filter(item => item !== value))
+}
+function startTagDrag(event, value) {
+  if (!props.reorderable) {
+    event.preventDefault()
+    return
+  }
+  draggedTag.value = value
+  dragOverTag.value = ''
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', value)
+  }
+}
+function reorderTag(event, targetValue) {
+  const sourceValue = draggedTag.value
+  if (!props.reorderable || !sourceValue || targetValue === sourceValue) return
+  dragOverTag.value = targetValue
+  const from = props.modelValue.indexOf(sourceValue)
+  const target = props.modelValue.indexOf(targetValue)
+  if (from < 0 || target < 0) return
+  const bounds = event.currentTarget.getBoundingClientRect()
+  let insertion = target + (event.clientX > bounds.left + bounds.width / 2 ? 1 : 0)
+  if (from < insertion) insertion -= 1
+  insertion = Math.max(0, Math.min(props.modelValue.length - 1, insertion))
+  if (insertion === from) return
+  const reordered = [...props.modelValue]
+  const [value] = reordered.splice(from, 1)
+  reordered.splice(insertion, 0, value)
+  emit('update:modelValue', reordered)
+}
+function finishTagDrag() {
+  draggedTag.value = ''
+  dragOverTag.value = ''
 }
 function close() {
   window.clearTimeout(closeTimer)

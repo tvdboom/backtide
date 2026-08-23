@@ -104,7 +104,7 @@ This is the simplest option. The engine supplies current equity and price, then
 resolves the concrete quantity before validation and fill processing.
 
 ```python
-from backtide.backtest import Order
+from backtide import Order
 from backtide.sizers import FixedFractional
 from backtide.strategies import BaseStrategy
 
@@ -132,7 +132,7 @@ For [`RiskBased`], set the order's `price` to your stop level. The engine derive
 `stop_distance = abs(current_close - price)` and passes it to the sizer.
 
 ```python
-from backtide.backtest import Order
+from backtide import Order
 from backtide.sizers import RiskBased
 
 entry = Order(
@@ -151,7 +151,7 @@ the order.
 ```python
 from math import floor
 
-from backtide.backtest import Order
+from backtide import Order
 from backtide.indicators import AverageTrueRange
 from backtide.sizers import VolatilityScaled
 from backtide.strategies import BaseStrategy

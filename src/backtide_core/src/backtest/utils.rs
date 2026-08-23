@@ -38,7 +38,7 @@ pub fn persist_experiment_config(
         exchange: config.exchange.clone(),
         engine: config.engine.clone(),
     };
-    let toml_str = toml::to_string_pretty(&inner).map_err(|e| format!("toml serialize: {e}"))?;
+    let toml_str = inner.to_toml().map_err(|e| format!("toml serialize: {e}"))?;
 
     let path = path.join("config.toml");
     std::fs::write(&path, toml_str).map_err(|e| format!("write {}: {e}", path.display()))?;

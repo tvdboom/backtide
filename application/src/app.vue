@@ -135,6 +135,7 @@ import {
   FlaskConical,
   Gauge,
   Github,
+  History,
   Home,
   Menu,
   Sigma,
@@ -177,7 +178,7 @@ const navigation = [
     label: 'Live',
     items: [
       { id: 'live', label: 'Live session', icon: Activity, component: markRaw(LivePage), guide: `${docsBaseUrl}/live/sessions/` },
-      { id: 'live-history', label: 'Session history', icon: Gauge, component: markRaw(LiveHistoryPage), guide: `${docsBaseUrl}/live/sessions/` }
+      { id: 'live-history', label: 'Session history', icon: History, component: markRaw(LiveHistoryPage), guide: `${docsBaseUrl}/live/sessions/` }
     ]
   },
   {

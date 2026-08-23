@@ -21,6 +21,10 @@ pub enum StorageError {
     /// A value could not be serialized for persistence.
     #[error("storage serialization failed: {0}")]
     Serialization(String),
+
+    /// The process-wide database connection lock was poisoned.
+    #[error("database connection lock is unavailable")]
+    LockPoisoned,
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;

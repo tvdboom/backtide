@@ -86,7 +86,7 @@ Run `backtide --help` to see all available commands.
 Import backtide in any Python script or notebook for full programmatic control.
 
 ```pycon
-from backtide.backtest import DataExpConfig, Experiment, ExperimentConfig, GeneralExpConfig
+from backtide import DataExpConfig, Experiment, ExperimentConfig, GeneralExpConfig
 from backtide.data import resolve_profiles, download_bars
 from backtide.storage import query_bars
 from backtide.strategies import MultiBollingerRotation

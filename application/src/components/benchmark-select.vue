@@ -8,6 +8,7 @@
           alt=""
           @error="logoFailed(modelValue)"
         />
+        <Bot v-else-if="icon === 'strategy'" :size="17" aria-hidden="true" />
         <ChartCandlestick v-else :size="17" aria-hidden="true" />
       </span>
       <input
@@ -23,7 +24,7 @@
         @keydown.enter.prevent="commit"
         @keydown.escape.prevent="close"
       />
-      <button v-if="modelValue" type="button" :aria-label="`Clear ${modelValue} benchmark`" @click="clear"><X :size="14" /></button>
+      <button v-if="modelValue" type="button" :aria-label="`Clear ${modelValue} ${selectionName}`" @click="clear"><X :size="14" /></button>
       <ChevronDown v-else :size="15" aria-hidden="true" />
     </div>
     <div v-if="focused && filtered.length" class="search-menu benchmark-select-menu" role="listbox" :aria-label="label">
@@ -43,6 +44,7 @@
             alt=""
             @error="logoFailed(option)"
           />
+          <Bot v-else-if="icon === 'strategy'" :size="18" aria-hidden="true" />
           <ChartCandlestick v-else :size="18" aria-hidden="true" />
         </span>
         <span class="search-option-copy"><strong>{{ option }}</strong><small>{{ descriptions[option] }}</small></span>
@@ -52,7 +54,7 @@
 </template>
 
 <script setup>
-import { ChartCandlestick, ChevronDown, X } from 'lucide-vue-next'
+import { Bot, ChartCandlestick, ChevronDown, X } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 const props = defineProps({
@@ -61,7 +63,10 @@ const props = defineProps({
   descriptions: { type: Object, default: () => ({}) },
   logos: { type: Object, default: () => ({}) },
   placeholder: { type: String, default: 'Search or enter a ticker…' },
-  label: { type: String, default: 'Benchmark' }
+  label: { type: String, default: 'Benchmark' },
+  selectionName: { type: String, default: 'benchmark' },
+  uppercaseValue: { type: Boolean, default: true },
+  icon: { type: String, default: 'benchmark' }
 })
 const emit = defineEmits(['update:modelValue'])
 const root = ref(null)
@@ -87,7 +92,8 @@ function show() {
 }
 
 function choose(value) {
-  const selected = String(value || '').trim().toUpperCase()
+  const normalized = String(value || '').trim()
+  const selected = props.uppercaseValue ? normalized.toUpperCase() : normalized
   if (!selected) return
   emit('update:modelValue', selected)
   needle.value = selected

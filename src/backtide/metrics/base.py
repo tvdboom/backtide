@@ -26,7 +26,7 @@ class BaseMetric(ABC):
     percentage : bool, default=False
         Whether the returned fraction should be displayed as a percentage.
 
-    higher_is_better : bool, default=True
+    greater_is_better : bool, default=True
         Whether larger values should rank ahead of smaller values.
 
     Examples
@@ -38,7 +38,7 @@ class BaseMetric(ABC):
         '''Return gross gains divided by gross losses.'''
 
         percentage = False
-        higher_is_better = True
+        greater_is_better = True
 
         def compute(self, equity_curve, trades):
             pnl = trades["pnl"]
@@ -50,6 +50,8 @@ class BaseMetric(ABC):
     """
 
     percentage = False
+    greater_is_better = True
+    # Compatibility alias for custom metrics created before ``greater_is_better``.
     higher_is_better = True
 
     @abstractmethod

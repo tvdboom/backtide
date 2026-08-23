@@ -713,8 +713,8 @@ class ExperimentConfig:
     def from_dict(data) -> ExperimentConfig:
         """Build an `ExperimentConfig` from a (possibly nested) dictionary.
 
-        The dict may use the same nested structure produced by `to_toml`
-        (with `general`, `data`, `portfolio`, etc. sections) **or**
+        The dict may use the nested API structure produced by `to_dict`
+        (with `general`, `data`, `portfolio`, etc. keys) **or**
         a flat key-value mapping. Missing keys silently fall back to defaults.
 
         Parameters
@@ -756,7 +756,7 @@ class ExperimentConfig:
         """Serialise the configuration to a TOML string.
 
         The output is grouped into `[general]`, `[data]`,
-        `[portfolio]`, `[strategy]`, `[indicators]`,
+        `[portfolio]`, `[strategy]`, `[indicators]`, `[metrics]`,
         `[exchange]` and `[engine]` sections.
 
         Returns
@@ -1717,7 +1717,13 @@ class Trade:
     def __str__(self, /):
         ...
 
-def _run_experiment(config, verbose=True, strategy_overrides=None, indicator_overrides=None):
+def _run_experiment(
+    config,
+    verbose=True,
+    strategy_overrides=None,
+    indicator_overrides=None,
+    progress_callback=None,
+):
     """Low-level entry point that runs an already-built experiment
     configuration.
 

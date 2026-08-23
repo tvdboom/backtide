@@ -10,7 +10,7 @@ class GainToPain(BaseMetric):
     """Return gross winning PnL divided by gross losing PnL."""
 
     percentage = False
-    higher_is_better = True
+    greater_is_better = True
 
     def compute(self, equity_curve, trades):
         del equity_curve

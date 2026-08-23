@@ -11,7 +11,7 @@ pub fn progress_bar(total: u64, msg: impl Into<String>) -> ProgressBar {
                 .template(
                     "{msg}\n{spinner:.green} [{elapsed}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
                 )
-                .unwrap()
+                .unwrap_or_else(|_| ProgressStyle::default_bar())
                 .progress_chars("━╸─"),
         )
         .with_message(msg.into());
@@ -26,7 +26,7 @@ pub fn progress_spinner(msg: impl Into<String>) -> ProgressBar {
         .with_style(
             ProgressStyle::default_spinner()
                 .template("{spinner:.green} [{elapsed}] {msg}")
-                .unwrap(),
+                .unwrap_or_else(|_| ProgressStyle::default_spinner()),
         )
         .with_message(msg.into());
 

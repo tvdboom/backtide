@@ -5,12 +5,86 @@ use crate::config::models::LogLevel;
 use crate::engine::Engine;
 use pyo3::prelude::*;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use tracing::warn;
 
 /// Global flag that signals a running experiment should abort as soon as
 /// possible.  Set from Python via [`request_abort`] and polled from the
 /// engine's hot loop. Automatically cleared when a new experiment starts.
 pub static ABORT_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Throttled bridge from parallel Rust simulation steps to a Python callback.
+pub struct ProgressReporter {
+    callback: Py<PyAny>,
+    completed: AtomicU64,
+    total: AtomicU64,
+    next_report: AtomicU64,
+}
+
+impl ProgressReporter {
+    /// Create a reporter for one Python `callback(completed, total)` callable.
+    pub fn new(callback: Py<PyAny>) -> Self {
+        Self {
+            callback,
+            completed: AtomicU64::new(0),
+            total: AtomicU64::new(0),
+            next_report: AtomicU64::new(0),
+        }
+    }
+
+    /// Set the simulation work total and publish the initial zero position.
+    pub fn set_total(&self, total: u64) {
+        self.completed.store(0, Ordering::Relaxed);
+        self.total.store(total, Ordering::Relaxed);
+        self.next_report.store(0, Ordering::Relaxed);
+        self.report(0, total);
+    }
+
+    /// Advance work while limiting Python calls to about 200 per experiment.
+    pub fn advance(&self, amount: u64) {
+        let total = self.total.load(Ordering::Relaxed);
+        if total == 0 {
+            return;
+        }
+        let completed = self.completed.fetch_add(amount, Ordering::Relaxed).saturating_add(amount);
+        if completed >= total {
+            self.report(total, total);
+            return;
+        }
+        let stride = (total / 200).max(1);
+        let next = self.next_report.load(Ordering::Relaxed);
+        if completed < next {
+            return;
+        }
+        if self
+            .next_report
+            .compare_exchange(
+                next,
+                completed.saturating_add(stride),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            self.report(completed.min(total), total);
+        }
+    }
+
+    /// Publish a final complete position after all strategy workers join.
+    pub fn finish(&self) {
+        let total = self.total.load(Ordering::Relaxed);
+        self.completed.store(total, Ordering::Relaxed);
+        self.report(total, total);
+    }
+
+    fn report(&self, completed: u64, total: u64) {
+        Python::attach(|py| {
+            if let Err(error) = self.callback.bind(py).call1((completed, total)) {
+                warn!("Experiment progress callback failed: {error}");
+            }
+        });
+    }
+}
 
 /// Returns `true` if the abort flag is currently set.
 #[inline]
@@ -53,6 +127,7 @@ pub fn experiment_log(message: &str, level: LogLevel) {
         verbose: "bool" = true,
         strategy_overrides: "dict[str, Any] | None" = None,
         indicator_overrides: "dict[str, Any] | None" = None,
+        progress_callback: "Callable[[int, int], None] | None" = None,
     )
 )]
 pub fn run_experiment(
@@ -61,6 +136,7 @@ pub fn run_experiment(
     verbose: bool,
     strategy_overrides: Option<HashMap<String, Py<PyAny>>>,
     indicator_overrides: Option<HashMap<String, Py<PyAny>>>,
+    progress_callback: Option<Py<PyAny>>,
 ) -> PyResult<ExperimentResult> {
     // Always start with a clean abort flag.
     ABORT_REQUESTED.store(false, Ordering::Relaxed);
@@ -70,7 +146,10 @@ pub fn run_experiment(
     let strat = strategy_overrides.unwrap_or_default();
     let ind = indicator_overrides.unwrap_or_default();
     let metrics = cfg.metrics.implementations(py);
+    let progress = progress_callback.map(ProgressReporter::new);
 
     // Release the GIL so rayon workers can acquire it.
-    Ok(py.detach(|| engine.run_experiment(&cfg, verbose, &strat, &ind, &metrics))?)
+    Ok(py.detach(|| {
+        engine.run_experiment(&cfg, verbose, &strat, &ind, &metrics, progress.as_ref())
+    })?)
 }

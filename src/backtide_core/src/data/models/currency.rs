@@ -275,28 +275,6 @@ impl Currency {
         self.to_string()
     }
 
-    /// Return the default variant.
-    ///
-    /// Returns
-    /// -------
-    /// self
-    ///     The default variant.
-    #[staticmethod]
-    fn get_default(py: Python<'_>) -> Py<Self> {
-        Py::new(py, Self::default()).unwrap()
-    }
-
-    /// Return all variants.
-    ///
-    /// Returns
-    /// -------
-    /// list[self]
-    ///     All variants of this type.
-    #[staticmethod]
-    fn variants(py: Python<'_>) -> Vec<Py<Self>> {
-        Self::iter().map(|v| Py::new(py, v).unwrap()).collect()
-    }
-
     /// The human-readable name of the currency.
     #[getter]
     pub fn name(&self) -> &'static str {
@@ -329,6 +307,8 @@ impl Currency {
         self.data().4
     }
 }
+
+impl_python_enum_variants!(Currency, default);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Currency {
     type Error = PyErr;

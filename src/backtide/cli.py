@@ -13,7 +13,14 @@ from typing import Any
 import click
 import yaml
 
-from backtide.backtest import Experiment, ExperimentAborted, ExperimentConfig, ExperimentStatus
+from backtide.backtest import (
+    Experiment,
+    ExperimentAborted,
+    ExperimentConfig,
+    ExperimentStatus,
+    Study,
+    WalkForwardConfig,
+)
 from backtide.core.config import get_config
 from backtide.core.utils import init_logging
 from backtide.data import download_bars, resolve_profiles
@@ -326,6 +333,189 @@ def run_experiment_command(config: Path, log_level: str, *, verbose: bool) -> No
         for w in result.warnings:
             click.echo(f"   - {w}", err=True)
         raise SystemExit(1)
+
+
+def _read_study_config(path: Path) -> dict[str, Any]:
+    """Read a study configuration mapping from a supported file."""
+    text = path.read_text(encoding="utf-8")
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".toml":
+            data = tomllib.loads(text)
+        elif suffix == ".json":
+            data = json.loads(text)
+        elif suffix in (".yaml", ".yml"):
+            data = yaml.safe_load(text)
+        else:
+            raise click.UsageError(
+                f"Unsupported config extension {suffix!r}. Use .toml, .yaml/.yml or .json."
+            )
+    except (json.JSONDecodeError, tomllib.TOMLDecodeError, yaml.YAMLError) as exc:
+        raise click.UsageError(f"Invalid study configuration: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise click.UsageError("The study configuration must be a mapping.")
+    return data
+
+
+@main.command(name="run-study")
+@click.argument(
+    "config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--log_level",
+    "-l",
+    help="Minimum log level to emit. Choose from: `error`, `warn`, `info` or `debug`.",
+)
+@click.option(
+    "--verbose/--no-verbose",
+    "-v",
+    default=True,
+    show_default=True,
+    help="Show progress while the study is running.",
+)
+def run_study_command(config: Path, log_level: str | None, *, verbose: bool) -> None:
+    """Run a parameter study defined in a configuration file.
+
+    Reads a `.toml`, `.yaml`/`.yml`, or `.json` file containing a `config`
+    mapping with the shared experiment settings and a `study` mapping with the
+    parameter sweep. Every candidate is run and persisted under one study
+    record. Optional walk-forward validation selects candidates on training
+    windows and evaluates them on the test windows that follow.
+
+    Read more in the [study guide][study-guide].
+
+    Parameters
+    ----------
+    config : Path
+        Path to a study configuration. The top-level `config` field accepts an
+        [ExperimentConfig]. The top-level `study` field accepts
+        `parameter_space`, optional saved `strategy`, `min_trades`,
+        `max_drawdown`, and optional `walk_forward` settings.
+
+    --log_level, -l : str, default="warn"
+        Minimum log level to emit. Choose from: `error`, `warn`, `info` or
+        `debug`.
+
+    --verbose/--no-verbose, -v : bool, default=True
+        Whether to display progress while the study is running.
+
+    See Also
+    --------
+    - backtide.backtest.study:Study
+    - backtide.cli:run_experiment_command
+    - backtide.cli:launch
+
+    Examples
+    --------
+    Create `study.toml` using the name of one saved strategy:
+
+    ```toml
+    [config]
+    metrics = ["sharpe"]
+
+    [config.general]
+    name = "SMA parameter study"
+
+    [config.data]
+    symbols = ["SPY"]
+    full_history = false
+    start_date = "2012-01-01"
+    end_date = "2025-12-31"
+
+    [config.strategy]
+    strategies = ["My SMA strategy"]
+
+    [study]
+    min_trades = 30
+    max_drawdown = 0.25
+
+    [study.parameter_space]
+    fast = [10, 20, 30]
+    slow = [100, 150, 200]
+
+    [study.walk_forward]
+    training_days = 1095
+    test_days = 365
+    ```
+
+    Run the study:
+
+    ```console
+    backtide run-study study.toml
+    ```
+
+    """
+    cfg = get_config()
+    init_logging(log_level or cfg.general.log_level)
+    values = _read_study_config(config)
+
+    if unexpected := sorted(values.keys() - {"config", "study"}):
+        raise click.UsageError(f"Unknown study file field(s): {', '.join(unexpected)}.")
+    config_value = values.get("config")
+    study_value = values.get("study")
+    if not isinstance(config_value, dict) or not isinstance(study_value, dict):
+        raise click.UsageError("Study files require config and study mappings.")
+
+    allowed = {"strategy", "parameter_space", "min_trades", "max_drawdown", "walk_forward"}
+    if unexpected := sorted(study_value.keys() - allowed):
+        raise click.UsageError(f"Unknown study field(s): {', '.join(unexpected)}.")
+    parameter_space = study_value.get("parameter_space")
+    if not isinstance(parameter_space, dict):
+        raise click.UsageError("study.parameter_space must be a mapping.")
+    walk_forward_value = study_value.get("walk_forward")
+    if walk_forward_value is not None and not isinstance(walk_forward_value, dict):
+        raise click.UsageError("study.walk_forward must be a mapping when provided.")
+
+    try:
+        experiment_config = ExperimentConfig.from_dict(config_value)
+        walk_forward = (
+            WalkForwardConfig(**walk_forward_value) if walk_forward_value is not None else None
+        )
+        study = Study(
+            experiment_config,
+            strategy=study_value.get("strategy"),
+            parameter_space=parameter_space,
+            min_trades=int(study_value.get("min_trades", 0)),
+            max_drawdown=(
+                float(study_value["max_drawdown"])
+                if study_value.get("max_drawdown") is not None
+                else None
+            ),
+            walk_forward=walk_forward,
+        )
+    except (TypeError, ValueError) as exc:
+        raise click.UsageError(f"Invalid study configuration: {exc}") from exc
+
+    click.echo(f"Running study from {config.name}...")
+    try:
+        result = study.run(verbose=verbose)
+    except (KeyboardInterrupt, ExperimentAborted):
+        click.echo("\nStudy aborted. Nothing was stored.", err=True)
+        raise SystemExit(130) from None
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    candidate_count = len(result.candidates)
+    fold_count = len(result.folds)
+    candidate_label = "candidate" if candidate_count == 1 else "candidates"
+    fold_summary = ""
+    if fold_count:
+        fold_label = "fold" if fold_count == 1 else "folds"
+        fold_summary = f", {fold_count} walk-forward {fold_label}"
+    click.echo(
+        f"Done - study {result.study_id} completed "
+        f"({candidate_count} {candidate_label}{fold_summary})."
+    )
+    if result.best_candidate_id is not None:
+        click.echo(f"Best candidate: {result.best_candidate_id}.")
+    else:
+        click.echo("WARNING: The study has no eligible candidate.", err=True)
+    if result.warnings:
+        click.echo(f"WARNING: Study completed with {len(result.warnings)} warning(s):", err=True)
+        for warning in result.warnings:
+            click.echo(f"   - {warning}", err=True)
 
 
 def _read_live_session_config(path: Path) -> dict[str, Any]:

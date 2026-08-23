@@ -95,12 +95,18 @@ describe('live simulation setup', () => {
     expect(declaration('.toggle-control')).toContain('height: 42px')
     expect(declaration('.toggle-title')).toContain('padding-right: 24px')
     expect(declaration('.toggle-description')).toContain('-webkit-line-clamp: 2')
+    expect(declaration('input.toggle')).toContain('flex: 0 0 36px')
   })
 
-  it('shows accessible field and action popovers on hover or keyboard focus', () => {
-    expect(declaration('.field-info-popover, .action-popover')).toContain('visibility: hidden')
-    expect(styles).toContain('.field-info:hover .field-info-popover')
-    expect(styles).toContain('.field-info:focus-visible .field-info-popover')
+  it('keeps field explanations above every UI stacking context', () => {
+    expect(declaration('.field-info-popover')).toContain('position: fixed')
+    expect(declaration('.field-info-popover')).toContain('z-index: 10000')
+    expect(declaration('.field-info-popover')).toContain('calc(100vw - 24px)')
+    expect(styles).toContain(".field-info-popover[data-placement='below']")
+  })
+
+  it('shows accessible action popovers on hover or keyboard focus', () => {
+    expect(declaration('.action-popover')).toContain('visibility: hidden')
     expect(styles).toContain('.action-help .secondary:focus-visible + .action-popover')
     expect(styles).not.toContain('.action-help:focus-within .action-popover')
   })
@@ -239,6 +245,19 @@ describe('experiment result summaries', () => {
     expect(declaration('.run-breakdown-card')).toContain('background: transparent')
   })
 
+  it('shows the result heading icon without a box and aligns it with the title', () => {
+    expect(declaration('.result-heading-copy')).toContain(
+      'grid-template-columns: max-content minmax(0, 1fr)'
+    )
+    expect(declaration('.result-heading-icon')).toContain('grid-row: 1')
+    expect(declaration('.result-heading-icon')).toContain('align-self: center')
+    expect(declaration('.result-heading h2, .result-heading-copy > .result-title, .result-heading-copy > p'))
+      .toContain('grid-column: 2')
+    expect(declaration('.result-heading-icon')).toContain('background: transparent')
+    expect(declaration('.result-heading-icon')).toContain('border: 0')
+    expect(declaration('.result-heading-icon')).toContain('box-shadow: none')
+  })
+
   it('uses Streamlit-style metric rows and a right-side plot options column', () => {
     expect(declaration('.primary-metrics')).toContain('grid-template-columns: .8fr 1.2fr 1fr 1fr')
     expect(declaration('.context-metrics')).toContain('grid-template-columns: .8fr 1.2fr 1fr 1fr')
@@ -256,6 +275,28 @@ describe('experiment result summaries', () => {
     expect(declaration('.result-plot-description p')).toContain('font-size: 15px')
     expect(declaration('.strategy-plot-tabs')).toContain('repeat(5, minmax(0, 1fr))')
     expect(declaration('.modal.document-modal')).toContain('width: min(1140px, 94vw)')
+  })
+
+  it('distributes up to six strategy headline metrics across the full desktop row', () => {
+    expect(declaration('.result-metrics')).toContain(
+      'grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))'
+    )
+    expect(declaration('.result-metrics .metric-card')).toContain('min-height: 104px')
+    expect(declaration('.result-metrics .metric-card')).toContain('padding: 16px')
+  })
+
+  it('ends the metrics table container after its final metric', () => {
+    expect(declaration('.result-table')).toContain('min-height: 0')
+  })
+
+  it('colors two-parameter sweeps by metric value and styles parameter overflow', () => {
+    expect(declaration('.heatmap-cell::before')).toContain('var(--heatmap-score, 0)')
+    expect(declaration('.study-heatmap-scroll')).toContain('max-height: 560px')
+    expect(declaration('.study-heatmap-scroll')).toContain('overflow: auto')
+    expect(declaration('.study-heatmap')).toContain('var(--heatmap-width)')
+    expect(declaration('.heatmap-axis-value.x-axis')).toContain('position: sticky')
+    expect(declaration('.study-heatmap > .heatmap-axis-value:not(.x-axis)')).toContain('position: sticky')
+    expect(declaration('.parameter-overflow.field-info')).toContain('border-radius: 999px')
   })
 
   it('keeps order history in a bounded table with visible headings', () => {

@@ -123,6 +123,7 @@ nav:
         - Backtest:
             - Introduction: user_guide/backtest/introduction.md
             - Experiments: user_guide/backtest/experiment.md
+            - Study: user_guide/backtest/study.md
             - Results: user_guide/backtest/results.md
             - Plots: user_guide/backtest/plots.md
         - Live:
@@ -140,6 +141,7 @@ nav:
     - CLI:
           - launch: cli/launch.md
           - run-experiment: cli/run_experiment.md
+          - run-study: cli/run_study.md
           - start-live-session: cli/start_live_session.md
           - download: cli/download.md
     - API:
@@ -175,6 +177,7 @@ nav:
             - plot_vwap: api/analysis/plot_vwap.md
         - backtest:
             - Experiment: api/backtest/experiment.md
+            - Study: api/backtest/study.md
         - live:
             - collect_market_updates: api/live/collect_market_updates.md
             - list_live_instruments: api/live/list_live_instruments.md
@@ -188,8 +191,10 @@ nav:
             - query_experiments: api/storage/query_experiments.md
             - query_instruments: api/storage/query_instruments.md
             - query_strategy_runs: api/storage/query_strategy_runs.md
+            - query_study: api/storage/query_study.md
         - models:
             - backtest:
+                - CandidateResult: api/models/backtest/candidateresult.md
                 - CommissionType: api/models/backtest/commissiontype.md
                 - ConversionPeriod: api/models/backtest/conversionperiod.md
                 - CurrencyConversionMode: api/models/backtest/currencyconversionmode.md
@@ -212,7 +217,16 @@ nav:
                 - RunResult: api/models/backtest/runresult.md
                 - State: api/models/backtest/state.md
                 - StrategyExpConfig: api/models/backtest/strategyexpconfig.md
+                - StudyResult: api/models/backtest/studyresult.md
                 - Trade: api/models/backtest/trade.md
+                - WalkForwardConfig: api/models/backtest/walkforwardconfig.md
+                - WalkForwardFoldResult: api/models/backtest/walkforwardfoldresult.md
+            - live:
+                - MarketUpdate: api/models/live/marketupdate.md
+                - SessionConfig: api/models/live/sessionconfig.md
+                - SessionFill: api/models/live/sessionfill.md
+                - SessionSnapshot: api/models/live/sessionsnapshot.md
+                - SessionUpdate: api/models/live/sessionupdate.md
             - config:
                 - Config: api/models/config/config.md
                 - DataConfig: api/models/config/dataconfig.md
@@ -250,12 +264,6 @@ nav:
             - metrics:
                 - BaseMetric: api/models/metrics/basemetric.md
                 - MetricDefinition: api/models/metrics/metricdefinition.md
-            - live:
-                - MarketUpdate: api/models/live/marketupdate.md
-                - SessionConfig: api/models/live/sessionconfig.md
-                - SessionFill: api/models/live/sessionfill.md
-                - SessionSnapshot: api/models/live/sessionsnapshot.md
-                - SessionUpdate: api/models/live/sessionupdate.md
             - sizers:
                 - BaseSizer: api/models/sizers/basesizer.md
                 - EqualWeight: api/models/sizers/equalweight.md
@@ -292,7 +300,11 @@ nav:
             - init_logging: api/utils/init_logging.md
     - Examples:
         - Backtesting:
-            - Run and inspect an experiment: examples/backtest/run_experiment.md
+            - Run an experiment: examples/backtest/run_experiment.md
+            - Run a study: examples/backtest/study.md
+        - Live:
+            - Live session: examples/live/session.md
+            - Inspect a market feed: examples/live/market_feed.md
         - Strategies:
             - Daily reversal: examples/strategies/daily_reversal.md
             - Moving-average trend: examples/strategies/moving_average_trend.md
@@ -305,9 +317,6 @@ nav:
         - Metrics:
             - Gain to pain: examples/metrics/gain_to_pain.md
             - Ulcer index: examples/metrics/ulcer_index.md
-        - Live:
-            - Live session: examples/live/session.md
-            - Inspect a market feed: examples/live/market_feed.md
     - FAQ: faq.md
     - Contributing: contributing.md
     - Dependencies: dependencies.md

@@ -85,6 +85,12 @@ describe('App theme control', () => {
       sibling = sibling.nextElementSibling
     }
     expect(dataItems).toEqual(['Download', 'Storage', 'Analysis'])
+
+    const results = wrapper.findAll('nav button').find(button => button.text() === 'Results')
+    const sessionHistory = wrapper.findAll('nav button')
+      .find(button => button.text() === 'Session history')
+    expect(results.get('svg').classes()).toContain('lucide-gauge-icon')
+    expect(sessionHistory.get('svg').classes()).toContain('lucide-history-icon')
     wrapper.unmount()
   })
 
