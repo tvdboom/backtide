@@ -85,6 +85,10 @@ Every fold has a training window followed immediately by an untouched test windo
 all candidates on training data, selects the best eligible candidate using only that window, then
 runs only that selected constructor configuration on the test data.
 
+!!! info
+    Walk-forward results are diagnostic only. They do not affect the overall candidate ranking,
+    winner, or headline metric.
+
 The earliest and latest equity samples in the full-sample parent result define the available
 walk-forward range. You do not need to enter separate dates for validation.
 

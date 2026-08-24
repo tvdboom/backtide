@@ -18,11 +18,31 @@ import logging
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
 
 LOGGER = logging.getLogger("rust-coverage")
+
+
+def _parse_shell_environment(output: str) -> dict[str, str]:
+    """Parse POSIX shell exports emitted by ``cargo llvm-cov show-env --sh``."""
+    parsed = {}
+    for line in output.splitlines():
+        if not line:
+            continue
+        try:
+            tokens = shlex.split(line, comments=False, posix=True)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid cargo llvm-cov environment line: {line!r}.") from exc
+        if len(tokens) != 2 or tokens[0] != "export":
+            raise RuntimeError(f"Invalid cargo llvm-cov environment line: {line!r}.")
+        key, separator, value = tokens[1].partition("=")
+        if not separator or not key:
+            raise RuntimeError(f"Invalid cargo llvm-cov environment line: {line!r}.")
+        parsed[key] = value
+    return parsed
 
 
 def _run(
@@ -63,16 +83,14 @@ def _coverage_environment(root: Path, manifest: Path, env: dict[str, str]) -> di
             "--manifest-path",
             manifest,
             "--no-cfg-coverage",
+            "--sh",
         ],
         cwd=root,
         env=env,
         capture_output=True,
     )
     configured = env.copy()
-    for line in result.stdout.splitlines():
-        key, separator, value = line.partition("=")
-        if separator:
-            configured[key] = value
+    configured.update(_parse_shell_environment(result.stdout))
     return configured
 
 

@@ -54,8 +54,14 @@ class TestMetricCatalog:
 
     def test_documentation_lists_every_builtin_metric_key(self):
         """The metrics guide exposes every exact built-in string key."""
-        documentation = Path("docs_sources/user_guide/library/metrics.md").read_text(
-            encoding="utf-8"
+        documentation = (
+            Path(__file__).resolve().parents[1]
+            / "docs_sources"
+            / "user_guide"
+            / "library"
+            / "metrics.md"
+        ).read_text(
+            encoding="utf-8",
         )
 
         for metric in list_builtin_metrics():

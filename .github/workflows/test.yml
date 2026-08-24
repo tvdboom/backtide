@@ -10,56 +10,7 @@ env:
   PYTHON_VERSION: "3.14"
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      docs: ${{ steps.filter.outputs.docs }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      python: ${{ steps.filter.outputs.python }}
-      rust: ${{ steps.filter.outputs.rust }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: dorny/paths-filter@v4
-        id: filter
-        with:
-          predicate-quantifier: some-with-excludes
-          filters: |
-            backend:
-              - '**'
-              - '!application/**'
-              - '!src/backtide/ui/static/**'
-            docs:
-              - 'docs_sources/**'
-              - 'mkdocs.yml'
-              - 'README.md'
-            frontend:
-              - 'application/**'
-              - 'src/backtide/ui/static/**'
-            python:
-              - 'backtide.config.toml'
-              - 'pyproject.toml'
-              - 'scripts/**/*.py'
-              - 'src/backtide/**'
-              - '!src/backtide/ui/static/**'
-              - 'src/backtide_core/**'
-              - 'tests/**'
-              - 'tox.ini'
-              - 'uv.lock'
-            rust:
-              - '.cargo/**'
-              - 'rustfmt.toml'
-              - 'scripts/run_cargo.py'
-              - 'src/backtide_core/**'
-
   pre-commit:
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -74,20 +25,14 @@ jobs:
           restore-keys: |
             tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
-        if: needs.changes.outputs.rust == 'true'
         with:
           workspaces: src/backtide_core
       - name: Run pre-commit
         run: |
-          if [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
-            export SKIP=cargo-fmt,cargo-clippy,check-stubs
-          fi
           uv sync --locked --no-install-project --no-default-groups --group tox
           uv run --no-sync tox -e pre-commit
 
   unit-tests:
-    needs: changes
-    if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -122,8 +67,6 @@ jobs:
           files: ./coverage.xml
 
   cargo-tests:
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -154,8 +97,6 @@ jobs:
           files: ./rust-coverage.info
 
   frontend-tests:
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -177,8 +118,6 @@ jobs:
           git diff --exit-code -- src/backtide/ui/static
 
   benchmarks:
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -203,11 +142,6 @@ jobs:
           uv run --no-sync tox -e bench
 
   documentation:
-    needs: changes
-    if: >-
-      needs.changes.outputs.docs == 'true' ||
-      needs.changes.outputs.python == 'true' ||
-      needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
