@@ -47,10 +47,9 @@ the app can start jobs and modify the configured local Backtide store.
 | Group | Section | Purpose |
 |---|---|---|
 | **Overview** | Home | Review recent experiments, stored datasets, active sessions, and workflow shortcuts. |
-| **Backtest** | Experiments | Configure data, portfolios, reusable assets, execution assumptions, risk, and engine behavior. |
+| **Backtest** | New experiment | Configure a single run or study across market data, portfolio, strategy, metrics, execution, risk, and engine settings. |
 | **Backtest** | Results | Compare completed runs and inspect metrics, equity, trades, orders, configuration, and logs. |
-| **Backtest** | Analysis | Build interactive price, return, correlation, seasonality, volatility, volume, and dividend plots. |
-| **Live** | Live simulation | Configure and run live-data strategies with local simulated execution. See [Live simulation]. |
+| **Live** | Live session | Configure and run live-data strategies with local simulated execution. See [Live simulation]. |
 | **Live** | Session history | Inspect persisted journals and replay a prior session through a fresh simulation engine. |
 | **Library** | Strategies | Create and manage strategies used by backtests and live simulation. |
 | **Library** | Indicators | Manage strategy dependencies and optional backtest/live monitoring indicators. |
@@ -58,6 +57,7 @@ the app can start jobs and modify the configured local Backtide store.
 | **Library** | Sizers | Save reusable built-in presets or custom position-sizing policies. |
 | **Data** | Download | Resolve instruments and download normalized OHLCV bars. |
 | **Data** | Storage | Inspect coverage, open stored series in Analysis, or delete selected data. |
+| **Data** | Analysis | Compare stored series with metrics and interactive price, return, correlation, seasonality, volatility, volume, VWAP, and dividend plots. |
 
 Searchable selectors are keyboard accessible and remain usable on smaller screens.
 Long-running downloads and experiments run in background jobs, so the interface can
@@ -70,23 +70,6 @@ show progress and accept cancellation without blocking navigation.
 The web application and Python API use the same calculations, configuration, and local storage.
 The browser never reads the database directly, and long-running work can report progress or be
 canceled without blocking navigation.
-
-<br>
-
-## Frontend development
-
-Package users can skip this section. Contributors changing `application/` install its
-development dependencies, run unit tests, and rebuild the committed production bundle:
-
-```console
-just frontend-sync
-just frontend-test
-just frontend-build
-```
-
-The build output is written to `src/backtide/ui/static/` and must be committed with
-the source change. `just launch` always serves that production bundle through the
-same backend used by an installed wheel.
 
 <br>
 
