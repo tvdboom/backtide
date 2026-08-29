@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <section class="page-intro live-intro">
-      <div><h2>Live session</h2><p>Apply a saved strategy to live bars with simulated fills and no capital at risk.</p></div>
+      <div><h2>Live session</h2><p>Apply a saved strategy to live bars with simulated fills.</p></div>
       <div v-if="sessionVisible" class="session-actions">
         <span
           class="status-pill"
@@ -14,8 +14,8 @@
         </span>
         <button v-if="state.status === 'paused'" class="secondary" @click="resume"><Play :size="15"/> Resume</button>
         <button v-else-if="activeSession" class="secondary" @click="pause"><Pause :size="15"/> Pause</button>
-        <span v-if="activeSession && hasStrategy" class="action-help"><button class="secondary" @click="cancelAll">Cancel orders</button><span class="action-popover" role="tooltip">Cancel every open simulated order before the next market update.</span></span>
-        <span v-if="activeSession && hasStrategy" class="action-help"><button class="secondary" @click="flatten">Flatten</button><span class="action-popover" role="tooltip">Close all simulated positions on the next market update.</span></span>
+        <span v-if="activeSession && hasStrategy" class="action-help"><button class="secondary" @click="cancelAll"><ListX :size="15" aria-hidden="true" /> Cancel orders</button><span class="action-popover" role="tooltip">Cancel every open simulated order before the next market update.</span></span>
+        <span v-if="activeSession && hasStrategy" class="action-help"><button class="secondary" @click="flatten"><FoldVertical :size="15" aria-hidden="true" /> Flatten</button><span class="action-popover" role="tooltip">Close all simulated positions on the next market update.</span></span>
         <button v-if="activeSession" class="danger secondary" @click="stop"><Square :size="15"/> Stop</button>
         <template v-else>
           <button class="primary" @click="newConfiguration"><Plus :size="16"/> New configuration</button>
@@ -309,9 +309,11 @@ import {
   ChevronRight,
   ChevronUp,
   CircleDollarSign,
+  FoldVertical,
   Gauge,
   GripVertical,
   History,
+  ListX,
   Pause,
   Play,
   Plus,

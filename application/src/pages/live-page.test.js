@@ -106,6 +106,14 @@ describe('live page', () => {
     query.mockReset().mockResolvedValue(liveInstrumentCatalog)
   })
 
+  it('describes live sessions without the redundant risk qualifier', async () => {
+    const wrapper = mount(LivePage, { props: { bootstrap } })
+    await flushPromises()
+
+    expect(wrapper.get('.live-intro p').text())
+      .toBe('Apply a saved strategy to live bars with simulated fills.')
+  })
+
   it('uses a valid and editable initial cash default', async () => {
     const wrapper = mount(LivePage, { props: { bootstrap } })
     await flushPromises()
@@ -1133,6 +1141,11 @@ describe('live page', () => {
     expect(wrapper.findAll('.live-tables > article')).toHaveLength(1)
     expect(wrapper.text()).toContain('Cancel orders')
     expect(wrapper.text()).toContain('Flatten')
+    const sessionActionIcons = wrapper.findAll('.action-help button svg')
+    expect(sessionActionIcons.map(icon => icon.classes())).toEqual([
+      expect.arrayContaining(['lucide-list-xicon']),
+      expect.arrayContaining(['lucide-fold-vertical-icon'])
+    ])
     expect(wrapper.findAll('.action-popover').map(item => item.text())).toEqual([
       'Cancel every open simulated order before the next market update.',
       'Close all simulated positions on the next market update.'
