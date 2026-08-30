@@ -64,4 +64,23 @@ describe('benchmark-select', () => {
 
     expect(wrapper.emitted('update:modelValue')).toEqual([['Custom crossover']])
   })
+
+  it('shows twenty prefix-ranked matches while searching a large catalog', async () => {
+    const options = [
+      ...Array.from({ length: 25 }, (_, index) => `SHELL${String(index).padStart(2, '0')}`),
+      ...Array.from({ length: 25 }, (_, index) => `OTHER${index}`),
+      'SHELL'
+    ]
+    const wrapper = mount(BenchmarkSelect, {
+      props: { modelValue: '', options }
+    })
+
+    await wrapper.get('input').trigger('focus')
+    await wrapper.get('input').setValue('SHELL')
+
+    const matches = wrapper.findAll('[role="option"]')
+    expect(matches).toHaveLength(20)
+    expect(matches[0].text()).toContain('SHELL')
+    expect(matches.every(option => option.text().startsWith('SHELL'))).toBe(true)
+  })
 })

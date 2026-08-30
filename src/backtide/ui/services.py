@@ -331,6 +331,63 @@ class BacktideServices:
 
         return dataframe_records(query_bars_summary())
 
+    def instrument_overview(
+        self,
+        symbol: str,
+        instrument_type: str | None = None,
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        """Return compact metadata and the latest stored closes for one instrument."""
+        from backtide.storage import query_bars_summary
+
+        normalized_symbol = symbol.strip().casefold()
+        if not normalized_symbol:
+            raise APIError("A symbol is required.")
+        rows = [
+            row
+            for row in dataframe_records(query_bars_summary())
+            if str(row.get("symbol") or "").casefold() == normalized_symbol
+        ]
+        if not rows:
+            return {}
+
+        def matches(value: Any, expected: str | None) -> bool:
+            """Return whether an optional catalog value matches the requested context."""
+            if not expected:
+                return True
+            left = re.sub(r"[^a-z]", "", str(value or "").casefold())
+            right = re.sub(r"[^a-z]", "", expected.casefold())
+            return left == right or left.startswith(right) or right.startswith(left)
+
+        contextual = [
+            row
+            for row in rows
+            if matches(row.get("instrument_type"), instrument_type)
+            and matches(row.get("provider"), provider)
+        ]
+        candidates = contextual or rows
+        best = max(
+            candidates,
+            key=lambda row: (
+                str(row.get("interval") or "").casefold() in {"1d", "oneday"},
+                int(row.get("last_ts") or 0),
+                len(row.get("sparkline") or []),
+            ),
+        )
+        fields = (
+            "symbol",
+            "name",
+            "base",
+            "quote",
+            "instrument_type",
+            "exchange",
+            "provider",
+            "interval",
+        )
+        result = {field: best.get(field) for field in fields if best.get(field) is not None}
+        result["sparkline"] = list(best.get("sparkline") or [])[-30:]
+        return result
+
     def delete_storage(self, payload: dict[str, Any]) -> dict[str, int]:
         """Delete selected stored market-data series."""
         from backtide.storage import delete_symbols

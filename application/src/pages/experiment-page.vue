@@ -52,7 +52,7 @@
           </div>
         </div>
         <div class="form-grid two">
-          <div class="field-label wide symbol-select-field"><span>Symbols</span><FieldInfo text="Choose the instruments whose historical bars will be used in the experiment." /><SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :loading="loadingInstruments" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /></div>
+          <div class="field-label wide symbol-select-field"><span>Symbols</span><FieldInfo text="Choose the instruments whose historical bars will be used in the experiment." /><SearchSelect :key="config.data.instrument_type" v-model="config.data.symbols" :options="symbols" :descriptions="symbolNames" :logos="symbolLogos" :selected-logos="selectedSymbolLogos" :option-details="symbolDetails" :loading="loadingInstruments" clearable clear-label="symbols" allow-custom input-id="experiment-symbols" label="Experiment symbols" placeholder="Search symbols or company names…" /></div>
           <div class="field-label interval-picker-field">
             <span>Interval</span>
             <FieldInfo text="Set the duration represented by each historical market-data bar." />
@@ -86,7 +86,7 @@
           </div>
           <div v-if="!positions.length" class="position-empty">No starting positions. The experiment will begin entirely in cash.</div>
           <div v-for="(position, index) in positions" :key="`${position.symbol}-${index}`" class="position-row">
-            <div class="position-field"><span>Symbol</span><FieldInfo text="Choose a market-universe symbol to hold before the first bar." /><InstrumentSelect v-model="position.symbol" :options="positionOptions(index)" :descriptions="symbolNames" :logos="symbolLogos" :label="`Starting position ${index + 1} symbol`" /></div>
+            <div class="position-field"><span>Symbol</span><FieldInfo text="Choose a market-universe symbol to hold before the first bar." /><InstrumentSelect v-model="position.symbol" :options="positionOptions(index)" :descriptions="symbolNames" :logos="symbolLogos" :option-details="symbolDetails" :label="`Starting position ${index + 1} symbol`" /></div>
             <label>Quantity<FieldInfo text="Set the number of units held in this starting position." /><input v-model.number="position.quantity" type="number" step="any" /></label>
             <button type="button" class="icon-button danger" :aria-label="position.symbol ? `Remove ${position.symbol} starting position` : 'Remove empty starting position'" @click="removePosition(index)"><Trash2 :size="16" /></button>
           </div>
@@ -96,8 +96,8 @@
       <div v-if="tab === 3" class="form-section">
         <div class="section-copy"><h3>Trading logic</h3><p>Select saved strategies, optional indicators and a benchmark.</p></div>
         <div class="form-grid two">
-          <div class="field-label wide benchmark-field"><span>Benchmark</span><FieldInfo text="Choose a passive reference instrument used to compare experiment performance." /><small class="field-help">Compare performance against a passive benchmark for this asset class.</small><BenchmarkSelect :model-value="config.strategy.benchmark" :options="benchmarkSymbols" :descriptions="symbolNames" :logos="symbolLogos" label="Experiment benchmark" :placeholder="benchmarkPlaceholder" @update:model-value="setBenchmark" /></div>
-          <div class="field-label wide"><span>Strategies</span><FieldInfo text="Select the saved trading strategies to run against the same market data." /><BenchmarkSelect v-if="experimentMode === 'study'" :model-value="config.strategy.strategies[0] || ''" :options="savedStrategies" :descriptions="strategyOptionDetails" :uppercase-value="false" icon="strategy" selection-name="strategy" label="Experiment strategy" placeholder="Search saved strategies…" @update:model-value="setStudyStrategy" /><SearchSelect v-else v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></div>
+          <div class="field-label wide benchmark-field"><span>Benchmark</span><FieldInfo text="Choose a passive reference instrument used to compare experiment performance." /><small class="field-help">Compare performance against a passive benchmark for this asset class.</small><BenchmarkSelect :model-value="config.strategy.benchmark" :options="benchmarkSymbols" :descriptions="symbolNames" :logos="symbolLogos" :option-details="symbolDetails" label="Experiment benchmark" :placeholder="benchmarkPlaceholder" @update:model-value="setBenchmark" /></div>
+          <div class="field-label wide"><span>Strategies</span><FieldInfo text="Select the saved trading strategies to run against the same market data." /><BenchmarkSelect v-if="experimentMode === 'study'" :model-value="config.strategy.strategies[0] || ''" :options="savedStrategies" :descriptions="strategyOptionDetails" :uppercase-value="false" icon="strategy" selection-name="strategy" label="Experiment strategy" placeholder="Search saved strategies…" @update:model-value="setStudyStrategy" /><SearchSelect v-else v-model="config.strategy.strategies" :options="savedStrategies" :descriptions="strategyOptionDetails" :option-icons="strategyOptionIcons" clearable clear-label="strategies" option-name-first input-id="experiment-strategies" label="Experiment strategies" placeholder="Search saved strategies…" /></div>
           <section v-if="selectedStrategies.length" class="selection-insights wide" aria-label="Selected strategy details">
             <article v-for="item in selectedStrategies" :key="item.name" class="asset-selection-card">
               <header><span class="metric-icon"><LibraryAssetIcon kind="strategy" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ catalogTypeLabel(item.type) }}</small></span></header>
@@ -145,7 +145,7 @@
               </p>
             </fieldset>
           </section>
-          <div class="field-label wide"><span>Indicators</span><FieldInfo text="Add optional indicators that will be calculated and supplied during the simulation." /><SearchSelect v-model="config.indicators.indicators" :options="savedIndicators" :descriptions="indicatorOptionDetails" :option-icons="indicatorOptionIcons" option-name-first label="Experiment indicators" placeholder="Search saved indicators…" /></div>
+          <div class="field-label wide"><span>Indicators</span><FieldInfo text="Add optional indicators that will be calculated and supplied during the simulation." /><SearchSelect v-model="config.indicators.indicators" :options="savedIndicators" :descriptions="indicatorOptionDetails" :option-icons="indicatorOptionIcons" clearable clear-label="indicators" option-name-first label="Experiment indicators" placeholder="Search saved indicators…" /></div>
           <section v-if="selectedIndicators.length" class="selection-insights wide" aria-label="Selected indicator details">
             <article v-for="item in selectedIndicators" :key="item.name" class="asset-selection-card compact-card">
               <header><span class="metric-icon"><LibraryAssetIcon kind="indicator" :builtin="item.builtin" :size="18" /></span><span><strong>{{ item.name }}</strong><small>{{ catalogTypeLabel(item.type) }}</small></span></header>
@@ -374,6 +374,7 @@ const study = reactive({
 })
 const symbols = computed(() => instruments.value.map(item => item.symbol))
 const symbolNames = computed(() => Object.fromEntries(instruments.value.map(item => [item.symbol, item.name])))
+const symbolDetails = computed(() => Object.fromEntries(instruments.value.map(item => [item.symbol, item])))
 const symbolLogos = computed(() => {
   const values = Object.fromEntries(instruments.value.map(item => [
     item.symbol,

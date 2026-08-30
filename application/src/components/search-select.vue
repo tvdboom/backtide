@@ -62,6 +62,10 @@
         :class="{ 'plain-option': plainOptions }"
         @pointerdown.prevent
         @click.stop.prevent="choose(option)"
+        @mouseenter="showPreview($event, option)"
+        @mouseleave="hidePreview"
+        @focus="showPreview($event, option)"
+        @blur="hidePreview"
       >
         <span v-if="plainOptions" class="search-option-plain">
           <strong>{{ option }}</strong>
@@ -88,12 +92,29 @@
         </template>
       </button>
     </div>
+    <div v-if="clearable" class="selector-clear-row">
+      <button
+        type="button"
+        class="text-button selector-clear-button"
+        :aria-label="`Clear all ${clearLabel}`"
+        :disabled="modelValue.length === 0"
+        @click="clearAll"
+      ><X :size="13" /> Clear all</button>
+    </div>
+    <InstrumentPreview
+      :anchor="previewAnchor"
+      :details="optionDetails[previewOption] || {}"
+      :logo="logos[previewOption] || ''"
+      :symbol="previewOption"
+      :visible="Boolean(previewOption)"
+    />
   </div>
 </template>
 
 <script setup>
-import { ChartCandlestick } from 'lucide-vue-next'
+import { ChartCandlestick, X } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, reactive, ref } from 'vue'
+import InstrumentPreview from './instrument-preview.vue'
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
@@ -108,11 +129,14 @@ const props = defineProps({
   multiple: { type: Boolean, default: true },
   optionIcon: { type: [Object, Function], default: null },
   optionIcons: { type: Object, default: () => ({}) },
+  optionDetails: { type: Object, default: () => ({}) },
   optionNameFirst: Boolean,
   plainOptions: Boolean,
   reorderable: Boolean,
   removable: { type: Boolean, default: true },
-  resultLimit: { type: Number, default: 100 },
+  resultLimit: { type: Number, default: 20 },
+  clearable: Boolean,
+  clearLabel: { type: String, default: 'selections' },
   showSelectedDescription: Boolean,
   inputId: { type: String, default: undefined },
   uppercaseCustom: { type: Boolean, default: true }
@@ -127,13 +151,17 @@ const failedMenuLogos = reactive(new Set())
 const loadedSelectedLogos = reactive(new Set())
 const selectedLogoFailures = reactive(new Map())
 const menuLogoRequestLimit = 12
+const previewOption = ref('')
+const previewAnchor = ref(null)
 let closeTimer
 const filtered = computed(() => {
   const search = needle.value.trim().toLowerCase()
   return props.options
     .filter(item => !props.modelValue.includes(item))
     .filter(item => `${item} ${props.descriptions[item] || ''}`.toLowerCase().includes(search))
-    .sort((left, right) => matchScore(left, search) - matchScore(right, search))
+    .sort((left, right) => search
+      ? matchScore(left, search) - matchScore(right, search) || left.localeCompare(right)
+      : 0)
     .slice(0, props.resultLimit)
 })
 
@@ -202,6 +230,7 @@ function choose(value) {
     emit('update:modelValue', props.multiple ? [...props.modelValue, selected] : [selected])
   }
   needle.value = ''
+  hidePreview()
   if (!props.multiple) focused.value = false
 }
 function open() {
@@ -210,6 +239,20 @@ function open() {
 }
 function remove(value) {
   emit('update:modelValue', props.modelValue.filter(item => item !== value))
+}
+function clearAll() {
+  emit('update:modelValue', [])
+  needle.value = ''
+  hidePreview()
+}
+function showPreview(event, option) {
+  if (!props.optionDetails[option]) return
+  previewOption.value = option
+  previewAnchor.value = event.currentTarget
+}
+function hidePreview() {
+  previewOption.value = ''
+  previewAnchor.value = null
 }
 function startTagDrag(event, value) {
   if (!props.reorderable) {
@@ -246,7 +289,7 @@ function finishTagDrag() {
 }
 function close() {
   window.clearTimeout(closeTimer)
-  closeTimer = window.setTimeout(() => { focused.value = false }, 100)
+  closeTimer = window.setTimeout(() => { focused.value = false; hidePreview() }, 100)
 }
 onBeforeUnmount(() => window.clearTimeout(closeTimer))
 </script>

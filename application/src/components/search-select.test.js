@@ -28,6 +28,21 @@ describe('search-select', () => {
     expect(wrapper.emitted('update:modelValue')[0]).toEqual([[]])
   })
 
+  it('clears every selected value from the compact selector action', async () => {
+    const wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: ['AAPL', 'MSFT'],
+        options: ['AAPL', 'MSFT'],
+        clearable: true,
+        clearLabel: 'symbols'
+      }
+    })
+
+    await wrapper.get('[aria-label="Clear all symbols"]').trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')[0]).toEqual([[]])
+  })
+
   it('reorders selected tags by dragging when enabled', async () => {
     let wrapper
     wrapper = mount(SearchSelect, {
@@ -149,7 +164,7 @@ describe('search-select', () => {
     expect(wrapper.get('.search-option-copy small').text()).toBe('MACD')
   })
 
-  it('shows up to one hundred options, supports a visual icon, and replaces a single selection', async () => {
+  it('shows up to twenty options, supports a visual icon, and replaces a single selection', async () => {
     const wrapper = mount(SearchSelect, {
       props: {
         modelValue: ['OLD'],
@@ -168,10 +183,12 @@ describe('search-select', () => {
     expect(wrapper.find('.search-menu').exists()).toBe(false)
   })
 
-  it('ranks ticker matches first and bounds a large searchable result set', async () => {
+  it('ranks ticker prefixes first and bounds a large searchable result set', async () => {
     const options = [
-      ...Array.from({ length: 110 }, (_, index) => `ITEM${index}`),
-      'INGA.AS'
+      ...Array.from({ length: 30 }, (_, index) => `SHELL${String(index).padStart(2, '0')}`),
+      ...Array.from({ length: 30 }, (_, index) => `ITEM${index}`),
+      'INGA.AS',
+      'SHELL'
     ]
     const descriptions = Object.fromEntries(options.map(option => [
       option,
@@ -182,10 +199,12 @@ describe('search-select', () => {
     })
 
     await wrapper.get('input').trigger('focus')
-    await wrapper.get('input').setValue('ING')
+    await wrapper.get('input').setValue('SHELL')
 
-    expect(wrapper.findAll('.search-menu button')).toHaveLength(100)
-    expect(wrapper.get('.search-menu button small').text()).toBe('INGA.AS')
+    expect(wrapper.findAll('.search-menu button')).toHaveLength(20)
+    expect(wrapper.get('.search-menu button small').text()).toBe('SHELL')
+    expect(wrapper.findAll('.search-menu button small').every(option =>
+      option.text().startsWith('SHELL'))).toBe(true)
   })
 
   it('does not queue off-screen logo requests ahead of a selected symbol', async () => {

@@ -36,6 +36,10 @@
         :aria-selected="option === modelValue"
         @pointerdown.prevent
         @click.stop.prevent="choose(option)"
+        @mouseenter="showPreview($event, option)"
+        @mouseleave="hidePreview"
+        @focus="showPreview($event, option)"
+        @blur="hidePreview"
       >
         <span class="search-option-logo">
           <img
@@ -50,18 +54,28 @@
         <span class="search-option-copy"><strong>{{ option }}</strong><small>{{ descriptions[option] }}</small></span>
       </button>
     </div>
+    <InstrumentPreview
+      v-if="icon !== 'strategy'"
+      :anchor="previewAnchor"
+      :details="optionDetails[previewOption] || {}"
+      :logo="logos[previewOption] || ''"
+      :symbol="previewOption"
+      :visible="Boolean(previewOption)"
+    />
   </div>
 </template>
 
 <script setup>
 import { Bot, ChartCandlestick, ChevronDown, X } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import InstrumentPreview from './instrument-preview.vue'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
   options: { type: Array, default: () => [] },
   descriptions: { type: Object, default: () => ({}) },
   logos: { type: Object, default: () => ({}) },
+  optionDetails: { type: Object, default: () => ({}) },
   placeholder: { type: String, default: 'Search or enter a ticker…' },
   label: { type: String, default: 'Benchmark' },
   selectionName: { type: String, default: 'benchmark' },
@@ -74,13 +88,30 @@ const input = ref(null)
 const needle = ref(props.modelValue || '')
 const focused = ref(false)
 const failedLogos = reactive(new Set())
+const previewOption = ref('')
+const previewAnchor = ref(null)
 const filtered = computed(() => {
   const search = needle.value === (props.modelValue || '') ? '' : needle.value.toLowerCase()
   return props.options
     .filter(option => option !== props.modelValue)
     .filter(option => `${option} ${props.descriptions[option] || ''}`.toLowerCase().includes(search))
-    .slice(0, 10)
+    .sort((left, right) => search
+      ? matchScore(left, search) - matchScore(right, search) || left.localeCompare(right)
+      : 0)
+    .slice(0, 20)
 })
+
+function matchScore(value, search) {
+  if (!search) return 0
+  const symbol = String(value).toLowerCase()
+  const description = String(props.descriptions[value] || '').toLowerCase()
+  if (symbol === search) return 0
+  if (symbol.startsWith(search)) return 1
+  if (description.startsWith(search)) return 2
+  if (description.split(/[^a-z0-9]+/).some(word => word.startsWith(search))) return 3
+  if (symbol.includes(search)) return 4
+  return 5
+}
 
 function logoFailed(value) {
   failedLogos.add(value)
@@ -97,6 +128,7 @@ function choose(value) {
   if (!selected) return
   emit('update:modelValue', selected)
   needle.value = selected
+  hidePreview()
   focused.value = false
 }
 
@@ -109,11 +141,24 @@ function clear() {
   emit('update:modelValue', null)
   needle.value = ''
   focused.value = false
+  hidePreview()
+}
+
+function showPreview(event, option) {
+  if (!props.optionDetails[option]) return
+  previewOption.value = option
+  previewAnchor.value = event.currentTarget
+}
+
+function hidePreview() {
+  previewOption.value = ''
+  previewAnchor.value = null
 }
 
 function close() {
   needle.value = props.modelValue || ''
   focused.value = false
+  hidePreview()
 }
 
 function closeFromOutside(event) {

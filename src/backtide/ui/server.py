@@ -81,6 +81,14 @@ class BacktideRequestHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/storage":
                 self._json(self.services.storage())
+            elif path == "/api/instrument-overview":
+                self._json(
+                    self.services.instrument_overview(
+                        self._first(query, "symbol") or "",
+                        self._first(query, "instrument_type"),
+                        self._first(query, "provider"),
+                    )
+                )
             elif path == "/api/experiments":
                 self._json(
                     self.services.experiments(

@@ -89,6 +89,14 @@ class StubServices(BacktideServices):
         """Return deterministic live-provider symbols for route assertions."""
         return [{"symbol": "ADA-USD", "provider": provider, "limit": limit}]
 
+    def instrument_overview(self, symbol, instrument_type=None, provider=None):
+        """Return deterministic instrument-preview route arguments."""
+        return {
+            "symbol": symbol,
+            "instrument_type": instrument_type,
+            "provider": provider,
+        }
+
     def update_strategy(self, original_name, payload):
         """Return a deterministic saved strategy update."""
         return {"original": original_name, "saved": payload["name"]}
@@ -221,6 +229,21 @@ class TestJSONRoutes:
 
         assert response.status == 200
         assert json.loads(body) == [{"symbol": "ADA-USD", "provider": "coinbase", "limit": 4321}]
+
+    def test_instrument_overview_route_forwards_catalog_context(self, web_server):
+        """The instrument preview route keeps the symbol, type, and provider context."""
+        response, body = request(
+            web_server,
+            "GET",
+            "/api/instrument-overview?symbol=BTC-USD&instrument_type=crypto&provider=kraken",
+        )
+
+        assert response.status == 200
+        assert json.loads(body) == {
+            "symbol": "BTC-USD",
+            "instrument_type": "crypto",
+            "provider": "kraken",
+        }
 
     def test_unknown_command_returns_not_found(self, web_server):
         """An unknown API command returns a structured 404 error."""
@@ -598,6 +621,50 @@ class TestSerialization:
 
 class TestServiceCommands:
     """Tests for command validation and backend dispatch."""
+
+    def test_instrument_overview_prefers_daily_context_and_limits_history(self, monkeypatch):
+        """Instrument previews return one contextual series with thirty recent closes."""
+        rows = [
+            {
+                "symbol": "BTC-USD",
+                "instrument_type": "crypto",
+                "interval": "1m",
+                "provider": "kraken",
+                "last_ts": 200,
+                "sparkline": [99.0, 100.0],
+            },
+            {
+                "symbol": "BTC-USD",
+                "name": "Bitcoin / US Dollar",
+                "base": "BTC",
+                "quote": "USD",
+                "instrument_type": "crypto",
+                "exchange": "KRAKEN",
+                "interval": "1d",
+                "provider": "kraken",
+                "last_ts": 100,
+                "sparkline": list(range(40)),
+            },
+        ]
+        monkeypatch.setitem(
+            sys.modules,
+            "backtide.storage",
+            SimpleNamespace(query_bars_summary=lambda: rows),
+        )
+
+        result = BacktideServices().instrument_overview(" btc-usd ", "Crypto", "Kraken")
+
+        assert result == {
+            "symbol": "BTC-USD",
+            "name": "Bitcoin / US Dollar",
+            "base": "BTC",
+            "quote": "USD",
+            "instrument_type": "crypto",
+            "exchange": "KRAKEN",
+            "provider": "kraken",
+            "interval": "1d",
+            "sparkline": list(range(10, 40)),
+        }
 
     def test_reuse_study_setup_promotes_only_the_best_candidate(
         self,

@@ -57,7 +57,7 @@
                 </button>
               </div>
             </fieldset>
-            <div class="field-label wide symbol-select-field"><span>Symbols</span><FieldInfo text="Choose the instruments to subscribe to and monitor during this session." /><SearchSelect v-model="form.symbols" :options="liveSymbols" :descriptions="liveSymbolNames" :logos="liveSymbolLogos" :loading="loadingLiveSymbols" allow-custom input-id="live-symbols" label="Live symbols" placeholder="Search the provider catalog, e.g. BTC-USD…" /><small v-if="liveSymbolError" class="negative">{{ liveSymbolError }}</small></div>
+            <div class="field-label wide symbol-select-field"><span>Symbols</span><FieldInfo text="Choose the instruments to subscribe to and monitor during this session." /><SearchSelect v-model="form.symbols" :options="liveSymbols" :descriptions="liveSymbolNames" :logos="liveSymbolLogos" :option-details="liveSymbolDetails" :loading="loadingLiveSymbols" clearable clear-label="symbols" allow-custom input-id="live-symbols" label="Live symbols" placeholder="Search the provider catalog, e.g. BTC-USD…" /><small v-if="liveSymbolError" class="negative">{{ liveSymbolError }}</small></div>
             <div class="field-label interval-picker-field live-interval-field wide">
               <span>Interval</span>
               <FieldInfo text="Set the candle duration used for strategy evaluation and monitoring." />
@@ -86,8 +86,8 @@
         <div v-if="setupTab === 2" class="form-section">
           <div class="section-copy"><h3>Trading logic</h3><p>Select saved strategies and optional indicators for the live feed.</p></div>
           <div class="form-grid two">
-            <div class="field-label wide"><span>Strategies</span><FieldInfo text="Select saved strategies to evaluate; leave this empty for market monitoring only." /><SearchSelect v-model="form.strategies" :options="strategyOptions" :option-icons="strategyOptionIcons" input-id="live-strategies" label="Live strategies" placeholder="Select one or more saved strategies..."/><small>Leave empty to monitor the feed without orders.</small></div>
-            <div class="field-label wide"><span>Indicators</span><FieldInfo text="Add optional indicators to calculate during the session." /><SearchSelect v-model="form.indicators" :options="indicatorOptions" :option-icons="indicatorOptionIcons" input-id="live-indicators" label="Live indicators" placeholder="Select optional indicators..."/><small>Strategy-required indicators are added automatically.</small></div>
+            <div class="field-label wide"><span>Strategies</span><FieldInfo text="Select saved strategies to evaluate; leave this empty for market monitoring only." /><SearchSelect v-model="form.strategies" :options="strategyOptions" :option-icons="strategyOptionIcons" clearable clear-label="strategies" input-id="live-strategies" label="Live strategies" placeholder="Select one or more saved strategies..."/><small>Leave empty to monitor the feed without orders.</small></div>
+            <div class="field-label wide"><span>Indicators</span><FieldInfo text="Add optional indicators to calculate during the session." /><SearchSelect v-model="form.indicators" :options="indicatorOptions" :option-icons="indicatorOptionIcons" clearable clear-label="indicators" input-id="live-indicators" label="Live indicators" placeholder="Select optional indicators..."/><small>Strategy-required indicators are added automatically.</small></div>
           </div>
         </div>
 
@@ -415,6 +415,10 @@ const liveSymbols = computed(() => liveInstruments.value.map(item => item.symbol
 const liveSymbolNames = computed(() => Object.fromEntries(liveInstruments.value.map(item => [
   item.symbol,
   item.name || `${title(form.provider)} spot market`
+])))
+const liveSymbolDetails = computed(() => Object.fromEntries(liveInstruments.value.map(item => [
+  item.symbol,
+  item
 ])))
 const providerLogos = {
   binance: '/providers/binance.png',

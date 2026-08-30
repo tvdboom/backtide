@@ -4,7 +4,7 @@
     <form class="panel form-section" @submit.prevent="download">
       <div class="segmented wide-control"><button v-for="type in enums.instrument_types" :key="type" type="button" :class="{ active: form.instrument_type === optionValue('instrument_type', type) }" @click="setType(type)"><component :is="instrumentTypeIcon(type)" :size="16" />{{ type }}</button></div>
       <div class="form-grid two">
-        <div class="field-label wide symbol-select-field"><span>Symbols</span><SearchSelect :key="form.instrument_type" v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" :loading="loadingInstruments" allow-custom input-id="download-symbols" label="Download symbols" placeholder="Search symbols or company names…" /></div>
+        <div class="field-label wide symbol-select-field"><span>Symbols</span><SearchSelect :key="form.instrument_type" v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" :option-details="instrumentDetails" :loading="loadingInstruments" clearable clear-label="symbols" allow-custom input-id="download-symbols" label="Download symbols" placeholder="Search symbols or company names…" /></div>
         <div class="field-label wide">
           <span>Intervals</span>
           <IntervalPicker v-model="form.intervals" :options="enums.intervals" multiple input-id="download-intervals" label="Download intervals" />
@@ -99,6 +99,7 @@ let planTimer
 let planController
 const symbols = computed(() => instruments.value.map(item => item.symbol))
 const names = computed(() => Object.fromEntries(instruments.value.map(item => [item.symbol, item.name])))
+const instrumentDetails = computed(() => Object.fromEntries(instruments.value.map(item => [item.symbol, item])))
 const logos = computed(() => {
   const values = Object.fromEntries(instruments.value.map(item => [
     item.symbol,
