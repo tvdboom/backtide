@@ -12,6 +12,14 @@ describe('benchmark-select', () => {
         modelValue: 'AAPL',
         options: ['AAPL', 'ASML.AS'],
         descriptions: { AAPL: 'Apple Inc.', 'ASML.AS': 'ASML Holding N.V.' },
+        optionDetails: {
+          'ASML.AS': {
+            exchange_mic: 'XAMS',
+            exchange_name: 'Euronext Amsterdam',
+            quote: 'EUR',
+            provider: 'yahoo'
+          }
+        },
         'onUpdate:modelValue': value => wrapper.setProps({ modelValue: value })
       }
     })
@@ -21,6 +29,10 @@ describe('benchmark-select', () => {
     expect(wrapper.find('.tag').exists()).toBe(false)
     await input.trigger('focus')
     await input.setValue('ASML')
+    expect(wrapper.get('.instrument-menu-details').text()).toContain('XAMS')
+    expect(wrapper.get('.instrument-menu-details').text()).toContain('Euronext Amsterdam')
+    expect(wrapper.get('.instrument-menu-details').text()).toContain('EUR')
+    expect(wrapper.find('.instrument-menu-sparkline').exists()).toBe(false)
     await wrapper.get('[role="option"]').trigger('click')
     await wrapper.vm.$nextTick()
     expect(input.element.value).toBe('ASML.AS')

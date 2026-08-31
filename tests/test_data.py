@@ -16,6 +16,7 @@ from backtide.data import (
     InstrumentType,
     Interval,
     Provider,
+    fetch_bar_preview,
     fetch_instruments,
     list_instruments,
     resolve_profiles,
@@ -302,6 +303,26 @@ class TestFetchInstruments:
         """An invalid instrument_type string raises ValueError."""
         with pytest.raises(ValueError, match="Unknown instrument_type"):
             fetch_instruments("AAPL", "invalid_type")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# fetch_bar_preview
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestFetchBarPreview:
+    """Tests for the 'fetch_bar_preview' function."""
+
+    def test_empty_symbol_raises(self):
+        """An empty preview symbol raises before any provider request."""
+        with pytest.raises(ValueError, match="symbol must not be empty"):
+            fetch_bar_preview(" ", "stocks", "yahoo")
+
+    @pytest.mark.parametrize("limit", [1, 61])
+    def test_limit_is_bounded(self, limit):
+        """Preview limits outside the supported range are rejected."""
+        with pytest.raises(ValueError, match="limit must be between 2 and 60"):
+            fetch_bar_preview("AAPL", "stocks", "yahoo", limit=limit)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

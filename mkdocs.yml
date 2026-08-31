@@ -151,6 +151,7 @@ nav:
             - set_config: api/config/set_config.md
         - data:
             - download_bars: api/data/download_bars.md
+            - fetch_bar_preview: api/data/fetch_bar_preview.md
             - fetch_instruments: api/data/fetch_instruments.md
             - list_instruments: api/data/list_instruments.md
             - resolve_profiles: api/data/resolve_profiles.md

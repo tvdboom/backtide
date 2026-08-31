@@ -27,53 +27,63 @@
       <button v-if="modelValue" type="button" :aria-label="`Clear ${modelValue} ${selectionName}`" @click="clear"><X :size="14" /></button>
       <ChevronDown v-else :size="15" aria-hidden="true" />
     </div>
-    <div v-if="focused && filtered.length" class="search-menu benchmark-select-menu" role="listbox" :aria-label="label">
-      <button
-        v-for="option in filtered"
-        :key="option"
-        type="button"
-        role="option"
-        :aria-selected="option === modelValue"
-        @pointerdown.prevent
-        @click.stop.prevent="choose(option)"
-        @mouseenter="showPreview($event, option)"
-        @mouseleave="hidePreview"
-        @focus="showPreview($event, option)"
-        @blur="hidePreview"
+    <div
+      v-if="focused && filtered.length"
+      class="search-menu benchmark-select-menu"
+      :class="{ 'instrument-option-menu': hasInstrumentOptions }"
+    >
+      <div
+        :class="{ 'instrument-menu-options': hasInstrumentOptions }"
+        role="listbox"
+        :aria-label="label"
       >
-        <span class="search-option-logo">
-          <img
-            v-if="logos[option] && !failedLogos.has(option)"
-            :src="logos[option]"
-            alt=""
-            @error="logoFailed(option)"
-          />
-          <Bot v-else-if="icon === 'strategy'" :size="18" aria-hidden="true" />
-          <ChartCandlestick v-else :size="18" aria-hidden="true" />
-        </span>
-        <span class="search-option-copy"><strong>{{ option }}</strong><small>{{ descriptions[option] }}</small></span>
-      </button>
+        <button
+          v-for="option in filtered"
+          :key="option"
+          type="button"
+          :class="{ previewed: option === detailOption }"
+          role="option"
+          :aria-selected="option === modelValue"
+          @pointerdown.prevent
+          @click.stop.prevent="choose(option)"
+          @mouseenter="showDetails(option)"
+          @focus="showDetails(option)"
+        >
+          <span class="search-option-logo">
+            <img
+              v-if="logos[option] && !failedLogos.has(option)"
+              :src="logos[option]"
+              alt=""
+              @error="logoFailed(option)"
+            />
+            <Bot v-else-if="icon === 'strategy'" :size="18" aria-hidden="true" />
+            <ChartCandlestick v-else :size="18" aria-hidden="true" />
+          </span>
+          <span class="search-option-copy"><strong>{{ option }}</strong><small>{{ descriptions[option] }}</small></span>
+        </button>
+      </div>
+      <InstrumentMenuDetails
+        v-if="hasInstrumentOptions && detailOption"
+        :details="optionDetails[detailOption] || {}"
+        :display="display"
+        :load-graph="Boolean(activeOption) && activeOption === detailOption"
+        :logo="logos[detailOption] || ''"
+        :symbol="detailOption"
+      />
     </div>
-    <InstrumentPreview
-      v-if="icon !== 'strategy'"
-      :anchor="previewAnchor"
-      :details="optionDetails[previewOption] || {}"
-      :logo="logos[previewOption] || ''"
-      :symbol="previewOption"
-      :visible="Boolean(previewOption)"
-    />
   </div>
 </template>
 
 <script setup>
 import { Bot, ChartCandlestick, ChevronDown, X } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import InstrumentPreview from './instrument-preview.vue'
+import InstrumentMenuDetails from './instrument-menu-details.vue'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
   options: { type: Array, default: () => [] },
   descriptions: { type: Object, default: () => ({}) },
+  display: { type: Object, default: () => ({}) },
   logos: { type: Object, default: () => ({}) },
   optionDetails: { type: Object, default: () => ({}) },
   placeholder: { type: String, default: 'Search or enter a ticker…' },
@@ -88,8 +98,9 @@ const input = ref(null)
 const needle = ref(props.modelValue || '')
 const focused = ref(false)
 const failedLogos = reactive(new Set())
-const previewOption = ref('')
-const previewAnchor = ref(null)
+const activeOption = ref('')
+const hasInstrumentOptions = computed(() => iconIsInstrument() &&
+  Object.keys(props.optionDetails).length > 0)
 const filtered = computed(() => {
   const search = needle.value === (props.modelValue || '') ? '' : needle.value.toLowerCase()
   return props.options
@@ -100,6 +111,9 @@ const filtered = computed(() => {
       : 0)
     .slice(0, 20)
 })
+const detailOption = computed(() => filtered.value.includes(activeOption.value)
+  ? activeOption.value
+  : filtered.value[0] || '')
 
 function matchScore(value, search) {
   if (!search) return 0
@@ -117,7 +131,16 @@ function logoFailed(value) {
   failedLogos.add(value)
 }
 
+function iconIsInstrument() {
+  return props.icon !== 'strategy'
+}
+
+function showDetails(option) {
+  activeOption.value = option
+}
+
 function show() {
+  if (!focused.value) activeOption.value = ''
   focused.value = true
   nextTick(() => input.value?.select())
 }
@@ -128,8 +151,8 @@ function choose(value) {
   if (!selected) return
   emit('update:modelValue', selected)
   needle.value = selected
-  hidePreview()
   focused.value = false
+  activeOption.value = ''
 }
 
 function commit() {
@@ -141,24 +164,13 @@ function clear() {
   emit('update:modelValue', null)
   needle.value = ''
   focused.value = false
-  hidePreview()
-}
-
-function showPreview(event, option) {
-  if (!props.optionDetails[option]) return
-  previewOption.value = option
-  previewAnchor.value = event.currentTarget
-}
-
-function hidePreview() {
-  previewOption.value = ''
-  previewAnchor.value = null
+  activeOption.value = ''
 }
 
 function close() {
   needle.value = props.modelValue || ''
   focused.value = false
-  hidePreview()
+  activeOption.value = ''
 }
 
 function closeFromOutside(event) {

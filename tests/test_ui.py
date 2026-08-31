@@ -622,48 +622,83 @@ class TestSerialization:
 class TestServiceCommands:
     """Tests for command validation and backend dispatch."""
 
-    def test_instrument_overview_prefers_daily_context_and_limits_history(self, monkeypatch):
-        """Instrument previews return one contextual series with thirty recent closes."""
-        rows = [
-            {
-                "symbol": "BTC-USD",
-                "instrument_type": "crypto",
-                "interval": "1m",
-                "provider": "kraken",
-                "last_ts": 200,
-                "sparkline": [99.0, 100.0],
-            },
-            {
-                "symbol": "BTC-USD",
-                "name": "Bitcoin / US Dollar",
-                "base": "BTC",
-                "quote": "USD",
-                "instrument_type": "crypto",
-                "exchange": "KRAKEN",
-                "interval": "1d",
-                "provider": "kraken",
-                "last_ts": 100,
-                "sparkline": list(range(40)),
-            },
-        ]
-        monkeypatch.setitem(
-            sys.modules,
-            "backtide.storage",
-            SimpleNamespace(query_bars_summary=lambda: rows),
+    def test_instrument_overview_fetches_a_non_persisted_daily_preview(self, monkeypatch):
+        """Instrument previews return direct-provider closes and canonical exchange details."""
+        import backtide.data
+
+        class ExchangeValue(str):
+            @property
+            def mic(self) -> str:
+                """Return the test MIC."""
+                return "XNAS"
+
+            @property
+            def name(self) -> str:
+                """Return the test exchange name."""
+                return "NASDAQ Global Select Market"
+
+            @property
+            def country(self) -> SimpleNamespace:
+                """Return the test exchange country."""
+                return SimpleNamespace(alpha2="US")
+
+        class CountryValue:
+            alpha2 = "US"
+
+        class CurrencyValue(str):
+            country = CountryValue()
+
+        captured = {}
+
+        def fetch_bar_preview(symbol, instrument_type, provider, *, limit):
+            captured.update(
+                symbol=symbol,
+                instrument_type=instrument_type,
+                provider=provider,
+                limit=limit,
+            )
+            instrument = SimpleNamespace(
+                symbol="AAPL",
+                name="Apple Inc.",
+                base=None,
+                quote=CurrencyValue("USD"),
+                instrument_type="stocks",
+                exchange=ExchangeValue("XNAS"),
+                provider="yahoo",
+            )
+            bars = [SimpleNamespace(open_ts=index, adj_close=float(index)) for index in range(30)]
+            return instrument, bars
+
+        monkeypatch.setattr(
+            backtide.data,
+            "fetch_bar_preview",
+            fetch_bar_preview,
+            raising=False,
         )
 
-        result = BacktideServices().instrument_overview(" btc-usd ", "Crypto", "Kraken")
+        result = BacktideServices().instrument_overview(" AAPL ", "Stocks", "Yahoo")
 
         assert result == {
-            "symbol": "BTC-USD",
-            "name": "Bitcoin / US Dollar",
-            "base": "BTC",
+            "symbol": "AAPL",
+            "name": "Apple Inc.",
+            "base": None,
             "quote": "USD",
-            "instrument_type": "crypto",
-            "exchange": "KRAKEN",
-            "provider": "kraken",
+            "instrument_type": "stocks",
+            "exchange": "XNAS",
+            "provider": "yahoo",
+            "exchange_mic": "XNAS",
+            "exchange_name": "NASDAQ Global Select Market",
+            "market_country_code": "us",
+            "currency_country_code": "us",
             "interval": "1d",
-            "sparkline": list(range(10, 40)),
+            "sparkline": [float(index) for index in range(30)],
+            "sparkline_ts": list(range(30)),
+        }
+        assert captured == {
+            "symbol": "AAPL",
+            "instrument_type": "Stocks",
+            "provider": "Yahoo",
+            "limit": 30,
         }
 
     def test_reuse_study_setup_promotes_only_the_best_candidate(
@@ -1170,6 +1205,8 @@ class TestServiceCommands:
             "estimated_bytes": 2_520,
             "series": 1,
         }
+        assert plan["profiles"][0]["market_country_code"] == "us"
+        assert plan["profiles"][0]["currency_country_code"] == "us"
         assert plan["profiles"][0]["intervals"][0] == {
             "interval": "1d",
             "available_start": "2024-01-01",

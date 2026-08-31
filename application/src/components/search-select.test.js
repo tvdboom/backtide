@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { BrainCircuit } from 'lucide-vue-next'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SearchSelect from './search-select.vue'
 
+const { query } = vi.hoisted(() => ({ query: vi.fn() }))
+
+vi.mock('../api', () => ({ query }))
+
 describe('search-select', () => {
+  beforeEach(() => query.mockReset())
+
   it('filters options and emits a selected value', async () => {
     const wrapper = mount(SearchSelect, {
       props: { modelValue: [], options: ['AAPL', 'MSFT', 'AMZN'], label: 'Symbols' }
@@ -123,6 +129,83 @@ describe('search-select', () => {
     expect(option.get('img').attributes('src')).toBe('https://example.test/msft.png')
     expect(option.get('strong').text()).toBe('Microsoft Corporation')
     expect(option.get('small').text()).toBe('MSFT')
+  })
+
+  it('loads the integrated price chart only after an instrument is hovered', async () => {
+    query.mockImplementation((_path, params = {}) => Promise.resolve(params.symbol === 'AAPL'
+      ? {
+          sparkline: [180, 182, 179, 185],
+          sparkline_ts: [1_693_526_400, 1_693_612_800, 1_693_699_200, 1_693_785_600]
+        }
+      : { sparkline: [] }))
+    const wrapper = mount(SearchSelect, {
+      props: {
+        modelValue: [],
+        display: { date_format: 'MM/DD/YYYY', timezone: 'UTC' },
+        options: ['AAPL', 'MSFT'],
+        descriptions: { AAPL: 'Apple Inc.', MSFT: 'Microsoft Corporation' },
+        logos: {
+          AAPL: 'https://example.test/aapl.png',
+          MSFT: 'https://example.test/msft.png'
+        },
+        optionDetails: {
+          AAPL: {
+            exchange_mic: 'XNAS',
+            exchange_name: 'NASDAQ Global Select Market',
+            market_country_code: 'us',
+            quote: 'USD',
+            currency_country_code: 'us',
+            provider: 'yahoo',
+            instrument_type: 'stocks'
+          },
+          MSFT: {
+            exchange_mic: 'XNYS',
+            exchange_name: 'New York Stock Exchange',
+            quote: 'EUR',
+            provider: 'yahoo',
+            instrument_type: 'stocks'
+          }
+        }
+      }
+    })
+
+    await wrapper.get('input').trigger('focus')
+
+    const menu = wrapper.get('.search-menu')
+    expect(menu.get('.instrument-market-identity').text()).toBe(
+      'NASDAQ Global Select Market (XNAS)'
+    )
+    expect(menu.get('.instrument-menu-details').text()).toContain('USD')
+    expect(menu.get('.instrument-menu-logo img').attributes('src')).toContain('aapl.png')
+    expect(menu.get('.instrument-currency-fact img').attributes('src')).toBe(
+      'https://flagcdn.com/us.svg'
+    )
+    expect(menu.get('.instrument-market-fact img').attributes('src')).toBe(
+      'https://flagcdn.com/us.svg'
+    )
+    expect(menu.get('.instrument-menu-provider img').attributes('src')).toBe(
+      '/providers/yahoo.png'
+    )
+    expect(menu.find('.instrument-menu-sparkline').exists()).toBe(false)
+    expect(query).not.toHaveBeenCalled()
+
+    await menu.findAll('button')[0].trigger('mouseenter')
+    await flushPromises()
+
+    expect(menu.get('.instrument-menu-sparkline').exists()).toBe(true)
+    expect(menu.get('.instrument-menu-chart-x-axis').text()).toContain('09/01/2023')
+    expect(menu.get('.instrument-menu-chart-x-axis').text()).toContain('09/04/2023')
+    expect(query).toHaveBeenCalledTimes(1)
+
+    await menu.findAll('button')[1].trigger('mouseenter')
+    await flushPromises()
+
+    expect(menu.get('.instrument-menu-details').text()).toContain('XNYS')
+    expect(menu.get('.instrument-menu-details').text()).toContain('New York Stock Exchange')
+    expect(menu.get('.instrument-menu-details').text()).toContain('EUR')
+    expect(menu.find('.instrument-menu-sparkline').exists()).toBe(false)
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(document.body.querySelector('.instrument-preview')).toBeNull()
   })
 
   it('renders plain options without a logo or secondary label', async () => {

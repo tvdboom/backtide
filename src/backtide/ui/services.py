@@ -87,6 +87,30 @@ def public_attributes(value: Any, names: tuple[str, ...]) -> dict[str, Any]:
     return {name: _clean(getattr(value, name, None)) for name in names if hasattr(value, name)}
 
 
+def _country_code(value: Any) -> str | None:
+    """Return the lowercase ISO alpha-2 country code associated with a model value."""
+    country = getattr(value, "country", None)
+    country_code = getattr(country, "alpha2", None)
+    return str(country_code).lower() if country_code is not None else None
+
+
+def instrument_attributes(value: Any, names: tuple[str, ...]) -> dict[str, Any]:
+    """Select instrument attributes and expand canonical exchange metadata."""
+    result = public_attributes(value, names)
+    exchange = getattr(value, "exchange", None)
+    if exchange is not None:
+        result["exchange_mic"] = str(getattr(exchange, "mic", exchange))
+        result["exchange_name"] = str(getattr(exchange, "name", exchange))
+        market_country_code = _country_code(exchange)
+        if market_country_code is not None:
+            result["market_country_code"] = market_country_code
+    quote = getattr(value, "quote", None)
+    currency_country_code = _country_code(quote)
+    if currency_country_code is not None:
+        result["currency_country_code"] = currency_country_code
+    return result
+
+
 class JobStore:
     """Manage bounded background jobs for downloads and backtests."""
 
@@ -289,7 +313,7 @@ class BacktideServices:
             from backtide.storage import query_instruments
 
             values = query_instruments(instrument_type, provider, limit=limit)
-        rows = [public_attributes(value, self.instrument_fields) for value in values]
+        rows = [instrument_attributes(value, self.instrument_fields) for value in values]
         if search:
             needle = search.casefold()
             rows = [
@@ -308,7 +332,7 @@ class BacktideServices:
         from backtide.live import list_live_instruments
 
         values = list_live_instruments(provider, limit=min(max(limit, 1), 10_000))
-        return [public_attributes(value, self.instrument_fields) for value in values]
+        return [instrument_attributes(value, self.instrument_fields) for value in values]
 
     def bars(
         self,
@@ -337,55 +361,25 @@ class BacktideServices:
         instrument_type: str | None = None,
         provider: str | None = None,
     ) -> dict[str, Any]:
-        """Return compact metadata and the latest stored closes for one instrument."""
-        from backtide.storage import query_bars_summary
+        """Fetch compact metadata and recent closes without persisting the bars."""
+        from backtide.data import fetch_bar_preview
 
-        normalized_symbol = symbol.strip().casefold()
+        normalized_symbol = symbol.strip()
         if not normalized_symbol:
             raise APIError("A symbol is required.")
-        rows = [
-            row
-            for row in dataframe_records(query_bars_summary())
-            if str(row.get("symbol") or "").casefold() == normalized_symbol
-        ]
-        if not rows:
-            return {}
-
-        def matches(value: Any, expected: str | None) -> bool:
-            """Return whether an optional catalog value matches the requested context."""
-            if not expected:
-                return True
-            left = re.sub(r"[^a-z]", "", str(value or "").casefold())
-            right = re.sub(r"[^a-z]", "", expected.casefold())
-            return left == right or left.startswith(right) or right.startswith(left)
-
-        contextual = [
-            row
-            for row in rows
-            if matches(row.get("instrument_type"), instrument_type)
-            and matches(row.get("provider"), provider)
-        ]
-        candidates = contextual or rows
-        best = max(
-            candidates,
-            key=lambda row: (
-                str(row.get("interval") or "").casefold() in {"1d", "oneday"},
-                int(row.get("last_ts") or 0),
-                len(row.get("sparkline") or []),
-            ),
+        resolved_type = instrument_type or "stocks"
+        normalized_type = re.sub(r"[^a-z]", "", resolved_type.casefold())
+        resolved_provider = provider or ("binance" if normalized_type == "crypto" else "yahoo")
+        instrument, bars = fetch_bar_preview(
+            normalized_symbol,
+            resolved_type,
+            resolved_provider,
+            limit=30,
         )
-        fields = (
-            "symbol",
-            "name",
-            "base",
-            "quote",
-            "instrument_type",
-            "exchange",
-            "provider",
-            "interval",
-        )
-        result = {field: best.get(field) for field in fields if best.get(field) is not None}
-        result["sparkline"] = list(best.get("sparkline") or [])[-30:]
+        result = instrument_attributes(instrument, self.instrument_fields)
+        result["interval"] = "1d"
+        result["sparkline"] = [float(bar.adj_close) for bar in bars]
+        result["sparkline_ts"] = [int(bar.open_ts) for bar in bars]
         return result
 
     def delete_storage(self, payload: dict[str, Any]) -> dict[str, int]:
@@ -538,19 +532,26 @@ class BacktideServices:
 
             series_count += len(profile_intervals)
 
-            details.append(
-                {
-                    "symbol": str(profile.symbol),
-                    "name": str(profile.name),
-                    "instrument_type": str(profile.instrument_type),
-                    "provider": str(profile.provider),
-                    "exchange": str(profile.exchange),
-                    "quote": str(profile.quote),
-                    "legs": [str(leg) for leg in profile.legs],
-                    "direct": index < len(symbols),
-                    "intervals": profile_intervals,
-                }
-            )
+            exchange = profile.exchange
+            quote = profile.quote
+            profile_details = {
+                "symbol": str(profile.symbol),
+                "name": str(profile.name),
+                "instrument_type": str(profile.instrument_type),
+                "provider": str(profile.provider),
+                "exchange": str(exchange),
+                "quote": str(quote),
+                "legs": [str(leg) for leg in profile.legs],
+                "direct": index < len(symbols),
+                "intervals": profile_intervals,
+            }
+            market_country_code = _country_code(exchange)
+            if market_country_code is not None:
+                profile_details["market_country_code"] = market_country_code
+            currency_country_code = _country_code(quote)
+            if currency_country_code is not None:
+                profile_details["currency_country_code"] = currency_country_code
+            details.append(profile_details)
 
         return {
             "available_start": available_start.isoformat(),

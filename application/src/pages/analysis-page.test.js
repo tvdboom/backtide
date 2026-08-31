@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, ref } from 'vue'
 import AnalysisPage from './analysis-page.vue'
 
-const { api, post } = vi.hoisted(() => ({
+const { api, post, query } = vi.hoisted(() => ({
   api: vi.fn(),
-  post: vi.fn()
+  post: vi.fn(),
+  query: vi.fn()
 }))
 
-vi.mock('../api', () => ({ api, post }))
+vi.mock('../api', () => ({ api, post, query }))
 vi.mock('../components/chart-panel.vue', () => ({
   default: { template: '<div class="chart-stub" />' }
 }))
@@ -24,6 +25,7 @@ describe('analysis page', () => {
       name: 'Apple Inc.',
       instrument_type: 'stocks'
     }])
+    query.mockReset().mockResolvedValue({})
     post.mockReset().mockImplementation((_endpoint, payload) => Promise.resolve(
       payload.plot === 'metrics'
         ? { rows: [{

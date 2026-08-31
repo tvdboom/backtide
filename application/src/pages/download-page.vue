@@ -4,7 +4,7 @@
     <form class="panel form-section" @submit.prevent="download">
       <div class="segmented wide-control"><button v-for="type in enums.instrument_types" :key="type" type="button" :class="{ active: form.instrument_type === optionValue('instrument_type', type) }" @click="setType(type)"><component :is="instrumentTypeIcon(type)" :size="16" />{{ type }}</button></div>
       <div class="form-grid two">
-        <div class="field-label wide symbol-select-field"><span>Symbols</span><SearchSelect :key="form.instrument_type" v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" :option-details="instrumentDetails" :loading="loadingInstruments" clearable clear-label="symbols" allow-custom input-id="download-symbols" label="Download symbols" placeholder="Search symbols or company names…" /></div>
+        <div class="field-label wide symbol-select-field"><span>Symbols</span><SearchSelect :key="form.instrument_type" v-model="form.symbols" :options="symbols" :descriptions="names" :display="bootstrap.display" :logos="logos" :selected-logos="selectedLogos" :option-details="instrumentDetails" :loading="loadingInstruments" clearable clear-label="symbols" allow-custom input-id="download-symbols" label="Download symbols" placeholder="Search symbols or company names…" /></div>
         <div class="field-label wide">
           <span>Intervals</span>
           <IntervalPicker v-model="form.intervals" :options="enums.intervals" multiple input-id="download-intervals" label="Download intervals" />
@@ -38,8 +38,35 @@
                 </div>
                 <div class="download-profile-meta">
                   <div class="download-provider"><img v-if="providerLogo(profile.provider)" :src="providerLogo(profile.provider)" :alt="`${profile.provider} provider`" @error="providerLogoFailed(profile.provider)" /></div>
-                  <span v-if="profile.exchange"><small>Exchange</small><strong>{{ profile.exchange }}</strong></span>
-                  <span><small>Currency</small><strong>{{ profile.quote }}</strong></span>
+                  <span
+                    v-if="profile.exchange && showProfileExchange(profile)"
+                    class="download-profile-exchange"
+                  >
+                    <small>Exchange</small>
+                    <strong class="download-profile-fact-value">
+                      <img
+                        v-if="profileFlagUrl(profile.market_country_code)"
+                        class="download-meta-flag"
+                        :src="profileFlagUrl(profile.market_country_code)"
+                        :alt="`${profile.market_country_code.toUpperCase()} flag`"
+                        @error="profileFlagFailed(profile.market_country_code)"
+                      />
+                      <span>{{ profile.exchange }}</span>
+                    </strong>
+                  </span>
+                  <span v-if="showProfileCurrency(profile)" class="download-profile-currency">
+                    <small>Currency</small>
+                    <strong class="download-profile-fact-value">
+                      <img
+                        v-if="profileFlagUrl(profile.currency_country_code)"
+                        class="download-meta-flag"
+                        :src="profileFlagUrl(profile.currency_country_code)"
+                        :alt="`${profile.currency_country_code.toUpperCase()} flag`"
+                        @error="profileFlagFailed(profile.currency_country_code)"
+                      />
+                      <span>{{ profile.quote }}</span>
+                    </strong>
+                  </span>
                 </div>
               </header>
               <div v-if="profile.legs.length" class="download-legs"><span>Conversion via</span><strong v-for="leg in profile.legs" :key="leg">{{ leg }}</strong></div>
@@ -94,6 +121,7 @@ const planning = ref(false)
 const planError = ref('')
 const failedProfileLogos = reactive(new Set())
 const failedProviderLogos = reactive(new Set())
+const failedProfileFlags = reactive(new Set())
 let timer
 let planTimer
 let planController
@@ -170,6 +198,25 @@ function providerLogoFailed(provider) {
   const value = String(provider || '').toLowerCase()
   const key = Object.keys(providerLogos).find(item => value.includes(item))
   if (key) failedProviderLogos.add(key)
+}
+function profileFlagUrl(countryCode) {
+  const value = String(countryCode || '').toLowerCase()
+  return /^[a-z]{2}$/.test(value) && !failedProfileFlags.has(value)
+    ? `https://flagcdn.com/${value}.svg`
+    : ''
+}
+function profileFlagFailed(countryCode) {
+  const value = String(countryCode || '').toLowerCase()
+  if (value) failedProfileFlags.add(value)
+}
+function profileInstrumentType(profile) {
+  return String(profile.instrument_type || '').replace(/[^a-z]/gi, '').toLowerCase()
+}
+function showProfileExchange(profile) {
+  return !['forex', 'crypto'].includes(profileInstrumentType(profile))
+}
+function showProfileCurrency(profile) {
+  return profileInstrumentType(profile) !== 'crypto'
 }
 async function setType(type) {
   form.instrument_type = optionValue('instrument_type', type)

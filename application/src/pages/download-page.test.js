@@ -36,7 +36,9 @@ const plan = {
     instrument_type: 'Stocks',
     provider: 'yahoo',
     exchange: 'XNAS',
+    market_country_code: 'us',
     quote: 'USD',
+    currency_country_code: 'us',
     legs: [],
     intervals: [{
       interval: '1d',
@@ -54,6 +56,25 @@ const plan = {
     provider: 'yahoo',
     exchange: 'CCY',
     quote: 'USD',
+    currency_country_code: 'us',
+    legs: [],
+    intervals: [{
+      interval: '1d',
+      available_start: '2020-01-01',
+      available_end: '2026-08-10',
+      download_start: '2020-01-01',
+      download_end: '2026-08-10',
+      estimated_bars: 1650,
+      days: 2414
+    }]
+  }, {
+    symbol: 'BTC-USDT',
+    name: 'Bitcoin / Tether',
+    instrument_type: 'Crypto',
+    provider: 'binance',
+    exchange: 'BINANCE',
+    quote: 'USDT',
+    currency_country_code: 'us',
     legs: [],
     intervals: [{
       interval: '1d',
@@ -112,9 +133,20 @@ describe('download page', () => {
     expect(wrapper.get('.download-provider img').attributes('alt')).toBe('yahoo provider')
     expect(wrapper.get('.download-profile-meta').text()).toContain('ExchangeXNAS')
     expect(wrapper.get('.download-profile-meta').text()).toContain('CurrencyUSD')
-    expect(wrapper.findAll('.download-profile')[1].get('.download-profile-icon img').attributes('src')).toBe(
+    expect(wrapper.get('.download-profile-exchange img').attributes('src')).toBe(
+      'https://flagcdn.com/us.svg'
+    )
+    expect(wrapper.get('.download-profile-currency img').attributes('src')).toBe(
+      'https://flagcdn.com/us.svg'
+    )
+    const profiles = wrapper.findAll('.download-profile')
+    expect(profiles[1].get('.download-profile-icon img').attributes('src')).toBe(
       'https://img.logokit.com/ticker/EURUSD:CUR?token=test%20token'
     )
+    expect(profiles[1].find('.download-profile-exchange').exists()).toBe(false)
+    expect(profiles[1].find('.download-profile-currency').exists()).toBe(true)
+    expect(profiles[2].find('.download-profile-exchange').exists()).toBe(false)
+    expect(profiles[2].find('.download-profile-currency').exists()).toBe(false)
     const interval = wrapper.get('.download-interval-row').text()
     expect(interval).toContain('Provider availability')
     expect(interval).toContain('6 years 224 days')

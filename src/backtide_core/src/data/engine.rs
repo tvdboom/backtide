@@ -63,6 +63,24 @@ impl Engine {
         Ok(instruments)
     }
 
+    /// Fetch recent daily bars directly from a named provider without persisting them.
+    #[instrument(skip(self), fields(%symbol, ?instrument_type, ?provider, limit))]
+    pub fn fetch_bar_preview(
+        &self,
+        symbol: Symbol,
+        instrument_type: InstrumentType,
+        provider: Provider,
+        limit: usize,
+    ) -> DataResult<(Instrument, Vec<Bar>)> {
+        let data_provider = self.named_data_provider(provider)?;
+        self.rt.block_on(crate::data::providers::load_bar_preview(
+            data_provider.as_ref(),
+            &symbol,
+            instrument_type,
+            limit,
+        ))
+    }
+
     /// Download bars from a list of [`InstrumentProfile`] and store the results in
     /// the database.
     ///
@@ -494,6 +512,18 @@ impl Engine {
             .ok_or(DataError::ProviderNotConfigured(instrument_type))
     }
 
+    /// Return a configured process-wide client by provider name.
+    fn named_data_provider(&self, provider: Provider) -> DataResult<&Arc<dyn DataProvider>> {
+        self.config
+            .data
+            .providers
+            .iter()
+            .find_map(|(instrument_type, configured)| {
+                (*configured == provider).then(|| self.providers.get(instrument_type)).flatten()
+            })
+            .ok_or(DataError::ProviderUnavailable(provider))
+    }
+
     /// Resolve an instrument using the engine's cache.
     async fn load_instrument(
         &self,
@@ -886,6 +916,23 @@ mod tests {
         let results = engine.list_instruments(InstrumentType::Crypto, None, 10, false).unwrap();
 
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn fetch_bar_preview_is_bounded_and_does_not_write_to_storage() {
+        let inst = test_instrument();
+        let mut mock = MockProvider::new(inst);
+        mock.bars =
+            vec![sample_bar(1_700_000_000), sample_bar(1_700_086_400), sample_bar(1_700_172_800)];
+        let (engine, _tmp) = test_engine(mock);
+
+        let (_, bars) = engine
+            .fetch_bar_preview("TEST-USD".to_owned(), InstrumentType::Crypto, Provider::Binance, 2)
+            .unwrap();
+
+        assert_eq!(bars.len(), 2);
+        assert_eq!(bars[0].open_ts, 1_700_086_400);
+        assert!(engine.query_bars(Some(&["TEST-USD"]), None, None, None).unwrap().is_empty());
     }
 
     // ── clear_cache ─────────────────────────────────────────────────────

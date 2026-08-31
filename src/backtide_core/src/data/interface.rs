@@ -211,6 +211,66 @@ pub fn list_instruments(
     Ok(engine.list_instruments(instrument_type, exchanges, limit, verbose)?)
 }
 
+/// Fetch a recent, non-persisted daily-bar preview for one instrument.
+///
+/// The returned bars are requested directly from the selected provider and are
+/// never written to Backtide storage.
+///
+/// Parameters
+/// ----------
+/// symbol : str
+///     Canonical instrument symbol.
+///
+/// instrument_type : str | [InstrumentType]
+///     Instrument type used to normalize the provider request.
+///
+/// provider : str | [Provider]
+///     Provider from which to request the preview.
+///
+/// limit : int, default=30
+///     Number of recent daily bars to return, from 2 through 60.
+///
+/// Returns
+/// -------
+/// tuple[[Instrument], list[[Bar]]]
+///     Resolved instrument metadata and chronological daily bars.
+///
+/// Raises
+/// ------
+/// ValueError
+///     If `symbol` is empty or `limit` is outside the supported range.
+///
+/// See Also
+/// --------
+/// - backtide.data:download_bars
+/// - backtide.data:fetch_instruments
+/// - backtide.data:resolve_profiles
+#[pyfunction]
+#[pyo3(signature = (symbol: "str", instrument_type: "str | InstrumentType", provider: "str | Provider", *, limit: "int"=30) -> "tuple[Instrument, list[Bar]]")]
+pub fn fetch_bar_preview(
+    py: Python<'_>,
+    symbol: String,
+    instrument_type: InstrumentType,
+    provider: Provider,
+    limit: usize,
+) -> PyResult<(Instrument, Vec<Bar>)> {
+    let symbol = symbol.trim().to_owned();
+    if symbol.is_empty() {
+        return Err(PyValueError::new_err("symbol must not be empty"));
+    }
+    if !(2..=60).contains(&limit) {
+        return Err(PyValueError::new_err("limit must be between 2 and 60"));
+    }
+
+    if provider == Provider::Yahoo {
+        let engine = Engine::get()?;
+        py.detach(|| engine.fetch_bar_preview(symbol, instrument_type, provider, limit))
+            .map_err(Into::into)
+    } else {
+        crate::live::interface::fetch_rest_bar_preview(py, provider, symbol, instrument_type, limit)
+    }
+}
+
 /// Download OHLCV data for the instruments described in a list of profiles.
 ///
 /// Concurrently downloads all instruments and legs, skipping data already stored

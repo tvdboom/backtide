@@ -17,6 +17,7 @@ from backtide.core.data import (
     Interval,
     Provider,
     download_bars,
+    fetch_bar_preview,
     fetch_instruments,
     list_instruments,
     resolve_profiles,

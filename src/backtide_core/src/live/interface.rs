@@ -785,6 +785,35 @@ pub fn list_live_instruments(
     })
 }
 
+/// Fetch recent REST bars with the process-wide live-provider clients.
+pub(crate) fn fetch_rest_bar_preview(
+    py: Python<'_>,
+    provider: Provider,
+    symbol: String,
+    instrument_type: InstrumentType,
+    limit: usize,
+) -> PyResult<(Instrument, Vec<Bar>)> {
+    if provider == Provider::Yahoo {
+        return Err(PyValueError::new_err(
+            "Yahoo previews use the historical-data provider client",
+        ));
+    }
+    let runtime = live_runtime()?;
+    let providers = live_catalog_providers(runtime)?;
+    let client = providers.get(&provider).cloned().ok_or_else(|| {
+        PyValueError::new_err(format!("unsupported preview provider: {provider}"))
+    })?;
+    py.detach(|| {
+        runtime.block_on(crate::data::providers::load_bar_preview(
+            client.as_ref(),
+            &symbol,
+            instrument_type,
+            limit,
+        ))
+    })
+    .map_err(Into::into)
+}
+
 async fn collect_updates(
     provider: Provider,
     symbols: Vec<String>,

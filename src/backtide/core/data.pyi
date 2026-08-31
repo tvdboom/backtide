@@ -12,6 +12,7 @@ __all__ = [
     "Interval",
     "Provider",
     "download_bars",
+    "fetch_bar_preview",
     "fetch_instruments",
     "list_instruments",
     "resolve_profiles",
@@ -1112,6 +1113,50 @@ def download_bars(profiles, start=None, end=None, *, verbose=True) -> DownloadRe
     result = download_bars(profiles)
     print(result)
     ```
+
+    """
+
+def fetch_bar_preview(
+    symbol,
+    instrument_type,
+    provider,
+    *,
+    limit=30,
+) -> tuple[Instrument, list[Bar]]:
+    """Fetch a recent, non-persisted daily-bar preview for one instrument.
+
+    The returned bars are requested directly from the selected provider and are
+    never written to Backtide storage.
+
+    Parameters
+    ----------
+    symbol : str
+        Canonical instrument symbol.
+
+    instrument_type : str | [InstrumentType]
+        Instrument type used to normalize the provider request.
+
+    provider : str | [Provider]
+        Provider from which to request the preview.
+
+    limit : int, default=30
+        Number of recent daily bars to return, from 2 through 60.
+
+    Returns
+    -------
+    tuple[[Instrument], list[[Bar]]]
+        Resolved instrument metadata and chronological daily bars.
+
+    Raises
+    ------
+    ValueError
+        If `symbol` is empty or `limit` is outside the supported range.
+
+    See Also
+    --------
+    - backtide.data:download_bars
+    - backtide.data:fetch_instruments
+    - backtide.data:resolve_profiles
 
     """
 

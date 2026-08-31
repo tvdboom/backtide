@@ -57,7 +57,7 @@
                 </button>
               </div>
             </fieldset>
-            <div class="field-label wide symbol-select-field"><span>Symbols</span><FieldInfo text="Choose the instruments to subscribe to and monitor during this session." /><SearchSelect v-model="form.symbols" :options="liveSymbols" :descriptions="liveSymbolNames" :logos="liveSymbolLogos" :option-details="liveSymbolDetails" :loading="loadingLiveSymbols" clearable clear-label="symbols" allow-custom input-id="live-symbols" label="Live symbols" placeholder="Search the provider catalog, e.g. BTC-USD…" /><small v-if="liveSymbolError" class="negative">{{ liveSymbolError }}</small></div>
+            <div class="field-label wide symbol-select-field"><span>Symbols</span><FieldInfo text="Choose the instruments to subscribe to and monitor during this session." /><SearchSelect v-model="form.symbols" :options="liveSymbols" :descriptions="liveSymbolNames" :display="bootstrap.display" :logos="liveSymbolLogos" :option-details="liveSymbolDetails" :loading="loadingLiveSymbols" clearable clear-label="symbols" allow-custom input-id="live-symbols" label="Live symbols" placeholder="Search the provider catalog, e.g. BTC-USD…" /><small v-if="liveSymbolError" class="negative">{{ liveSymbolError }}</small></div>
             <div class="field-label interval-picker-field live-interval-field wide">
               <span>Interval</span>
               <FieldInfo text="Set the candle duration used for strategy evaluation and monitoring." />

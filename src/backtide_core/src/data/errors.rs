@@ -1,5 +1,5 @@
 use crate::constants::Symbol;
-use crate::data::models::{InstrumentType, Interval};
+use crate::data::models::{InstrumentType, Interval, Provider};
 use crate::utils::http::HttpError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;
@@ -49,6 +49,10 @@ pub enum DataError {
     /// No provider was configured for an instrument type.
     #[error("No provider configured for instrument type: {0}")]
     ProviderNotConfigured(InstrumentType),
+
+    /// The requested provider has no process-wide client.
+    #[error("Provider is not available: {0}")]
+    ProviderUnavailable(Provider),
 
     /// The interval is not supported by the provider.
     #[error("Unsupported interval: {0}")]

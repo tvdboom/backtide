@@ -62,6 +62,35 @@ describe('experiment selectors', () => {
     expect(declaration('.symbol-select-field .selected-symbol-logo')).toContain('width: 25px')
   })
 
+  it('keeps integrated instrument details wide, compact, and tooltip-like', () => {
+    expect(declaration('.instrument-menu-heading')).toContain(
+      'grid-template-columns: 62px minmax(0, 1fr) 86px'
+    )
+    expect(declaration('.instrument-menu-logo')).not.toMatch(/background|border/)
+    expect(declaration('.instrument-menu-title strong')).toContain('font-size: 17px')
+    expect(styles).toMatch(/\.instrument-menu-title small\s*\{[^}]*font-size: 12px;/)
+    expect(declaration('.instrument-menu-provider')).not.toMatch(/background|border/)
+    expect(declaration('.instrument-menu-provider')).toContain('justify-content: flex-end')
+    expect(declaration('.instrument-menu-provider')).toContain('margin-top: 8px')
+    expect(declaration('.instrument-menu-provider img')).toContain('width: 72px')
+    expect(declaration('.instrument-menu-chart')).toContain('width: 100%')
+    expect(declaration('.instrument-menu-chart-body')).toContain(
+      'grid-template-columns: max-content minmax(0, 1fr)'
+    )
+    expect(declaration('.instrument-menu-details dl')).toContain(
+      'repeat(3, minmax(0, 1fr))'
+    )
+    expect(declaration('.instrument-menu-details dl > .instrument-market-fact')).toContain(
+      'grid-column: span 2'
+    )
+    expect(declaration('.search-menu.instrument-option-menu')).toContain(
+      'background: transparent'
+    )
+    expect(declaration('.search-menu.instrument-option-menu')).toContain('box-shadow: none')
+    expect(declaration('.instrument-menu-details')).toContain('box-shadow: var(--menu-shadow)')
+    expect(styles).not.toContain('.instrument-provider-fact')
+  })
+
   it('separates the download asset-type control from the symbols field', () => {
     expect(declaration('.download-page .wide-control')).toContain('margin-bottom: 18px')
   })
@@ -75,6 +104,9 @@ describe('experiment selectors', () => {
     expect(declaration('.download-interval-row')).toContain('background: var(--panel-start)')
     expect(styles).not.toMatch(/\.download-interval-row:nth-child/)
     expect(declaration('.download-provider')).toContain('margin-right: 14px')
+    expect(declaration('.download-profile-meta .download-profile-fact-value')).toContain(
+      'display: flex'
+    )
     expect(styles).toContain('.download-row-count small { margin-top: 3px; font-size: 15px;')
   })
 })

@@ -2,7 +2,7 @@
   <div class="page">
     <section class="page-intro"><div><h2>Analyze market data</h2><p>Compare key metrics and explore prices, returns, correlation, seasonality, volatility, volume and dividends.</p></div></section>
     <section class="panel analysis-controls">
-      <div class="field-label"><span>Symbols</span><SearchSelect v-model="form.symbols" :options="symbols" :descriptions="names" :logos="logos" :selected-logos="selectedLogos" :option-details="symbolDetails" clearable clear-label="symbols" label="Analysis symbols" placeholder="Search stored instruments…" /></div>
+      <div class="field-label"><span>Symbols</span><SearchSelect v-model="form.symbols" :options="symbols" :descriptions="names" :display="bootstrap.display" :logos="logos" :selected-logos="selectedLogos" :option-details="symbolDetails" clearable clear-label="symbols" label="Analysis symbols" placeholder="Search stored instruments…" /></div>
       <label>Interval<select v-model="form.interval"><option v-for="item in availableIntervals" :key="item">{{ item }}</option></select></label>
       <label>Price<select v-model="form.price_col"><option value="open">Open</option><option value="high">High</option><option value="low">Low</option><option value="close">Close</option><option value="adj_close">Adjusted close</option></select></label>
       <label v-if="form.plot === 'volatility'">Window<input v-model.number="form.window" type="number" min="2" /></label>

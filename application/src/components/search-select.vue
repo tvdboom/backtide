@@ -54,43 +54,55 @@
     <div v-if="focused && loading" class="search-menu search-state" role="status">
       <span class="spinner small" /> Loading options…
     </div>
-    <div v-else-if="focused && filtered.length" class="search-menu">
-      <button
-        v-for="(option, index) in filtered"
-        :key="option"
-        type="button"
-        :class="{ 'plain-option': plainOptions }"
-        @pointerdown.prevent
-        @click.stop.prevent="choose(option)"
-        @mouseenter="showPreview($event, option)"
-        @mouseleave="hidePreview"
-        @focus="showPreview($event, option)"
-        @blur="hidePreview"
-      >
-        <span v-if="plainOptions" class="search-option-plain">
-          <strong>{{ option }}</strong>
-          <small v-if="descriptions[option]">{{ descriptions[option] }}</small>
-        </span>
-        <template v-else>
-          <span class="search-option-logo">
-            <img
-              v-if="index < menuLogoRequestLimit && logos[option] && !failedMenuLogos.has(option)"
-              :src="logos[option]"
-              alt=""
-              decoding="async"
-              fetchpriority="low"
-              loading="lazy"
-              @error="logoFailed(option)"
-            />
-            <component :is="optionIconFor(option)" v-else-if="optionIconFor(option)" :size="18" aria-hidden="true" />
-            <span v-else>{{ option.slice(0, 2) }}</span>
+    <div
+      v-else-if="focused && filtered.length"
+      class="search-menu"
+      :class="{ 'instrument-option-menu': hasInstrumentOptions }"
+    >
+      <div :class="{ 'instrument-menu-options': hasInstrumentOptions }">
+        <button
+          v-for="(option, index) in filtered"
+          :key="option"
+          type="button"
+          :class="{ 'plain-option': plainOptions, previewed: option === detailOption }"
+          @pointerdown.prevent
+          @click.stop.prevent="choose(option)"
+          @mouseenter="showDetails(option)"
+          @focus="showDetails(option)"
+        >
+          <span v-if="plainOptions" class="search-option-plain">
+            <strong>{{ option }}</strong>
+            <small v-if="descriptions[option]">{{ descriptions[option] }}</small>
           </span>
-          <span class="search-option-copy">
-            <strong>{{ optionNameFirst ? option : descriptions[option] || option }}</strong>
-            <small>{{ optionNameFirst ? descriptions[option] : option }}</small>
-          </span>
-        </template>
-      </button>
+          <template v-else>
+            <span class="search-option-logo">
+              <img
+                v-if="index < menuLogoRequestLimit && logos[option] && !failedMenuLogos.has(option)"
+                :src="logos[option]"
+                alt=""
+                decoding="async"
+                fetchpriority="low"
+                loading="lazy"
+                @error="logoFailed(option)"
+              />
+              <component :is="optionIconFor(option)" v-else-if="optionIconFor(option)" :size="18" aria-hidden="true" />
+              <span v-else>{{ option.slice(0, 2) }}</span>
+            </span>
+            <span class="search-option-copy">
+              <strong>{{ optionNameFirst ? option : descriptions[option] || option }}</strong>
+              <small>{{ optionNameFirst ? descriptions[option] : option }}</small>
+            </span>
+          </template>
+        </button>
+      </div>
+      <InstrumentMenuDetails
+        v-if="hasInstrumentOptions && detailOption"
+        :details="optionDetails[detailOption] || {}"
+        :display="display"
+        :load-graph="Boolean(activeOption) && activeOption === detailOption"
+        :logo="logos[detailOption] || ''"
+        :symbol="detailOption"
+      />
     </div>
     <div v-if="clearable" class="selector-clear-row">
       <button
@@ -101,25 +113,19 @@
         @click="clearAll"
       ><X :size="13" /> Clear all</button>
     </div>
-    <InstrumentPreview
-      :anchor="previewAnchor"
-      :details="optionDetails[previewOption] || {}"
-      :logo="logos[previewOption] || ''"
-      :symbol="previewOption"
-      :visible="Boolean(previewOption)"
-    />
   </div>
 </template>
 
 <script setup>
 import { ChartCandlestick, X } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, reactive, ref } from 'vue'
-import InstrumentPreview from './instrument-preview.vue'
+import InstrumentMenuDetails from './instrument-menu-details.vue'
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
   options: { type: Array, default: () => [] },
   descriptions: { type: Object, default: () => ({}) },
+  display: { type: Object, default: () => ({}) },
   logos: { type: Object, default: () => ({}) },
   selectedLogos: { type: Object, default: () => ({}) },
   placeholder: { type: String, default: 'Search…' },
@@ -151,9 +157,9 @@ const failedMenuLogos = reactive(new Set())
 const loadedSelectedLogos = reactive(new Set())
 const selectedLogoFailures = reactive(new Map())
 const menuLogoRequestLimit = 12
-const previewOption = ref('')
-const previewAnchor = ref(null)
+const activeOption = ref('')
 let closeTimer
+const hasInstrumentOptions = computed(() => Object.keys(props.optionDetails).length > 0)
 const filtered = computed(() => {
   const search = needle.value.trim().toLowerCase()
   return props.options
@@ -164,6 +170,9 @@ const filtered = computed(() => {
       : 0)
     .slice(0, props.resultLimit)
 })
+const detailOption = computed(() => filtered.value.includes(activeOption.value)
+  ? activeOption.value
+  : filtered.value[0] || '')
 
 function logoFailed(value) {
   failedMenuLogos.add(value)
@@ -218,6 +227,10 @@ function optionIconFor(value) {
   return props.optionIcons[value] || props.optionIcon
 }
 
+function showDetails(option) {
+  activeOption.value = option
+}
+
 function choose(value) {
   window.clearTimeout(closeTimer)
   const clean = String(value || '').trim()
@@ -230,11 +243,11 @@ function choose(value) {
     emit('update:modelValue', props.multiple ? [...props.modelValue, selected] : [selected])
   }
   needle.value = ''
-  hidePreview()
   if (!props.multiple) focused.value = false
 }
 function open() {
   window.clearTimeout(closeTimer)
+  if (!focused.value) activeOption.value = ''
   focused.value = true
 }
 function remove(value) {
@@ -243,16 +256,6 @@ function remove(value) {
 function clearAll() {
   emit('update:modelValue', [])
   needle.value = ''
-  hidePreview()
-}
-function showPreview(event, option) {
-  if (!props.optionDetails[option]) return
-  previewOption.value = option
-  previewAnchor.value = event.currentTarget
-}
-function hidePreview() {
-  previewOption.value = ''
-  previewAnchor.value = null
 }
 function startTagDrag(event, value) {
   if (!props.reorderable) {
@@ -289,7 +292,10 @@ function finishTagDrag() {
 }
 function close() {
   window.clearTimeout(closeTimer)
-  closeTimer = window.setTimeout(() => { focused.value = false; hidePreview() }, 100)
+  closeTimer = window.setTimeout(() => {
+    focused.value = false
+    activeOption.value = ''
+  }, 100)
 }
 onBeforeUnmount(() => window.clearTimeout(closeTimer))
 </script>
