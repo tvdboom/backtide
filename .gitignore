@@ -43,8 +43,7 @@ __pycache__/
 env/
 venv*/
 application/dist/
-application/node_modules/
-/node_modules/
+node_modules/
 .pnpm-store/
 build/
 develop-eggs/
