@@ -225,6 +225,25 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ForexPair {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyo3::types::{PyInt, PyString};
+
+    #[test]
+    fn python_constructor_representation_and_extraction_cover_valid_and_invalid_values() {
+        assert_eq!(ForexPair::new("EURUSD").unwrap(), ForexPair::EURUSD);
+        assert!(ForexPair::new("invalid").is_err());
+        assert_eq!(ForexPair::EURUSD.__repr__(), "EUR/USD");
+
+        Python::attach(|py| {
+            let direct = Py::new(py, ForexPair::GBPUSD).unwrap().into_bound(py).into_any();
+            assert_eq!(direct.extract::<ForexPair>().unwrap(), ForexPair::GBPUSD);
+            assert_eq!(
+                PyString::new(py, "USDJPY").extract::<ForexPair>().unwrap(),
+                ForexPair::USDJPY
+            );
+            assert!(PyString::new(py, "invalid").extract::<ForexPair>().is_err());
+            assert!(PyInt::new(py, 1).extract::<ForexPair>().is_err());
+        });
+    }
 
     #[test]
     fn pickle_reconstructor_receives_parseable_symbol() {

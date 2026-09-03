@@ -153,3 +153,78 @@ pub fn run_experiment(
         engine.run_experiment(&cfg, verbose, &strat, &ind, &metrics, progress.as_ref())
     })?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::types::PyModule;
+
+    fn callback(raises: bool) -> Py<PyAny> {
+        Python::attach(|py| {
+            let module = PyModule::from_code(
+                py,
+                pyo3::ffi::c_str!(
+                    r#"
+class Callback:
+    def __init__(self, raises):
+        self.raises = raises
+        self.calls = []
+
+    def __call__(self, completed, total):
+        if self.raises:
+            raise RuntimeError("deliberate callback error")
+        self.calls.append((completed, total))
+"#
+                ),
+                pyo3::ffi::c_str!("progress_test.py"),
+                pyo3::ffi::c_str!("progress_test"),
+            )
+            .unwrap();
+            module.getattr("Callback").unwrap().call1((raises,)).unwrap().unbind()
+        })
+    }
+
+    #[test]
+    fn progress_reporter_publishes_throttled_updates_and_completion() {
+        let callback = callback(false);
+        let reporter = Python::attach(|py| ProgressReporter::new(callback.clone_ref(py)));
+
+        reporter.advance(1);
+        reporter.set_total(1_000);
+        reporter.advance(1);
+        reporter.advance(1);
+        reporter.advance(998);
+        reporter.finish();
+
+        let calls: Vec<(u64, u64)> =
+            Python::attach(|py| callback.bind(py).getattr("calls").unwrap().extract().unwrap());
+        assert_eq!(calls[0], (0, 1_000));
+        assert!(calls.contains(&(1, 1_000)));
+        assert_eq!(calls.last(), Some(&(1_000, 1_000)));
+    }
+
+    #[test]
+    fn progress_reporter_ignores_callback_errors() {
+        let reporter = ProgressReporter::new(callback(true));
+
+        reporter.set_total(1);
+        reporter.advance(1);
+        reporter.finish();
+    }
+
+    #[test]
+    fn abort_and_experiment_logging_cover_every_level() {
+        ABORT_REQUESTED.store(false, Ordering::Relaxed);
+        assert!(!check_abort());
+        request_abort();
+        assert!(check_abort());
+
+        for level in
+            [LogLevel::Trace, LogLevel::Debug, LogLevel::Info, LogLevel::Warn, LogLevel::Error]
+        {
+            experiment_log("coverage", level);
+        }
+
+        ABORT_REQUESTED.store(false, Ordering::Relaxed);
+    }
+}

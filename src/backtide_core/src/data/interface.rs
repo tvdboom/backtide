@@ -328,3 +328,92 @@ pub fn download_bars(
     // Release the GIL so HTTP workers and browser clients can continue running.
     Ok(py.detach(|| engine.download_bars(&profiles, start, end, verbose))?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::types::{PyInt, PyList, PyString};
+    use pyo3::Py;
+
+    fn instrument(symbol: &str) -> Instrument {
+        Instrument {
+            symbol: symbol.to_owned(),
+            name: symbol.to_owned(),
+            base: None,
+            quote: "USD".to_owned(),
+            instrument_type: InstrumentType::Stocks,
+            exchange: "XNAS".to_owned(),
+            provider: Provider::Yahoo,
+        }
+    }
+
+    #[test]
+    fn parse_input_accepts_single_values_and_sequences() {
+        Python::attach(|py| {
+            let single = PyString::new(py, "1d").into_any();
+            assert_eq!(parse_input::<Interval>(single).unwrap(), vec![Interval::OneDay]);
+
+            let values = PyList::new(py, ["1m", "1h"]).unwrap().into_any();
+            assert_eq!(
+                parse_input::<Interval>(values).unwrap(),
+                vec![Interval::OneMinute, Interval::OneHour]
+            );
+
+            let invalid = PyList::new(py, ["1d", "invalid"]).unwrap().into_any();
+            assert!(parse_input::<Interval>(invalid).is_err());
+        });
+    }
+
+    #[test]
+    fn parse_instrument_accepts_strings_instruments_and_mixed_sequences() {
+        Python::attach(|py| {
+            assert_eq!(
+                parse_instrument(PyString::new(py, "AAPL").into_any()).unwrap(),
+                vec!["AAPL"]
+            );
+
+            let rust_instrument =
+                Py::new(py, instrument("MSFT")).unwrap().into_bound(py).into_any();
+            assert_eq!(parse_instrument(rust_instrument).unwrap(), vec!["MSFT"]);
+
+            let apple = PyString::new(py, "AAPL").into_any().unbind();
+            let microsoft = Py::new(py, instrument("MSFT")).unwrap().into_any();
+            let mixed = PyList::new(py, [apple, microsoft]).unwrap().into_any();
+            assert_eq!(parse_instrument(mixed).unwrap(), vec!["AAPL", "MSFT"]);
+
+            assert!(parse_instrument(PyInt::new(py, 1).into_any()).is_err());
+            let invalid = PyList::new(py, [PyInt::new(py, 1)]).unwrap().into_any();
+            assert!(parse_instrument(invalid).is_err());
+        });
+    }
+
+    #[test]
+    fn fetch_bar_preview_validates_before_accessing_the_engine() {
+        Python::attach(|py| {
+            assert!(fetch_bar_preview(
+                py,
+                "  ".to_owned(),
+                InstrumentType::Stocks,
+                Provider::Yahoo,
+                30,
+            )
+            .is_err());
+            assert!(fetch_bar_preview(
+                py,
+                "AAPL".to_owned(),
+                InstrumentType::Stocks,
+                Provider::Yahoo,
+                1,
+            )
+            .is_err());
+            assert!(fetch_bar_preview(
+                py,
+                "AAPL".to_owned(),
+                InstrumentType::Stocks,
+                Provider::Yahoo,
+                61,
+            )
+            .is_err());
+        });
+    }
+}

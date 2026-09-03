@@ -1109,6 +1109,7 @@ indicator_pymethods!(WeightedMovingAverage);
 mod tests {
     use super::*;
     use crate::constants::MIN_POSITION;
+    use pyo3::types::PyDict;
 
     fn bar(close: f64) -> Bar {
         Bar {
@@ -1123,6 +1124,57 @@ mod tests {
             volume: 1.0,
             n_trades: None,
         }
+    }
+
+    #[test]
+    fn python_indicator_surface_exposes_metadata_compute_repr_and_pickle_arguments() {
+        Python::attach(|py| {
+            assert_eq!(AverageDirectionalIndex::acronym(), "ADX");
+            assert_eq!(AverageDirectionalIndex::name(), "Average Directional Index");
+            assert!(!AverageDirectionalIndex::description(
+                &py.get_type::<AverageDirectionalIndex>()
+            )
+            .is_empty());
+
+            let columns = PyDict::new(py);
+            columns.set_item("open", [10.0, 11.0, 12.0]).unwrap();
+            columns.set_item("high", [11.0, 12.0, 13.0]).unwrap();
+            columns.set_item("low", [9.0, 10.0, 11.0]).unwrap();
+            columns.set_item("close", [10.5, 11.5, 12.5]).unwrap();
+            columns.set_item("volume", [100.0, 110.0, 120.0]).unwrap();
+            let frame = py.import("pandas").unwrap().call_method1("DataFrame", (columns,)).unwrap();
+            let atr = AverageTrueRange::new(2);
+            assert!(atr.compute(py, &frame).unwrap().len().unwrap() > 0);
+            assert_eq!(atr.__repr__(), "ATR()");
+
+            AverageDirectionalIndex::new(3).__reduce__(py).unwrap();
+            AverageTrueRange::new(3).__reduce__(py).unwrap();
+            BollingerBands::new(3, 2.0).__reduce__(py).unwrap();
+            CommodityChannelIndex::new(3).__reduce__(py).unwrap();
+            ExponentialMovingAverage::new(3).__reduce__(py).unwrap();
+            MovingAverageConvergenceDivergence::new(2, 3, 1).__reduce__(py).unwrap();
+            OnBalanceVolume::new().__reduce__(py).unwrap();
+            RelativeStrengthIndex::new(3).__reduce__(py).unwrap();
+            SimpleMovingAverage::new(3).__reduce__(py).unwrap();
+            StochasticOscillator::new(3, 2).__reduce__(py).unwrap();
+            VolumeWeightedAveragePrice::new().__reduce__(py).unwrap();
+            WeightedMovingAverage::new(3).__reduce__(py).unwrap();
+        });
+    }
+
+    #[test]
+    fn indicator_edge_inputs_cover_flat_non_finite_and_zero_period_paths() {
+        let flat = vec![bar(10.0), bar(10.0), bar(10.0)];
+        assert_eq!(AverageDirectionalIndex::new(2).compute_inner(&flat)[0].len(), 3);
+        assert!(CommodityChannelIndex::new(0).compute_inner(&flat)[0]
+            .iter()
+            .all(|value| value.is_nan()));
+        assert!(StochasticOscillator::new(0, 2).compute_inner(&flat)[0]
+            .iter()
+            .all(|value| value.is_nan()));
+
+        let with_nan = vec![bar(10.0), bar(f64::NAN), bar(11.0)];
+        assert!(RelativeStrengthIndex::new(2).compute_inner(&with_nan)[0][1].is_nan());
     }
 
     #[test]

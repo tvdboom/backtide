@@ -156,6 +156,39 @@ mod tests {
     }
 
     #[test]
+    fn multi_series_python_conversion_uses_the_configured_dataframe_backend() {
+        Python::attach(|py| {
+            let converted = to_python(py, &[vec![1.0, 2.0], vec![3.0, 4.0]]).unwrap();
+
+            assert_eq!(converted.len().unwrap(), 2);
+            assert_eq!(
+                converted.getattr("shape").unwrap().extract::<(usize, usize)>().unwrap(),
+                (2, 2)
+            );
+        });
+    }
+
+    #[test]
+    fn load_pickle_returns_a_successfully_deserialized_object() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("valid.pkl");
+
+        Python::attach(|py| {
+            let builtins = py.import("builtins").unwrap();
+            let cloudpickle = py.import("cloudpickle").unwrap();
+            let file =
+                builtins.call_method1("open", (path.to_string_lossy().to_string(), "wb")).unwrap();
+            let value = PyDict::new(py);
+            value.set_item("answer", 42).unwrap();
+            cloudpickle.call_method1("dump", (&value, &file)).unwrap();
+            file.call_method0("close").unwrap();
+
+            let loaded = load_pickle(py, &path).unwrap();
+            assert_eq!(loaded.bind(py).get_item("answer").unwrap().extract::<i32>().unwrap(), 42);
+        });
+    }
+
+    #[test]
     fn load_pickle_closes_file_after_deserialization_error() {
         let directory = TempDir::new().unwrap();
         let path = directory.path().join("invalid.pkl");

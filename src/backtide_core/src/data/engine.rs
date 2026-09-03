@@ -735,6 +735,8 @@ mod tests {
         instrument: Instrument,
         range: (u64, u64),
         bars: Vec<Bar>,
+        dividends: Vec<Dividend>,
+        filter_bars_to_request: bool,
     }
 
     impl MockProvider {
@@ -743,6 +745,8 @@ mod tests {
                 instrument,
                 range: (1000, 2000),
                 bars: vec![],
+                dividends: vec![],
+                filter_bars_to_request: false,
             }
         }
     }
@@ -779,12 +783,20 @@ mod tests {
             _symbol: &str,
             _instrument_type: InstrumentType,
             _interval: Interval,
-            _start: u64,
-            _end: u64,
+            start: u64,
+            end: u64,
         ) -> DataResult<BarDownload> {
             Ok(BarDownload {
-                bars: self.bars.clone(),
-                dividends: vec![],
+                bars: if self.filter_bars_to_request {
+                    self.bars
+                        .iter()
+                        .filter(|bar| bar.open_ts >= start && bar.open_ts <= end)
+                        .cloned()
+                        .collect()
+                } else {
+                    self.bars.clone()
+                },
+                dividends: self.dividends.clone(),
             })
         }
     }
@@ -1323,6 +1335,13 @@ mod tests {
     fn test_engine_multi(mock: MultiProvider) -> (Engine, TempDir) {
         let config = Box::leak(Box::new(Config::default()));
 
+        test_engine_multi_with_config(mock, config)
+    }
+
+    fn test_engine_multi_with_config(
+        mock: MultiProvider,
+        config: &'static Config,
+    ) -> (Engine, TempDir) {
         let rt = Runtime::new().unwrap();
         let tmp = TempDir::new().unwrap();
         let db_path = tmp.path().join("test.db");
@@ -1451,5 +1470,268 @@ mod tests {
         assert_eq!(result.n_succeeded, 0);
         assert_eq!(result.n_failed, 1);
         assert!(!result.warnings.is_empty());
+    }
+
+    #[test]
+    fn download_bars_plans_missing_head_tail_and_deduplicates_dividends() {
+        let instrument = usd_quote_instrument();
+        let mut mock = MockProvider::new(instrument.clone());
+        mock.bars = vec![sample_bar(100), sample_bar(500)];
+        mock.dividends = vec![Dividend {
+            ex_date: 250,
+            amount: 1.5,
+        }];
+        mock.filter_bars_to_request = true;
+        let (engine, _tmp) = test_engine(mock);
+        engine
+            .write_bars_bulk(&[BarSeries {
+                symbol: instrument.symbol.clone(),
+                interval: Interval::OneMinute,
+                provider: Provider::Yahoo,
+                bars: vec![sample_bar(200), sample_bar(400)],
+            }])
+            .unwrap();
+        let profile = InstrumentProfile {
+            instrument,
+            earliest_ts: HashMap::from([(Interval::OneMinute, 100)]),
+            latest_ts: HashMap::from([(Interval::OneMinute, 500)]),
+            legs: vec![],
+        };
+
+        let result = engine.download_bars(&[profile], None, None, true).unwrap();
+
+        assert_eq!(result.n_succeeded, 2);
+        assert_eq!(engine.query_dividends(Some(&["AAPL"]), None, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn provider_helpers_report_missing_configuration_and_named_provider() {
+        let mut config = Config::default();
+        config.data.providers.remove(&InstrumentType::Crypto);
+        let config = Box::leak(Box::new(config));
+        let (engine, _tmp) = test_engine_multi_with_config(MultiProvider::new(), config);
+
+        assert!(matches!(
+            engine.configured_provider(InstrumentType::Crypto),
+            Err(DataError::ProviderNotConfigured(InstrumentType::Crypto))
+        ));
+        assert!(matches!(
+            engine.named_data_provider(Provider::Binance),
+            Err(DataError::ProviderUnavailable(Provider::Binance))
+        ));
+    }
+
+    #[test]
+    fn bidirectional_resolution_covers_canonical_history_and_error_choices() {
+        let mut provider = MultiProvider::new();
+        for (symbol, instrument_type, start) in [
+            ("EUR-USD", InstrumentType::Forex, 300),
+            ("USD-EUR", InstrumentType::Forex, 200),
+            ("AAA-BBB", InstrumentType::Crypto, 100),
+            ("BBB-AAA", InstrumentType::Crypto, 500),
+            ("CCC-DDD", InstrumentType::Crypto, 100),
+            ("FFF-EEE", InstrumentType::Crypto, 100),
+        ] {
+            provider
+                .instruments
+                .insert(symbol.to_owned(), make_instrument(symbol, None, "USD", instrument_type));
+            provider.ranges.insert(symbol.to_owned(), (start, 1_000));
+        }
+        let (engine, _tmp) = test_engine_multi(provider);
+        let intervals = [Interval::OneDay];
+
+        engine.rt.block_on(async {
+            assert_eq!(
+                engine
+                    .load_instrument_bidirectional("EUR", "USD", InstrumentType::Forex, &intervals)
+                    .await
+                    .unwrap()
+                    .symbol,
+                "EUR-USD"
+            );
+            assert_eq!(
+                engine
+                    .load_instrument_bidirectional("USD", "EUR", InstrumentType::Forex, &intervals)
+                    .await
+                    .unwrap()
+                    .symbol,
+                "EUR-USD"
+            );
+            assert_eq!(
+                engine
+                    .load_instrument_bidirectional("AAA", "BBB", InstrumentType::Crypto, &intervals)
+                    .await
+                    .unwrap()
+                    .symbol,
+                "AAA-BBB"
+            );
+            assert_eq!(
+                engine
+                    .load_instrument_bidirectional("CCC", "DDD", InstrumentType::Crypto, &intervals)
+                    .await
+                    .unwrap()
+                    .symbol,
+                "CCC-DDD"
+            );
+            assert_eq!(
+                engine
+                    .load_instrument_bidirectional("EEE", "FFF", InstrumentType::Crypto, &intervals)
+                    .await
+                    .unwrap()
+                    .symbol,
+                "FFF-EEE"
+            );
+            assert!(engine
+                .load_instrument_bidirectional("XXX", "YYY", InstrumentType::Crypto, &intervals)
+                .await
+                .is_err());
+        });
+    }
+
+    fn conversion_engine() -> (Engine, TempDir) {
+        let mut provider = MultiProvider::new();
+        for (symbol, instrument_type, start) in [
+            ("ASSET", InstrumentType::Stocks, 100),
+            ("PLN-EUR", InstrumentType::Forex, 500),
+            ("PLN-USD", InstrumentType::Forex, 100),
+            ("USD-EUR", InstrumentType::Forex, 200),
+            ("JPY-EUR", InstrumentType::Forex, 50),
+            ("JPY-USD", InstrumentType::Forex, 100),
+            ("GBP-EUR", InstrumentType::Forex, 50),
+            ("CAD-USD", InstrumentType::Forex, 100),
+        ] {
+            let quote = if symbol == "ASSET" {
+                "PLN"
+            } else {
+                "USD"
+            };
+            provider
+                .instruments
+                .insert(symbol.to_owned(), make_instrument(symbol, None, quote, instrument_type));
+            provider.ranges.insert(symbol.to_owned(), (start, 1_000));
+        }
+        let mut config = Config::default();
+        config.general.base_currency = Currency::EUR;
+        config.general.triangulation_fiat = Currency::USD;
+        let config = Box::leak(Box::new(config));
+        test_engine_multi_with_config(provider, config)
+    }
+
+    #[test]
+    fn triangulation_and_resolution_choose_available_and_earliest_paths() {
+        let (engine, _tmp) = conversion_engine();
+        let intervals = [Interval::OneDay];
+
+        engine.rt.block_on(async {
+            let legs = engine
+                .triangulate("PLN", ("USD", "USD"), "EUR", InstrumentType::Forex, &intervals)
+                .await
+                .unwrap();
+            assert_eq!(
+                legs.iter().map(|leg| leg.symbol.as_str()).collect::<Vec<_>>(),
+                ["PLN-USD", "USD-EUR"]
+            );
+            assert!(matches!(
+                engine
+                    .triangulate("USD", ("USD", "USD"), "USD", InstrumentType::Forex, &intervals,)
+                    .await,
+                Err(DataError::NoConversionPath { .. })
+            ));
+
+            let direct = engine
+                .resolve_legs(
+                    "PLN",
+                    "EUR",
+                    ("USD", "USD"),
+                    InstrumentType::Forex,
+                    &intervals,
+                    TriangulationStrategy::Direct,
+                )
+                .await
+                .unwrap();
+            assert_eq!(direct.len(), 1);
+
+            let earliest_tri = engine
+                .resolve_legs(
+                    "PLN",
+                    "EUR",
+                    ("USD", "USD"),
+                    InstrumentType::Forex,
+                    &intervals,
+                    TriangulationStrategy::Earliest,
+                )
+                .await
+                .unwrap();
+            assert_eq!(earliest_tri.len(), 2);
+
+            let earliest_direct = engine
+                .resolve_legs(
+                    "JPY",
+                    "EUR",
+                    ("USD", "USD"),
+                    InstrumentType::Forex,
+                    &intervals,
+                    TriangulationStrategy::Earliest,
+                )
+                .await
+                .unwrap();
+            assert_eq!(earliest_direct[0].symbol, "JPY-EUR");
+
+            let direct_only = engine
+                .resolve_legs(
+                    "GBP",
+                    "EUR",
+                    ("CHF", "CHF"),
+                    InstrumentType::Forex,
+                    &intervals,
+                    TriangulationStrategy::Earliest,
+                )
+                .await
+                .unwrap();
+            assert_eq!(direct_only[0].symbol, "GBP-EUR");
+
+            let tri_only = engine
+                .resolve_legs(
+                    "CAD",
+                    "EUR",
+                    ("USD", "USD"),
+                    InstrumentType::Forex,
+                    &intervals,
+                    TriangulationStrategy::Earliest,
+                )
+                .await
+                .unwrap();
+            assert_eq!(tri_only.len(), 2);
+
+            assert!(engine
+                .resolve_legs(
+                    "ZZZ",
+                    "EUR",
+                    ("CHF", "CHF"),
+                    InstrumentType::Forex,
+                    &intervals,
+                    TriangulationStrategy::Earliest,
+                )
+                .await
+                .is_err());
+        });
+    }
+
+    #[test]
+    fn resolve_profiles_attaches_and_deduplicates_conversion_legs() {
+        let (engine, _tmp) = conversion_engine();
+
+        let profiles = engine
+            .resolve_profiles(
+                vec!["ASSET".to_owned()],
+                InstrumentType::Stocks,
+                vec![Interval::OneDay],
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(profiles[0].instrument.symbol, "ASSET");
+        assert_eq!(profiles[0].legs, vec!["PLN-EUR"]);
+        assert!(profiles.iter().any(|profile| profile.instrument.symbol == "PLN-EUR"));
     }
 }

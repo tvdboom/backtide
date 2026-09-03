@@ -5,6 +5,8 @@ Description: Unit tests for the data interface and model classes.
 
 """
 
+import pickle
+
 import pytest
 
 from backtide.data import (
@@ -142,6 +144,13 @@ class TestProvider:
         p = Provider("yahoo")
         assert repr(p) == "yahoo"
 
+    def test_all_variants_round_trip(self) -> None:
+        """Every provider exposes its metadata and supports pickle."""
+        for provider in Provider.variants():
+            assert provider.intervals()
+            assert pickle.loads(pickle.dumps(provider)) == provider
+            assert repr(provider)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Country / Currency / Exchange
@@ -162,6 +171,15 @@ class TestCountry:
         assert c.alpha3 == "USA"
         assert isinstance(c.name, str)
         assert len(c.flag) > 0
+
+    def test_all_variants_expose_iso_metadata_and_round_trip(self) -> None:
+        """Every country maps to valid ISO metadata, a flag, and pickle state."""
+        for country in Country.variants():
+            assert len(country.alpha2) == 2
+            assert len(country.alpha3) == 3
+            assert country.name
+            assert len(country.flag) == 2
+            assert pickle.loads(pickle.dumps(country)) == country
 
 
 class TestCurrency:
@@ -187,6 +205,15 @@ class TestCurrency:
         """symbol_prefix returns a boolean."""
         assert isinstance(Currency("USD").symbol_prefix, bool)
 
+    def test_all_variants_expose_metadata_and_round_trip(self) -> None:
+        """Every currency exposes display metadata and supports pickle."""
+        for currency in Currency.variants():
+            assert currency.name
+            assert currency.symbol
+            assert currency.decimals >= 0
+            assert isinstance(currency.symbol_prefix, bool)
+            assert pickle.loads(pickle.dumps(currency)) == currency
+
 
 class TestExchange:
     """Tests for the 'Exchange' enum."""
@@ -203,6 +230,16 @@ class TestExchange:
         assert isinstance(e.city, str)
         assert isinstance(e.country, Country)
         assert isinstance(e.currency, Currency)
+
+    def test_all_variants_expose_metadata_and_round_trip(self) -> None:
+        """Every exchange exposes its catalog metadata and supports pickle."""
+        for exchange in Exchange.variants():
+            assert exchange.mic
+            assert exchange.name
+            assert exchange.city
+            assert isinstance(exchange.country, Country)
+            assert isinstance(exchange.currency, Currency)
+            assert pickle.loads(pickle.dumps(exchange)) == exchange
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -231,6 +268,26 @@ class TestInstrument:
         """Crypto instruments have a base currency."""
         assert sample_instrument_crypto.base is not None
 
+    def test_pickle_and_string_fallback_getters(self) -> None:
+        """Instrument pickle and getters preserve non-catalog provider metadata."""
+        instrument = Instrument(
+            symbol="CUSTOM",
+            name="Custom instrument",
+            base="TOKEN",
+            quote="POINTS",
+            instrument_type="crypto",
+            exchange="CUSTOM",
+            provider="binance",
+        )
+
+        restored = pickle.loads(pickle.dumps(instrument))
+
+        assert instrument.base == "TOKEN"
+        assert instrument.quote == "POINTS"
+        assert instrument.exchange == "CUSTOM"
+        assert restored.symbol == instrument.symbol
+        assert restored.base == instrument.base
+
 
 class TestInstrumentProfile:
     """Tests for the 'InstrumentProfile' class."""
@@ -250,6 +307,17 @@ class TestInstrumentProfile:
     def test_repr(self, sample_profile):
         """__repr__ contains InstrumentProfile."""
         assert "InstrumentProfile" in repr(sample_profile)
+
+    def test_delegated_currency_metadata_and_pickle(self, sample_profile) -> None:
+        """Profiles delegate every instrument field and preserve their mappings."""
+        restored = pickle.loads(pickle.dumps(sample_profile))
+
+        assert sample_profile.base is None
+        assert sample_profile.quote == Currency("USD")
+        assert sample_profile.exchange == Exchange("XNAS")
+        assert sample_profile.provider == Provider.Yahoo
+        assert restored.symbol == sample_profile.symbol
+        assert restored.earliest_ts == sample_profile.earliest_ts
 
 
 # ─────────────────────────────────────────────────────────────────────────────

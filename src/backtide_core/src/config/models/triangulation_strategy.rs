@@ -56,3 +56,31 @@ impl<'a, 'py> FromPyObject<'a, 'py> for TriangulationStrategy {
             .map_err(|_| PyValueError::new_err(format!("Unknown triangulation_strategy {s:?}.")))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::types::{PyInt, PyString};
+
+    #[test]
+    fn triangulation_strategy_exposes_variants_and_python_extraction() {
+        assert_eq!(TriangulationStrategy::default(), TriangulationStrategy::Direct);
+        assert_eq!(TriangulationStrategy::Direct.__repr__(), "direct");
+        assert_eq!(TriangulationStrategy::Earliest.__repr__(), "earliest");
+
+        Python::attach(|py| {
+            let direct =
+                Py::new(py, TriangulationStrategy::Earliest).unwrap().into_bound(py).into_any();
+            assert_eq!(
+                direct.extract::<TriangulationStrategy>().unwrap(),
+                TriangulationStrategy::Earliest
+            );
+            assert_eq!(
+                PyString::new(py, "DIRECT").extract::<TriangulationStrategy>().unwrap(),
+                TriangulationStrategy::Direct
+            );
+            assert!(PyString::new(py, "fastest").extract::<TriangulationStrategy>().is_err());
+            assert!(PyInt::new(py, 1).extract::<TriangulationStrategy>().is_err());
+        });
+    }
+}

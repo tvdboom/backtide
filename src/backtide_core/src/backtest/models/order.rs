@@ -466,7 +466,153 @@ impl Order {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_stored_order_id;
+    use super::*;
+    use pyo3::types::{PyFloat, PyModule, PyString};
+
+    #[test]
+    fn order_id_supports_sentinel_serde_and_python_conversion() {
+        let nil = OrderId::nil();
+        assert!(nil.is_nil());
+        assert_eq!(nil.to_string(), "00000000000000000000000000000000");
+        assert_eq!(format!("{nil:?}"), nil.to_string());
+
+        let generated = OrderId::default();
+        assert!(!generated.is_nil());
+        let json = serde_json::to_string(&generated).unwrap();
+        assert_eq!(serde_json::from_str::<OrderId>(&json).unwrap(), generated);
+        assert!(serde_json::from_str::<OrderId>("\"invalid\"").is_err());
+
+        Python::attach(|py| {
+            let value = generated.into_pyobject(py).unwrap().into_any();
+            assert_eq!(value.extract::<OrderId>().unwrap(), generated);
+            assert!(PyString::new(py, "invalid").extract::<OrderId>().is_err());
+            assert!(PyFloat::new(py, 1.0).extract::<OrderId>().is_err());
+        });
+    }
+
+    #[test]
+    fn sizer_slots_clone_format_serialize_and_convert_to_python() {
+        let builtin = BuiltinSizer::CashEqualWeight(EqualWeight::new(2));
+        assert!(builtin.uses_cash_capital());
+        assert_eq!(builtin.calculate(1_000.0, 100.0, None, None).unwrap(), 5.0);
+        let ordinary = BuiltinSizer::FixedQuantity(FixedQuantity::new(3.0));
+        assert!(!ordinary.uses_cash_capital());
+        assert_eq!(ordinary.calculate(0.0, 0.0, None, None).unwrap(), 3.0);
+
+        let builtin_slot = SizerSlot::Builtin(ordinary);
+        assert!(format!("{builtin_slot:?}").contains("builtin sizer"));
+        assert_ne!(builtin_slot, builtin_slot.clone());
+        assert_eq!(serde_json::to_string(&builtin_slot).unwrap(), "null");
+        assert!(serde_json::from_str::<SizerSlot>("null").is_err());
+
+        Python::attach(|py| {
+            assert!(builtin_slot.clone().into_pyobject(py).unwrap().is_none());
+
+            let module = PyModule::from_code(
+                py,
+                pyo3::ffi::c_str!(
+                    "class Sizer:\n    def calculate(self, *args):\n        return 4.0\nsizer = Sizer()\n"
+                ),
+                pyo3::ffi::c_str!("order_sizer.py"),
+                pyo3::ffi::c_str!("order_sizer"),
+            )
+            .unwrap();
+            let object = module.getattr("sizer").unwrap();
+            let custom = SizerSlot::Custom(object.clone().unbind());
+            assert!(format!("{custom:?}").contains("custom sizer"));
+            assert!(custom.clone().into_pyobject(py).unwrap().hasattr("calculate").unwrap());
+            assert!(matches!(object.extract::<SizerSlot>().unwrap(), SizerSlot::Custom(_)));
+
+            let py_builtin =
+                Py::new(py, FixedQuantity::new(7.0)).unwrap().into_bound(py).into_any();
+            assert!(matches!(
+                py_builtin.extract::<SizerSlot>().unwrap(),
+                SizerSlot::Builtin(BuiltinSizer::FixedQuantity(_))
+            ));
+        });
+    }
+
+    #[test]
+    fn order_constructor_handles_numeric_builtin_custom_and_invalid_quantities() {
+        Python::attach(|py| {
+            let default =
+                Order::new(py, "AAPL", None, OrderType::Market, None, None, None).unwrap();
+            assert_eq!(default.quantity, 1.0);
+            assert!(default.sizer.is_none());
+            assert!(default.__repr__().contains("type=Market"));
+
+            let numeric = Order::new(
+                py,
+                "AAPL",
+                Some(PyFloat::new(py, 2.5).into_any()),
+                OrderType::Limit,
+                Some(100.0),
+                Some(99.0),
+                Some(default.id.to_string()),
+            )
+            .unwrap();
+            assert_eq!(numeric.id, default.id);
+            assert!(numeric.__repr__().contains("limit=99"));
+
+            let py_builtin =
+                Py::new(py, FixedQuantity::new(2.0)).unwrap().into_bound(py).into_any();
+            let sized = Order::new(
+                py,
+                "AAPL",
+                Some(py_builtin),
+                OrderType::Market,
+                Some(100.0),
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(sized.quantity, 0.0);
+            assert!(matches!(sized.sizer, Some(SizerSlot::Builtin(_))));
+            assert!(sized.__repr__().contains("sizer=<attached>"));
+
+            let module = PyModule::from_code(
+                py,
+                pyo3::ffi::c_str!(
+                    "class Sizer:\n    def calculate(self, *args):\n        return 4.0\nsizer = Sizer()\n"
+                ),
+                pyo3::ffi::c_str!("custom_order_sizer.py"),
+                pyo3::ffi::c_str!("custom_order_sizer"),
+            )
+            .unwrap();
+            let custom = Order::new(
+                py,
+                "AAPL",
+                Some(module.getattr("sizer").unwrap()),
+                OrderType::Market,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            assert!(matches!(custom.sizer, Some(SizerSlot::Custom(_))));
+
+            assert!(Order::new(
+                py,
+                "AAPL",
+                Some(PyString::new(py, "bad").into_any()),
+                OrderType::Market,
+                None,
+                None,
+                None,
+            )
+            .is_err());
+            assert!(Order::new(
+                py,
+                "AAPL",
+                None,
+                OrderType::Market,
+                None,
+                None,
+                Some("invalid".to_owned()),
+            )
+            .is_err());
+        });
+    }
 
     #[test]
     fn parses_current_stored_order_id() {

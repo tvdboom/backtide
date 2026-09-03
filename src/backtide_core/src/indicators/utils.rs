@@ -447,3 +447,150 @@ pub fn true_range(high: &[f64], low: &[f64], close: &[f64]) -> Vec<f64> {
     }
     tr
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::types::PyModule;
+
+    fn bar(close: f64) -> Bar {
+        Bar {
+            open_ts: 0,
+            close_ts: 0,
+            open_ts_exchange: 0,
+            open: close,
+            high: close + 1.0,
+            low: close - 1.0,
+            close,
+            adj_close: close,
+            volume: 10.0,
+            n_trades: None,
+        }
+    }
+
+    fn custom_indicator(class_name: &str) -> Py<PyAny> {
+        Python::attach(|py| {
+            let module = PyModule::from_code(
+                py,
+                pyo3::ffi::c_str!(
+                    r#"
+class Vector:
+    acronym = "VEC"
+    def __init__(self, period=3):
+        self.period = period
+    def __reduce__(self):
+        return (Vector, (self.period, -2.5, "a b"))
+    def compute(self, data):
+        return [1, 2, 3]
+
+class Matrix:
+    acronym = ""
+    def compute(self, data):
+        return [[1, 2], [3, 4], [5, 6]]
+
+class Broken:
+    def compute(self, data):
+        raise RuntimeError("deliberate indicator error")
+
+class Empty:
+    __slots__ = ()
+    def __reduce__(self):
+        return None
+
+class ArrayLike:
+    def to_numpy(self, allow_copy=True):
+        import numpy
+        return numpy.asarray([1, 2, 3])
+"#
+                ),
+                pyo3::ffi::c_str!("indicator_utils_test.py"),
+                pyo3::ffi::c_str!("indicator_utils_test"),
+            )
+            .unwrap();
+            module.getattr(class_name).unwrap().call0().unwrap().unbind()
+        })
+    }
+
+    #[test]
+    fn indicator_metadata_uses_acronym_reduce_dict_and_class_fallbacks() {
+        Python::attach(|py| {
+            let vector = custom_indicator("Vector");
+            let vector = vector.bind(py);
+            assert_eq!(indicator_acronym_from_py(vector).unwrap(), "VEC");
+            assert_eq!(indicator_args_from_py(vector).unwrap(), ["3", "-2.5", "a b"]);
+            assert_eq!(_indicator_deterministic_name(vector).unwrap(), "VEC_3_n2p5_ab");
+
+            let matrix = custom_indicator("Matrix");
+            assert_eq!(indicator_acronym_from_py(matrix.bind(py)).unwrap(), "Matrix");
+
+            let empty = custom_indicator("Empty");
+            assert!(indicator_args_from_py(empty.bind(py)).unwrap().is_empty());
+            assert_eq!(indicator_deterministic_name("EMPTY", &[]), "EMPTY");
+        });
+    }
+
+    #[test]
+    fn indicator_result_extraction_accepts_vector_matrix_and_array_like() {
+        Python::attach(|py| {
+            let vector = py.eval(pyo3::ffi::c_str!("[1, 2, 3]"), None, None).unwrap();
+            assert_eq!(extract_indicator_result(py, &vector).unwrap(), vec![vec![1.0, 2.0, 3.0]]);
+
+            let matrix =
+                py.eval(pyo3::ffi::c_str!("[[1, 2], [3, 4], [5, 6]]"), None, None).unwrap();
+            assert_eq!(
+                extract_indicator_result(py, &matrix).unwrap(),
+                vec![vec![1.0, 3.0, 5.0], vec![2.0, 4.0, 6.0]]
+            );
+
+            let array_like = custom_indicator("ArrayLike");
+            assert_eq!(
+                extract_indicator_result(py, array_like.bind(py)).unwrap(),
+                vec![vec![1.0, 2.0, 3.0]]
+            );
+
+            let cube = py.eval(pyo3::ffi::c_str!("[[[1.0]]]"), None, None).unwrap();
+            assert!(extract_indicator_result(py, &cube).unwrap_err().to_string().contains("3-D"));
+        });
+    }
+
+    #[test]
+    fn compute_indicators_covers_all_builtin_and_custom_paths() {
+        let bars = (0..40).map(|index| Some(bar(100.0 + index as f64))).collect();
+        let aligned = HashMap::from([("AAPL".to_owned(), bars)]);
+        let indicators = Python::attach(|py| {
+            vec![
+                ("adx".into(), Py::new(py, AverageDirectionalIndex::new(3)).unwrap().into_any()),
+                ("atr".into(), Py::new(py, AverageTrueRange::new(3)).unwrap().into_any()),
+                ("bb".into(), Py::new(py, BollingerBands::new(3, 2.0)).unwrap().into_any()),
+                ("cci".into(), Py::new(py, CommodityChannelIndex::new(3)).unwrap().into_any()),
+                ("ema".into(), Py::new(py, ExponentialMovingAverage::new(3)).unwrap().into_any()),
+                (
+                    "macd".into(),
+                    Py::new(py, MovingAverageConvergenceDivergence::new(3, 5, 2))
+                        .unwrap()
+                        .into_any(),
+                ),
+                ("obv".into(), Py::new(py, OnBalanceVolume::new()).unwrap().into_any()),
+                ("rsi".into(), Py::new(py, RelativeStrengthIndex::new(3)).unwrap().into_any()),
+                ("sma".into(), Py::new(py, SimpleMovingAverage::new(3)).unwrap().into_any()),
+                ("stoch".into(), Py::new(py, StochasticOscillator::new(3, 2)).unwrap().into_any()),
+                ("vwap".into(), Py::new(py, VolumeWeightedAveragePrice::new()).unwrap().into_any()),
+                ("wma".into(), Py::new(py, WeightedMovingAverage::new(3)).unwrap().into_any()),
+            ]
+        });
+        let progress = ProgressBar::hidden();
+        let result = compute_indicators(&indicators, &aligned, Some(&progress)).unwrap();
+        assert_eq!(result.len(), indicators.len());
+        assert!(result.values().all(|symbols| symbols.contains_key("AAPL")));
+
+        let custom = [
+            ("vector".to_owned(), custom_indicator("Vector")),
+            ("matrix".to_owned(), custom_indicator("Matrix")),
+            ("broken".to_owned(), custom_indicator("Broken")),
+        ];
+        let result = compute_indicators(&custom, &aligned, None).unwrap();
+        assert_eq!(result["vector"]["AAPL"], vec![vec![1.0, 2.0, 3.0]]);
+        assert_eq!(result["matrix"]["AAPL"].len(), 2);
+        assert!(result["broken"].is_empty());
+    }
+}

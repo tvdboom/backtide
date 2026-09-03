@@ -2569,3 +2569,526 @@ impl BuiltinStrategy {
         orders
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::models::Currency;
+
+    type IndicatorData = HashMap<String, HashMap<String, Vec<Vec<f64>>>>;
+
+    fn bar(close: f64) -> Bar {
+        Bar {
+            open_ts: 0,
+            close_ts: 0,
+            open_ts_exchange: 0,
+            open: close,
+            high: close,
+            low: close,
+            close,
+            adj_close: close,
+            volume: 1.0,
+            n_trades: None,
+        }
+    }
+
+    fn bars(closes: &[f64]) -> Vec<Bar> {
+        closes.iter().copied().map(bar).collect()
+    }
+
+    fn portfolio(cash: f64, position: f64) -> Portfolio {
+        let mut value = Portfolio::default();
+        value.cash.insert(Currency::USD, cash);
+        if position != 0.0 {
+            value.positions.insert("AAPL".to_owned(), position);
+        }
+        value
+    }
+
+    fn indicator(name: String, outputs: &[f64]) -> IndicatorData {
+        HashMap::from([(
+            name,
+            HashMap::from([(
+                "AAPL".to_owned(),
+                outputs.iter().map(|value| vec![*value]).collect(),
+            )]),
+        )])
+    }
+
+    fn indicators(entries: &[(String, &str, Vec<f64>)]) -> IndicatorData {
+        let mut data = IndicatorData::new();
+        for (name, symbol, outputs) in entries {
+            data.entry(name.clone())
+                .or_default()
+                .insert((*symbol).to_owned(), outputs.iter().map(|value| vec![*value]).collect());
+        }
+        data
+    }
+
+    fn evaluate<S: Strategy>(
+        strategy: &S,
+        closes: &[f64],
+        position: f64,
+        data: &IndicatorData,
+    ) -> Vec<Order> {
+        let history = bars(closes);
+        let market = [("AAPL", history.as_slice())];
+        strategy.evaluate_inner(
+            &market,
+            &portfolio(10_000.0, position),
+            &State::default(),
+            &IndicatorView::new(data, 0),
+        )
+    }
+
+    fn assert_buy_and_sell<S: Strategy>(
+        strategy: &S,
+        buy_closes: &[f64],
+        buy_data: &IndicatorData,
+        sell_closes: &[f64],
+        sell_data: &IndicatorData,
+    ) {
+        assert!(evaluate(strategy, buy_closes, 0.0, buy_data)[0].quantity > 0.0);
+        assert!(evaluate(strategy, sell_closes, 2.0, sell_data)[0].quantity < 0.0);
+    }
+
+    #[test]
+    fn adaptive_rsi_strategies_generate_entry_and_exit_orders() {
+        let adaptive = AdaptiveRsi::new(3, 5);
+        let adaptive_buy = indicators(&[
+            (indicator_deterministic_name("RSI", &[fmt_arg(3)]), "AAPL", vec![20.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(5)]), "AAPL", vec![20.0]),
+        ]);
+        let adaptive_sell = indicators(&[
+            (indicator_deterministic_name("RSI", &[fmt_arg(3)]), "AAPL", vec![80.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(5)]), "AAPL", vec![80.0]),
+        ]);
+        assert_buy_and_sell(
+            &adaptive,
+            &[100.0, 101.0, 99.0, 102.0, 98.0, 103.0],
+            &adaptive_buy,
+            &[100.0, 101.0, 99.0, 102.0, 98.0, 103.0],
+            &adaptive_sell,
+        );
+
+        let alpha = AlphaRsiPro::new(2, 2);
+        let alpha_buy = indicator(indicator_deterministic_name("RSI", &[fmt_arg(2)]), &[20.0]);
+        let alpha_sell = indicator(indicator_deterministic_name("RSI", &[fmt_arg(2)]), &[90.0]);
+        assert_buy_and_sell(
+            &alpha,
+            &[100.0, 105.0, 110.0],
+            &alpha_buy,
+            &[110.0, 105.0, 100.0],
+            &alpha_sell,
+        );
+
+        let hybrid = HybridAlphaRsi::new(2, 3, 2);
+        let hybrid_buy = indicators(&[
+            (indicator_deterministic_name("RSI", &[fmt_arg(2)]), "AAPL", vec![20.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(3)]), "AAPL", vec![20.0]),
+        ]);
+        let hybrid_sell = indicators(&[
+            (indicator_deterministic_name("RSI", &[fmt_arg(2)]), "AAPL", vec![90.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(3)]), "AAPL", vec![90.0]),
+        ]);
+        assert_buy_and_sell(
+            &hybrid,
+            &[100.0, 110.0, 120.0],
+            &hybrid_buy,
+            &[120.0, 110.0, 100.0],
+            &hybrid_sell,
+        );
+
+        let no_indicators = IndicatorData::new();
+        assert!(evaluate(&adaptive, &[100.0; 6], 0.0, &no_indicators).is_empty());
+        assert!(evaluate(&alpha, &[100.0, 101.0], 0.0, &alpha_buy).is_empty());
+        let hybrid_neutral = indicators(&[
+            (indicator_deterministic_name("RSI", &[fmt_arg(2)]), "AAPL", vec![60.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(3)]), "AAPL", vec![60.0]),
+        ]);
+        assert!(evaluate(&hybrid, &[0.0, 1.0, 2.0], 0.0, &hybrid_neutral).is_empty());
+    }
+
+    #[test]
+    fn indicator_driven_strategies_generate_entry_and_exit_orders() {
+        let bollinger = BollingerMeanReversion::new(3, 1.0);
+        let bollinger_name = indicator_deterministic_name("BB", &[fmt_arg(3), fmt_arg(1.0)]);
+        let bollinger_data = indicator(bollinger_name, &[110.0, 100.0, 90.0]);
+        assert_buy_and_sell(&bollinger, &[80.0], &bollinger_data, &[120.0], &bollinger_data);
+
+        let macd = Macd::new(2, 3, 2);
+        let macd_name = indicator_deterministic_name("MACD", &[fmt_arg(2), fmt_arg(3), fmt_arg(2)]);
+        assert_buy_and_sell(
+            &macd,
+            &[100.0],
+            &indicator(macd_name.clone(), &[2.0, 1.0]),
+            &[100.0],
+            &indicator(macd_name, &[1.0, 2.0]),
+        );
+
+        let momentum = Momentum::new(2, 2);
+        let momentum_name = indicator_deterministic_name("SMA", &[fmt_arg(2)]);
+        assert_buy_and_sell(
+            &momentum,
+            &[100.0, 105.0, 110.0],
+            &indicator(momentum_name.clone(), &[100.0]),
+            &[110.0, 105.0, 100.0],
+            &indicator(momentum_name, &[105.0]),
+        );
+
+        let risk_averse = RiskAverse::new(2, 2);
+        let atr_name = indicator_deterministic_name("ATR", &[fmt_arg(2)]);
+        assert_buy_and_sell(
+            &risk_averse,
+            &[100.0, 101.0, 110.0],
+            &indicator(atr_name.clone(), &[1.0]),
+            &[110.0, 100.0, 90.0],
+            &indicator(atr_name, &[1.0]),
+        );
+
+        let rsi = Rsi::new(2, 3, 1.0);
+        let rsi_buy = indicators(&[
+            (indicator_deterministic_name("RSI", &[fmt_arg(2)]), "AAPL", vec![20.0]),
+            (
+                indicator_deterministic_name("BB", &[fmt_arg(3), fmt_arg(1.0)]),
+                "AAPL",
+                vec![110.0, 100.0, 90.0],
+            ),
+        ]);
+        let rsi_sell = indicators(&[
+            (indicator_deterministic_name("RSI", &[fmt_arg(2)]), "AAPL", vec![80.0]),
+            (
+                indicator_deterministic_name("BB", &[fmt_arg(3), fmt_arg(1.0)]),
+                "AAPL",
+                vec![110.0, 100.0, 90.0],
+            ),
+        ]);
+        assert_buy_and_sell(&rsi, &[80.0], &rsi_buy, &[100.0], &rsi_sell);
+
+        let crossover = SmaCrossover::new(2, 3);
+        let crossover_buy = indicators(&[
+            (indicator_deterministic_name("SMA", &[fmt_arg(2)]), "AAPL", vec![110.0]),
+            (indicator_deterministic_name("SMA", &[fmt_arg(3)]), "AAPL", vec![100.0]),
+        ]);
+        let crossover_sell = indicators(&[
+            (indicator_deterministic_name("SMA", &[fmt_arg(2)]), "AAPL", vec![90.0]),
+            (indicator_deterministic_name("SMA", &[fmt_arg(3)]), "AAPL", vec![100.0]),
+        ]);
+        assert_buy_and_sell(&crossover, &[100.0], &crossover_buy, &[100.0], &crossover_sell);
+
+        let naive = SmaNaive::new(2);
+        let naive_name = indicator_deterministic_name("SMA", &[fmt_arg(2)]);
+        assert_buy_and_sell(
+            &naive,
+            &[110.0],
+            &indicator(naive_name.clone(), &[100.0]),
+            &[90.0],
+            &indicator(naive_name, &[100.0]),
+        );
+    }
+
+    #[test]
+    fn price_pattern_strategies_generate_entry_and_exit_orders() {
+        let no_indicators = IndicatorData::new();
+
+        assert_buy_and_sell(
+            &DoubleTop::new(6),
+            &[90.0, 95.0, 100.0, 110.0, 100.0, 109.0, 100.0, 111.0],
+            &no_indicators,
+            &[90.0, 95.0, 100.0, 110.0, 100.0, 109.0, 100.0, 90.0],
+            &no_indicators,
+        );
+        assert_buy_and_sell(
+            &Roc::new(2),
+            &[100.0, 105.0, 110.0],
+            &no_indicators,
+            &[110.0, 105.0, 100.0],
+            &no_indicators,
+        );
+        assert_buy_and_sell(
+            &Rsrs::new(3),
+            &[100.0, 105.0, 110.0],
+            &no_indicators,
+            &[110.0, 105.0, 100.0],
+            &no_indicators,
+        );
+        assert_buy_and_sell(
+            &Vcp::new(6, 3),
+            &[80.0, 100.0, 90.0, 100.0, 99.0, 101.0],
+            &no_indicators,
+            &[0.0, 100.0, 40.0, 80.0, 49.0, 50.0],
+            &no_indicators,
+        );
+
+        assert!(evaluate(&Roc::new(2), &[0.0, 1.0, 2.0], 0.0, &no_indicators).is_empty());
+        assert!(evaluate(&Rsrs::new(3), &[-2.0, -1.0, 0.0], 0.0, &no_indicators).is_empty());
+        assert!(evaluate(&Vcp::new(6, 1), &[1.0; 6], 0.0, &no_indicators).is_empty());
+        assert!(evaluate(&Vcp::new(3, 3), &[1.0; 3], 0.0, &no_indicators).is_empty());
+    }
+
+    #[test]
+    fn turtle_trading_uses_atr_for_entries_and_price_for_exits() {
+        let strategy = TurtleTrading::new(3, 2, 2);
+        let atr_name = indicator_deterministic_name("ATR", &[fmt_arg(2)]);
+        let atr = indicator(atr_name.clone(), &[2.0]);
+
+        assert_buy_and_sell(&strategy, &[100.0, 105.0, 110.0], &atr, &[110.0, 100.0, 90.0], &atr);
+        assert!(evaluate(&strategy, &[100.0, 105.0, 110.0], 0.0, &indicator(atr_name, &[0.0]),)
+            .is_empty());
+        assert!(evaluate(&strategy, &[1.0, 2.0], 0.0, &IndicatorData::new()).is_empty());
+    }
+
+    #[test]
+    fn buy_and_hold_handles_targeted_staggered_and_already_entered_assets() {
+        let no_indicators = IndicatorData::new();
+        let history = bars(&[100.0]);
+        let market = [("AAPL", history.as_slice())];
+        let empty_market: [(&str, &[Bar]); 0] = [];
+        let strategy = BuyAndHold::new(Some("AAPL".to_owned()));
+
+        assert!(strategy
+            .evaluate_inner(
+                &empty_market,
+                &portfolio(100.0, 0.0),
+                &State::default(),
+                &IndicatorView::new(&no_indicators, 0),
+            )
+            .is_empty());
+        assert_eq!(
+            strategy.evaluate_inner(
+                &market,
+                &portfolio(100.0, 0.0),
+                &State::default(),
+                &IndicatorView::new(&no_indicators, 0),
+            )[0]
+            .symbol,
+            "AAPL",
+        );
+        assert!(strategy
+            .evaluate_inner(
+                &market,
+                &portfolio(100.0, 1.0),
+                &State::default(),
+                &IndicatorView::new(&no_indicators, 0),
+            )
+            .is_empty());
+        assert!(BuyAndHold::new(Some("MSFT".to_owned()))
+            .evaluate_inner(
+                &market,
+                &portfolio(100.0, 0.0),
+                &State::default(),
+                &IndicatorView::new(&no_indicators, 0),
+            )
+            .is_empty());
+
+        let second = bars(&[50.0]);
+        let invalid = bars(&[f64::NAN]);
+        let staggered = [
+            ("AAPL", history.as_slice()),
+            ("MSFT", second.as_slice()),
+            ("INVALID", invalid.as_slice()),
+        ];
+        let orders = BuyAndHold::new(None).evaluate_inner(
+            &staggered,
+            &portfolio(150.0, 0.0),
+            &State::default(),
+            &IndicatorView::new(&no_indicators, 0),
+        );
+        assert_eq!(orders.len(), 2);
+    }
+
+    #[test]
+    fn rotation_strategies_rank_assets_and_obey_rebalance_intervals() {
+        let aapl = bars(&[100.0, 105.0, 120.0]);
+        let msft = bars(&[100.0, 95.0, 90.0]);
+        let market = [("AAPL", aapl.as_slice()), ("MSFT", msft.as_slice())];
+        let mut held = portfolio(100.0, 0.0);
+        held.positions.insert("MSFT".to_owned(), 2.0);
+        let state = State {
+            bar_index: 2,
+            ..State::default()
+        };
+        let no_indicators = IndicatorData::new();
+
+        for strategy in [
+            BuiltinStrategy::RocRotation(RocRotation::new(2, 1, 2)),
+            BuiltinStrategy::RsrsRotation(RsrsRotation::new(3, 1, 2)),
+        ] {
+            let orders = strategy.evaluate(
+                &market,
+                &held,
+                &state,
+                &IndicatorView::new(&no_indicators, 0),
+                &HashMap::from([
+                    ("AAPL", InstrumentType::Crypto),
+                    ("MSFT", InstrumentType::Crypto),
+                ]),
+            );
+            assert!(orders.iter().any(|order| order.symbol == "AAPL"));
+            assert!(orders.iter().any(|order| order.symbol == "MSFT"));
+        }
+
+        let bb_name = indicator_deterministic_name("BB", &[fmt_arg(2), fmt_arg(1.0)]);
+        let bb_data = indicators(&[
+            (bb_name.clone(), "AAPL", vec![110.0, 100.0, 90.0]),
+            (bb_name, "MSFT", vec![100.0, 95.0, 90.0]),
+        ]);
+        let multi_bb = MultiBollingerRotation::new(2, 1.0, 1, 2);
+        assert!(!multi_bb
+            .evaluate_inner(&market, &held, &state, &IndicatorView::new(&bb_data, 0))
+            .is_empty());
+
+        let triple = TripleRsiRotation::new(2, 3, 4, 1, 2);
+        let triple_data = indicators(&[
+            (indicator_deterministic_name("RSI", &[fmt_arg(2)]), "AAPL", vec![80.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(3)]), "AAPL", vec![80.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(4)]), "AAPL", vec![80.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(2)]), "MSFT", vec![20.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(3)]), "MSFT", vec![20.0]),
+            (indicator_deterministic_name("RSI", &[fmt_arg(4)]), "MSFT", vec![20.0]),
+        ]);
+        assert!(!triple
+            .evaluate_inner(&market, &held, &state, &IndicatorView::new(&triple_data, 0))
+            .is_empty());
+
+        let off_cycle = State {
+            bar_index: 1,
+            ..State::default()
+        };
+        assert!(RocRotation::new(2, 1, 2)
+            .evaluate_inner(&market, &held, &off_cycle, &IndicatorView::new(&no_indicators, 0),)
+            .is_empty());
+        assert!(RsrsRotation::new(3, 1, 2)
+            .evaluate_inner(&market, &held, &off_cycle, &IndicatorView::new(&no_indicators, 0),)
+            .is_empty());
+        assert!(multi_bb
+            .evaluate_inner(&market, &held, &off_cycle, &IndicatorView::new(&bb_data, 0))
+            .is_empty());
+        assert!(triple
+            .evaluate_inner(&market, &held, &off_cycle, &IndicatorView::new(&triple_data, 0))
+            .is_empty());
+    }
+
+    #[test]
+    fn builtin_dispatch_visits_every_variant_and_filters_fractional_equity_orders() {
+        let strategies = vec![
+            BuiltinStrategy::AdaptiveRsi(AdaptiveRsi::new(3, 5)),
+            BuiltinStrategy::AlphaRsiPro(AlphaRsiPro::new(2, 2)),
+            BuiltinStrategy::BollingerMeanReversion(BollingerMeanReversion::new(3, 1.0)),
+            BuiltinStrategy::BuyAndHold(BuyAndHold::new(None)),
+            BuiltinStrategy::DoubleTop(DoubleTop::new(6)),
+            BuiltinStrategy::HybridAlphaRsi(HybridAlphaRsi::new(2, 3, 2)),
+            BuiltinStrategy::Macd(Macd::new(2, 3, 2)),
+            BuiltinStrategy::Momentum(Momentum::new(2, 2)),
+            BuiltinStrategy::MultiBollingerRotation(MultiBollingerRotation::new(2, 1.0, 1, 2)),
+            BuiltinStrategy::RiskAverse(RiskAverse::new(2, 2)),
+            BuiltinStrategy::Roc(Roc::new(2)),
+            BuiltinStrategy::RocRotation(RocRotation::new(2, 1, 2)),
+            BuiltinStrategy::Rsi(Rsi::new(2, 3, 1.0)),
+            BuiltinStrategy::Rsrs(Rsrs::new(3)),
+            BuiltinStrategy::RsrsRotation(RsrsRotation::new(3, 1, 2)),
+            BuiltinStrategy::SmaCrossover(SmaCrossover::new(2, 3)),
+            BuiltinStrategy::SmaNaive(SmaNaive::new(2)),
+            BuiltinStrategy::TripleRsiRotation(TripleRsiRotation::new(2, 3, 4, 1, 2)),
+            BuiltinStrategy::TurtleTrading(TurtleTrading::new(3, 2, 2)),
+            BuiltinStrategy::Vcp(Vcp::new(6, 3)),
+        ];
+        let no_indicators = IndicatorData::new();
+        for strategy in &strategies {
+            assert!(strategy
+                .evaluate(
+                    &[],
+                    &portfolio(100.0, 0.0),
+                    &State::default(),
+                    &IndicatorView::new(&no_indicators, 0),
+                    &HashMap::new(),
+                )
+                .is_empty());
+        }
+
+        let history = bars(&[10.0]);
+        let market = [("AAPL", history.as_slice())];
+        let strategy = BuiltinStrategy::BuyAndHold(BuyAndHold::new(None));
+        let stock = HashMap::from([("AAPL", InstrumentType::Stocks)]);
+        let crypto = HashMap::from([("AAPL", InstrumentType::Crypto)]);
+        assert_eq!(
+            strategy.evaluate(
+                &market,
+                &portfolio(105.0, 0.0),
+                &State::default(),
+                &IndicatorView::new(&no_indicators, 0),
+                &stock,
+            )[0]
+            .quantity,
+            10.0,
+        );
+        assert_eq!(
+            strategy.evaluate(
+                &market,
+                &portfolio(105.0, 0.0),
+                &State::default(),
+                &IndicatorView::new(&no_indicators, 0),
+                &crypto,
+            )[0]
+            .quantity,
+            10.5,
+        );
+        assert!(strategy
+            .evaluate(
+                &market,
+                &portfolio(5.0, 0.0),
+                &State::default(),
+                &IndicatorView::new(&no_indicators, 0),
+                &stock,
+            )
+            .is_empty());
+        assert!(strategy
+            .evaluate(
+                &market,
+                &portfolio(105.0, 0.0),
+                &State::default(),
+                &IndicatorView::new(&no_indicators, 0),
+                &HashMap::new(),
+            )
+            .is_empty());
+    }
+
+    #[test]
+    fn builtin_python_extraction_recognizes_every_strategy_type() {
+        Python::attach(|py| {
+            let objects: Vec<Py<PyAny>> = vec![
+                Py::new(py, AdaptiveRsi::new(3, 5)).expect("strategy").into_any(),
+                Py::new(py, AlphaRsiPro::new(2, 2)).expect("strategy").into_any(),
+                Py::new(py, BollingerMeanReversion::new(3, 1.0)).expect("strategy").into_any(),
+                Py::new(py, BuyAndHold::new(None)).expect("strategy").into_any(),
+                Py::new(py, DoubleTop::new(6)).expect("strategy").into_any(),
+                Py::new(py, HybridAlphaRsi::new(2, 3, 2)).expect("strategy").into_any(),
+                Py::new(py, Macd::new(2, 3, 2)).expect("strategy").into_any(),
+                Py::new(py, Momentum::new(2, 2)).expect("strategy").into_any(),
+                Py::new(py, MultiBollingerRotation::new(2, 1.0, 1, 2))
+                    .expect("strategy")
+                    .into_any(),
+                Py::new(py, RiskAverse::new(2, 2)).expect("strategy").into_any(),
+                Py::new(py, Roc::new(2)).expect("strategy").into_any(),
+                Py::new(py, RocRotation::new(2, 1, 2)).expect("strategy").into_any(),
+                Py::new(py, Rsi::new(2, 3, 1.0)).expect("strategy").into_any(),
+                Py::new(py, Rsrs::new(3)).expect("strategy").into_any(),
+                Py::new(py, RsrsRotation::new(3, 1, 2)).expect("strategy").into_any(),
+                Py::new(py, SmaCrossover::new(2, 3)).expect("strategy").into_any(),
+                Py::new(py, SmaNaive::new(2)).expect("strategy").into_any(),
+                Py::new(py, TripleRsiRotation::new(2, 3, 4, 1, 2)).expect("strategy").into_any(),
+                Py::new(py, TurtleTrading::new(3, 2, 2)).expect("strategy").into_any(),
+                Py::new(py, Vcp::new(6, 3)).expect("strategy").into_any(),
+            ];
+
+            assert!(objects
+                .iter()
+                .all(|object| BuiltinStrategy::try_from_py(py, object).is_some()));
+            assert!(BuiltinStrategy::try_from_py(
+                py,
+                &1_u8.into_pyobject(py).expect("Python integer").into_any().unbind(),
+            )
+            .is_none());
+        });
+    }
+}

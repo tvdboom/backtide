@@ -1927,6 +1927,7 @@ mod tests {
     use crate::storage::models::BarSeries;
     use crate::storage::traits::Storage;
     use async_trait::async_trait;
+    use pyo3::types::{PyDict, PyList, PyModule};
     use std::collections::HashMap;
     use std::sync::Arc;
     use strum::IntoEnumIterator;
@@ -1991,12 +1992,18 @@ mod tests {
     // ── Helpers ──────────────────────────────────────────────────────────
 
     fn make_engine() -> (Engine, TempDir) {
-        let config = Box::leak(Box::new(Config::default()));
-        let rt = Runtime::new().unwrap();
+        make_engine_with_stub(StubProvider::new())
+    }
+
+    fn make_engine_with_stub(stub: StubProvider) -> (Engine, TempDir) {
         let tmp = TempDir::new().unwrap();
+        let mut config = Config::default();
+        config.data.storage_path = tmp.path().join("state");
+        let config = Box::leak(Box::new(config));
+        let rt = Runtime::new().unwrap();
         let db = DuckDb::new(&tmp.path().join("test.db")).unwrap();
         db.init().unwrap();
-        let stub: Arc<dyn DataProvider> = Arc::new(StubProvider::new());
+        let stub: Arc<dyn DataProvider> = Arc::new(stub);
         let providers = InstrumentType::iter().map(|it| (it, stub.clone())).collect();
         (
             Engine {
@@ -2223,6 +2230,185 @@ mod tests {
             latest_ts: [(Interval::OneDay, 9_999_999u64)].into(),
             legs: vec![],
         }
+    }
+
+    fn make_order(symbol: &str, quantity: f64, order_type: OrderType, price: Option<f64>) -> Order {
+        Order {
+            id: OrderId::new(),
+            symbol: symbol.to_owned(),
+            quantity,
+            order_type,
+            price,
+            limit_price: None,
+            sizer: None,
+        }
+    }
+
+    fn custom_strategy(orders: Vec<Order>, raises: bool) -> Py<PyAny> {
+        Python::attach(|py| {
+            let module = PyModule::from_code(
+                py,
+                pyo3::ffi::c_str!(
+                    r#"
+class Strategy:
+    def __init__(self, orders, raises):
+        self.orders = orders
+        self.raises = raises
+
+    def evaluate(self, data, portfolio, state, indicators):
+        if self.raises:
+            raise RuntimeError("deliberate test error")
+        orders, self.orders = self.orders, []
+        return orders
+"#
+                ),
+                pyo3::ffi::c_str!("engine_test_strategy.py"),
+                pyo3::ffi::c_str!("engine_test_strategy"),
+            )
+            .unwrap();
+            let py_orders =
+                PyList::new(py, orders.into_iter().map(|order| Py::new(py, order).unwrap()))
+                    .unwrap();
+            module.getattr("Strategy").unwrap().call1((py_orders, raises)).unwrap().unbind()
+        })
+    }
+
+    fn custom_strategy_batches(batches: Vec<Vec<Order>>) -> Py<PyAny> {
+        Python::attach(|py| {
+            let module = PyModule::from_code(
+                py,
+                pyo3::ffi::c_str!(
+                    r#"
+class Strategy:
+    def __init__(self, batches):
+        self.batches = batches
+
+    def evaluate(self, data, portfolio, state, indicators):
+        return self.batches.pop(0) if self.batches else []
+"#
+                ),
+                pyo3::ffi::c_str!("engine_test_batches.py"),
+                pyo3::ffi::c_str!("engine_test_batches"),
+            )
+            .unwrap();
+            let batches = PyList::new(
+                py,
+                batches.into_iter().map(|orders| {
+                    PyList::new(py, orders.into_iter().map(|order| Py::new(py, order).unwrap()))
+                        .unwrap()
+                }),
+            )
+            .unwrap();
+            module.getattr("Strategy").unwrap().call1((batches,)).unwrap().unbind()
+        })
+    }
+
+    fn custom_sizer(raises: bool) -> Py<PyAny> {
+        Python::attach(|py| {
+            let module = PyModule::from_code(
+                py,
+                pyo3::ffi::c_str!(
+                    r#"
+class Sizer:
+    def __init__(self, raises):
+        self.raises = raises
+
+    def calculate(self, equity, price, stop_distance, atr):
+        if self.raises:
+            raise RuntimeError("deliberate sizer error")
+        return 2.0
+"#
+                ),
+                pyo3::ffi::c_str!("engine_test_sizer.py"),
+                pyo3::ffi::c_str!("engine_test_sizer"),
+            )
+            .unwrap();
+            module.getattr("Sizer").unwrap().call1((raises,)).unwrap().unbind()
+        })
+    }
+
+    fn custom_metric(value: f64, raises: bool) -> Py<PyAny> {
+        Python::attach(|py| {
+            let module = PyModule::from_code(
+                py,
+                pyo3::ffi::c_str!(
+                    r#"
+class Metric:
+    def __init__(self, value, raises):
+        self.value = value
+        self.raises = raises
+
+    def compute(self, equity, trades):
+        if self.raises:
+            raise RuntimeError("deliberate metric error")
+        return self.value
+"#
+                ),
+                pyo3::ffi::c_str!("engine_test_metric.py"),
+                pyo3::ffi::c_str!("engine_test_metric"),
+            )
+            .unwrap();
+            module.getattr("Metric").unwrap().call1((value, raises)).unwrap().unbind()
+        })
+    }
+
+    fn progress_callback() -> Py<PyAny> {
+        Python::attach(|py| {
+            let globals = PyDict::new(py);
+            py.run(
+                pyo3::ffi::c_str!("def callback(completed, total):\n    return None"),
+                Some(&globals),
+                Some(&globals),
+            )
+            .unwrap();
+            globals.get_item("callback").unwrap().unwrap().unbind()
+        })
+    }
+
+    fn run_custom_strategy(
+        strategy: Py<PyAny>,
+        cfg: &ExperimentConfig,
+        profiles: &[InstrumentProfile],
+    ) -> RunResult {
+        let timestamps = [1_000_i64, 2_000];
+        let aligned = make_aligned(
+            "AAPL",
+            timestamps.iter().map(|ts| Some(make_bar(*ts as u64, 100.0))).collect(),
+        );
+        run_one_strategy(
+            "custom",
+            strategy,
+            cfg,
+            &aligned,
+            &HashMap::new(),
+            profiles,
+            &timestamps,
+            &FxTable::new("USD"),
+            None,
+        )
+    }
+
+    fn run_scheduled_strategy(strategy: Py<PyAny>, cfg: &ExperimentConfig) -> RunResult {
+        let timestamps = [1_000_i64, 2_000, 3_000, 4_000];
+        let aligned = make_aligned(
+            "AAPL",
+            [100.0, 110.0, 120.0, 115.0]
+                .into_iter()
+                .zip(timestamps)
+                .map(|(price, timestamp)| Some(make_bar(timestamp as u64, price)))
+                .collect(),
+        );
+        run_one_strategy(
+            "scheduled",
+            strategy,
+            cfg,
+            &aligned,
+            &HashMap::new(),
+            &[make_profile("AAPL")],
+            &timestamps,
+            &FxTable::new("USD"),
+            None,
+        )
     }
 
     #[test]
@@ -2854,6 +3040,177 @@ mod tests {
         assert!(result.error.is_none());
     }
 
+    #[test]
+    fn custom_strategy_reports_evaluation_errors() {
+        let cfg = base_config();
+        let result =
+            run_custom_strategy(custom_strategy(vec![], true), &cfg, &[make_profile("AAPL")]);
+
+        assert!(result.error.as_deref().is_some_and(|error| error.contains("evaluate() raised")));
+        assert_eq!(result.equity_curve.len(), 2);
+    }
+
+    #[test]
+    fn custom_strategy_rejects_invalid_orders() {
+        let mut cfg = base_config();
+        cfg.exchange.allowed_order_types = vec![OrderType::Market];
+
+        let unknown = run_custom_strategy(
+            custom_strategy(vec![make_order("MSFT", 1.0, OrderType::Market, None)], false),
+            &cfg,
+            &[make_profile("AAPL")],
+        );
+        assert!(unknown.orders[0].reason.contains("unknown symbol"));
+
+        let disallowed = run_custom_strategy(
+            custom_strategy(vec![make_order("AAPL", 1.0, OrderType::Limit, Some(90.0))], false),
+            &cfg,
+            &[make_profile("AAPL")],
+        );
+        assert_eq!(disallowed.orders[0].reason, "order type not allowed");
+
+        let fractional = run_custom_strategy(
+            custom_strategy(vec![make_order("AAPL", 0.5, OrderType::Market, None)], false),
+            &cfg,
+            &[make_profile("AAPL")],
+        );
+        assert!(fractional.orders[0].reason.contains("fractional"));
+
+        let metadata_missing = run_custom_strategy(
+            custom_strategy(vec![make_order("AAPL", 1.0, OrderType::Market, None)], false),
+            &cfg,
+            &[],
+        );
+        assert!(metadata_missing.orders[0].reason.contains("metadata unavailable"));
+    }
+
+    #[test]
+    fn custom_strategy_rejects_duplicate_order_ids() {
+        let cfg = base_config();
+        let order = make_order("AAPL", 1.0, OrderType::Market, None);
+        let duplicate = order.clone();
+        let result = run_custom_strategy(
+            custom_strategy(vec![order, duplicate], false),
+            &cfg,
+            &[make_profile("AAPL")],
+        );
+
+        assert!(result.orders.iter().any(|record| record.reason.contains("duplicate order id")));
+        assert!(result.orders.iter().any(|record| record.status == OrderStatus::Filled));
+    }
+
+    #[test]
+    fn custom_strategy_resolves_and_rejects_python_sizers() {
+        let cfg = base_config();
+        let mut sized = make_order("AAPL", 0.0, OrderType::Market, None);
+        sized.sizer = Some(SizerSlot::Custom(custom_sizer(false)));
+        let filled =
+            run_custom_strategy(custom_strategy(vec![sized], false), &cfg, &[make_profile("AAPL")]);
+        assert_eq!(filled.orders[0].status, OrderStatus::Filled);
+        assert_eq!(filled.orders[0].order.quantity, 2.0);
+
+        let mut rejected = make_order("AAPL", 0.0, OrderType::Market, None);
+        rejected.sizer = Some(SizerSlot::Custom(custom_sizer(true)));
+        let failed = run_custom_strategy(
+            custom_strategy(vec![rejected], false),
+            &cfg,
+            &[make_profile("AAPL")],
+        );
+        assert_eq!(failed.orders[0].status, OrderStatus::Rejected);
+        assert!(failed.orders[0].reason.contains("quantity"));
+    }
+
+    #[test]
+    fn custom_strategy_cancels_invalid_trigger() {
+        let mut cfg = base_config();
+        cfg.exchange.allowed_order_types.push(OrderType::Limit);
+        let result = run_custom_strategy(
+            custom_strategy(vec![make_order("AAPL", 1.0, OrderType::Limit, None)], false),
+            &cfg,
+            &[make_profile("AAPL")],
+        );
+
+        assert_eq!(result.orders[0].status, OrderStatus::Canceled);
+        assert!(result.orders[0].reason.contains("missing price"));
+    }
+
+    #[test]
+    fn custom_strategy_cancellation_order_removes_pending_order() {
+        let mut cfg = base_config();
+        cfg.exchange.allowed_order_types.push(OrderType::Limit);
+        let pending = make_order("AAPL", 1.0, OrderType::Limit, Some(1.0));
+        let mut cancel = make_order("AAPL", 0.0, OrderType::Cancel, None);
+        cancel.id = pending.id;
+        let result = run_custom_strategy(
+            custom_strategy(vec![pending, cancel], false),
+            &cfg,
+            &[make_profile("AAPL")],
+        );
+
+        assert_eq!(result.orders[0].status, OrderStatus::Canceled);
+        assert_eq!(result.orders[0].reason, "canceled by cancellation order");
+    }
+
+    #[test]
+    fn scheduled_strategy_closes_long_trade_and_executes_short_round_trip() {
+        let mut long_config = base_config();
+        long_config.exchange.commission_pct = 0.1;
+        long_config.exchange.commission_fixed = 1.0;
+        long_config.exchange.commission_type = CommissionType::PercentagePlusFixed;
+        let long = run_scheduled_strategy(
+            custom_strategy_batches(vec![
+                vec![make_order("AAPL", 10.0, OrderType::Market, None)],
+                vec![make_order("AAPL", -10.0, OrderType::Market, None)],
+            ]),
+            &long_config,
+        );
+        assert!(long.orders.iter().all(|record| record.status == OrderStatus::Filled));
+        assert!(long.orders.iter().all(|record| record.commission > 0.0));
+        assert_eq!(long.trades.len(), 1);
+        assert!(long.trades[0].pnl > 0.0);
+
+        let mut short_config = base_config();
+        short_config.exchange.allow_short_selling = true;
+        short_config.exchange.allow_margin = true;
+        short_config.exchange.max_leverage = 10.0;
+        short_config.exchange.max_position_size = 1_000;
+        short_config.exchange.commission_type = CommissionType::Fixed;
+        short_config.exchange.commission_fixed = 1.0;
+        let short = run_scheduled_strategy(
+            custom_strategy_batches(vec![
+                vec![make_order("AAPL", -5.0, OrderType::Market, None)],
+                vec![make_order("AAPL", 5.0, OrderType::Market, None)],
+            ]),
+            &short_config,
+        );
+        assert_eq!(short.orders.len(), 2);
+        assert!(short.orders.iter().all(|record| record.status == OrderStatus::Filled));
+        assert!(short.orders.iter().all(|record| record.commission == 1.0));
+    }
+
+    #[test]
+    fn scheduled_strategy_surfaces_short_and_margin_limit_errors() {
+        let mut short_config = base_config();
+        short_config.exchange.raise_on_short_violation = true;
+        let short = run_scheduled_strategy(
+            custom_strategy_batches(vec![vec![make_order("AAPL", -1.0, OrderType::Market, None)]]),
+            &short_config,
+        );
+        assert!(short.error.as_deref().is_some_and(|error| error.contains("short")));
+
+        let mut margin_config = base_config();
+        margin_config.portfolio.initial_cash = 100;
+        margin_config.exchange.allow_margin = true;
+        margin_config.exchange.max_leverage = 1.0;
+        margin_config.exchange.raise_on_margin_limit = true;
+        margin_config.exchange.max_position_size = 1_000;
+        let margin = run_scheduled_strategy(
+            custom_strategy_batches(vec![vec![make_order("AAPL", 100.0, OrderType::Market, None)]]),
+            &margin_config,
+        );
+        assert!(margin.error.as_deref().is_some_and(|error| error.contains("limit")));
+    }
+
     // ── Engine::run_experiment — smoke tests ─────────────────────────────
 
     #[test]
@@ -2899,5 +3256,93 @@ mod tests {
             None,
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn run_experiment_exercises_builtin_custom_benchmark_metrics_and_diagnostics() {
+        crate::backtest::interface::ABORT_REQUESTED
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        let mut stub = StubProvider::new();
+        stub.instruments.insert("AAPL".to_owned(), make_instrument("AAPL"));
+        let (engine, _tmp) = make_engine_with_stub(stub);
+        write_bars(
+            &engine,
+            "AAPL",
+            vec![
+                make_bar(1_000_000_000, 100.0),
+                make_bar(1_000_086_400, 101.0),
+                make_bar(1_000_172_800, 102.0),
+            ],
+        );
+
+        let mut config = base_config();
+        config.general.name = "coverage experiment".to_owned();
+        config.general.tags = vec!["coverage".to_owned()];
+        config.strategy.benchmark = Some("AAPL".to_owned());
+        config.strategy.strategies = vec![
+            "builtin".to_owned(),
+            "empty".to_owned(),
+            "pending".to_owned(),
+            "rejected".to_owned(),
+            "raising".to_owned(),
+        ];
+        config.indicators.indicators = vec!["manual".to_owned(), "missing".to_owned()];
+        config.metrics = crate::metrics::selection::MetricSelection::from_names(vec![
+            "total_return".to_owned(),
+            "sharpe".to_owned(),
+            "excess_return".to_owned(),
+            "alpha".to_owned(),
+            "custom_good".to_owned(),
+            "custom_bad".to_owned(),
+        ]);
+        config.exchange.allowed_order_types.push(OrderType::Limit);
+
+        let pending_order = make_order("AAPL", 1.0, OrderType::Limit, Some(1.0));
+        let strategies = HashMap::from([
+            ("builtin".to_owned(), bah_strategy()),
+            ("empty".to_owned(), custom_strategy(vec![], false)),
+            ("pending".to_owned(), custom_strategy(vec![pending_order], false)),
+            (
+                "rejected".to_owned(),
+                custom_strategy(vec![make_order("AAPL", 0.5, OrderType::Market, None)], false),
+            ),
+            ("raising".to_owned(), custom_strategy(vec![], true)),
+        ]);
+        let indicators = Python::attach(|py| {
+            HashMap::from([(
+                "manual".to_owned(),
+                Py::new(py, crate::indicators::interface::SimpleMovingAverage::new(2))
+                    .unwrap()
+                    .into_any(),
+            )])
+        });
+        let metrics = HashMap::from([
+            ("custom_good".to_owned(), custom_metric(42.0, false)),
+            ("custom_bad".to_owned(), custom_metric(0.0, true)),
+        ]);
+        let progress = crate::backtest::interface::ProgressReporter::new(progress_callback());
+
+        let result = engine
+            .run_experiment(&config, true, &strategies, &indicators, &metrics, Some(&progress))
+            .unwrap();
+
+        assert_eq!(result.name, "coverage experiment");
+        assert_eq!(result.status, ExperimentStatus::Partial);
+        assert_eq!(result.strategies.len(), 6);
+        assert!(result.warnings.iter().any(|warning| warning.contains("missing")));
+        assert!(result.warnings.iter().any(|warning| warning.contains("produced no orders")));
+        assert!(result.warnings.iter().any(|warning| warning.contains("none were filled")));
+        assert!(result.warnings.iter().any(|warning| warning.contains("Metric")));
+        assert!(result
+            .strategies
+            .iter()
+            .filter(|run| run.error.is_none())
+            .all(|run| run.metrics.get("custom_good") == Some(&42.0)));
+        assert!(engine
+            .db
+            .query_experiments(Some(&[result.experiment_id.clone()]), None, None)
+            .unwrap()
+            .iter()
+            .any(|stored| stored.id == result.experiment_id));
     }
 }

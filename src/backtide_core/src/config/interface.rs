@@ -788,3 +788,32 @@ pub fn set_config(py: Python<'_>, config: PyConfig) -> PyResult<()> {
         .map_err(|_| ConfigError::AlreadySet)
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn python_config_and_plot_objects_cover_defaults_custom_values_and_conversion() {
+        Python::attach(|py| {
+            let config = PyConfig::new(py, None, None, None, None).unwrap();
+            assert!(config.__repr__(py).contains("Config(general="));
+            config.to_dict(py).unwrap();
+            let cloned = config.clone();
+            assert_eq!(cloned.to_rust(py), config.to_rust(py));
+
+            let other = Py::new(py, PyConfig::new(py, None, None, None, None).unwrap()).unwrap();
+            assert!(!config.__richcmp__(py, other.borrow(py), CompareOp::Lt));
+
+            let default_palette = PlotsConfig::new("plotly", None, 22, 20, 14, 2.0, 8.0);
+            assert_eq!(default_palette.palette, PlotsConfig::default().palette);
+            assert!(default_palette.__repr__().contains("template=\"plotly\""));
+            default_palette.to_dict(py).unwrap();
+
+            let custom =
+                PlotsConfig::new("custom", Some(vec!["red".to_owned()]), 10, 11, 12, 1.5, 4.0);
+            assert_eq!(custom.palette, ["red"]);
+            assert_eq!(custom.marker_size, 4.0);
+        });
+    }
+}

@@ -5,6 +5,7 @@ Description: Unit tests for the backtest module.
 
 """
 
+import pickle
 import threading
 from types import SimpleNamespace
 from typing import Any, cast
@@ -28,9 +29,12 @@ from backtide.backtest import (
     GeneralExpConfig,
     Order,
     OrderRecord,
+    OrderStatus,
     OrderType,
+    Portfolio,
     PortfolioExpConfig,
     RunResult,
+    State,
     Trade,
 )
 import backtide.backtest.experiment as backtest_module
@@ -296,6 +300,33 @@ def test_enum_get_default(cls):
     assert cls.get_default() is not None
 
 
+@pytest.mark.parametrize(
+    "cls",
+    [
+        CommissionType,
+        ConversionPeriod,
+        CurrencyConversionMode,
+        EmptyBarPolicy,
+        ExperimentStatus,
+        OrderStatus,
+        OrderType,
+    ],
+)
+def test_every_enum_variant_supports_its_public_contract(cls: type) -> None:
+    """Every variant can be inspected and round-tripped through pickle."""
+    variants = cls.variants()
+
+    for variant in variants:
+        assert pickle.loads(pickle.dumps(variant)) == variant
+        assert repr(variant)
+        assert str(variant)
+        assert hash(variant) == hash(variant)
+        if hasattr(variant, "name"):
+            assert variant.name
+        if hasattr(variant, "description"):
+            assert variant.description()
+
+
 class TestCommissionType:
     """Tests for the CommissionType enum."""
 
@@ -354,6 +385,51 @@ class TestOrder:
         o = Order(symbol="AAPL", order_type="market", quantity=1, id=uid)
         assert uid in repr(o)
 
+    @pytest.mark.parametrize(
+        ("price", "limit_price", "expected"),
+        [(None, None, "type=Market"), (100.0, None, "price=100"), (100.0, 99.0, "limit=99")],
+    )
+    def test_repr_and_pickle_cover_each_price_shape(
+        self,
+        price: float | None,
+        limit_price: float | None,
+        expected: str,
+    ) -> None:
+        """Order representations and pickle preserve every optional price shape."""
+        order = Order("AAPL", 2.5, price=price, limit_price=limit_price)
+
+        restored = pickle.loads(pickle.dumps(order))
+
+        assert expected in repr(order)
+        assert restored == order
+
+    def test_invalid_quantity_and_identifier_are_rejected(self) -> None:
+        """Order construction rejects unrelated quantities and malformed identifiers."""
+        with pytest.raises(TypeError, match="quantity must be"):
+            Order("AAPL", object())
+        with pytest.raises(TypeError, match="invalid order id"):
+            Order("AAPL", id="invalid")
+
+
+class TestPortfolioAndState:
+    """Tests for strategy-facing backtest snapshots."""
+
+    def test_portfolio_and_state_expose_values_and_representations(self) -> None:
+        """Snapshot constructors preserve values and provide useful representations."""
+        order = Order("AAPL", 1.0)
+        portfolio = Portfolio(cash={"USD": 100.0}, positions={"AAPL": 2.0}, orders=[order])
+        state = State(timestamp=1_700_000_000, bar_index=2, total_bars=10, is_warmup=True)
+
+        assert portfolio.cash
+        assert portfolio.positions == {"AAPL": 2.0}
+        assert portfolio.orders == [order]
+        assert "AAPL" in repr(portfolio)
+        assert state.datetime.tzinfo is not None
+        assert state.bar_index == 2
+        assert state.total_bars == 10
+        assert state.is_warmup is True
+        assert "bar_index=2" in repr(state)
+
 
 class TestOrderType:
     """Tests for the OrderType enum."""
@@ -397,6 +473,34 @@ class TestResultModels:
 
         assert TopLevelExperiment is Experiment is ModuleExperiment
         assert TopLevelStudy is ModuleStudy
+
+    def test_completed_result_models_expose_serializable_state(self) -> None:
+        """A deterministic round trip exercises every persisted result model."""
+
+        class RoundTripStrategy(BaseStrategy):
+            """Open one share and close it on the following strategy tick."""
+
+            def evaluate(self, _data, portfolio, _state, _indicators):
+                quantity = portfolio.positions.get("AAPL", 0.0)
+                if quantity > 0.0:
+                    return [Order("AAPL", -quantity)]
+                if not portfolio.orders:
+                    return [Order("AAPL", 1.0)]
+                return []
+
+        result = Experiment(
+            _fixture_config(name="result-model-round-trip"),
+            strategies=RoundTripStrategy(),
+        ).run(verbose=False)
+        run = result.strategies[0]
+
+        values = [result, run, run.equity_curve[0], run.orders[0], run.trades[0]]
+        for value in values:
+            state = value.__getstate__()
+            value.__setstate__(state)
+
+            assert pickle.dumps(value)
+            assert repr(value)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

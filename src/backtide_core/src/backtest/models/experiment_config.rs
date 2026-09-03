@@ -917,7 +917,7 @@ impl ExperimentConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::ExperimentConfigInner;
+    use super::*;
 
     #[test]
     fn deserializes_partial_sections_with_current_defaults() {
@@ -950,6 +950,79 @@ mod tests {
 
         assert_eq!(parsed.general.name, "legacy");
         assert_eq!(parsed.metrics.first().map(String::as_str), Some("total_return"));
+    }
+
+    #[test]
+    fn python_value_objects_expose_constructors_representations_and_dicts() {
+        Python::attach(|py| {
+            let general = GeneralExpConfig::new("name", "icon", vec!["tag".into()], "description");
+            assert!(general.__repr__().contains("name"));
+            general.to_dict(py)?;
+
+            let data = DataExpConfig::new(
+                InstrumentType::Stocks,
+                vec!["AAPL".into()],
+                false,
+                Some("2020-01-01"),
+                Some("2021-01-01"),
+                Interval::OneDay,
+            );
+            assert!(data.__repr__().contains("AAPL"));
+            data.to_dict(py)?;
+
+            let portfolio = PortfolioExpConfig::new(
+                1_000,
+                Currency::USD,
+                HashMap::from([("AAPL".into(), 1.0)]),
+            );
+            assert!(portfolio.__repr__().contains("1000"));
+            portfolio.to_dict(py)?;
+
+            let strategy = StrategyExpConfig::new(Some("AAPL"), vec!["custom".into()]);
+            assert!(strategy.__repr__().contains("custom"));
+            strategy.to_dict(py)?;
+
+            let indicator = IndicatorExpConfig::new(vec!["SMA_2".into()]);
+            assert!(indicator.__repr__().contains("SMA_2"));
+            indicator.to_dict(py)?;
+
+            let exchange = ExchangeExpConfig::default();
+            assert!(exchange.__repr__().contains("ExchangeExpConfig"));
+            exchange.to_dict(py)?;
+
+            let engine = EngineExpConfig::new(2, true, 1.0, true, EmptyBarPolicy::Skip);
+            assert!(engine.__repr__().contains("warmup_period=2"));
+            engine.to_dict(py)?;
+
+            assert!(ExperimentConfig::new(
+                general.clone(),
+                data.clone(),
+                portfolio.clone(),
+                strategy.clone(),
+                indicator.clone(),
+                MetricSelection::default(),
+                exchange.clone(),
+                engine.clone(),
+            )
+            .is_err());
+            let config = ExperimentConfig::new(
+                general,
+                data,
+                portfolio,
+                strategy,
+                indicator,
+                default_experiment_metrics(),
+                exchange,
+                engine,
+            )?;
+            assert!(config.__repr__().contains("ExperimentConfig"));
+            config.to_dict(py)?;
+            let dict = PyDict::new(py);
+            let restored = ExperimentConfig::from_dict(py, &dict)?;
+            assert_eq!(restored.to_inner(py), ExperimentConfigInner::default());
+            PyResult::Ok(())
+        })
+        .unwrap();
     }
 }
 

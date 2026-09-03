@@ -409,6 +409,37 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn resolve_dt_handles_existing_renamed_timestamp_and_unrelated_columns() {
+        Python::attach(|py| {
+            let pandas = py.import("pandas").unwrap();
+
+            let existing = PyDict::new(py);
+            existing.set_item("dt", [0]).unwrap();
+            let existing = pandas.call_method1("DataFrame", (existing,)).unwrap();
+            let resolved = resolve_dt(py, &existing).unwrap();
+            assert!(resolved.getattr("columns").unwrap().contains("dt").unwrap());
+
+            let renamed = PyDict::new(py);
+            renamed.set_item("datetime", [0]).unwrap();
+            let renamed = pandas.call_method1("DataFrame", (renamed,)).unwrap();
+            let resolved = resolve_dt(py, &renamed).unwrap();
+            assert!(resolved.getattr("columns").unwrap().contains("dt").unwrap());
+
+            let timestamped = PyDict::new(py);
+            timestamped.set_item("open_ts", [0]).unwrap();
+            let timestamped = pandas.call_method1("DataFrame", (timestamped,)).unwrap();
+            let resolved = resolve_dt(py, &timestamped).unwrap();
+            assert!(resolved.getattr("columns").unwrap().contains("dt").unwrap());
+
+            let unrelated = PyDict::new(py);
+            unrelated.set_item("value", [1]).unwrap();
+            let unrelated = pandas.call_method1("DataFrame", (unrelated,)).unwrap();
+            let resolved = resolve_dt(py, &unrelated).unwrap();
+            assert!(!resolved.getattr("columns").unwrap().contains("dt").unwrap());
+        });
+    }
+
     /// Build a simple monotonically-increasing price series.
     fn linear_prices(n: usize, start: f64, step: f64) -> Vec<f64> {
         (0..n).map(|i| start + step * i as f64).collect()

@@ -389,3 +389,152 @@ pub fn rotation_orders(
 
     orders
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::models::Currency;
+    use pyo3::types::PyDict;
+
+    fn bar(close: f64) -> Bar {
+        Bar {
+            open_ts: 0,
+            close_ts: 0,
+            open_ts_exchange: 0,
+            open: close,
+            high: close,
+            low: close,
+            close,
+            adj_close: close,
+            volume: 1.0,
+            n_trades: None,
+        }
+    }
+
+    fn portfolio(cash: f64, positions: &[(&str, f64)]) -> Portfolio {
+        let mut value = Portfolio::default();
+        value.cash.insert(Currency::USD, cash);
+        value.positions =
+            positions.iter().map(|(symbol, quantity)| ((*symbol).to_owned(), *quantity)).collect();
+        value
+    }
+
+    #[test]
+    fn python_payload_extractors_validate_and_convert_mappings() {
+        Python::attach(|py| {
+            let invalid = 1_u8.into_pyobject(py).expect("Python integer").into_any();
+            assert!(extract_strategy_data_from_python(&invalid).is_err());
+            assert!(extract_indicator_data_from_python(Some(&invalid)).is_err());
+
+            let outer = PyDict::new(py);
+            outer.set_item("RSI", 1).expect("insert invalid payload");
+            assert!(extract_indicator_data_from_python(Some(outer.as_any())).is_err());
+
+            let by_symbol = PyDict::new(py);
+            by_symbol.set_item("AAPL", vec![vec![10.0, 20.0]]).expect("insert series");
+            outer.set_item("RSI", by_symbol).expect("insert symbol mapping");
+            let extracted =
+                extract_indicator_data_from_python(Some(outer.as_any())).expect("valid payload");
+            assert_eq!(extracted["RSI"]["AAPL"], vec![vec![10.0, 20.0]]);
+
+            assert!(extract_indicator_data_from_python(None).expect("empty payload").is_empty());
+
+            let frame = PyDict::new(py);
+            for column in ["open", "high", "low", "close", "volume"] {
+                frame.set_item(column, vec![1.0, 2.0]).expect("insert column");
+            }
+            let market = PyDict::new(py);
+            market.set_item("AAPL", frame).expect("insert frame");
+            let extracted = extract_strategy_data_from_python(market.as_any()).expect("valid data");
+            assert_eq!(extracted[0].0, "AAPL");
+            assert_eq!(extracted[0].1.len(), 2);
+        });
+    }
+
+    #[test]
+    fn indicator_view_handles_missing_short_empty_and_non_finite_series() {
+        let data = HashMap::from([(
+            "signal".to_owned(),
+            HashMap::from([
+                ("AAPL".to_owned(), vec![vec![1.0, f64::NAN], vec![2.0, 3.0]]),
+                ("EMPTY".to_owned(), Vec::new()),
+                ("SHORT".to_owned(), vec![vec![1.0]]),
+            ]),
+        )]);
+
+        assert_eq!(IndicatorView::new(&data, 0).last("signal", "AAPL"), Some(vec![1.0, 2.0]));
+        assert_eq!(IndicatorView::new(&data, 0).value("signal", "AAPL"), Some(1.0));
+        assert_eq!(IndicatorView::new(&data, 1).value("signal", "AAPL"), None);
+        assert_eq!(IndicatorView::new(&data, 1).last("signal", "SHORT"), None);
+        assert_eq!(IndicatorView::new(&data, 0).last("signal", "EMPTY"), None);
+        assert_eq!(IndicatorView::new(&data, 0).last("missing", "AAPL"), None);
+    }
+
+    #[test]
+    fn order_helpers_cover_valid_and_rejected_sizes() {
+        let equal_weight = EqualWeight::new(2);
+
+        assert_eq!(fmt_arg(2.5), "2.5");
+        assert!(buy_with_sizer("AAPL", &equal_weight, 100.0, 0.0).is_none());
+        assert!(buy_with_sizer("AAPL", &equal_weight, 0.0, 10.0).is_none());
+        assert_eq!(
+            buy_with_sizer("AAPL", &equal_weight, 100.0, 10.0).expect("valid order").quantity,
+            5.0,
+        );
+        assert!(buy_order("AAPL", 0.0, 10.0).is_none());
+        assert_eq!(buy_order("AAPL", 50.0, 10.0).expect("valid order").quantity, 5.0);
+        assert!(buy_equal_weight("AAPL", 0, 100.0, 10.0).is_none());
+        assert!(buy_equal_weight("AAPL", 1, 0.0, 10.0).is_none());
+        assert_eq!(buy_equal_weight("AAPL", 2, 100.0, 10.0).expect("valid order").quantity, 5.0,);
+        assert!(matches!(
+            buy_cash_equal_weight("AAPL", 2, 100.0, 10.0).expect("valid order").sizer,
+            Some(SizerSlot::Builtin(BuiltinSizer::CashEqualWeight(_))),
+        ));
+        assert!(sell_order("AAPL", 0.0).is_none());
+        assert_eq!(sell_order("AAPL", 3.0).expect("valid order").quantity, -3.0);
+    }
+
+    #[test]
+    fn portfolio_helpers_and_signal_reactions_cover_buy_sell_and_hold() {
+        let empty = portfolio(100.0, &[]);
+        let held = portfolio(100.0, &[("AAPL", 2.0)]);
+        let aapl = [bar(10.0)];
+        let bars = [("AAPL", aapl.as_slice())];
+
+        assert_eq!(portfolio_cash(&empty), 100.0);
+        assert_eq!(portfolio_equity(&held, &bars), 120.0);
+        assert_eq!(portfolio_equity(&portfolio(100.0, &[("MISSING", 2.0)]), &bars), 100.0);
+        assert_eq!(react_to_signal("AAPL", true, 10.0, &empty, 200.0)[0].quantity, 10.0);
+        assert_eq!(react_to_signal("AAPL", false, 10.0, &held, 100.0)[0].quantity, -2.0);
+        assert!(react_to_signal("AAPL", true, 10.0, &held, 100.0).is_empty());
+        assert!(react_to_signal("AAPL", false, 10.0, &empty, 100.0).is_empty());
+    }
+
+    #[test]
+    fn statistical_helpers_handle_short_invalid_and_regular_series() {
+        assert_eq!(linreg_slope(&[]), None);
+        assert_eq!(linreg_slope(&[1.0]), None);
+        assert_eq!(linreg_slope(&[1.0, 2.0, 3.0]), Some((1.0, 2.0)));
+        assert_eq!(stddev(&[1.0]), None);
+        assert_eq!(stddev(&[1.0, 2.0, 3.0]), Some(1.0));
+        assert_eq!(window_return_std(&[1.0, 2.0]), None);
+        assert_eq!(window_return_std(&[0.0, f64::NAN, 2.0]), None);
+        assert!(window_return_std(&[1.0, 2.0, 1.0]).is_some());
+    }
+
+    #[test]
+    fn rotation_orders_close_non_targets_and_open_ranked_symbols() {
+        let current = portfolio(100.0, &[("OLD", 2.0), ("KEEP", 1.0)]);
+        let prices = HashMap::from([("NEW", 10.0), ("KEEP", 20.0)]);
+        let scores = [("NEW", 3.0), ("KEEP", 2.0), ("INVALID", f64::NAN)];
+
+        let orders = rotation_orders(&scores, 2, &current, &prices);
+
+        assert!(orders.iter().any(|order| order.symbol == "OLD" && order.quantity == -2.0));
+        assert!(orders.iter().any(|order| order.symbol == "NEW" && order.quantity == 5.0));
+        assert!(!orders.iter().any(|order| order.symbol == "KEEP" && order.quantity > 0.0));
+        assert!(rotation_orders(&scores, 0, &current, &prices)
+            .iter()
+            .all(|order| order.quantity < 0.0));
+    }
+}

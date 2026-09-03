@@ -153,3 +153,52 @@ impl Visit for MessageVisitor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    #[test]
+    fn experiment_layer_ignores_unscoped_and_invalid_spans_and_writes_scoped_events() {
+        let temp = tempdir().unwrap();
+        let log_path = temp.path().join("nested").join("logs.txt");
+        let blocked = temp.path().join("blocked");
+        std::fs::write(&blocked, "file").unwrap();
+        let invalid_path = blocked.join("logs.txt");
+        let log_path_string = log_path.to_string_lossy().into_owned();
+        let subscriber = tracing_subscriber::registry().with(ExperimentFileLayer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(message = "outside");
+
+            let wrong = tracing::info_span!("not_experiment", log_path = %log_path.display());
+            let _wrong_guard = wrong.enter();
+            tracing::info!(message = "wrong span");
+            drop(_wrong_guard);
+
+            let no_path = tracing::info_span!("experiment", unrelated = true);
+            let _no_path_guard = no_path.enter();
+            tracing::info!(message = "missing path");
+            drop(_no_path_guard);
+
+            let invalid = tracing::info_span!("experiment", log_path = %invalid_path.display());
+            let _invalid_guard = invalid.enter();
+            tracing::info!(message = "invalid path");
+            drop(_invalid_guard);
+
+            let span = tracing::info_span!("experiment", log_path = log_path_string.as_str());
+            let _guard = span.enter();
+            tracing::info!(message = "completed", symbol = "AAPL", count = 2);
+            tracing::info!(message = ?"debug message", result = ?Some(3));
+        });
+
+        let text = std::fs::read_to_string(log_path).unwrap();
+        assert!(text.contains("completed"));
+        assert!(text.contains("symbol=AAPL"));
+        assert!(text.contains("count=2"));
+        assert!(text.contains("debug message"));
+        assert!(!text.contains("outside"));
+    }
+}

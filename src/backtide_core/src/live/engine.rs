@@ -958,8 +958,9 @@ fn rejected_fill(order: Order, timestamp: i64, reason: String) -> SessionFill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::models::{Order, OrderId};
+    use crate::backtest::models::{BuiltinSizer, Order, OrderId};
     use crate::data::models::Currency;
+    use pyo3::types::PyModule;
 
     fn update(close: f64, timestamp: u64) -> MarketUpdate {
         MarketUpdate {
@@ -1004,6 +1005,29 @@ mod tests {
             symbol: symbol.to_owned(),
             ..update(close, timestamp)
         }
+    }
+
+    fn custom_sizer(raises: bool) -> Py<PyAny> {
+        Python::attach(|py| {
+            let module = PyModule::from_code(
+                py,
+                pyo3::ffi::c_str!(
+                    r#"
+class Sizer:
+    def __init__(self, raises):
+        self.raises = raises
+    def calculate(self, equity, price, stop_distance, atr):
+        if self.raises:
+            raise RuntimeError("deliberate sizer error")
+        return 2.0
+"#
+                ),
+                pyo3::ffi::c_str!("live_engine_sizer.py"),
+                pyo3::ffi::c_str!("live_engine_sizer"),
+            )
+            .unwrap();
+            module.getattr("Sizer").unwrap().call1((raises,)).unwrap().unbind()
+        })
     }
 
     #[test]
@@ -1226,5 +1250,235 @@ mod tests {
             SessionBroker::new(config).unwrap_err(),
             "maintenance_margin cannot exceed initial_margin"
         );
+    }
+
+    #[test]
+    fn invalid_configuration_reports_every_validation_family() {
+        let invalid = [
+            (
+                SessionConfig {
+                    initial_cash: -1.0,
+                    ..SessionConfig::default()
+                },
+                "initial_cash",
+            ),
+            (
+                SessionConfig {
+                    commission_pct: f64::NAN,
+                    ..SessionConfig::default()
+                },
+                "commission_pct",
+            ),
+            (
+                SessionConfig {
+                    commission_fixed: -1.0,
+                    ..SessionConfig::default()
+                },
+                "commission_fixed",
+            ),
+            (
+                SessionConfig {
+                    slippage: -1.0,
+                    ..SessionConfig::default()
+                },
+                "slippage",
+            ),
+            (
+                SessionConfig {
+                    max_history: 0,
+                    ..SessionConfig::default()
+                },
+                "max_history",
+            ),
+            (
+                SessionConfig {
+                    max_leverage: 0.5,
+                    ..SessionConfig::default()
+                },
+                "max_leverage",
+            ),
+            (
+                SessionConfig {
+                    initial_margin: 101.0,
+                    ..SessionConfig::default()
+                },
+                "initial_margin",
+            ),
+            (
+                SessionConfig {
+                    maintenance_margin: -1.0,
+                    ..SessionConfig::default()
+                },
+                "maintenance_margin",
+            ),
+            (
+                SessionConfig {
+                    margin_interest: -1.0,
+                    ..SessionConfig::default()
+                },
+                "margin_interest",
+            ),
+            (
+                SessionConfig {
+                    borrow_rate: -1.0,
+                    ..SessionConfig::default()
+                },
+                "borrow_rate",
+            ),
+            (
+                SessionConfig {
+                    max_drawdown: -1.0,
+                    ..SessionConfig::default()
+                },
+                "max_drawdown",
+            ),
+            (
+                SessionConfig {
+                    max_position_size: 0.0,
+                    ..SessionConfig::default()
+                },
+                "max_position_size",
+            ),
+            (
+                SessionConfig {
+                    allowed_order_types: vec![],
+                    ..SessionConfig::default()
+                },
+                "allowed_order_types",
+            ),
+            (
+                SessionConfig {
+                    max_volume_participation: 101.0,
+                    ..SessionConfig::default()
+                },
+                "max_volume_participation",
+            ),
+            (
+                SessionConfig {
+                    risk_free_rate: f64::INFINITY,
+                    ..SessionConfig::default()
+                },
+                "risk_free_rate",
+            ),
+            (
+                SessionConfig {
+                    metrics: vec!["custom".to_owned()].into(),
+                    ..SessionConfig::default()
+                },
+                "requires a Python metric",
+            ),
+        ];
+
+        for (config, message) in invalid {
+            assert!(SessionBroker::new(config).unwrap_err().contains(message));
+        }
+    }
+
+    #[test]
+    fn exchange_rates_accessors_and_history_bounds_are_exercised() {
+        let mut broker = SessionBroker::new(SessionConfig {
+            max_history: 2,
+            ..SessionConfig::default()
+        })
+        .unwrap();
+        assert!(broker.set_exchange_rate("", "USD", 1.0, 0).unwrap_err().contains("non-empty"));
+        assert!(broker.set_exchange_rate("EUR", "USD", 0.0, 0).unwrap_err().contains("positive"));
+        broker.set_exchange_rate(" eur ", " usd ", 1.1, 0).unwrap();
+        assert!(broker.has_exchange_rate("EUR", 0));
+        assert!(!broker.has_exchange_rate("GBP", 0));
+        assert!(broker.portfolio().positions.is_empty());
+        assert!(broker.equity_curve().is_empty());
+        assert!(broker.trades().is_empty());
+
+        for (index, price) in [100.0, 101.0, 102.0].into_iter().enumerate() {
+            broker.process(update(price, 1_000 + index as u64 * 60), Vec::new());
+        }
+        assert_eq!(broker.equity_curve().len(), 2);
+    }
+
+    #[test]
+    fn order_submission_rejects_disabled_duplicate_invalid_and_missing_cancel_targets() {
+        let mut broker = SessionBroker::new(SessionConfig {
+            allowed_order_types: vec![OrderType::Market],
+            ..SessionConfig::default()
+        })
+        .unwrap();
+        let market_update = update(100.0, 1_000);
+
+        let mut limit = market(1.0);
+        limit.order_type = OrderType::Limit;
+        let disabled = broker.process(market_update.clone(), vec![limit]);
+        assert!(disabled.fills[0].reason.contains("disabled"));
+
+        let mut cancel = market(0.0);
+        cancel.order_type = OrderType::Cancel;
+        let missing = broker.process(update(100.0, 1_060), vec![cancel]);
+        assert!(missing.fills[0].reason.contains("not open"));
+
+        let order = market(1.0);
+        let duplicate = order.clone();
+        let result = broker.process(update(100.0, 1_120), vec![order, duplicate]);
+        assert!(result.fills.iter().any(|fill| fill.reason.contains("duplicate order id")));
+
+        let mut invalid = market(f64::NAN);
+        invalid.symbol.clear();
+        let result = broker.process(update(100.0, 1_180), vec![invalid]);
+        assert!(result.fills[0].reason.contains("symbol and finite"));
+    }
+
+    #[test]
+    fn resting_orders_can_fill_cancel_or_remain_for_another_symbol() {
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
+        let eth = market_for("ETH-USD", 1.0);
+        let first = broker.process(update(100.0, 1_000), vec![eth.clone()]);
+        assert_eq!(first.snapshot.portfolio.orders.len(), 1);
+
+        let mut invalid_limit = market(1.0);
+        invalid_limit.order_type = OrderType::Limit;
+        let second = broker.process(update(100.0, 1_060), vec![invalid_limit]);
+        assert!(second.snapshot.portfolio.orders.len() >= 2);
+
+        let third = broker.process(update(100.0, 1_120), Vec::new());
+        assert!(third.fills.iter().any(|fill| fill.status == OrderStatus::Canceled));
+        assert!(third.snapshot.portfolio.orders.iter().any(|order| order.symbol == "ETH-USD"));
+
+        let mut cancel = market_for("ETH-USD", 0.0);
+        cancel.order_type = OrderType::Cancel;
+        cancel.id = eth.id;
+        let canceled = broker.process(update(100.0, 1_180), vec![cancel]);
+        assert!(canceled.fills.iter().any(|fill| fill.status == OrderStatus::Canceled));
+    }
+
+    #[test]
+    fn execution_handles_conversion_invalid_values_and_python_sizers() {
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
+        broker.quote_currencies.insert("BTC-USD".to_owned(), "EUR".to_owned());
+        let (missing_rate, _) =
+            broker.execute(market(1.0), 1_000, 100.0, None, String::new(), false, None);
+        assert!(missing_rate.reason.contains("missing EUR/USD"));
+
+        broker.quote_currencies.insert("BTC-USD".to_owned(), "USD".to_owned());
+        let (invalid_price, _) =
+            broker.execute(market(1.0), 1_000, f64::NAN, None, String::new(), false, None);
+        assert_eq!(invalid_price.status, OrderStatus::Rejected);
+        let (zero, _) = broker.execute(market(0.0), 1_000, 100.0, None, String::new(), false, None);
+        assert_eq!(zero.status, OrderStatus::Rejected);
+
+        let mut sized = market(0.0);
+        sized.sizer = Some(SizerSlot::Custom(custom_sizer(false)));
+        let (filled, _) = broker.execute(sized, 1_000, 100.0, None, String::new(), false, None);
+        assert_eq!(filled.order.quantity, 2.0);
+
+        let mut failed = market(0.0);
+        failed.sizer = Some(SizerSlot::Custom(custom_sizer(true)));
+        let (rejected, _) = broker.execute(failed, 1_000, 100.0, None, String::new(), false, None);
+        assert!(rejected.reason.contains("sizer failed"));
+
+        let mut built_in = market(0.0);
+        built_in.sizer = Some(SizerSlot::Builtin(BuiltinSizer::FixedQuantity(
+            crate::sizers::FixedQuantity::new(1.0),
+        )));
+        let (filled, _) = broker.execute(built_in, 1_000, 100.0, None, String::new(), false, None);
+        assert_eq!(filled.order.quantity, 1.0);
     }
 }

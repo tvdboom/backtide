@@ -1128,6 +1128,7 @@ mod tests {
     use crate::live::providers::MockMarketDataStream;
     use crate::strategies::interface::BuyAndHold;
     use async_trait::async_trait;
+    use pyo3::types::{PyList, PyModule};
     use std::future::pending;
     use tokio::sync::Notify;
 
@@ -1173,6 +1174,43 @@ mod tests {
             is_final: true,
             received_ts: timestamp as i64 + 60,
         }
+    }
+
+    fn custom_strategy(py: Python<'_>, indicator: &Py<PyAny>) -> PyResult<Py<PyAny>> {
+        let module = PyModule::from_code(
+            py,
+            pyo3::ffi::c_str!(
+                r#"
+class Strategy:
+    def __init__(self, orders, indicators):
+        self.orders = orders
+        self.indicators = indicators
+        self.calls = 0
+
+    def required_indicators(self):
+        return self.indicators
+
+    def evaluate(self, data, portfolio, state, indicators):
+        self.calls += 1
+        orders, self.orders = self.orders, []
+        return orders
+"#
+            ),
+            pyo3::ffi::c_str!("live_strategy_test.py"),
+            pyo3::ffi::c_str!("live_strategy_test"),
+        )?;
+        let order = Order {
+            id: crate::backtest::models::OrderId::new(),
+            symbol: "BTC-USDT".to_owned(),
+            quantity: 1.0,
+            order_type: crate::backtest::models::OrderType::Market,
+            price: None,
+            limit_price: None,
+            sizer: None,
+        };
+        let orders = PyList::new(py, [Py::new(py, order)?])?;
+        let indicators = PyList::new(py, [indicator.clone_ref(py), indicator.clone_ref(py)])?;
+        Ok(module.getattr("Strategy")?.call1((orders, indicators))?.unbind())
     }
 
     #[test]
@@ -1782,5 +1820,159 @@ mod tests {
             PyResult::Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn custom_strategy_receives_deduplicated_indicators_and_python_views() {
+        Python::attach(|py| {
+            let indicator = Py::new(py, SimpleMovingAverage::new(2))?.into_any();
+            let strategy = custom_strategy(py, &indicator)?;
+            let mut session = Session::new(
+                py,
+                None,
+                Some(strategy.clone_ref(py)),
+                Some(vec![indicator.clone_ref(py)]),
+            )?;
+            assert_eq!(session.indicator_objects.len(), 1);
+
+            let result = session.on_bar(py, mock_update(1_000), None)?;
+            assert_eq!(result.orders_submitted, 1);
+            assert_eq!(result.fills[0].status, OrderStatus::Filled);
+            assert_eq!(strategy.bind(py).getattr("calls")?.extract::<usize>()?, 1);
+            assert!(session.__repr__().contains("processed_bars=1"));
+            assert!(session.evaluate_strategy(py, &mock_update(1_060))?.is_empty());
+            PyResult::Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn session_history_ignores_invalid_bars_and_respects_bound() {
+        Python::attach(|py| {
+            let config = SessionConfig {
+                max_history: 2,
+                ..SessionConfig::default()
+            };
+            let mut session = Session::new(py, Some(config), None, None)?;
+            let mut invalid = mock_update(900);
+            invalid.close = f64::NAN;
+            session.record_history(&invalid);
+            assert!(session.histories.is_empty());
+
+            for timestamp in [1_000, 1_060, 1_120] {
+                session.record_history(&mock_update(timestamp));
+            }
+            assert_eq!(session.histories["BTC-USDT"].len(), 2);
+            assert_eq!(session.histories["BTC-USDT"].front().unwrap().open_ts, 1_060);
+            assert!(session.evaluate_strategy(py, &mock_update(1_180))?.is_empty());
+            PyResult::Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn live_feed_rejects_invalid_symbols_and_concurrent_state_changes() {
+        assert!(
+            LiveMarketFeed::new(Provider::Binance, vec![], Interval::OneMinute, true, 1, 0.01,)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("non-empty symbol")
+        );
+        assert!(LiveMarketFeed::new(
+            Provider::Yahoo,
+            vec!["AAPL".to_owned()],
+            Interval::OneMinute,
+            true,
+            1,
+            0.01,
+        )
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("Yahoo"));
+
+        let feed = LiveMarketFeed::new(
+            Provider::Binance,
+            vec!["BTC-USDT".to_owned()],
+            Interval::OneMinute,
+            true,
+            1,
+            0.01,
+        )
+        .unwrap();
+        feed.collecting.store(true, Ordering::Release);
+        assert!(feed.reset().unwrap_err().to_string().contains("still in progress"));
+        let error = Python::attach(|py| feed.collect(py, 1, 0.01).unwrap_err());
+        assert!(error.to_string().contains("already in progress"));
+        feed.collecting.store(false, Ordering::Release);
+    }
+
+    #[test]
+    fn public_collection_and_preview_reject_unsupported_yahoo_without_network() {
+        Python::attach(|py| {
+            let error = collect_market_updates(
+                py,
+                Provider::Yahoo,
+                vec!["AAPL".to_owned()],
+                Interval::OneMinute,
+                1,
+                0.01,
+                true,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("Yahoo"));
+
+            let error = fetch_rest_bar_preview(
+                py,
+                Provider::Yahoo,
+                "AAPL".to_owned(),
+                InstrumentType::Stocks,
+                1,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("historical-data"));
+
+            assert!(std::ptr::eq(live_runtime()?, live_runtime()?));
+            PyResult::Ok(())
+        })
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn collection_helpers_handle_preemptive_cancellation_and_error_mapping() {
+        let canceled = AtomicBool::new(true);
+        let result = cancellable_connect(
+            Provider::Binance,
+            &["BTC-USDT".to_owned()],
+            Interval::OneMinute,
+            Instant::now() + Duration::from_secs(1),
+            &canceled,
+        )
+        .await
+        .unwrap();
+        assert!(result.is_none());
+
+        let updates = collect_updates(
+            Provider::Binance,
+            vec!["BTC-USDT".to_owned()],
+            Interval::OneMinute,
+            1,
+            Duration::from_secs(1),
+            true,
+            1,
+            Duration::ZERO,
+            Arc::new(AtomicBool::new(true)),
+        )
+        .await
+        .unwrap();
+        assert!(updates.is_empty());
+
+        assert!(stream_error_to_python(LiveStreamError::Unsupported("nope".into()))
+            .to_string()
+            .contains("nope"));
+        assert!(stream_error_to_python(LiveStreamError::InvalidMessage("bad".into()))
+            .to_string()
+            .contains("bad"));
     }
 }

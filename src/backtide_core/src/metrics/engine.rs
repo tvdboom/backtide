@@ -341,4 +341,86 @@ mod tests {
         assert!((values["total_return"] - 0.2).abs() < 1e-12);
         assert!(!values.contains_key("sharpe"));
     }
+
+    #[test]
+    fn all_independent_metrics_cover_trade_drawdown_empty_and_non_finite_paths() {
+        let curve = vec![
+            EquitySample {
+                timestamp: 0,
+                equity: 100.0,
+                cash: [(Currency::USD, 100.0)].into(),
+                drawdown: 0.0,
+            },
+            EquitySample {
+                timestamp: 86_400,
+                equity: 80.0,
+                cash: [(Currency::USD, 80.0)].into(),
+                drawdown: -0.2,
+            },
+            EquitySample {
+                timestamp: 172_800,
+                equity: 120.0,
+                cash: [(Currency::USD, 120.0)].into(),
+                drawdown: 0.0,
+            },
+        ];
+        let trade = |pnl| Trade {
+            symbol: "AAPL".to_owned(),
+            quantity: 1.0,
+            entry_ts: 0,
+            exit_ts: 1,
+            entry_price: 100.0,
+            exit_price: 100.0 + pnl,
+            pnl,
+        };
+        let trades = vec![trade(10.0), trade(-5.0)];
+        let selected = [
+            "pnl",
+            "final_equity",
+            "ann_volatility",
+            "sharpe",
+            "sortino",
+            "max_dd",
+            "calmar",
+            "n_trades",
+            "win_rate",
+            "profit_factor",
+            "expectancy",
+            "avg_win",
+            "avg_loss",
+            "best_trade",
+            "worst_trade",
+            "payoff_ratio",
+            "recovery_factor",
+            "excess_return",
+            "unknown",
+        ]
+        .map(str::to_owned);
+        let metrics = compute_builtin_metrics(&selected, 100.0, 0.0, &curve, &trades);
+        assert_eq!(metrics["profit_factor"], 2.0);
+        assert_eq!(metrics["win_rate"], 0.5);
+        assert!(metrics["recovery_factor"] > 0.0);
+        assert!(!metrics.contains_key("excess_return"));
+        assert!(!metrics.contains_key("unknown"));
+
+        let empty_metrics = compute_builtin_metrics(&selected, 0.0, 0.0, &[], &[]);
+        assert_eq!(empty_metrics["win_rate"], 0.0);
+        assert_eq!(empty_metrics["profit_factor"], 0.0);
+        assert_eq!(empty_metrics["expectancy"], 0.0);
+        assert_eq!(empty_metrics["best_trade"], 0.0);
+        assert_eq!(empty_metrics["payoff_ratio"], 0.0);
+        assert_eq!(empty_metrics["recovery_factor"], 0.0);
+
+        let non_finite = ["final_equity".to_owned()];
+        let nan_curve = [EquitySample {
+            timestamp: 0,
+            equity: f64::NAN,
+            cash: HashMap::new(),
+            drawdown: 0.0,
+        }];
+        assert_eq!(
+            compute_builtin_metrics(&non_finite, 100.0, 0.0, &nan_curve, &[])["final_equity"],
+            0.0
+        );
+    }
 }

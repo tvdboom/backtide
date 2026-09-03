@@ -269,6 +269,84 @@ pub fn build_indicator_view<'py>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    fn bar(timestamp: u64, close: f64) -> Bar {
+        Bar {
+            open_ts: timestamp,
+            close_ts: timestamp + 60,
+            open_ts_exchange: timestamp,
+            open: close,
+            high: close,
+            low: close,
+            close,
+            adj_close: close,
+            volume: 10.0,
+            n_trades: Some(1),
+        }
+    }
+
+    #[test]
+    fn persists_experiment_configuration_and_reports_filesystem_errors() {
+        Python::attach(|py| {
+            let config =
+                ExperimentConfig::from_inner(py, ExperimentConfigInner::default()).unwrap();
+            let temp = tempdir().unwrap();
+            let output = persist_experiment_config(&temp.path().join("experiment"), &config)
+                .expect("configuration should be persisted");
+            let text = std::fs::read_to_string(output).unwrap();
+            assert!(text.contains("[general]"));
+
+            let file_parent = temp.path().join("file-parent");
+            std::fs::write(&file_parent, "not a directory").unwrap();
+            let create_error = persist_experiment_config(&file_parent.join("child"), &config)
+                .expect_err("a file cannot be used as a parent directory");
+            assert!(create_error.contains("create_dir_all"));
+
+            let blocked_output = temp.path().join("blocked-output");
+            std::fs::create_dir(&blocked_output).unwrap();
+            std::fs::create_dir(blocked_output.join("config.toml")).unwrap();
+            let write_error = persist_experiment_config(&blocked_output, &config)
+                .expect_err("a directory cannot be overwritten with TOML");
+            assert!(write_error.contains("write"));
+        });
+    }
+
+    #[test]
+    fn validates_quantities_and_iso_dates() {
+        assert!(validate_qty(f64::INFINITY, InstrumentType::Stocks).unwrap().contains("finite"));
+        assert!(validate_qty(0.0, InstrumentType::Stocks).unwrap().contains("non-zero"));
+        assert!(validate_qty(1.5, InstrumentType::Stocks).unwrap().contains("fractional"));
+        assert_eq!(validate_qty(1.5, InstrumentType::Crypto), None);
+
+        assert_eq!(iso_to_ts("1970-01-01"), Some(0));
+        assert_eq!(iso_to_ts("not-a-date"), None);
+    }
+
+    #[test]
+    fn aligns_missing_bars_under_each_policy() {
+        let bars = HashMap::from([("AAPL".to_owned(), vec![bar(2, 100.0)])]);
+        let timeline = [1, 2, 3];
+
+        let skipped = align_bars(&bars, &timeline, EmptyBarPolicy::Skip);
+        assert!(skipped["AAPL"][0].is_none());
+        assert_eq!(skipped["AAPL"][1].unwrap().close, 100.0);
+        assert!(skipped["AAPL"][2].is_none());
+
+        let forward = align_bars(&bars, &timeline, EmptyBarPolicy::ForwardFill);
+        assert!(forward["AAPL"][0].is_none());
+        let filled = forward["AAPL"][2].unwrap();
+        assert_eq!(filled.open_ts, 3);
+        assert_eq!(filled.close_ts, 3);
+        assert_eq!(filled.volume, 0.0);
+        assert_eq!(filled.close, 100.0);
+
+        let nan = align_bars(&bars, &timeline, EmptyBarPolicy::FillWithNaN);
+        assert_eq!(nan["AAPL"][0].unwrap().open_ts, 1);
+        assert!(nan["AAPL"][0].unwrap().close.is_nan());
+        assert_eq!(nan["AAPL"][1].unwrap().close, 100.0);
+        assert!(nan["AAPL"][2].unwrap().volume.is_nan());
+    }
 
     #[test]
     fn python_strategy_views_exclude_symbols_outside_the_run_universe() {

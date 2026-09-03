@@ -70,3 +70,29 @@ impl<'a, 'py> FromPyObject<'a, 'py> for DataFrameLibrary {
         s.parse().map_err(|_| PyValueError::new_err(format!("Unknown dataframe_library {s:?}.")))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::types::{PyInt, PyString};
+
+    #[test]
+    fn dataframe_library_exposes_metadata_and_python_extraction() {
+        assert_eq!(DataFrameLibrary::default(), DataFrameLibrary::Pandas);
+        assert_eq!(DataFrameLibrary::Pandas.__repr__(), "pandas");
+        assert_eq!(DataFrameLibrary::Pandas.class_name(), "pd.DataFrame");
+        assert_eq!(DataFrameLibrary::Polars.__repr__(), "polars");
+        assert_eq!(DataFrameLibrary::Polars.class_name(), "pl.DataFrame");
+
+        Python::attach(|py| {
+            let direct = Py::new(py, DataFrameLibrary::Polars).unwrap().into_bound(py).into_any();
+            assert_eq!(direct.extract::<DataFrameLibrary>().unwrap(), DataFrameLibrary::Polars);
+            assert_eq!(
+                PyString::new(py, "PANDAS").extract::<DataFrameLibrary>().unwrap(),
+                DataFrameLibrary::Pandas
+            );
+            assert!(PyString::new(py, "arrow").extract::<DataFrameLibrary>().is_err());
+            assert!(PyInt::new(py, 1).extract::<DataFrameLibrary>().is_err());
+        });
+    }
+}
