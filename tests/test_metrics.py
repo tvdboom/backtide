@@ -209,6 +209,66 @@ AveragePnl()
 
         assert _check_metric_code(code) == "Metric `compute` must return a finite float."
 
+    @pytest.mark.parametrize(
+        ("replacement", "message"),
+        [
+            (
+                "def compute(self, equity_curve):\n        return 1.0",
+                "must have signature",
+            ),
+            (
+                (
+                    "percentage = 'yes'\n    greater_is_better = True\n\n    "
+                    "def compute(self, equity_curve, trades):\n        return 1.0"
+                ),
+                "percentage` must be a bool",
+            ),
+            (
+                (
+                    "percentage = False\n    greater_is_better = 'yes'\n\n    "
+                    "def compute(self, equity_curve, trades):\n        return 1.0"
+                ),
+                "greater_is_better` must be a bool",
+            ),
+            (
+                "def compute(self, equity_curve, trades):\n        raise LookupError('missing')",
+                "LookupError: missing",
+            ),
+        ],
+    )
+    def test_validation_reports_metric_contract_errors(
+        self,
+        replacement: str,
+        message: str,
+    ) -> None:
+        """Metric validation reports signature, metadata, and execution failures."""
+        start = self.code.index("    percentage = False")
+        end = self.code.index("\n\nAveragePnl()")
+        code = f"{self.code[:start]}    {replacement}{self.code[end:]}"
+
+        assert message in str(_check_metric_code(code))
+
+    def test_validation_reports_instantiation_errors(self) -> None:
+        """Metric validation translates a final-expression type mismatch."""
+        assert "Failed to instantiate metric" in str(_check_metric_code("object()"))
+
+    def test_legacy_metric_direction_is_supported(self) -> None:
+        """The legacy ranking attribute remains supported on custom subclasses."""
+
+        class LegacyMetric(self.ConstantMetric):
+            higher_is_better = False
+
+        assert _metric_greater_is_better(LegacyMetric()) is False
+
+    def test_invalid_metric_direction_raises(self) -> None:
+        """A non-boolean ranking direction raises a specific type error."""
+
+        class InvalidMetric(self.ConstantMetric):
+            greater_is_better = "yes"
+
+        with pytest.raises(TypeError, match="must be a bool"):
+            _metric_greater_is_better(InvalidMetric())
+
     def test_save_and_load_metric(self, tmp_path: Path):
         """Custom metric source and behavior survive local persistence."""
         config: Any = type(

@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from http.client import HTTPConnection
+from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
+import runpy
 import sys
 import threading
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -26,8 +28,15 @@ from backtide.live_history import (
     write_warmup,
 )
 from backtide.ui.live import LiveTradingManager
-from backtide.ui.server import create_server
-from backtide.ui.services import APIError, BacktideServices, JobStore, dataframe_records
+import backtide.ui.server as server_module
+from backtide.ui.server import BacktideRequestHandler, create_server
+from backtide.ui.services import (
+    APIError,
+    BacktideServices,
+    JobStore,
+    dataframe_records,
+    json_default,
+)
 
 
 def _persist_live_replay_source(
@@ -153,7 +162,7 @@ def web_server():
 
 def request(server, method: str, path: str, body: dict | None = None):
     """Issue one JSON request to the ephemeral test server."""
-    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=10)
     encoded = json.dumps(body).encode() if body is not None else None
     headers = {"Content-Type": "application/json"} if body is not None else {}
     connection.request(method, path, body=encoded, headers=headers)
@@ -207,6 +216,13 @@ class TestStaticApplication:
         assert response.status == 404
         assert json.loads(body)["error"] == "Asset not found."
 
+    def test_missing_known_asset_is_rejected(self, web_server):
+        """A missing asset path returns a structured not-found response."""
+        response, body = request(web_server, "GET", "/assets/missing.js")
+
+        assert response.status == 404
+        assert json.loads(body) == {"error": "Asset not found."}
+
 
 class TestJSONRoutes:
     """Tests for JSON response and routing behavior."""
@@ -254,7 +270,7 @@ class TestJSONRoutes:
 
     def test_non_object_body_is_rejected(self, web_server):
         """Command bodies must be JSON objects."""
-        connection = HTTPConnection("127.0.0.1", web_server.server_port, timeout=2)
+        connection = HTTPConnection("127.0.0.1", web_server.server_port, timeout=10)
         connection.request(
             "POST",
             "/api/downloads",
@@ -402,6 +418,246 @@ class TestJSONRoutes:
         assert response.status == 200
         assert json.loads(body) == {"builtin": [{"type": "FixedFractional"}], "saved": []}
 
+    def test_remaining_read_routes_dispatch_to_services(self, web_server, monkeypatch):
+        """Every JSON read endpoint dispatches to the shared service facade."""
+        services = web_server.services
+        monkeypatch.setattr(
+            services,
+            "instruments",
+            lambda *args, **kwargs: [{"route": "instruments", "args": args, "kwargs": kwargs}],
+        )
+        monkeypatch.setattr(services, "bars", lambda *args: [{"route": "bars", "args": args}])
+        monkeypatch.setattr(services, "storage", lambda: [{"route": "storage"}])
+        monkeypatch.setattr(services, "experiment", lambda value: {"experiment": value})
+        monkeypatch.setattr(services, "strategy_catalog", lambda: {"route": "strategies"})
+        monkeypatch.setattr(services, "indicator_catalog", lambda: {"route": "indicators"})
+        monkeypatch.setattr(services, "metric_catalog", lambda: {"route": "metrics"})
+        monkeypatch.setattr(services, "live_status", lambda: {"route": "live"})
+        services.jobs._jobs["job-1"] = {"id": "job-1", "status": "success"}
+
+        paths = [
+            "/api/bootstrap",
+            "/api/dashboard",
+            "/api/instruments?instrument_type=crypto&provider=kraken&search=btc&limit=7&source=catalog",
+            "/api/bars?symbol=BTC-USD&interval=1m&provider=kraken&limit=7",
+            "/api/storage",
+            "/api/experiments/exp-1",
+            "/api/jobs",
+            "/api/jobs/job-1",
+            "/api/strategies",
+            "/api/indicators",
+            "/api/metrics",
+            "/api/live",
+        ]
+
+        for path in paths:
+            response, body = request(web_server, "GET", path)
+            assert response.status == 200, (path, body)
+
+    def test_write_routes_dispatch_to_services(self, web_server, monkeypatch):
+        """POST, PUT, and DELETE endpoints dispatch every supported command."""
+        services = web_server.services
+        post_routes = {
+            "/api/downloads": "start_download",
+            "/api/downloads/plan": "download_plan",
+            "/api/experiments": "start_experiment",
+            "/api/analysis": "analysis_plot",
+            "/api/results/plot": "result_plot",
+            "/api/config/parse": "parse_experiment_config",
+            "/api/strategies": "save_strategy",
+            "/api/indicators": "save_indicator",
+            "/api/metrics": "save_metric",
+            "/api/sizers": "save_sizer",
+            "/api/live": "start_live",
+        }
+        for method_name in post_routes.values():
+            monkeypatch.setattr(
+                services,
+                method_name,
+                lambda *args, _method=method_name: {"called": _method, "args": len(args)},
+            )
+        for path, method_name in post_routes.items():
+            response, body = request(web_server, "POST", path, {"plot": "price"})
+            expected = 202 if path in {"/api/downloads", "/api/experiments"} else 200
+            assert response.status == expected, (path, body)
+            assert json.loads(body)["called"] == method_name
+
+        commands = {
+            "/api/experiments/abort": "abort_experiment",
+            "/api/live/stop": "stop_live",
+            "/api/live/pause": "pause_live",
+            "/api/live/resume": "resume_live",
+            "/api/live/flatten": "flatten_live",
+            "/api/live/cancel-all": "cancel_live_orders",
+        }
+        for method_name in commands.values():
+            monkeypatch.setattr(
+                services, method_name, lambda _method=method_name: {"called": _method}
+            )
+        for path, method_name in commands.items():
+            response, body = request(web_server, "POST", path)
+            assert response.status == 200, (path, body)
+            assert json.loads(body)["called"] == method_name
+
+        delete_routes = {
+            "/api/storage": "delete_storage",
+            "/api/experiments/exp-1": "delete_experiment",
+            "/api/strategies/Saved": "delete_strategy",
+            "/api/indicators/Saved": "delete_indicator",
+            "/api/metrics/Saved": "delete_metric",
+            "/api/sizers/Saved": "delete_sizer",
+        }
+        for method_name in delete_routes.values():
+            monkeypatch.setattr(
+                services,
+                method_name,
+                lambda *_args, _method=method_name: {"called": _method},
+            )
+        for path, method_name in delete_routes.items():
+            response, body = request(
+                web_server, "DELETE", path, {} if path == "/api/storage" else None
+            )
+            assert response.status == 200, (path, body)
+            assert json.loads(body)["called"] == method_name
+
+        put_routes = {
+            "/api/indicators/Saved": "update_indicator",
+            "/api/metrics/Saved": "update_metric",
+            "/api/sizers/Saved": "update_sizer",
+        }
+        for method_name in put_routes.values():
+            monkeypatch.setattr(
+                services,
+                method_name,
+                lambda *_args, _method=method_name: {"called": _method},
+            )
+        for path, method_name in put_routes.items():
+            response, body = request(web_server, "PUT", path, {})
+            assert response.status == 200, (path, body)
+            assert json.loads(body)["called"] == method_name
+
+    def test_route_errors_are_translated_by_http_method(self, web_server, monkeypatch):
+        """Validation and unexpected failures become safe HTTP responses."""
+        response, body = request(web_server, "GET", "/api/instruments?limit=bad")
+        assert response.status == 400
+        assert "invalid literal" in json.loads(body)["error"]
+
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("private failure")
+
+        monkeypatch.setattr(web_server.services, "dashboard", fail)
+        response, body = request(web_server, "GET", "/api/dashboard")
+        assert response.status == 500
+        assert json.loads(body) == {"error": "Internal server error."}
+
+        monkeypatch.setattr(web_server.services, "start_download", lambda _body: int("bad"))
+        response, body = request(web_server, "POST", "/api/downloads", {})
+        assert response.status == 400
+        assert "invalid literal" in json.loads(body)["error"]
+        monkeypatch.setattr(web_server.services, "start_download", fail)
+        response, body = request(web_server, "POST", "/api/downloads", {})
+        assert response.status == 500
+        assert json.loads(body) == {"error": "Internal server error."}
+
+        response, body = request(web_server, "DELETE", "/api/missing")
+        assert response.status == 404
+        monkeypatch.setattr(web_server.services, "delete_experiment", fail)
+        response, body = request(web_server, "DELETE", "/api/experiments/exp-1")
+        assert response.status == 500
+        assert json.loads(body) == {"error": "Internal server error."}
+
+        response, body = request(web_server, "PUT", "/api/missing", {})
+        assert response.status == 404
+        monkeypatch.setattr(web_server.services, "update_metric", lambda *_args: int("bad"))
+        response, body = request(web_server, "PUT", "/api/metrics/Saved", {})
+        assert response.status == 400
+        monkeypatch.setattr(web_server.services, "update_metric", fail)
+        response, body = request(web_server, "PUT", "/api/metrics/Saved", {})
+        assert response.status == 500
+        assert json.loads(body) == {"error": "Internal server error."}
+
+    def test_oversized_body_is_rejected(self, web_server):
+        """Request bodies larger than the API limit are rejected before reading."""
+        connection = HTTPConnection("127.0.0.1", web_server.server_port, timeout=10)
+        connection.request(
+            "POST",
+            "/api/downloads",
+            body=b"",
+            headers={"Content-Length": "2000001"},
+        )
+        response = connection.getresponse()
+        body = response.read()
+        connection.close()
+
+        assert response.status == 413
+        assert json.loads(body) == {"error": "Request body is too large."}
+
+
+class TestServerInternals:
+    """Tests for request-handler guards and server lifecycle behavior."""
+
+    def test_services_property_rejects_an_unexpected_server(self):
+        """Request handlers require the Backtide HTTP server type."""
+        handler = SimpleNamespace(server=object())
+
+        with pytest.raises(RuntimeError, match="invalid server"):
+            BacktideRequestHandler.services.fget(cast(Any, handler))
+
+    def test_error_logging_delegates_only_for_server_errors(self, monkeypatch):
+        """Routine access logs stay silent while server errors reach the base handler."""
+        messages = []
+        monkeypatch.setattr(
+            BaseHTTPRequestHandler,
+            "log_message",
+            lambda _self, format_string, *args: messages.append((format_string, args)),
+        )
+        handler = object.__new__(BacktideRequestHandler)
+
+        handler.log_message("%s %s", "request", "500")
+        handler.log_message("%s %s", "request", "200")
+
+        assert messages == [("%s %s", ("request", "500"))]
+
+    def test_launch_opens_browser_and_closes_after_interrupt(self, monkeypatch):
+        """The server launcher opens its public URL and always closes the socket."""
+        served = []
+        closed = []
+        opened = []
+        server = SimpleNamespace(
+            server_port=4321,
+            serve_forever=lambda **kwargs: (
+                served.append(kwargs),
+                (_ for _ in ()).throw(KeyboardInterrupt()),
+            )[-1],
+            server_close=lambda: closed.append(True),
+        )
+
+        class ImmediateTimer:
+            def __init__(self, _delay, callback):
+                self.callback = callback
+
+            def start(self):
+                self.callback()
+
+        monkeypatch.setattr(server_module, "create_server", lambda *_args: server)
+        monkeypatch.setattr(server_module.threading, "Timer", ImmediateTimer)
+        monkeypatch.setattr(server_module.webbrowser, "open", opened.append)
+
+        server_module.launch("0.0.0.0", 0)
+
+        assert served == [{"poll_interval": 0.25}]
+        assert closed == [True]
+        assert opened == ["http://localhost:4321"]
+
+    def test_ui_module_entrypoint_launches_server(self, monkeypatch):
+        """Executing the UI module invokes the server launcher."""
+        launched = []
+        monkeypatch.setattr(server_module, "launch", lambda: launched.append(True))
+
+        runpy.run_module("backtide.ui.app", run_name="__main__")
+
+        assert launched == [True]
+
 
 class TestJobStore:
     """Tests for bounded background work snapshots."""
@@ -455,6 +711,35 @@ class TestJobStore:
 
         assert exc_info.value.status == 404
 
+    def test_job_listing_and_trimming_preserve_recent_work(self):
+        """Completed job retention removes only the oldest completed snapshots."""
+        jobs = JobStore(max_completed=1)
+        jobs._jobs = {
+            "old": {"id": "old", "status": "success"},
+            "running": {"id": "running", "status": "running"},
+            "new": {"id": "new", "status": "error"},
+        }
+
+        jobs._trim()
+
+        assert [job["id"] for job in jobs.list_jobs()] == ["new", "running"]
+
+    def test_zero_total_progress_is_ignored(self):
+        """A worker cannot publish an unusable non-positive progress total."""
+        jobs = JobStore()
+
+        def work(progress):
+            progress(4, 0)
+            return "done"
+
+        job = jobs.start("test", work)
+        for _ in range(1000):
+            snapshot = jobs.get(job["id"])
+            if snapshot["status"] == "success":
+                break
+
+        assert snapshot["progress_total"] is None
+
 
 class TestSerialization:
     """Tests for dataframe-independent response normalization."""
@@ -464,6 +749,48 @@ class TestSerialization:
         rows = dataframe_records([{"nan": float("nan"), "inf": float("inf")}])
 
         assert rows == [{"nan": None, "inf": None}]
+
+    def test_json_default_supports_common_application_values(self):
+        """The JSON fallback handles models, dates, paths, scalars, and plain objects."""
+        from dataclasses import dataclass
+        from datetime import date
+
+        @dataclass
+        class Model:
+            value: int
+
+        class Scalar:
+            def item(self):
+                return 4
+
+        class MappingModel:
+            def to_dict(self):
+                return {"value": 5}
+
+        class EnumLike:
+            __slots__ = ("name",)
+
+            def __init__(self):
+                self.name = "Value"
+
+            def __str__(self):
+                return self.name
+
+        assert json_default(Model(3)) == {"value": 3}
+        assert json_default(date(2024, 1, 2)) == "2024-01-02"
+        assert json_default(Path("saved")) == "saved"
+        assert json_default(Scalar()) == 4
+        assert json_default(MappingModel()) == {"value": 5}
+        assert json_default(EnumLike()) == "Value"
+        assert json_default(SimpleNamespace(public=1, _private=2)) == {"public": 1}
+        assert json_default(object()).startswith("<object object at")
+
+    def test_dataframe_records_support_none_and_polars_style_values(self):
+        """Record conversion accepts empty input and dataframe objects with `to_dicts`."""
+        frame = SimpleNamespace(to_dicts=lambda: [{"value": float("nan")}, {"value": 2}])
+
+        assert dataframe_records(None) == []
+        assert dataframe_records(frame) == [{"value": None}, {"value": 2}]
 
     def test_currency_options_use_rust_enum_metadata(self):
         """Currency choices include every Rust value with its name and country flag."""
@@ -617,6 +944,230 @@ class TestSerialization:
 
         with pytest.raises(APIError, match="rename the placeholder Python class"):
             BacktideServices._library_asset_name("", instance, ignored_class_prefix="My")
+
+    @pytest.mark.parametrize("value", ["", "bad/name", ".", "..", "x" * 81])
+    def test_unsafe_saved_names_are_rejected(self, value):
+        """Saved asset names reject empty, reserved, long, and path-like values."""
+        with pytest.raises(APIError, match="valid name"):
+            BacktideServices._safe_name(value)
+
+    def test_library_name_requires_input_without_an_instance(self):
+        """Library name inference cannot proceed without a custom instance."""
+        with pytest.raises(APIError, match="valid name"):
+            BacktideServices._library_asset_name("")
+
+    def test_order_timestamp_handles_datetime_and_invalid_values(self):
+        """Order sorting accepts timestamp objects and safely handles malformed values."""
+        assert BacktideServices._order_timestamp(datetime(2024, 1, 1, tzinfo=UTC)) > 0
+        assert BacktideServices._order_timestamp("invalid") == 0.0
+
+    def test_optional_integer_bounds_non_empty_values(self):
+        """Optional integer controls are absent when blank and at least one otherwise."""
+        assert BacktideServices._optional_int(0) == 1
+        assert BacktideServices._optional_int("") is None
+
+    def test_bounded_text_reader_handles_missing_and_large_files(self, tmp_path):
+        """Text artifacts return no value when missing and retain only their bounded tail."""
+        path = tmp_path / "artifact.txt"
+        assert BacktideServices._read_text(path, max_bytes=3) is None
+        path.write_text("abcdef", encoding="utf-8")
+
+        value = BacktideServices._read_text(path, max_bytes=3)
+        assert value is not None
+        assert len(value) == 3
+
+    @pytest.mark.parametrize("text", ["not toml", "data = []"])
+    def test_experiment_metadata_rejects_invalid_data_sections(self, text):
+        """Experiment metadata ignores malformed TOML and non-mapping data sections."""
+        assert BacktideServices._experiment_config_metadata(text) is None
+
+    @pytest.mark.parametrize("text", ["not toml", "strategy = []", "[strategy]"])
+    def test_benchmark_display_ignores_invalid_or_empty_configuration(self, text):
+        """Benchmark display rewriting is a no-op for unusable strategy configuration."""
+        runs = [{"strategy_name": "Benchmark", "is_benchmark": True}]
+
+        BacktideServices._apply_benchmark_display_name(text, runs)
+
+        assert runs[0]["strategy_name"] == "Benchmark"
+
+    def test_constructor_values_skip_variadics_and_use_defaults(self):
+        """Saved constructor metadata omits variadics and recovers declared defaults."""
+
+        class Example:
+            def __init__(self, value=3, *args, **kwargs):
+                del value, args, kwargs
+
+        assert BacktideServices._constructor_values(Example()) == {"value": 3}
+
+    @pytest.mark.parametrize(
+        ("payload", "message"),
+        [
+            ({"kind": "custom", "code": "bad"}, "invalid source"),
+            ({"kind": "unknown"}, "Unknown strategy kind"),
+            ({"kind": "builtin", "type": "Missing"}, "Unknown built-in strategy"),
+            (
+                {"kind": "builtin", "type": "Builtin", "params": [1]},
+                "parameters must be a JSON object",
+            ),
+        ],
+    )
+    def test_library_asset_builder_reports_invalid_payloads(self, payload, message):
+        """Library asset construction rejects invalid source, kinds, types, and parameters."""
+
+        class Builtin:
+            def __init__(self, value=1):
+                self.value = value
+
+        with pytest.raises(APIError, match=message):
+            BacktideServices._build_library_asset(
+                payload,
+                label="strategy",
+                builtins=[Builtin],
+                validate=lambda _code: "invalid source",
+                build=lambda code: code,
+            )
+
+    def test_catalog_description_supports_methods_attributes_and_fallbacks(self):
+        """Catalog descriptions prefer methods, then attributes, then a stable fallback."""
+
+        class MethodDescription:
+            def description(self):
+                return "method"
+
+        class AttributeDescription:
+            description = "attribute"
+
+        Empty = type("Empty", (), {"__doc__": None})
+
+        assert BacktideServices._catalog_description(MethodDescription()) == "method"
+        assert BacktideServices._catalog_description(AttributeDescription()) == "attribute"
+        assert BacktideServices._catalog_description(Empty()) == "Custom Empty."
+
+    def test_download_date_accepts_all_supported_types(self):
+        """Download plan dates accept datetime, date, epoch, ISO, and reject invalid text."""
+        from datetime import date
+        from zoneinfo import ZoneInfo
+
+        timezone = ZoneInfo("Europe/Amsterdam")
+        fallback = date(2024, 1, 1)
+        aware = datetime(2024, 1, 2, tzinfo=UTC)
+
+        assert BacktideServices._download_date(None, timezone, fallback=fallback) == fallback
+        assert BacktideServices._download_date(aware, timezone, fallback=fallback) == date(
+            2024, 1, 2
+        )
+        assert BacktideServices._download_date(fallback, timezone, fallback=fallback) == fallback
+        assert BacktideServices._download_date(1_704_153_600, timezone, fallback=fallback) == date(
+            2024, 1, 2
+        )
+        assert BacktideServices._download_date(
+            "2024-01-02T00:00:00+00:00", timezone, fallback=fallback
+        ) == date(2024, 1, 2)
+        with pytest.raises(APIError, match="Invalid ISO date"):
+            BacktideServices._download_date("invalid", timezone, fallback=fallback)
+
+    def test_download_bar_estimates_cover_market_schedules(self):
+        """Download estimates account for equity, forex, and continuous market schedules."""
+        from datetime import date
+
+        class Interval:
+            def __init__(self, minutes, *, intraday):
+                self._minutes = minutes
+                self._intraday = intraday
+
+            def minutes(self):
+                return self._minutes
+
+            def is_intraday(self):
+                return self._intraday
+
+        class InstrumentType:
+            def __init__(self, name, *, is_equity=False):
+                self.name = name
+                self.is_equity = is_equity
+
+            def __str__(self):
+                return self.name
+
+        start = date(2024, 1, 1)
+        end = date(2024, 1, 8)
+        equity = SimpleNamespace(instrument_type=InstrumentType("stocks", is_equity=True))
+        forex = SimpleNamespace(instrument_type=InstrumentType("forex"))
+        continuous = SimpleNamespace(instrument_type=InstrumentType("crypto"))
+
+        assert (
+            BacktideServices._estimate_download_bars(
+                equity, Interval(60, intraday=True), start, end
+            )
+            > 0
+        )
+        assert (
+            BacktideServices._estimate_download_bars(
+                equity, Interval(1_440, intraday=False), start, end
+            )
+            > 0
+        )
+        assert (
+            BacktideServices._estimate_download_bars(
+                forex, Interval(60, intraday=True), start, end
+            )
+            > 0
+        )
+        assert (
+            BacktideServices._estimate_download_bars(
+                forex, Interval(1_440, intraday=False), start, end
+            )
+            > 0
+        )
+        assert (
+            BacktideServices._estimate_download_bars(
+                continuous, Interval(60, intraday=True), start, end
+            )
+            > 0
+        )
+        assert (
+            BacktideServices._estimate_download_bars(
+                continuous, Interval(60, intraday=True), end, start
+            )
+            == 0
+        )
+
+    def test_invalid_date_boundary_is_rejected(self):
+        """Malformed ISO text receives a client-safe date validation error."""
+        with pytest.raises(APIError, match="Invalid ISO date"):
+            BacktideServices._date_boundary("invalid", end=False)
+
+    def test_legacy_walk_forward_settings_are_inferred(self):
+        """Legacy studies recover window sizes and anchoring from persisted folds."""
+        folds = [
+            SimpleNamespace(
+                training_start="2020-01-01",
+                training_end="2020-01-04",
+                test_start="2020-01-05",
+                test_end="2020-01-06",
+            ),
+            SimpleNamespace(
+                training_start="2020-01-01",
+                training_end="2020-01-06",
+                test_start="2020-01-07",
+                test_end="2020-01-08",
+            ),
+        ]
+
+        assert (
+            BacktideServices._saved_walk_forward_settings(
+                SimpleNamespace(walk_forward=None, folds=[])
+            )
+            is None
+        )
+        assert BacktideServices._saved_walk_forward_settings(
+            SimpleNamespace(walk_forward=None, folds=folds)
+        ) == {
+            "training_days": 4,
+            "test_days": 2,
+            "step_days": 2,
+            "anchored": True,
+        }
 
 
 class TestServiceCommands:
@@ -2315,6 +2866,517 @@ metrics = ["sharpe", "total_return", "pnl", "win_rate"]
         assert captured == {"payload": payload, "value": replacement, "name": "Original"}
 
 
+class TestServiceEdgeCases:
+    """Tests for service validation, dispatch, and uncommon persistence paths."""
+
+    def test_instrument_queries_cover_catalog_storage_and_search(self, monkeypatch):
+        """Instrument queries support provider catalogs, stored rows, and local filtering."""
+        import backtide.data
+        import backtide.storage
+
+        values = [
+            SimpleNamespace(
+                symbol="BTC-USD",
+                name="Bitcoin",
+                base="BTC",
+                quote="USD",
+                instrument_type="crypto",
+                exchange="Kraken",
+                provider="kraken",
+            ),
+            SimpleNamespace(
+                symbol="ETH-USD",
+                name="Ethereum",
+                base="ETH",
+                quote="USD",
+                instrument_type="crypto",
+                exchange="Kraken",
+                provider="kraken",
+            ),
+        ]
+        catalog_calls = []
+        storage_calls = []
+        monkeypatch.setattr(
+            backtide.data,
+            "list_instruments",
+            lambda *args, **kwargs: (catalog_calls.append((args, kwargs)), values)[1],
+        )
+        monkeypatch.setattr(
+            backtide.storage,
+            "query_instruments",
+            lambda *args, **kwargs: (storage_calls.append((args, kwargs)), values)[1],
+        )
+        services = BacktideServices()
+
+        assert len(services.instruments("crypto", search="bitcoin", catalog=True, limit=5)) == 1
+        assert len(services.instruments("crypto", "kraken", search="eth", limit=7)) == 1
+        assert catalog_calls[0] == (("crypto",), {"limit": 5, "verbose": False})
+        assert storage_calls[0] == (("crypto", "kraken"), {"limit": 7})
+
+    def test_bars_storage_and_deletion_validate_and_dispatch(self, monkeypatch):
+        """Storage services validate selections and forward bounded query arguments."""
+        import backtide.storage
+
+        calls = []
+        monkeypatch.setattr(
+            backtide.storage,
+            "query_bars",
+            lambda *args, **kwargs: [{"symbol": args[0][0], "limit": kwargs["limit"]}],
+        )
+        monkeypatch.setattr(
+            backtide.storage,
+            "query_bars_summary",
+            lambda: [{"symbol": "BTC-USD", "n_rows": 4}],
+        )
+        monkeypatch.setattr(
+            backtide.storage,
+            "delete_symbols",
+            lambda *args, **kwargs: (calls.append((args, kwargs)), 2)[1],
+        )
+        services = BacktideServices()
+
+        with pytest.raises(APIError, match="Select at least one symbol"):
+            services.bars([], None, None, 1)
+        assert services.bars(["BTC-USD"], "1m", "kraken", 200_000) == [
+            {"symbol": "BTC-USD", "limit": 100_000}
+        ]
+        assert services.storage() == [{"symbol": "BTC-USD", "n_rows": 4}]
+        assert services.delete_storage({"series": [["BTC-USD", "1m", "kraken"]]}) == {"deleted": 2}
+        assert services.delete_storage(
+            {"symbol": "BTC-USD", "interval": "1m", "provider": "kraken"}
+        ) == {"deleted": 2}
+        with pytest.raises(APIError, match="symbol or list of series"):
+            services.delete_storage({})
+        assert calls == [
+            ((), {"series": [("BTC-USD", "1m", "kraken")]}),
+            (("BTC-USD", "1m", "kraken"), {}),
+        ]
+
+    def test_download_commands_report_invalid_selections_and_provider_ranges(self, monkeypatch):
+        """Download setup reports empty selections, provider failures, and missing ranges."""
+        import backtide.data
+
+        services = BacktideServices()
+        with pytest.raises(APIError, match="Select at least one symbol"):
+            services.start_download({"symbols": []})
+        with pytest.raises(APIError, match="symbol and interval"):
+            services.download_plan({"symbols": ["BTC-USD"]})
+
+        monkeypatch.setattr(
+            backtide.data,
+            "resolve_profiles",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")),
+        )
+        with pytest.raises(APIError, match="availability could not be resolved") as exc_info:
+            services.download_plan({"symbols": ["BTC-USD"], "intervals": ["1m"]})
+        assert exc_info.value.status == 422
+
+        profile = SimpleNamespace(earliest_ts={}, latest_ts={})
+        monkeypatch.setattr(backtide.data, "resolve_profiles", lambda *_args, **_kwargs: [profile])
+        with pytest.raises(APIError, match="No provider ranges"):
+            services.download_plan({"symbols": ["BTC-USD"], "intervals": ["1m"]})
+
+    def test_study_experiment_summary_includes_ranked_metadata(self, monkeypatch, tmp_path):
+        """Experiment listings identify studies and retain ranked candidate metadata."""
+        import backtide.storage
+
+        run = SimpleNamespace(
+            strategy_id="run-1",
+            strategy_name="C1 · period=5",
+            base_currency="USD",
+            is_benchmark=False,
+            metrics={"sharpe": 1.5},
+            error=None,
+        )
+        candidate = SimpleNamespace(
+            candidate_id="candidate-1",
+            strategy_id="run-1",
+            strategy_name="C1 · period=5",
+            parameters={"period": 5},
+            metrics={"sharpe": 1.5},
+            rank=1,
+        )
+        study = SimpleNamespace(
+            candidates=[candidate],
+            folds=[object()],
+            objective="sharpe",
+            best_candidate_id="candidate-1",
+            best_candidate=candidate,
+        )
+        monkeypatch.setattr(
+            backtide.storage, "query_experiments", lambda **_kwargs: [{"id": "s1"}]
+        )
+        monkeypatch.setattr(
+            backtide.storage, "query_strategy_runs", lambda *_args, **_kwargs: [run]
+        )
+        monkeypatch.setattr(backtide.storage, "query_study", lambda _study_id: study)
+        monkeypatch.setattr(
+            "backtide.config.get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path)),
+        )
+        services = BacktideServices()
+        monkeypatch.setattr(
+            services,
+            "metric_catalog",
+            lambda: {
+                "builtin": [{"key": "sharpe", "name": "Sharpe", "percentage": False}],
+                "saved": [],
+            },
+        )
+
+        result = services.experiments()
+
+        assert result[0]["kind"] == "study"
+        assert result[0]["study"]["candidate_count"] == 1
+        assert result[0]["runs"][0]["strategy_name"] == "C1"
+        assert result[0]["runs"][0]["parameters"] == {"period": 5}
+
+    def test_missing_experiment_orders_and_logs_are_reported(self, monkeypatch, tmp_path):
+        """Experiment detail services return precise validation and not-found errors."""
+        import backtide.storage
+
+        services = BacktideServices()
+        monkeypatch.setattr(backtide.storage, "query_experiments", lambda *_args, **_kwargs: [])
+        with pytest.raises(APIError, match="Experiment not found"):
+            services.experiment("missing")
+        with pytest.raises(APIError, match="Experiment not found"):
+            services.experiment_log("missing")
+
+        with pytest.raises(APIError, match="offset"):
+            services.experiment_orders("exp", None, offset=-1)
+        with pytest.raises(APIError, match="limit"):
+            services.experiment_orders("exp", None, limit=501)
+        monkeypatch.setattr(services, "_query_result_runs", lambda *_args, **_kwargs: [])
+        with pytest.raises(APIError, match="runs were not found"):
+            services.experiment_orders("exp", None)
+
+        monkeypatch.setattr(
+            backtide.storage, "query_experiments", lambda *_args, **_kwargs: [{"name": "Exp"}]
+        )
+        monkeypatch.setattr(
+            "backtide.config.get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path)),
+        )
+        with pytest.raises(APIError, match="log not found"):
+            services.experiment_log("exp")
+
+    def test_background_experiment_and_study_workers_serialize_results(self, monkeypatch):
+        """Background experiment and study services return compact completed-job payloads."""
+        import backtide.backtest
+        import backtide.backtest.study
+
+        class ImmediateJobs:
+            def start(self, kind, work, **metadata):
+                return {"kind": kind, "metadata": metadata, "result": work(lambda *_args: None)}
+
+        experiment_result = SimpleNamespace(
+            experiment_id="exp-1",
+            name="Experiment",
+            status="success",
+            started_at="start",
+            finished_at="finish",
+            tags=[],
+            warnings=[],
+        )
+
+        class FakeExperiment:
+            def __init__(self, config):
+                self.config = config
+
+            def run(self, **_kwargs):
+                return experiment_result
+
+        study_result = SimpleNamespace(
+            study_id="study-1",
+            name="Study",
+            candidates=[object(), object()],
+            folds=[object()],
+            best_candidate_id="candidate-1",
+        )
+
+        class FakeStudy:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def run(self, **_kwargs):
+                return study_result
+
+        monkeypatch.setattr(backtide.backtest, "Experiment", FakeExperiment)
+        monkeypatch.setattr(backtide.backtest.study, "Study", FakeStudy)
+        services = BacktideServices()
+        cast(Any, services).jobs = ImmediateJobs()
+
+        experiment = services.start_experiment({"general": {"name": "Experiment"}})
+        study = services.start_study(
+            {
+                "config": {"general": {"name": "Study"}},
+                "study": {
+                    "strategy": "Saved",
+                    "parameter_space": {"period": [5]},
+                    "walk_forward": {"training_days": 5, "test_days": 1},
+                },
+            }
+        )
+
+        assert experiment["result"]["experiment_id"] == "exp-1"
+        assert study["result"] == {
+            "study_id": "study-1",
+            "name": "Study",
+            "candidate_count": 2,
+            "fold_count": 1,
+            "best_candidate_id": "candidate-1",
+        }
+
+    @pytest.mark.parametrize(
+        ("payload", "message"),
+        [
+            ({}, "config and study objects"),
+            ({"config": {}, "study": {"parameter_space": []}}, "parameter_space"),
+            (
+                {"config": {}, "study": {"parameter_space": {}, "walk_forward": []}},
+                "walk_forward",
+            ),
+        ],
+    )
+    def test_background_study_rejects_invalid_shapes(self, payload, message):
+        """Study job creation rejects malformed request objects."""
+        with pytest.raises(APIError, match=message):
+            BacktideServices().start_study(payload)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {},
+            {"text": "", "suffix": ".txt"},
+            {"text": "x" * 500_001, "suffix": ".toml"},
+            {"text": "invalid", "suffix": ".toml"},
+        ],
+    )
+    def test_uploaded_config_validation_errors_are_safe(self, payload):
+        """Uploaded configuration reports missing, large, unsupported, and invalid data."""
+        with pytest.raises(APIError):
+            BacktideServices().parse_experiment_config(payload)
+
+    def test_abort_and_delete_experiment_dispatch_and_clear_cache(self, monkeypatch):
+        """Experiment controls dispatch to storage and invalidate matching result caches."""
+        import backtide.backtest
+        import backtide.storage
+
+        aborted = []
+        deleted = []
+        monkeypatch.setattr(backtide.backtest, "request_abort", lambda: aborted.append(True))
+        monkeypatch.setattr(
+            backtide.storage, "delete_experiment", lambda value: (deleted.append(value), 1)[1]
+        )
+        services = BacktideServices()
+        services._result_runs_cache = (("exp-1", True, True, True), [object()])
+
+        assert services.abort_experiment() == {"aborted": True}
+        assert services.delete_experiment("exp-1") == {"deleted": 1}
+        assert aborted == [True]
+        assert deleted == ["exp-1"]
+        assert services._result_runs_cache is None
+
+    def test_analysis_plot_validates_and_dispatches_specialized_options(self, monkeypatch):
+        """Analysis plot dispatch handles metrics, dividends, options, and empty figures."""
+        import backtide.analysis
+        import backtide.storage
+
+        class Figure:
+            def __init__(self, value):
+                self.value = value
+
+            def to_json(self):
+                return json.dumps({"plot": self.value})
+
+        monkeypatch.setattr(
+            backtide.storage, "query_bars", lambda *_args, **_kwargs: [{"close": 1}]
+        )
+        monkeypatch.setattr(backtide.storage, "query_dividends", lambda *_args: [{"amount": 1}])
+        monkeypatch.setattr(
+            backtide.analysis,
+            "compute_statistics",
+            lambda data, **_kwargs: [{"rows": len(data)}],
+        )
+        monkeypatch.setattr(
+            backtide.analysis,
+            "plot_dividends",
+            lambda data, **_kwargs: Figure(f"dividends-{len(data)}"),
+        )
+        monkeypatch.setattr(
+            backtide.analysis,
+            "plot_candlestick",
+            lambda _data, **kwargs: Figure(kwargs["rangeslider"]),
+        )
+        monkeypatch.setattr(
+            backtide.analysis,
+            "plot_volatility",
+            lambda _data, **kwargs: Figure(kwargs["window"]),
+        )
+        services = BacktideServices()
+
+        with pytest.raises(APIError, match="Unknown analysis plot"):
+            services.analysis_plot("missing", {"symbols": ["BTC-USD"]})
+        with pytest.raises(APIError, match="Select at least one symbol"):
+            services.analysis_plot("metrics", {})
+        assert services.analysis_plot("metrics", {"symbols": ["BTC-USD"]}) == {
+            "rows": [{"rows": 1}]
+        }
+        assert services.analysis_plot("dividends", {"symbols": ["BTC-USD"]}) == {
+            "plot": "dividends-1"
+        }
+        assert services.analysis_plot(
+            "candlestick", {"symbols": ["BTC-USD"], "rangeslider": False}
+        ) == {"plot": False}
+        assert services.analysis_plot("volatility", {"symbols": ["BTC-USD"], "window": 1}) == {
+            "plot": 2
+        }
+
+        monkeypatch.setattr(backtide.analysis, "plot_volatility", lambda *_args, **_kwargs: None)
+        with pytest.raises(APIError, match="could not be generated"):
+            services.analysis_plot("volatility", {"symbols": ["BTC-USD"]})
+
+    def test_strategy_and_indicator_catalogs_serialize_saved_builtins(self, monkeypatch):
+        """Library catalogs describe both registered types and persisted built-in instances."""
+        from backtide.indicators import SimpleMovingAverage
+        from backtide.strategies import BuyAndHold
+
+        monkeypatch.setattr(
+            "backtide.strategies.utils._load_stored_strategies",
+            lambda _cfg: {"Saved strategy": BuyAndHold()},
+        )
+        monkeypatch.setattr(
+            "backtide.indicators.utils._load_stored_indicators",
+            lambda _cfg: {"Saved indicator": SimpleMovingAverage(5)},
+        )
+        services = BacktideServices()
+
+        strategies = services.strategy_catalog()
+        indicators = services.indicator_catalog()
+
+        assert strategies["builtin"]
+        assert strategies["saved"][0]["builtin"] is True
+        assert indicators["builtin"]
+        assert indicators["saved"][0]["params"] == {"period": 5}
+
+    def test_saved_asset_deletion_and_update_errors(self, monkeypatch, tmp_path):
+        """Saved asset helpers report missing, corrupt, immutable, and colliding targets."""
+        config = SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path))
+        monkeypatch.setattr("backtide.config.get_config", lambda: config)
+        directory = tmp_path / "strategies"
+        directory.mkdir()
+        path = directory / "Saved.pkl"
+        path.write_bytes(b"saved")
+        services = BacktideServices()
+
+        assert services.delete_strategy("Saved") == {"deleted": True}
+        assert services.delete_indicator("Missing") == {"deleted": False}
+        assert services.delete_sizer("Missing") == {"deleted": False}
+        assert services.delete_metric("Missing") == {"deleted": False}
+
+        path.write_bytes(b"corrupt")
+        with pytest.raises(APIError, match="could not be loaded"):
+            services._update_saved_asset(
+                folder="strategies",
+                label="strategy",
+                original_name="Saved",
+                payload={},
+                stored={},
+                storage_path=tmp_path,
+                is_builtin=lambda _value: False,
+                validate=lambda _code: None,
+                build=lambda code: code,
+                save=lambda _value, _name: None,
+            )
+        path.unlink()
+        with pytest.raises(APIError, match="was not found"):
+            services._update_saved_asset(
+                folder="strategies",
+                label="strategy",
+                original_name="Saved",
+                payload={},
+                stored={},
+                storage_path=tmp_path,
+                is_builtin=lambda _value: False,
+                validate=lambda _code: None,
+                build=lambda code: code,
+                save=lambda _value, _name: None,
+            )
+
+        stored = {"Saved": object()}
+        with pytest.raises(APIError, match="cannot be replaced"):
+            services._update_saved_asset(
+                folder="strategies",
+                label="strategy",
+                original_name="Saved",
+                payload={"kind": "builtin", "name": "Saved"},
+                stored=stored,
+                storage_path=tmp_path,
+                is_builtin=lambda _value: True,
+                validate=lambda _code: None,
+                build=lambda code: code,
+                save=lambda _value, _name: None,
+            )
+
+    def test_live_service_facade_handles_idle_and_active_managers(self):
+        """Live service methods return idle defaults and delegate every manager operation."""
+
+        class Manager:
+            def status(self):
+                return {"called": "status"}
+
+            def start(self, payload):
+                return {"called": "start", "payload": payload}
+
+            def stop(self):
+                return {"called": "stop"}
+
+            def sessions(self):
+                return [{"called": "sessions"}]
+
+            def session(self, session_id):
+                return {"called": "session", "id": session_id}
+
+            def delete_session(self, session_id):
+                return {"called": "delete", "id": session_id}
+
+            def replay(self, session_id, speed):
+                return {"called": "replay", "id": session_id, "speed": speed}
+
+            def pause(self):
+                return {"called": "pause"}
+
+            def resume(self):
+                return {"called": "resume"}
+
+            def flatten(self):
+                return {"called": "flatten"}
+
+            def cancel_all(self):
+                return {"called": "cancel"}
+
+        services = BacktideServices()
+        assert services.live_status()["status"] == "idle"
+        assert services.stop_live()["status"] == "idle"
+        assert services.pause_live()["status"] == "idle"
+        assert services.resume_live()["status"] == "idle"
+        assert services.flatten_live()["status"] == "idle"
+        assert services.cancel_live_orders()["status"] == "idle"
+
+        cast(Any, services)._live_manager = Manager()
+        assert services.live_status() == {"called": "status"}
+        assert services.start_live({"value": 1})["called"] == "start"
+        assert services.stop_live() == {"called": "stop"}
+        assert services.live_sessions() == [{"called": "sessions"}]
+        assert services.live_session("id")["called"] == "session"
+        assert services.delete_live_session("id")["called"] == "delete"
+        assert services.replay_live({"session_id": "id", "speed": 2})["called"] == "replay"
+        assert services.pause_live() == {"called": "pause"}
+        assert services.resume_live() == {"called": "resume"}
+        assert services.flatten_live() == {"called": "flatten"}
+        assert services.cancel_live_orders() == {"called": "cancel"}
+
+
 class TestLiveCapabilities:
     """Tests for provider and interval capability discovery."""
 
@@ -3345,3 +4407,290 @@ class TestLiveTradingManager:
 
         assert manager._flatten_requested is False
         assert session.submissions[1][0].quantity == -1.0
+
+
+class TestLiveTradingManagerEdgeCases:
+    """Tests for live-manager validation, adapters, and failure recovery."""
+
+    def test_cancel_all_sets_pending_control(self):
+        """Cancel-all requests remain observable until a market update handles them."""
+        manager = LiveTradingManager()
+
+        status = manager.cancel_all()
+
+        assert manager._cancel_requested is True
+        assert status["status"] == "idle"
+
+    def test_session_deletion_translates_storage_failures(self, monkeypatch):
+        """Live history deletion distinguishes storage failures and absent sessions."""
+        import backtide.ui.live as live_module
+
+        manager = LiveTradingManager()
+        monkeypatch.setattr(
+            live_module,
+            "delete_stored_session",
+            lambda _session_id: (_ for _ in ()).throw(RuntimeError("locked")),
+        )
+        with pytest.raises(APIError, match="Could not delete") as exc_info:
+            manager.delete_session("0123456789abcdef")
+        assert exc_info.value.status == 500
+
+        monkeypatch.setattr(live_module, "delete_stored_session", lambda _session_id: 0)
+        with pytest.raises(APIError, match="was not found") as exc_info:
+            manager.delete_session("0123456789abcdef")
+        assert exc_info.value.status == 404
+
+    def test_orphan_reconciliation_survives_manifest_write_failure(self, monkeypatch):
+        """An orphan is reported stopped even when manifest repair cannot be persisted."""
+        import backtide.ui.live as live_module
+
+        monkeypatch.setattr(
+            live_module,
+            "write_manifest",
+            lambda *_args: (_ for _ in ()).throw(RuntimeError("locked")),
+        )
+        record = {"id": "0123456789abcdef", "status": "running", "finished_at": None}
+
+        result = LiveTradingManager()._reconcile_persisted_status(record, None)
+
+        assert result["status"] == "stopped"
+        assert result["finished_at"]
+
+    @pytest.mark.parametrize(
+        ("event", "expected"),
+        [
+            ({"received_at": 1_700_000_000}, 1_700_000_000.0),
+            ({"received_at": 1_700_000_000_000}, 1_700_000_000.0),
+            ({"received_at": "2023-11-14T22:13:20Z"}, 1_700_000_000.0),
+            ({"received_at": "invalid"}, None),
+            ({"market": {"close_ts": 10}}, 10.0),
+            ({}, None),
+        ],
+    )
+    def test_event_timestamp_normalizes_recorded_formats(self, event, expected):
+        """Replay timestamps accept seconds, milliseconds, ISO text, and market fallbacks."""
+        assert LiveTradingManager._event_timestamp(event) == expected
+
+    def test_replay_delay_handles_completion_pause_and_stop(self, monkeypatch):
+        """Replay timing completes normally, resumes from pause, and stops promptly."""
+        manager = LiveTradingManager()
+        assert manager._wait_replay_delay(0.001) is True
+
+        manager._paused.set()
+
+        def resume():
+            manager._paused.clear()
+            return True
+
+        monkeypatch.setattr(manager, "_wait_until_replay_resumed", resume)
+        assert manager._wait_replay_delay(0.001) is True
+
+        manager._paused.set()
+        monkeypatch.setattr(manager, "_wait_until_replay_resumed", lambda: False)
+        assert manager._wait_replay_delay(0.001) is False
+
+        manager._paused.clear()
+        manager._stop.set()
+        assert manager._wait_replay_delay(1.0) is False
+
+    def test_live_input_helpers_validate_and_resolve_saved_assets(self, monkeypatch):
+        """Live helper loaders handle monitor mode, deduplication, saved assets, and errors."""
+        strategy = object()
+        indicator = object()
+        metric = object()
+        monkeypatch.setattr(
+            "backtide.strategies.utils._load_stored_strategies",
+            lambda _cfg: {"Saved": strategy},
+        )
+        monkeypatch.setattr(
+            "backtide.indicators.utils._load_stored_indicators",
+            lambda _cfg: {"Indicator": indicator},
+        )
+        monkeypatch.setattr(
+            "backtide.metrics.utils._load_stored_metrics",
+            lambda _cfg: {"custom": metric},
+        )
+
+        assert LiveTradingManager._symbols([" btc-usd ", "BTC-USD", ""]) == ["BTC-USD"]
+        with pytest.raises(APIError, match="Select at least one live symbol"):
+            LiveTradingManager._symbols([])
+        with pytest.raises(APIError, match="must be an object"):
+            LiveTradingManager._session_config_values([])
+        assert LiveTradingManager._load_strategies([]) == [("Monitor", None)]
+        assert LiveTradingManager._load_strategy(None) is None
+        assert LiveTradingManager._load_strategy("Saved") is strategy
+        with pytest.raises(APIError, match="Saved strategy 'Missing'"):
+            LiveTradingManager._load_strategy("Missing")
+        assert LiveTradingManager._load_indicators([]) == []
+        assert LiveTradingManager._load_indicators(["Indicator"]) == [indicator]
+        with pytest.raises(APIError, match="Saved indicator 'Missing'"):
+            LiveTradingManager._load_indicators(["Missing"])
+        assert LiveTradingManager._load_metrics(["sharpe", "custom"]) == [
+            "sharpe",
+            {"custom": metric},
+        ]
+        with pytest.raises(APIError, match="Metric 'Missing'"):
+            LiveTradingManager._load_metrics(["Missing"])
+
+    def test_ensure_idle_rejects_an_active_worker(self):
+        """Starting another session while a worker lives returns a conflict."""
+        manager = LiveTradingManager()
+        cast(Any, manager)._thread = SimpleNamespace(is_alive=lambda: True)
+
+        with pytest.raises(APIError, match="already running") as exc_info:
+            manager._ensure_idle()
+
+        assert exc_info.value.status == 409
+
+    def test_serialization_and_persistence_adapters_delegate(self, monkeypatch):
+        """Live-manager adapters serialize values and skip persistence without an identifier."""
+        import backtide.ui.live as live_module
+
+        manager = LiveTradingManager()
+        order = SimpleNamespace(
+            id="order",
+            symbol="BTC-USD",
+            order_type="Market",
+            quantity=1.0,
+            price=None,
+            limit_price=None,
+        )
+        assert manager._serialize_fills([]) == []
+        assert manager._serialize_order(order)["id"] == "order"
+        manager._append_event({"value": 1})
+        manager._persist_warmup([])
+
+        appended = []
+        warmed = []
+        monkeypatch.setattr(live_module, "append_event", lambda *args: appended.append(args))
+        monkeypatch.setattr(live_module, "write_warmup", lambda *args: warmed.append(args))
+        manager._session_id = "0123456789abcdef"
+        manager._append_event({"value": 1})
+        manager._persist_warmup([])
+
+        assert appended == [("0123456789abcdef", {"value": 1})]
+        assert warmed == [("0123456789abcdef", [])]
+
+    def test_warmup_loads_sorted_storage_rows(self, monkeypatch):
+        """Live warm-up converts sorted storage rows into canonical market updates."""
+        import backtide.storage
+
+        warmed = []
+        session = SimpleNamespace(warm_up=lambda markets: warmed.extend(markets))
+        manager = LiveTradingManager()
+        manager._sessions = {"Monitor": session}
+        manager._config = {
+            "symbols": ["BTC-USD"],
+            "interval": "1m",
+            "provider": "kraken",
+            "warmup_bars": 2,
+        }
+        manager._target_quotes = {"BTC-USD": "USD"}
+        rows = [
+            {
+                "symbol": "BTC-USD",
+                "interval": "1m",
+                "open_ts": timestamp,
+                "close_ts": timestamp + 60,
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "adj_close": 101.5,
+                "volume": 3.0,
+                "n_trades": 2,
+                "provider": "kraken",
+            }
+            for timestamp in [200, 100]
+        ]
+        monkeypatch.setattr(backtide.storage, "query_bars", lambda *_args, **_kwargs: rows)
+
+        loaded = manager._warm_up_sessions()
+
+        assert loaded == 2
+        assert [market.open_ts for market in warmed] == [100, 200]
+        assert warmed[0].close == 101.5
+        assert warmed[0].quote_currency == "USD"
+
+    def test_control_orders_cancel_open_orders_and_flatten_positions(self):
+        """Pending controls produce cancel and market orders from one account snapshot."""
+        snapshot = SimpleNamespace(
+            portfolio=SimpleNamespace(
+                orders=[
+                    SimpleNamespace(
+                        id="00112233445566778899aabbccddeeff",
+                        symbol="BTC-USD",
+                    )
+                ],
+                positions={"BTC-USD": 2.0},
+            )
+        )
+        session = SimpleNamespace(snapshot=lambda: snapshot)
+
+        orders = LiveTradingManager._control_orders(
+            session,
+            flatten_requested=True,
+            cancel_requested=True,
+        )
+
+        assert len(orders) == 2
+        assert str(orders[0].order_type) == "Cancel"
+        assert orders[0].id == "00112233445566778899aabbccddeeff"
+        assert orders[1].quantity == -2.0
+
+    def test_start_translates_currency_planner_and_session_errors(self, monkeypatch):
+        """Live startup translates conversion planning and session construction failures."""
+        import backtide.live as live_module
+
+        validation_feed = SimpleNamespace(cancel=lambda: None)
+        monkeypatch.setattr(
+            live_module, "LiveMarketFeed", lambda *_args, **_kwargs: validation_feed
+        )
+        monkeypatch.setattr(
+            live_module,
+            "_live_currency_plan",
+            lambda *_args: (_ for _ in ()).throw(ValueError("no conversion")),
+        )
+        with pytest.raises(APIError, match="no conversion"):
+            LiveTradingManager().start(
+                {"provider": "kraken", "symbols": ["BTC-EUR"], "config": {"base_currency": "USD"}}
+            )
+
+        monkeypatch.setattr(live_module, "SessionConfig", lambda **_kwargs: object())
+        monkeypatch.setattr(
+            live_module,
+            "Session",
+            lambda *_args: (_ for _ in ()).throw(ValueError("bad session")),
+        )
+        with pytest.raises(APIError, match="bad session"):
+            LiveTradingManager().start({"provider": "kraken", "symbols": ["BTC-USD"]})
+
+    def test_start_cleans_up_when_warmup_fails(self, monkeypatch):
+        """Live startup clears partially constructed sessions after warm-up failure."""
+        import backtide.live as live_module
+
+        validation_feed = SimpleNamespace(cancel=lambda: None)
+        session = SimpleNamespace(snapshot=lambda: None)
+        monkeypatch.setattr(
+            live_module, "LiveMarketFeed", lambda *_args, **_kwargs: validation_feed
+        )
+        monkeypatch.setattr(live_module, "SessionConfig", lambda **_kwargs: object())
+        monkeypatch.setattr(live_module, "Session", lambda *_args: session)
+        manager = LiveTradingManager()
+        monkeypatch.setattr(
+            manager,
+            "_warm_up_sessions",
+            lambda **_kwargs: (_ for _ in ()).throw(OSError("storage unavailable")),
+        )
+
+        with pytest.raises(APIError, match="Could not prepare live session"):
+            manager.start(
+                {
+                    "provider": "kraken",
+                    "symbols": ["BTC-USD"],
+                    "config": {"metrics": ["sharpe"]},
+                }
+            )
+
+        assert manager._session is None
+        assert manager._sessions == {}

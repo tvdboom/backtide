@@ -1036,7 +1036,7 @@ class BacktideServices:
 
         deleted = delete_experiment(experiment_id)
         with self._result_runs_lock:
-            if self._result_runs_cache and self._result_runs_cache[0] == experiment_id:
+            if self._result_runs_cache and self._result_runs_cache[0][0] == experiment_id:
                 self._result_runs_cache = None
         return {"deleted": deleted}
 

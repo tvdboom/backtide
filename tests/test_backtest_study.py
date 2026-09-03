@@ -8,10 +8,12 @@ Description: Tests for backtest parameter-sweep and walk-forward studies.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from backtide.backtest import ExperimentConfig
+import backtide.backtest.study as study_module
 from backtide.backtest.study import (
     Study,
     StudyResult,
@@ -260,6 +262,246 @@ class TestStudy:
         with pytest.raises(ValueError, match="Unknown strategy parameter"):
             study.run(verbose=False)
 
+    @pytest.mark.parametrize(
+        "values",
+        [
+            {"training_days": 0},
+            {"test_days": 0},
+            {"step_days": 0},
+        ],
+    )
+    def test_walk_forward_rejects_non_positive_windows(self, values):
+        """Walk-forward window sizes must be positive."""
+        with pytest.raises(ValueError, match="must be at least one"):
+            WalkForwardConfig(**values)
+
+    @pytest.mark.parametrize(
+        ("changes", "message"),
+        [
+            ({"min_trades": -1}, "min_trades"),
+            ({"max_drawdown": 1.1}, "max_drawdown"),
+        ],
+    )
+    def test_study_constraints_are_validated(self, changes, message):
+        """Study trade and drawdown constraints reject out-of-range values."""
+        study = Study(
+            _config(),
+            strategy=TunableStrategy(),
+            parameter_space={"lookback": [10]},
+            **changes,
+        )
+
+        with pytest.raises(ValueError, match=message):
+            study._validate()
+
+    @pytest.mark.parametrize(
+        ("parameter_space", "message"),
+        [
+            ({"": [1]}, "non-empty strings"),
+            ({"lookback": "bad"}, "must be a sequence"),
+            ({"lookback": []}, "at least one value"),
+            ({}, "at least one parameter"),
+            ({"lookback": list(range(101)), "threshold": list(range(101))}, "at most 10,000"),
+        ],
+    )
+    def test_parameter_space_validation(self, parameter_space, message):
+        """Parameter spaces reject malformed names, values, and excessive products."""
+        study = Study(_config(), strategy=TunableStrategy(), parameter_space=parameter_space)
+
+        with pytest.raises(ValueError, match=message):
+            study._normalized_parameter_space()
+
+    def test_candidate_specs_reject_unreconstructable_parameters(self):
+        """Candidate reconstruction rejects variadic, positional-only, and missing values."""
+
+        class Variadic:
+            def __init__(self, *values):
+                del values
+
+        class PositionalOnly:
+            def __init__(self, value, /):
+                self.value = value
+
+        class Required:
+            def __init__(self, value, other=0):
+                del value, other
+
+        with pytest.raises(ValueError, match="Variadic parameter"):
+            Study._candidate_specs(Variadic(), {"values": [1]})
+        with pytest.raises(ValueError, match="Positional-only parameter"):
+            Study._candidate_specs(PositionalOnly(1), {})
+        with pytest.raises(ValueError, match="must be swept or stored"):
+            Study._candidate_specs(Required(1), {"other": [1]})
+
+    def test_missing_engine_run_is_an_ineligible_candidate(self):
+        """A candidate omitted by the engine receives an explicit error summary."""
+        study = Study(
+            _config(),
+            strategy=TunableStrategy(),
+            parameter_space={"lookback": [10]},
+        )
+        specs = study._candidate_specs(TunableStrategy(), {"lookback": [10]})
+        result = SimpleNamespace(strategies=[])
+
+        candidates = study._summarize(cast(Any, result), specs)
+
+        assert candidates[0].eligible is False
+        assert candidates[0].error == "The experiment did not return this candidate."
+
+    def test_drawdown_falls_back_to_equity_samples(self):
+        """Drawdown summaries use equity samples when no drawdown metric exists."""
+        run = SimpleNamespace(
+            equity_curve=[SimpleNamespace(drawdown=-0.2), SimpleNamespace(drawdown=-0.1)]
+        )
+
+        assert Study._drawdown(cast(Any, run), {}) == -0.2
+        assert Study._drawdown(cast(Any, SimpleNamespace(equity_curve=[])), {}) is None
+
+    def test_date_folds_report_unavailable_and_short_history(self):
+        """Walk-forward validation explains missing or insufficient date ranges."""
+        study = Study(
+            _config(),
+            strategy=TunableStrategy(),
+            parameter_space={"lookback": [10]},
+            walk_forward=WalkForwardConfig(training_days=4, test_days=2),
+        )
+
+        with pytest.raises(ValueError, match="could not be determined"):
+            study._date_folds(cast(Any, SimpleNamespace(strategies=[])))
+
+        short = SimpleNamespace(
+            strategies=[SimpleNamespace(equity_curve=[SimpleNamespace(timestamp=1_577_836_800)])]
+        )
+        with pytest.raises(ValueError, match="does not contain one complete fold"):
+            study._date_folds(cast(Any, short))
+
+    def test_failed_walk_forward_fold_is_summarized(self, monkeypatch, tmp_path):
+        """A failed fold remains visible and does not discard the parent study."""
+        calls = []
+        monkeypatch.setattr(
+            "backtide.backtest.study.Experiment.run",
+            _fake_run_factory(calls),
+        )
+        monkeypatch.setattr(
+            "backtide.backtest.study._result_path",
+            lambda experiment_id: tmp_path / experiment_id / "study.json",
+        )
+        monkeypatch.setattr(
+            Study,
+            "_date_folds",
+            lambda _self, _result: [
+                (
+                    1,
+                    study_module.date(2020, 1, 1),
+                    study_module.date(2020, 1, 4),
+                    study_module.date(2020, 1, 5),
+                    study_module.date(2020, 1, 6),
+                )
+            ],
+        )
+        monkeypatch.setattr(Study, "_run_fold", lambda *_args, **_kwargs: 1 / 0)
+
+        result = Study(
+            _config(),
+            strategy=TunableStrategy(),
+            parameter_space={"lookback": [10]},
+            walk_forward=WalkForwardConfig(training_days=4, test_days=2),
+        ).run(verbose=False)
+
+        assert result.folds[0].error == "division by zero"
+        assert result.warnings[-1] == "Walk-forward fold 1 failed: division by zero"
+
+
+class TestStudyResolution:
+    """Tests for resolving study metrics and saved strategies."""
+
+    class ScoreMetric(BaseMetric):
+        """Return a fixed score for resolution tests."""
+
+        greater_is_better = False
+
+        def compute(self, equity_curve, trades):
+            """Return one deterministic score."""
+            del equity_curve, trades
+            return 1.0
+
+    def test_study_requires_a_metric(self):
+        """An empty metric configuration cannot define a study objective."""
+        config = _config()
+        config.metrics = []
+
+        with pytest.raises(ValueError, match="at least one experiment metric"):
+            Study(config, strategy=TunableStrategy(), parameter_space={"lookback": [10]})
+
+    def test_saved_custom_metric_controls_direction(self, monkeypatch):
+        """A named saved metric supplies its ranking direction."""
+        config = _config()
+        config.metrics = ["saved_score"]
+        monkeypatch.setattr(
+            "backtide.metrics.utils._load_stored_metrics",
+            lambda _config: {"saved_score": self.ScoreMetric()},
+        )
+
+        study = Study(config, strategy=TunableStrategy(), parameter_space={"lookback": [10]})
+
+        assert (study.objective, study.maximize) == ("saved_score", False)
+
+    def test_unknown_saved_metric_is_rejected(self, monkeypatch):
+        """A missing named custom metric produces a specific validation error."""
+        config = _config()
+        config.metrics = ["missing"]
+        monkeypatch.setattr("backtide.metrics.utils._load_stored_metrics", lambda _config: {})
+
+        with pytest.raises(ValueError, match="Main metric 'missing' was not found"):
+            Study(config, strategy=TunableStrategy(), parameter_space={"lookback": [10]})
+
+    def test_custom_metric_mapping_requires_one_entry(self):
+        """Inline custom metric mappings contain exactly one named instance."""
+        study = object.__new__(Study)
+        cast(Any, study).config = SimpleNamespace(
+            metrics=[{"one": self.ScoreMetric(), "two": self.ScoreMetric()}]
+        )
+
+        with pytest.raises(ValueError, match="exactly one metric"):
+            study._objective_settings()
+
+    def test_bare_custom_metric_uses_its_class_name(self):
+        """A bare custom metric derives the study objective from its class name."""
+        config = _config()
+        config.metrics = [self.ScoreMetric()]
+
+        study = Study(config, strategy=TunableStrategy(), parameter_space={"lookback": [10]})
+
+        assert (study.objective, study.maximize) == ("ScoreMetric", False)
+
+    def test_saved_strategy_is_loaded_by_name(self, monkeypatch):
+        """A configured saved strategy name resolves to its persisted instance."""
+        template = TunableStrategy()
+        monkeypatch.setattr(
+            "backtide.strategies.utils._load_stored_strategies",
+            lambda _config: {"Saved strategy": template},
+        )
+        study = Study(_config(), parameter_space={"lookback": [10]})
+
+        assert study._resolve_strategy() == ("Saved strategy", template)
+
+    def test_strategy_selection_requires_exactly_one_saved_name(self):
+        """Implicit strategy resolution requires exactly one configured name."""
+        study = object.__new__(Study)
+        study.strategy = None
+        cast(Any, study).config = SimpleNamespace(strategy=SimpleNamespace(strategies=[]))
+
+        with pytest.raises(ValueError, match="exactly one strategy"):
+            study._resolve_strategy()
+
+    def test_missing_saved_strategy_is_rejected(self, monkeypatch):
+        """An unavailable saved strategy name produces a specific error."""
+        monkeypatch.setattr("backtide.strategies.utils._load_stored_strategies", lambda _cfg: {})
+        study = Study(_config(), parameter_space={"lookback": [10]})
+
+        with pytest.raises(ValueError, match="Saved strategy 'Saved strategy' was not found"):
+            study._resolve_strategy()
+
 
 class TestStudyPersistence:
     """Tests for study sidecar loading."""
@@ -324,3 +566,30 @@ class TestStudyPersistence:
 
         assert "undefined" not in result.candidates[0].metrics
         assert query_study(result.study_id) == result
+
+    def test_unknown_schema_version_is_rejected(self):
+        """Persisted study results reject unsupported schema versions."""
+        with pytest.raises(ValueError, match="Unsupported study result schema version"):
+            StudyResult.from_dict({"schema_version": 99})
+
+    def test_non_object_sidecar_is_rejected(self, monkeypatch, tmp_path):
+        """The public query requires a JSON object in a study sidecar."""
+        path = tmp_path / "study.json"
+        path.write_text("[]", encoding="utf-8")
+        monkeypatch.setattr("backtide.backtest.study._result_path", lambda _study_id: path)
+
+        with pytest.raises(ValueError, match="must contain a JSON object"):
+            query_study("study")
+
+    def test_result_path_rejects_traversal(self, monkeypatch, tmp_path):
+        """Study sidecar paths cannot escape the experiment storage directory."""
+        config = SimpleNamespace(data=SimpleNamespace(storage_path=tmp_path))
+        monkeypatch.setattr("backtide.config.get_config", lambda: config)
+
+        with pytest.raises(ValueError, match="Invalid experiment id"):
+            study_module._result_path("../escape")
+
+        assert (
+            study_module._result_path("valid")
+            == (tmp_path / "experiments" / "valid" / "study.json").resolve()
+        )

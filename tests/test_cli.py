@@ -6,15 +6,17 @@ Description: Unit tests for the CLI commands.
 """
 
 import json
-import subprocess
-import sys
+import runpy
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+import warnings
 
+import click
 from click.testing import CliRunner
 import pytest
 
 from backtide.backtest import ExperimentAborted, WalkForwardConfig
+import backtide.cli as cli_module
 from backtide.cli import (
     download,
     launch,
@@ -166,17 +168,16 @@ class TestLaunch:
 class TestMainBlock:
     """Test the __main__ guard."""
 
-    def test_main_invoked(self):
+    def test_main_invoked(self, monkeypatch):
         """The main() function is called when run as __main__."""
-        result = subprocess.run(
-            [sys.executable, "-m", "backtide.cli", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        calls = []
+        monkeypatch.setattr(click.Group, "__call__", lambda group: calls.append(group.name))
 
-        assert result.returncode == 0
-        assert "CLI application" in result.stdout
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            runpy.run_module("backtide.cli", run_name="__main__")
+
+        assert calls == ["main"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -309,6 +310,29 @@ class TestRunExperimentCommand:
         result = runner.invoke(run_experiment_command, [str(cfg_path), "--log_level", "debug"])
         assert result.exit_code == 0
         mock_logging.assert_called_once_with("debug")
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.Experiment")
+    def test_abort_exits_with_shell_interrupt_status(
+        self,
+        mock_experiment,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+    ):
+        """An interrupted experiment exits with the conventional shell status."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        mock_experiment.return_value.run.side_effect = ExperimentAborted("stopped")
+        config = tmp_path / "experiment.toml"
+        config.write_text("", encoding="utf-8")
+
+        result = runner.invoke(run_experiment_command, [str(config)])
+
+        assert result.exit_code == 130
+        assert "Experiment aborted" in result.output
+        mock_logging.assert_called_once_with("warn")
 
 
 class TestRunStudyCommand:
@@ -473,6 +497,87 @@ test_days = 20
         assert "Study aborted" in result.output
         mock_logging.assert_called_once_with("warn")
 
+    @pytest.mark.parametrize(
+        ("payload", "message"),
+        [
+            (
+                {"config": {}, "study": {"parameter_space": {}}, "unexpected": True},
+                "Unknown study file field",
+            ),
+            (
+                {"config": {}, "study": {"parameter_space": {}, "unexpected": True}},
+                "Unknown study field",
+            ),
+            ({"config": {}, "study": {"parameter_space": []}}, "must be a mapping"),
+            (
+                {
+                    "config": {},
+                    "study": {"parameter_space": {}, "walk_forward": []},
+                },
+                "walk_forward must be a mapping",
+            ),
+        ],
+    )
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    def test_invalid_study_fields_are_rejected(
+        self,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+        payload,
+        message,
+    ):
+        """Study command validation rejects unknown and malformed fields."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        config = tmp_path / "study.json"
+        config.write_text(json.dumps(payload), encoding="utf-8")
+
+        result = runner.invoke(run_study_command, [str(config)])
+
+        assert result.exit_code == 2
+        assert message in result.output
+        mock_logging.assert_called_once_with("warn")
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    @patch("backtide.cli.Study")
+    def test_study_errors_and_warnings_are_user_facing(
+        self,
+        mock_study,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+    ):
+        """Completed study warnings and runtime validation errors are printed clearly."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        config = tmp_path / "study.json"
+        config.write_text(
+            json.dumps({"config": {}, "study": {"parameter_space": {"x": [1]}}}),
+            encoding="utf-8",
+        )
+        mock_study.return_value.run.return_value = SimpleNamespace(
+            study_id="study-1",
+            candidates=[object()],
+            folds=[object(), object()],
+            best_candidate_id=None,
+            warnings=["candidate failed"],
+        )
+
+        result = runner.invoke(run_study_command, [str(config)])
+
+        assert result.exit_code == 0
+        assert "no eligible candidate" in result.output
+        assert "candidate failed" in result.output
+
+        mock_study.return_value.run.side_effect = ValueError("invalid sweep")
+        failed = runner.invoke(run_study_command, [str(config)])
+        assert failed.exit_code == 1
+        assert "invalid sweep" in failed.output
+        assert mock_logging.call_count == 2
+
 
 class TestStartLiveSessionCommand:
     """Tests for the `start-live-session` CLI subcommand."""
@@ -608,3 +713,135 @@ class TestStartLiveSessionCommand:
         assert result.exit_code == 2
         assert "symbols must be a non-empty list" in result.output
         mock_logging.assert_called_once_with("warn")
+
+    @pytest.mark.parametrize(
+        ("payload", "message"),
+        [
+            ({"provider": "kraken", "symbols": ["BTC-USD"], "extra": 1}, "Unknown"),
+            ({"provider": "", "symbols": ["BTC-USD"]}, "provider must be"),
+            ({"provider": "kraken", "symbols": ["BTC-USD"], "interval": ""}, "interval"),
+            (
+                {"provider": "kraken", "symbols": ["BTC-USD"], "session": []},
+                "session must be a mapping",
+            ),
+            (
+                {"provider": "kraken", "symbols": ["BTC-USD"], "batch_size": "bad"},
+                "must be numeric",
+            ),
+            (
+                {"provider": "kraken", "symbols": ["BTC-USD"], "timeout_seconds": 0},
+                "must be positive",
+            ),
+        ],
+    )
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    def test_invalid_live_fields_are_rejected(
+        self,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+        payload,
+        message,
+    ):
+        """Live session configuration rejects malformed fields before connecting."""
+        mock_cfg.return_value = MagicMock(general=MagicMock(log_level="warn"))
+        config = tmp_path / "live.json"
+        config.write_text(json.dumps(payload), encoding="utf-8")
+
+        result = runner.invoke(start_live_session, [str(config)])
+
+        assert result.exit_code == 2
+        assert message in result.output
+        mock_logging.assert_called_once_with("warn")
+
+
+class TestCliConfigurationHelpers:
+    """Tests for CLI file parsing and reusable live-session helpers."""
+
+    @pytest.mark.parametrize(
+        ("reader", "filename", "contents", "message"),
+        [
+            (cli_module._read_study_config, "study.txt", "{}", "Unsupported"),
+            (cli_module._read_study_config, "study.json", "{", "Invalid study"),
+            (cli_module._read_study_config, "study.yaml", "[]", "must be a mapping"),
+            (cli_module._read_live_session_config, "live.txt", "{}", "Unsupported"),
+            (cli_module._read_live_session_config, "live.json", "{", "Invalid live-session"),
+            (cli_module._read_live_session_config, "live.yaml", "[]", "must be a mapping"),
+        ],
+    )
+    def test_config_readers_report_invalid_files(
+        self,
+        reader,
+        filename,
+        contents,
+        message,
+        tmp_path,
+    ):
+        """CLI configuration readers translate format and shape errors."""
+        path = tmp_path / filename
+        path.write_text(contents, encoding="utf-8")
+
+        with pytest.raises(click.UsageError, match=message):
+            reader(path)
+
+    def test_live_strategy_loader_handles_optional_and_saved_names(self, monkeypatch):
+        """The live strategy loader accepts omission and resolves a saved name."""
+        config = object()
+        strategy = object()
+        monkeypatch.setattr(
+            "backtide.strategies.utils._load_stored_strategies",
+            lambda _cfg: {"Saved": strategy},
+        )
+
+        assert cli_module._load_live_strategy(None, config) is None
+        assert cli_module._load_live_strategy("Saved", config) is strategy
+        with pytest.raises(click.UsageError, match="name of a saved strategy"):
+            cli_module._load_live_strategy([], config)
+        with pytest.raises(click.UsageError, match="was not found"):
+            cli_module._load_live_strategy("Missing", config)
+
+    def test_session_metric_loader_resolves_builtin_and_saved_metrics(self, monkeypatch):
+        """CLI live metrics preserve built-ins and wrap saved custom objects."""
+        metric = object()
+        monkeypatch.setattr(
+            "backtide.metrics.utils._load_stored_metrics",
+            lambda _cfg: {"custom": metric},
+        )
+
+        assert cli_module._load_session_metrics(["sharpe", "custom"], object()) == [
+            "sharpe",
+            {"custom": metric},
+        ]
+        with pytest.raises(click.UsageError, match="Metric 'missing' was not found"):
+            cli_module._load_session_metrics(["missing"], object())
+
+    def test_live_manifest_helper_serializes_terminal_state(self, monkeypatch):
+        """CLI live manifests include terminal time, health, snapshot, and errors."""
+        written = []
+        monkeypatch.setattr("backtide.live_history.utc_now", lambda: "finished")
+        monkeypatch.setattr(
+            "backtide.live_history.serialize_snapshot",
+            lambda snapshot: {"snapshot": snapshot},
+        )
+        monkeypatch.setattr(
+            "backtide.live_history.write_manifest",
+            lambda session_id, value: written.append((session_id, value)),
+        )
+
+        cli_module._write_cli_live_manifest(
+            "session",
+            status="error",
+            started_at="started",
+            config={"provider": "kraken"},
+            snapshot="value",
+            last_message_at="message",
+            received_events=4,
+            error="failed",
+        )
+
+        assert written[0][1]["finished_at"] == "finished"
+        assert written[0][1]["snapshot"] == {"snapshot": "value"}
+        assert written[0][1]["health"]["received_events"] == 4
+        assert written[0][1]["error"] == "failed"

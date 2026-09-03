@@ -5,6 +5,8 @@ Description: Unit tests for the backtest module.
 
 """
 
+import threading
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pandas as pd
@@ -562,6 +564,32 @@ class TestExperiment:
 
         assert cleaned == [(None, "interrupt")]
 
+    def test_runtime_parameter_resolves_stored_names(self):
+        """Stored runtime dependencies retain their configured names without overrides."""
+        assert Experiment._resolve_runtime_param("Saved") == (["Saved"], {})
+
+    def test_external_abort_cleans_up_completed_result(self, monkeypatch):
+        """An abort requested during execution removes the newly persisted result."""
+        cleaned = []
+        abort_event = threading.Event()
+        abort_event.set()
+        monkeypatch.setattr(backtest_module, "_abort_event", abort_event)
+        monkeypatch.setattr(
+            backtest_module,
+            "_run_experiment",
+            lambda *_args: SimpleNamespace(experiment_id="exp-aborted"),
+        )
+        monkeypatch.setattr(
+            backtest_module,
+            "_cleanup_experiment",
+            lambda experiment_id, name: cleaned.append((experiment_id, name)),
+        )
+
+        with pytest.raises(backtest_module.ExperimentAborted):
+            Experiment(_fixture_config(name="abort"), strategies=[BuyAndHold()]).run(verbose=False)
+
+        assert cleaned == [("exp-aborted", "abort")]
+
 
 class TestExperimentPolymorphicForms:
     """Tests for runtime strategy and indicator forms."""
@@ -687,6 +715,16 @@ class TestCleanupExperiment:
             side_effect=RuntimeError("failed"),
         ):
             backtest_module._cleanup_experiment(None, "name")
+
+    def test_known_experiment_delete_failures_are_ignored(self):
+        """Best-effort cleanup suppresses deletion failures for a known identifier."""
+        from unittest.mock import patch
+
+        with patch(
+            "backtide.backtest.experiment._delete_experiment",
+            side_effect=RuntimeError("failed"),
+        ):
+            backtest_module._cleanup_experiment("exp-123", "name")
 
 
 class TestStoredExperimentAccess:

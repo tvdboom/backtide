@@ -10,24 +10,37 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from backtide.indicators import BaseIndicator
 from backtide.indicators.utils import (
     _build_custom_indicator,
+    _check_indicator_code,
+    _get_indicator_label,
+    _is_builtin_indicator,
     _load_stored_indicators,
     _save_indicator,
 )
 from backtide.metrics import BaseMetric
 from backtide.metrics.utils import _build_custom_metric, _load_stored_metrics, _save_metric
 from backtide.sizers import BaseSizer
-from backtide.sizers.utils import _build_custom_sizer, _load_stored_sizers, _save_sizer
-from backtide.strategies import BaseStrategy
+from backtide.sizers.utils import (
+    _build_custom_sizer,
+    _check_sizer_code,
+    _load_stored_sizers,
+    _restore_sizer,
+    _save_sizer,
+)
+from backtide.strategies import BaseStrategy, BuyAndHold
 from backtide.strategies.utils import (
     _build_custom_strategy,
+    _check_strategy_code,
+    _get_strategy_label,
+    _is_builtin_strategy,
     _load_stored_strategies,
+    _resolve_auto_indicators,
     _save_strategy,
 )
 from backtide.utils.library import _save_pickle
@@ -234,3 +247,188 @@ class TestCustomLibrary:
 
         assert _load_stored_sizers(_config(tmp_path)) == {}
         assert not path.exists()
+
+
+class TestCustomLibraryValidation:
+    """Tests for extension-specific source validation and labels."""
+
+    indicator_template = """from backtide.indicators import BaseIndicator
+
+class CustomIndicator(BaseIndicator):
+    def compute(self, data):
+        {body}
+
+CustomIndicator()
+"""
+    strategy_template = """from backtide.strategies import BaseStrategy
+
+class CustomStrategy(BaseStrategy):
+    def evaluate(self, data, portfolio, state, indicators):
+        {body}
+
+CustomStrategy()
+"""
+    sizer_template = """from backtide.sizers import BaseSizer
+
+class CustomSizer(BaseSizer):
+    def calculate(self, equity, price, stop_distance, atr):
+        {body}
+
+CustomSizer()
+"""
+
+    @pytest.mark.parametrize(
+        ("code", "message"),
+        [
+            ("class Broken(", "Syntax error"),
+            ("raise RuntimeError('no instance')\nobject()", "Failed to instantiate indicator"),
+            (
+                (
+                    "from backtide.indicators import BaseIndicator\n"
+                    "class Wrong(BaseIndicator):\n"
+                    "    def compute(self): return 1\n"
+                    "Wrong()"
+                ),
+                "doesn't have signature",
+            ),
+            (
+                indicator_template.format(body="raise LookupError('missing')"),
+                "LookupError: missing",
+            ),
+            (indicator_template.format(body="return None"), "returned `None`"),
+        ],
+    )
+    def test_indicator_validation_reports_invalid_source(self, code: str, message: str) -> None:
+        """Indicator validation reports each public contract failure."""
+        from backtide.config import get_config
+
+        assert message in str(_check_indicator_code(code, get_config()))
+
+    def test_indicator_validation_accepts_a_result(self) -> None:
+        """Indicator validation accepts the required signature and a non-null result."""
+        from backtide.config import get_config
+
+        code = self.indicator_template.format(body="return data['close']")
+
+        assert _check_indicator_code(code, get_config()) is None
+
+    @pytest.mark.parametrize(
+        ("code", "message"),
+        [
+            ("class Broken(", "Syntax error"),
+            ("raise RuntimeError('no instance')\nobject()", "Failed to instantiate strategy"),
+            (
+                (
+                    "from backtide.strategies import BaseStrategy\n"
+                    "class Wrong(BaseStrategy):\n"
+                    "    def evaluate(self, data): return []\n"
+                    "Wrong()"
+                ),
+                "doesn't have signature",
+            ),
+            (strategy_template.format(body="data = data"), "must return a list"),
+            (strategy_template.format(body="return"), "not None"),
+            (strategy_template.format(body="return 3"), "not a constant"),
+        ],
+    )
+    def test_strategy_validation_reports_invalid_source(self, code: str, message: str) -> None:
+        """Strategy validation reports malformed source and return contracts."""
+        assert message in str(_check_strategy_code(code))
+
+    def test_strategy_validation_accepts_list_return(self) -> None:
+        """Strategy validation accepts a list-returning evaluate method."""
+        assert _check_strategy_code(self.strategy_template.format(body="return []")) is None
+
+    @pytest.mark.parametrize(
+        ("code", "message"),
+        [
+            ("object()", "Failed to instantiate sizer"),
+            (
+                (
+                    "from backtide.sizers import BaseSizer\n"
+                    "class Wrong(BaseSizer):\n"
+                    "    def calculate(self, equity): return 1\n"
+                    "Wrong()"
+                ),
+                "must have parameters",
+            ),
+            (sizer_template.format(body="raise ArithmeticError('bad input')"), "ArithmeticError"),
+            (sizer_template.format(body="return float('inf')"), "finite number"),
+        ],
+    )
+    def test_sizer_validation_reports_invalid_source(self, code: str, message: str) -> None:
+        """Sizer validation reports construction, signature, and numeric failures."""
+        assert message in str(_check_sizer_code(code))
+
+    def test_sizer_validation_accepts_finite_quantity(self) -> None:
+        """Sizer validation accepts a finite numeric result."""
+        assert _check_sizer_code(self.sizer_template.format(body="return 2")) is None
+
+    def test_builtin_and_custom_labels_are_distinct(self) -> None:
+        """Library labels expose built-in metadata and mark custom assets."""
+        from backtide.indicators import SimpleMovingAverage
+
+        custom_indicator = _build_custom_indicator(
+            self.indicator_template.format(body="return data['close']")
+        )
+        custom_strategy = _build_custom_strategy(self.strategy_template.format(body="return []"))
+        builtin_indicator = cast(BaseIndicator, SimpleMovingAverage(5))
+
+        assert _is_builtin_indicator(builtin_indicator) is True
+        assert "period=5" in _get_indicator_label("SMA", builtin_indicator)
+        assert _is_builtin_indicator(custom_indicator) is False
+        assert "Custom" in _get_indicator_label("Mine", custom_indicator)
+        assert _is_builtin_strategy(BuyAndHold()) is True
+        assert "Single Asset" in _get_strategy_label("Hold", BuyAndHold())
+        assert _is_builtin_strategy(custom_strategy) is False
+        assert "Custom" in _get_strategy_label("Mine", custom_strategy)
+
+    def test_auto_indicators_are_deduplicated_and_missing_hooks_are_skipped(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Automatic indicator discovery keeps the first deterministic requirement."""
+        first = object()
+        second = object()
+
+        class WithIndicators:
+            name = "Source"
+
+            @staticmethod
+            def required_indicators() -> list[object]:
+                return [first, second]
+
+        monkeypatch.setattr(
+            "backtide.strategies.utils._indicator_deterministic_name",
+            lambda _indicator: "same",
+        )
+
+        assert _resolve_auto_indicators(
+            [object(), WithIndicators(), SimpleNamespace(required_indicators=[])]
+        ) == [("same", first, "Source")]
+
+    @pytest.mark.parametrize(
+        ("value", "message"),
+        [
+            (
+                {"format": "backtide.builtin-sizer.v1", "type": "Missing", "parameters": {}},
+                "Unknown built-in sizer",
+            ),
+            (
+                {
+                    "format": "backtide.builtin-sizer.v1",
+                    "type": "FixedQuantity",
+                    "parameters": [],
+                },
+                "parameters must be a mapping",
+            ),
+        ],
+    )
+    def test_builtin_sizer_restore_rejects_invalid_records(
+        self,
+        value: dict[str, Any],
+        message: str,
+    ) -> None:
+        """Stable built-in sizer records reject unknown types and malformed parameters."""
+        with pytest.raises(ValueError, match=message):
+            _restore_sizer(value)
