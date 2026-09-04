@@ -1923,6 +1923,7 @@ mod tests {
     };
     use crate::data::providers::DataProvider;
     use crate::engine::{Engine, EngineCache};
+    use crate::sizers::{EqualWeight, FixedQuantity};
     use crate::storage::duckdb::DuckDb;
     use crate::storage::models::BarSeries;
     use crate::storage::traits::Storage;
@@ -1987,6 +1988,17 @@ mod tests {
                 dividends: vec![],
             })
         }
+    }
+
+    #[tokio::test]
+    async fn stub_provider_lists_its_configured_instruments() {
+        let mut provider = StubProvider::new();
+        provider.instruments.insert("AAPL".to_owned(), make_instrument("AAPL"));
+
+        let instruments =
+            provider.list_instruments(InstrumentType::Stocks, None, 10).await.unwrap();
+
+        assert_eq!(instruments.len(), 1);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -3082,6 +3094,15 @@ class Metric:
             &[],
         );
         assert!(metadata_missing.orders[0].reason.contains("metadata unavailable"));
+
+        let unmatched_cancel = run_custom_strategy(
+            custom_strategy(vec![make_order("AAPL", 0.0, OrderType::Cancel, None)], false),
+            &cfg,
+            &[],
+        );
+        assert!(unmatched_cancel.orders.iter().any(|record| {
+            record.status == OrderStatus::Rejected && record.reason.contains("metadata unavailable")
+        }));
     }
 
     #[test]
@@ -3172,7 +3193,7 @@ class Metric:
         let mut short_config = base_config();
         short_config.exchange.allow_short_selling = true;
         short_config.exchange.allow_margin = true;
-        short_config.exchange.max_leverage = 10.0;
+        short_config.exchange.max_leverage = 100_000.0;
         short_config.exchange.max_position_size = 1_000;
         short_config.exchange.commission_type = CommissionType::Fixed;
         short_config.exchange.commission_fixed = 1.0;
@@ -3214,6 +3235,368 @@ class Metric:
     // ── Engine::run_experiment — smoke tests ─────────────────────────────
 
     #[test]
+    fn scheduled_strategy_exercises_builtin_sizers_and_nil_order_ids() {
+        let config = base_config();
+        let mut cash_weighted = make_order("AAPL", 0.0, OrderType::Market, Some(100.0));
+        cash_weighted.id = OrderId::nil();
+        cash_weighted.sizer =
+            Some(SizerSlot::Builtin(BuiltinSizer::CashEqualWeight(EqualWeight::new(3))));
+        let mut fixed = make_order("AAPL", 0.0, OrderType::Market, Some(100.0));
+        fixed.sizer =
+            Some(SizerSlot::Builtin(BuiltinSizer::FixedQuantity(FixedQuantity::new(2.75))));
+
+        let result = run_scheduled_strategy(
+            custom_strategy_batches(vec![vec![cash_weighted], vec![fixed]]),
+            &config,
+        );
+
+        assert_eq!(result.orders.len(), 2);
+        assert!(result.orders.iter().all(|record| !record.order.id.is_nil()));
+        assert_eq!(result.orders[0].order.quantity.fract(), 0.0);
+        assert_eq!(result.orders[1].order.quantity, 2.75);
+    }
+
+    #[test]
+    fn scheduled_strategy_rejects_a_failing_builtin_sizer() {
+        let config = base_config();
+        let mut order = make_order("AAPL", 0.0, OrderType::Market, None);
+        order.sizer =
+            Some(SizerSlot::Builtin(BuiltinSizer::FixedQuantity(FixedQuantity::new(f64::NAN))));
+
+        let result = run_scheduled_strategy(custom_strategy_batches(vec![vec![order]]), &config);
+
+        assert_eq!(result.orders[0].status, OrderStatus::Rejected);
+        assert!(result.orders[0].reason.contains("quantity"));
+    }
+
+    #[test]
+    fn scheduled_strategy_covers_cash_fit_commissions_and_position_averaging() {
+        for commission_type in
+            [CommissionType::Percentage, CommissionType::Fixed, CommissionType::PercentagePlusFixed]
+        {
+            let mut config = base_config();
+            config.portfolio.initial_cash = 500;
+            config.exchange.allow_margin = true;
+            config.exchange.max_leverage = 100_000.0;
+            config.exchange.initial_margin = 0.0;
+            config.exchange.max_position_size = 1_000_000;
+            config.exchange.commission_type = commission_type;
+            config.exchange.commission_pct = 1.0;
+            config.exchange.commission_fixed = 5.0;
+            let result = run_scheduled_strategy(
+                custom_strategy_batches(vec![
+                    vec![make_order("AAPL", 100.0, OrderType::Market, None)],
+                    vec![make_order("AAPL", 1.0, OrderType::Market, None)],
+                ]),
+                &config,
+            );
+
+            assert!(result.orders.iter().any(|record| {
+                record.status == OrderStatus::Filled
+                    && record.order.quantity < 100.0
+                    && record.reason.contains("shrunk")
+            }));
+        }
+
+        let mut config = base_config();
+        config.exchange.commission_type = CommissionType::PercentagePlusFixed;
+        config.exchange.commission_pct = 0.5;
+        config.exchange.commission_fixed = 1.0;
+        let result = run_scheduled_strategy(
+            custom_strategy_batches(vec![
+                vec![make_order("AAPL", 1.0, OrderType::Market, None)],
+                vec![make_order("AAPL", 2.0, OrderType::Market, None)],
+            ]),
+            &config,
+        );
+
+        assert_eq!(result.orders.len(), 2);
+        assert_eq!(
+            result.orders.iter().filter(|record| record.status == OrderStatus::Filled).count(),
+            2
+        );
+
+        let mut limited = base_config();
+        limited.exchange.allowed_order_types.push(OrderType::Limit);
+        limited.exchange.allow_margin = true;
+        limited.exchange.max_leverage = 100_000.0;
+        limited.exchange.initial_margin = 0.0;
+        limited.exchange.max_position_size = 10;
+        for commission_type in
+            [CommissionType::Percentage, CommissionType::Fixed, CommissionType::PercentagePlusFixed]
+        {
+            limited.exchange.commission_type = commission_type;
+            limited.exchange.commission_fixed = 1.0;
+            limited.exchange.commission_pct = 1.0;
+            let result = run_scheduled_strategy(
+                custom_strategy_batches(vec![vec![make_order(
+                    "AAPL",
+                    100.0,
+                    OrderType::Limit,
+                    Some(200.0),
+                )]]),
+                &limited,
+            );
+            assert!(!result.orders[0].reason.is_empty());
+            assert!(result.orders[0].reason.contains("shrunk"));
+        }
+    }
+
+    #[test]
+    fn scheduled_strategy_rejects_unaffordable_buys_and_short_commissions() {
+        let mut buy_config = base_config();
+        buy_config.portfolio.initial_cash = 1;
+        buy_config.exchange.allow_margin = true;
+        buy_config.exchange.max_leverage = 100_000.0;
+        buy_config.exchange.initial_margin = 0.0;
+        buy_config.exchange.max_position_size = 1_000_000;
+        buy_config.exchange.commission_type = CommissionType::Fixed;
+        buy_config.exchange.commission_fixed = 10.0;
+        let buy = run_scheduled_strategy(
+            custom_strategy_batches(vec![vec![make_order("AAPL", 10.0, OrderType::Market, None)]]),
+            &buy_config,
+        );
+        assert!(
+            buy.orders.iter().any(|record| {
+                record.status == OrderStatus::Rejected && record.reason == "insufficient funds"
+            }),
+            "{:?}",
+            buy.orders
+        );
+
+        let mut short_config = base_config();
+        short_config.portfolio.initial_cash = 1_000;
+        short_config.exchange.allow_short_selling = true;
+        short_config.exchange.allow_margin = true;
+        short_config.exchange.max_leverage = 10.0;
+        short_config.exchange.initial_margin = 0.0;
+        short_config.exchange.max_position_size = 1_000_000;
+        short_config.exchange.commission_type = CommissionType::Fixed;
+        short_config.exchange.commission_fixed = 2_000.0;
+        let short = run_scheduled_strategy(
+            custom_strategy_batches(vec![vec![make_order("AAPL", -1.0, OrderType::Market, None)]]),
+            &short_config,
+        );
+        assert!(
+            short.orders.iter().any(|record| {
+                record.status == OrderStatus::Rejected && record.reason == "cannot pay commission"
+            }),
+            "{:?}",
+            short.orders
+        );
+    }
+
+    #[test]
+    fn exclusive_orders_cancel_resting_orders_before_accepting_a_new_batch() {
+        let mut config = base_config();
+        config.engine.exclusive_orders = true;
+        config.exchange.allowed_order_types.push(OrderType::Limit);
+        let result = run_scheduled_strategy(
+            custom_strategy_batches(vec![
+                vec![make_order("AAPL", 1.0, OrderType::Limit, Some(1.0))],
+                vec![make_order("AAPL", 1.0, OrderType::Market, None)],
+            ]),
+            &config,
+        );
+
+        assert!(result
+            .orders
+            .iter()
+            .any(|record| record.status == OrderStatus::Canceled
+                && record.reason == "exclusive_orders"));
+        assert!(result.orders.iter().any(|record| record.status == OrderStatus::Filled));
+    }
+
+    #[test]
+    fn scheduled_strategy_visits_every_currency_conversion_policy() {
+        let policies = [
+            CurrencyConversionMode::Immediate,
+            CurrencyConversionMode::HoldUntilThreshold,
+            CurrencyConversionMode::EndOfPeriod,
+            CurrencyConversionMode::CustomInterval,
+        ];
+
+        for policy in policies {
+            let mut config = base_config();
+            config.exchange.conversion_mode = policy;
+            config.exchange.conversion_threshold = Some(10.0);
+            config.exchange.conversion_period = Some(ConversionPeriod::Day);
+            config.exchange.conversion_interval = Some(1);
+            let result = run_scheduled_strategy(custom_strategy_batches(vec![]), &config);
+
+            assert_eq!(result.equity_curve.len(), 4);
+            assert!(result.error.is_none());
+        }
+    }
+
+    #[test]
+    fn maintenance_margin_force_flattens_long_and_short_positions() {
+        for starting_position in [10.0, -10.0] {
+            let mut config = base_config();
+            config.portfolio.initial_cash = if starting_position > 0.0 {
+                1
+            } else {
+                1_000
+            };
+            config.portfolio.starting_positions =
+                [("AAPL".to_owned(), starting_position)].into_iter().collect();
+            config.exchange.allow_short_selling = true;
+            config.exchange.allow_margin = true;
+            config.exchange.maintenance_margin = 200.0;
+            config.exchange.raise_on_margin_limit = true;
+
+            let result = run_scheduled_strategy(custom_strategy_batches(vec![]), &config);
+
+            assert!(result.error.as_deref().is_some_and(|error| error.contains("maintenance")));
+            assert!(result.orders.iter().any(
+                |record| record.reason.contains("maintenance") && record.order.quantity != 0.0
+            ));
+        }
+    }
+
+    #[test]
+    fn maintenance_margin_converts_non_fiat_position_value() {
+        let timestamps = [1_000_i64, 2_000];
+        let aligned = make_aligned(
+            "AAPL",
+            timestamps.iter().map(|ts| Some(make_bar(*ts as u64, 100.0))).collect(),
+        );
+        let mut profile = make_profile("AAPL");
+        profile.instrument.quote = "USDT".to_owned();
+        let mut config = base_config();
+        config.portfolio.initial_cash = 1;
+        config.portfolio.starting_positions = [("AAPL".to_owned(), 10.0)].into_iter().collect();
+        config.exchange.maintenance_margin = 200.0;
+        config.exchange.raise_on_margin_limit = true;
+        let mut fx = FxTable::new("USD");
+        fx.add_series("USDT", "USD", vec![(0, 1.0)]);
+
+        let result = run_one_strategy(
+            "non-fiat",
+            custom_strategy_batches(vec![]),
+            &config,
+            &aligned,
+            &HashMap::new(),
+            &[profile],
+            &timestamps,
+            &fx,
+            None,
+        );
+
+        assert!(result.orders.iter().any(|record| record.reason.contains("maintenance")));
+    }
+
+    #[test]
+    fn pending_orders_wait_for_missing_bars_and_non_fiat_quotes_fall_back_to_base() {
+        let timestamps = [1_000_i64, 2_000, 3_000];
+        let aligned = make_aligned(
+            "AAPL",
+            vec![Some(make_bar(1_000, 100.0)), None, Some(make_bar(3_000, 100.0))],
+        );
+        let mut config = base_config();
+        config.exchange.allowed_order_types.push(OrderType::Limit);
+        let pending = run_one_strategy(
+            "pending",
+            custom_strategy_batches(vec![vec![make_order(
+                "AAPL",
+                1.0,
+                OrderType::Limit,
+                Some(200.0),
+            )]]),
+            &config,
+            &aligned,
+            &HashMap::new(),
+            &[make_profile("AAPL")],
+            &timestamps,
+            &FxTable::new("USD"),
+            None,
+        );
+        assert_eq!(pending.orders[0].status, OrderStatus::Filled);
+
+        let mut crypto_profile = make_profile("AAPL");
+        crypto_profile.instrument.quote = "USDT".to_owned();
+        let crypto = run_one_strategy(
+            "crypto",
+            custom_strategy_batches(vec![vec![make_order("AAPL", 1.0, OrderType::Market, None)]]),
+            &base_config(),
+            &make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0)), Some(make_bar(2_000, 100.0))]),
+            &HashMap::new(),
+            &[crypto_profile],
+            &[1_000, 2_000],
+            &FxTable::new("USD"),
+            None,
+        );
+        assert_eq!(crypto.orders[0].status, OrderStatus::Filled);
+    }
+
+    #[test]
+    fn snapshots_cover_zero_equity_and_multiple_currency_buckets() {
+        let mut zero_config = base_config();
+        zero_config.portfolio.initial_cash = 0;
+        let zero = run_scheduled_strategy(custom_strategy_batches(vec![]), &zero_config);
+        assert!(zero.equity_curve.iter().all(|sample| sample.drawdown == 0.0));
+
+        let mut foreign_config = base_config();
+        foreign_config.portfolio.starting_positions = [("AAPL".to_owned(), 1.0)].into();
+        foreign_config.exchange.conversion_mode = CurrencyConversionMode::HoldUntilThreshold;
+        foreign_config.exchange.conversion_threshold = Some(1_000_000.0);
+        let mut profile = make_profile("AAPL");
+        profile.instrument.quote = "EUR".to_owned();
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.1)]);
+        let foreign = run_one_strategy(
+            "foreign",
+            custom_strategy_batches(vec![vec![make_order("AAPL", -1.0, OrderType::Market, None)]]),
+            &foreign_config,
+            &make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0)), Some(make_bar(2_000, 100.0))]),
+            &HashMap::new(),
+            &[profile],
+            &[1_000, 2_000],
+            &fx,
+            None,
+        );
+        assert!(foreign.equity_curve.iter().any(|sample| sample.cash.len() > 1));
+    }
+
+    #[test]
+    fn maintenance_margin_closes_new_trades_and_skips_symbols_without_bars() {
+        let mut config = base_config();
+        config.portfolio.initial_cash = 1_000;
+        config.exchange.allow_margin = true;
+        config.exchange.max_leverage = 100_000.0;
+        config.exchange.initial_margin = 0.0;
+        config.exchange.max_position_size = 1_000_000;
+        config.exchange.maintenance_margin = 200.0;
+        let closed = run_scheduled_strategy(
+            custom_strategy_batches(vec![vec![make_order("AAPL", 10.0, OrderType::Market, None)]]),
+            &config,
+        );
+        assert!(!closed.trades.is_empty());
+        assert!(closed.orders.iter().any(|record| record.reason.contains("maintenance")));
+
+        let mut missing_config = config;
+        missing_config.portfolio.initial_cash = 1;
+        missing_config.portfolio.starting_positions =
+            [("AAPL".to_owned(), 10.0), ("MSFT".to_owned(), 1.0)].into();
+        let aligned = HashMap::from([
+            ("AAPL".to_owned(), vec![Some(make_bar(1_000, 100.0))]),
+            ("MSFT".to_owned(), vec![None]),
+        ]);
+        let missing = run_one_strategy(
+            "missing",
+            custom_strategy_batches(vec![]),
+            &missing_config,
+            &aligned,
+            &HashMap::new(),
+            &[make_profile("AAPL"), make_profile("MSFT")],
+            &[1_000],
+            &FxTable::new("USD"),
+            None,
+        );
+        assert!(missing.orders.iter().any(|record| record.order.symbol == "AAPL"));
+    }
+
+    #[test]
     fn run_experiment_no_symbols_returns_error() {
         let (engine, _tmp) = make_engine();
         let cfg = base_config(); // symbols = ["AAPL"], but no data downloaded
@@ -3227,18 +3610,7 @@ class Metric:
             None,
         );
 
-        // resolve_profiles will call provider which returns NotFound → cascade error
-        // OR no-bars → empty timeline → ExperimentStatus::Error
-        // either way the call should not panic
-        match result {
-            Ok(exp) => {
-                // If it succeeds it must have a valid experiment_id
-                assert_eq!(exp.experiment_id.len(), 16);
-            },
-            Err(_) => {
-                // Acceptable — provider returned error
-            },
-        }
+        assert!(result.is_err());
     }
 
     #[test]
@@ -3256,6 +3628,135 @@ class Metric:
             None,
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn run_experiment_returns_an_error_result_when_storage_has_no_bars() {
+        let instrument = make_instrument("AAPL");
+        let (engine, _tmp) = make_engine_with_stub(StubProvider {
+            instruments: [("AAPL".to_owned(), instrument)].into_iter().collect(),
+        });
+        let config = base_config();
+
+        let result = engine
+            .run_experiment(&config, false, &HashMap::new(), &HashMap::new(), &HashMap::new(), None)
+            .unwrap();
+
+        assert_eq!(result.status, ExperimentStatus::Error);
+        assert!(result.strategies.is_empty());
+        assert!(result.warnings.iter().any(|warning| warning.contains("No bars")));
+    }
+
+    #[test]
+    fn run_experiment_validates_starting_positions_against_resolved_profiles() {
+        let instrument = make_instrument("AAPL");
+        let (engine, _tmp) = make_engine_with_stub(StubProvider {
+            instruments: [("AAPL".to_owned(), instrument)].into_iter().collect(),
+        });
+
+        for (positions, message) in [
+            ([("MSFT".to_owned(), 1.0)].into_iter().collect(), "not listed"),
+            ([("AAPL".to_owned(), 0.5)].into_iter().collect(), "fractional"),
+        ] {
+            let mut config = base_config();
+            config.portfolio.starting_positions = positions;
+            let error = engine
+                .run_experiment(
+                    &config,
+                    false,
+                    &HashMap::new(),
+                    &HashMap::new(),
+                    &HashMap::new(),
+                    None,
+                )
+                .unwrap_err();
+            assert!(error.to_string().contains(message));
+        }
+
+        let mut negligible = base_config();
+        negligible.portfolio.starting_positions =
+            [("MSFT".to_owned(), f64::EPSILON)].into_iter().collect();
+        let result = engine
+            .run_experiment(
+                &negligible,
+                false,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(result.status, ExperimentStatus::Error);
+    }
+
+    #[test]
+    fn run_experiment_injects_a_distinct_symbol_benchmark() {
+        let instruments = [
+            ("AAPL".to_owned(), make_instrument("AAPL")),
+            ("MSFT".to_owned(), make_instrument("MSFT")),
+        ]
+        .into_iter()
+        .collect();
+        let (engine, _tmp) = make_engine_with_stub(StubProvider {
+            instruments,
+        });
+        write_bars(&engine, "AAPL", vec![make_bar(1_000, 100.0), make_bar(2_000, 101.0)]);
+        write_bars(&engine, "MSFT", vec![make_bar(1_000, 200.0), make_bar(2_000, 202.0)]);
+        let mut config = base_config();
+        config.strategy.strategies = vec!["Buy & Hold".to_owned()];
+        config.strategy.benchmark = Some("MSFT".to_owned());
+        let strategies = HashMap::from([("Buy & Hold".to_owned(), bah_strategy())]);
+
+        let result = engine
+            .run_experiment(&config, false, &strategies, &HashMap::new(), &HashMap::new(), None)
+            .unwrap();
+
+        assert_eq!(result.strategies.len(), 2);
+        assert!(result.strategies.iter().any(|run| run.is_benchmark));
+    }
+
+    #[test]
+    fn run_experiment_loads_valid_empty_and_baseless_currency_legs() {
+        for (leg_bars, leg_base) in [(true, Some("PLN")), (false, Some("PLN")), (true, None)] {
+            let mut asset = make_instrument("ASSET");
+            asset.quote = "PLN".to_owned();
+            let leg = Instrument {
+                symbol: "PLN-USD".to_owned(),
+                name: "PLN-USD".to_owned(),
+                base: leg_base.map(str::to_owned),
+                quote: "USD".to_owned(),
+                instrument_type: InstrumentType::Forex,
+                exchange: "FX".to_owned(),
+                provider: Provider::Yahoo,
+            };
+            let instruments =
+                [("ASSET".to_owned(), asset), ("PLN-USD".to_owned(), leg)].into_iter().collect();
+            let (engine, _tmp) = make_engine_with_stub(StubProvider {
+                instruments,
+            });
+            write_bars(
+                &engine,
+                "ASSET",
+                vec![make_bar(1_000_000_000, 100.0), make_bar(1_000_086_400, 101.0)],
+            );
+            if leg_bars {
+                write_bars(
+                    &engine,
+                    "PLN-USD",
+                    vec![make_bar(1_000_000_000, 0.25), make_bar(1_000_086_400, 0.26)],
+                );
+            }
+            let mut config = base_config();
+            config.data.symbols = vec!["ASSET".to_owned()];
+            config.strategy.strategies = vec!["Buy & Hold".to_owned()];
+            let strategies = HashMap::from([("Buy & Hold".to_owned(), bah_strategy())]);
+
+            let result = engine
+                .run_experiment(&config, false, &strategies, &HashMap::new(), &HashMap::new(), None)
+                .unwrap();
+
+            assert_eq!(result.strategies.len(), 1);
+        }
     }
 
     #[test]
@@ -3340,9 +3841,29 @@ class Metric:
             .all(|run| run.metrics.get("custom_good") == Some(&42.0)));
         assert!(engine
             .db
-            .query_experiments(Some(&[result.experiment_id.clone()]), None, None)
+            .query_experiments(Some(std::slice::from_ref(&result.experiment_id)), None, None)
             .unwrap()
             .iter()
             .any(|stored| stored.id == result.experiment_id));
+    }
+
+    #[test]
+    fn run_experiment_reports_all_failed_strategies() {
+        let mut stub = StubProvider::new();
+        stub.instruments.insert("AAPL".to_owned(), make_instrument("AAPL"));
+        let (engine, _tmp) = make_engine_with_stub(stub);
+        write_bars(
+            &engine,
+            "AAPL",
+            vec![make_bar(1_000_000_000, 100.0), make_bar(1_000_086_400, 101.0)],
+        );
+        let mut config = base_config();
+        config.strategy.strategies = vec!["raising".to_owned()];
+        let strategies = HashMap::from([("raising".to_owned(), custom_strategy(vec![], true))]);
+
+        let failed = engine
+            .run_experiment(&config, false, &strategies, &HashMap::new(), &HashMap::new(), None)
+            .unwrap();
+        assert_eq!(failed.status, ExperimentStatus::Error);
     }
 }

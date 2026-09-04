@@ -339,6 +339,17 @@ CustomSizer()
         """Strategy validation accepts a list-returning evaluate method."""
         assert _check_strategy_code(self.strategy_template.format(body="return []")) is None
 
+    def test_strategy_validation_ignores_non_evaluate_methods(self) -> None:
+        """Helper methods do not participate in the evaluate return contract."""
+        code = self.strategy_template.format(
+            body="return []",
+        ).replace(
+            "    def evaluate",
+            "    def helper(self):\n        return 3\n\n    def evaluate",
+        )
+
+        assert _check_strategy_code(code) is None
+
     @pytest.mark.parametrize(
         ("code", "message"),
         [

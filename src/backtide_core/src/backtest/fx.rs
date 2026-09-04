@@ -225,10 +225,7 @@ pub fn try_debit(
     if needed_base.is_finite() {
         staged_base_drain = staged_base_drain.min(needed_base);
         let covered_in_ccy = if staged_base_drain > 0.0 {
-            match fx.rate(&base.to_string(), &ccy.to_string(), ts) {
-                Some(r) if r > 0.0 => staged_base_drain * r,
-                _ => 0.0,
-            }
+            staged_base_drain * remaining / needed_base
         } else {
             0.0
         };
@@ -301,12 +298,9 @@ pub fn sweep_foreign_to_base(
         .collect();
 
     for ccy in foreign {
-        let amount = match cash.get(&ccy) {
-            Some(v) if v.is_finite() && v.abs() > 0.0 => v,
-            _ => continue,
-        };
+        let amount = cash[&ccy];
 
-        let in_base = match fx.convert(*amount, &ccy.to_string(), &base.to_string(), ts) {
+        let in_base = match fx.convert(amount, &ccy.to_string(), &base.to_string(), ts) {
             Some(v) => v,
             None => continue,
         };
@@ -647,6 +641,36 @@ mod tests {
         // Whether it succeeds depends on the specific conversion path available.
         // The important thing is it doesn't panic.
         let _ = result;
+    }
+
+    #[test]
+    fn try_debit_combines_partial_base_and_foreign_buckets() {
+        let mut cash = HashMap::from([
+            (Currency::EUR, 10.0),
+            (Currency::USD, 20.0),
+            (Currency::CHF, 10.0),
+            (Currency::GBP, 100.0),
+            (Currency::JPY, 100.0),
+        ]);
+        let mut fx = FxTable::new("USD");
+        fx.add_series("EUR", "USD", vec![(0, 1.0)]);
+        fx.add_series("CHF", "EUR", vec![(0, 1.0)]);
+        fx.add_series("GBP", "EUR", vec![(0, 1.0)]);
+        fx.add_series("JPY", "EUR", vec![(0, 1.0)]);
+
+        assert!(try_debit(&mut cash, Currency::EUR, 50.0, Currency::USD, &fx, 0));
+        assert!(!cash.contains_key(&Currency::USD));
+        assert!(!cash.contains_key(&Currency::CHF));
+        assert_eq!(cash[&Currency::GBP], 90.0);
+        assert_eq!(cash[&Currency::JPY], 100.0);
+    }
+
+    #[test]
+    fn add_rate_ignores_invalid_samples() {
+        let mut fx = FxTable::new("USD");
+        fx.add_rate("EUR", "USD", 0, 0.0, 1);
+        fx.add_rate("EUR", "USD", 0, 1.0, 0);
+        assert_eq!(fx.rate("EUR", "USD", 0), None);
     }
 
     // ── sweep_foreign_to_base ────────────────────────────────────────────

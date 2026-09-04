@@ -62,7 +62,7 @@ public exchange WebSockets, without connecting a brokerage account.
 - **Rich analytics** — 20+ plots cover PnL, returns, drawdown and more.
 - **Live simulation** — Apply strategies to Binance, Coinbase, or Kraken WebSocket candles with local simulated fills.
 - **Interactive UI** — A packaged Vue app configures, runs, and analyzes backtests and live sessions visually.
-- **Simple installation** — Python wheels include the Rust extension and production frontend; users do not need Rust or Node.js.
+- **Simple installation** — Python wheels include the Rust extension and frontend; users do not need Rust or Node.js.
 - **Open source** — MIT-licensed, community-driven and free forever.
 
 <br>

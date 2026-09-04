@@ -11,7 +11,7 @@ use crate::utils::http::{HttpClient, HttpClientConfig, HttpError};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::HashMap;
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
 /// Kraken spot-market data provider.
 ///
@@ -19,6 +19,12 @@ use tracing::{debug, info, instrument};
 pub struct Kraken {
     /// Shared async HTTP client.
     client: HttpClient,
+
+    /// Trading-pair catalog endpoint.
+    asset_pairs_url: String,
+
+    /// Candlestick endpoint.
+    ohlc_url: String,
 }
 
 impl Kraken {
@@ -45,6 +51,8 @@ impl Kraken {
         info!("Kraken provider initialised");
         Ok(Self {
             client,
+            asset_pairs_url: Self::ASSET_PAIRS_URL.to_owned(),
+            ohlc_url: Self::OHLC_URL.to_owned(),
         })
     }
 
@@ -119,7 +127,7 @@ impl Kraken {
 
         let params_ref: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
-        let resp = self.client.get(Self::OHLC_URL, Some(&params_ref)).await?;
+        let resp = self.client.get(&self.ohlc_url, Some(&params_ref)).await?;
         let parsed = HttpClient::json::<KrakenResponse<serde_json::Value>>(resp).await?;
         let result = Self::unwrap_response(parsed, symbol)?;
 
@@ -162,7 +170,7 @@ impl DataProvider for Kraken {
 
         let resp = self
             .client
-            .get(Self::ASSET_PAIRS_URL, Some(&[("pair", &pair)]))
+            .get(&self.asset_pairs_url, Some(&[("pair", &pair)]))
             .await
             .map_err(|_| DataError::SymbolNotFound(symbol.to_owned()))?;
 
@@ -172,7 +180,7 @@ impl DataProvider for Kraken {
         let info =
             map.into_values().next().ok_or_else(|| DataError::SymbolNotFound(symbol.to_owned()))?;
 
-        Ok(Instrument::try_from(info)?)
+        Ok(Instrument::from(info))
     }
 
     /// Returns the usable download range for an instrument at a given interval.
@@ -219,21 +227,14 @@ impl DataProvider for Kraken {
     ) -> DataResult<Vec<Instrument>> {
         Self::check_instrument_type(instrument_type)?;
 
-        let resp = self.client.get(Self::ASSET_PAIRS_URL, None).await?;
+        let resp = self.client.get(&self.asset_pairs_url, None).await?;
         let parsed = HttpClient::json::<KrakenResponse<HashMap<String, PairInfo>>>(resp).await?;
         let map = Self::unwrap_response(parsed, "AssetPairs")?;
 
         let instruments: Vec<Instrument> = map
             .into_values()
             .filter(|p| p.status == "online")
-            .filter_map(|info| {
-                Instrument::try_from(info)
-                    .map_err(|e| {
-                        debug!("Kraken list_instruments error: {e}");
-                        e
-                    })
-                    .ok()
-            })
+            .map(Instrument::from)
             .filter(|a| a.instrument_type == instrument_type)
             .take(limit)
             .collect();
@@ -332,10 +333,8 @@ struct PairInfo {
     status: String,
 }
 
-impl TryFrom<PairInfo> for Instrument {
-    type Error = DataError;
-
-    fn try_from(info: PairInfo) -> DataResult<Self> {
+impl From<PairInfo> for Instrument {
+    fn from(info: PairInfo) -> Self {
         // Prefer the human-readable wsname (e.g., "XBT/USD") for base/quote.
         let (base, quote) = if let Some(ref ws) = info.wsname {
             let mut parts = ws.splitn(2, '/');
@@ -360,7 +359,7 @@ impl TryFrom<PairInfo> for Instrument {
                 InstrumentType::Crypto
             };
 
-        Ok(Instrument {
+        Instrument {
             symbol: symbol.clone(),
             name: symbol,
             base: Some(base),
@@ -368,7 +367,7 @@ impl TryFrom<PairInfo> for Instrument {
             instrument_type,
             exchange: "KRAKEN".to_owned(),
             provider: Provider::Kraken,
-        })
+        }
     }
 }
 
@@ -479,6 +478,16 @@ mod tests {
     use super::*;
     use rstest::rstest;
     use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn mocked_kraken(server: &MockServer) -> Kraken {
+        Kraken {
+            client: HttpClient::new().unwrap(),
+            asset_pairs_url: format!("{}/pairs", server.uri()),
+            ohlc_url: format!("{}/ohlc", server.uri()),
+        }
+    }
 
     // ── normalize_ticker ────────────────────────────────────────────────
 
@@ -605,7 +614,7 @@ mod tests {
             quote: "ZUSD".to_owned(),
             status: "online".to_owned(),
         };
-        let inst = Instrument::try_from(info).unwrap();
+        let inst = Instrument::from(info);
         assert_eq!(inst.symbol, "BTC-USD");
         assert_eq!(inst.base, Some("BTC".to_owned()));
         assert_eq!(inst.quote, "USD");
@@ -621,7 +630,7 @@ mod tests {
             quote: "ZUSD".to_owned(),
             status: "online".to_owned(),
         };
-        let inst = Instrument::try_from(info).unwrap();
+        let inst = Instrument::from(info);
         assert_eq!(inst.instrument_type, InstrumentType::Forex);
     }
 
@@ -634,7 +643,7 @@ mod tests {
             quote: "BTC".to_owned(),
             status: "online".to_owned(),
         };
-        let inst = Instrument::try_from(info).unwrap();
+        let inst = Instrument::from(info);
         assert_eq!(inst.base, Some("ETH".to_owned()));
         assert_eq!(inst.quote, "BTC");
     }
@@ -644,6 +653,8 @@ mod tests {
     fn kraken_for_test() -> Kraken {
         Kraken {
             client: HttpClient::with_config(HttpClientConfig::default()).unwrap(),
+            asset_pairs_url: Kraken::ASSET_PAIRS_URL.to_owned(),
+            ohlc_url: Kraken::OHLC_URL.to_owned(),
         }
     }
 
@@ -754,7 +765,7 @@ mod tests {
             quote: "XBT".to_owned(),
             status: "online".to_owned(),
         };
-        let inst = Instrument::try_from(info).unwrap();
+        let inst = Instrument::from(info);
         assert_eq!(inst.instrument_type, InstrumentType::Crypto);
         // XBT must be normalized to BTC for the quote.
         assert_eq!(inst.quote, "BTC");
@@ -770,7 +781,7 @@ mod tests {
             quote: "USD".to_owned(),
             status: "online".to_owned(),
         };
-        let inst = Instrument::try_from(info).unwrap();
+        let inst = Instrument::from(info);
         // base = "BROKEN" (first segment), quote = fallback "USD"
         assert_eq!(inst.base, Some("BROKEN".to_owned()));
         assert_eq!(inst.quote, "USD");
@@ -792,5 +803,47 @@ mod tests {
         let bar = Bar::from(ohlc);
         assert_eq!(bar.n_trades, None);
         assert_eq!(bar.open_ts_exchange, 100);
+    }
+
+    #[tokio::test]
+    async fn kraken_http_paths_parse_bars_fetch_metadata_and_list_markets() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ohlc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "error": [],
+                "result": {
+                    "XXBTZUSD": [[1000, "1.0", "2.0", "0.5", "1.5", "1.4", "10.0", 7]],
+                    "last": 1000
+                }
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/pairs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "error": [],
+                "result": {
+                    "XXBTZUSD": {
+                        "wsname": "XBT/USD",
+                        "altname": "XBTUSD",
+                        "base": "XBT",
+                        "quote": "USD",
+                        "status": "online"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+        let provider = mocked_kraken(&server);
+
+        let bars = provider.get_bars("XBTUSD", Interval::OneMinute, Some(1)).await.unwrap();
+        let instrument =
+            provider.fetch_instrument(&"BTC-USD".to_owned(), InstrumentType::Crypto).await.unwrap();
+        let listed = provider.list_instruments(InstrumentType::Crypto, None, 10).await.unwrap();
+
+        assert_eq!(bars[0].count, Some(7));
+        assert_eq!(instrument.symbol, "BTC-USD");
+        assert_eq!(listed.len(), 1);
     }
 }

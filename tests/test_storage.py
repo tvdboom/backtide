@@ -6,8 +6,10 @@ Description: Unit tests for the storage interface functions.
 """
 
 import pandas as pd
+import pytest
 
 from backtide.storage import (
+    delete_experiment,
     delete_symbols,
     query_bars,
     query_bars_summary,
@@ -144,6 +146,28 @@ class TestDeleteSymbols:
             int,
         )
 
+    def test_list_and_series_modes(self):
+        """List and explicit-series deletion accept all supported input shapes."""
+        assert delete_symbols([_MISSING_SYMBOL], interval="1d", provider="yahoo") == 0
+        assert delete_symbols(series=[(_MISSING_SYMBOL, "1d", "yahoo")]) == 0
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({}, "Either `symbol` or `series`"),
+            ({"series": [(_MISSING_SYMBOL, "invalid", "yahoo")]}, "invalid interval"),
+            ({"series": [(_MISSING_SYMBOL, "1d", "invalid")]}, "invalid provider"),
+        ],
+    )
+    def test_invalid_delete_requests_are_rejected(self, kwargs, message):
+        """Deletion requires a target and validates explicit series metadata."""
+        with pytest.raises(ValueError, match=message):
+            delete_symbols(**kwargs)
+
+    def test_delete_missing_experiment_returns_zero(self):
+        """Deleting an unknown experiment returns zero."""
+        assert delete_experiment("__missing__") == 0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # query_experiments / query_strategy_runs
@@ -181,6 +205,11 @@ class TestQueryExperiments:
     def test_limit_accepted(self):
         """The limit kwarg is accepted."""
         assert isinstance(query_experiments(limit=10), pd.DataFrame)
+
+    def test_single_and_multiple_id_filters_are_accepted(self):
+        """Experiment filtering accepts a single id or a list of ids."""
+        assert len(query_experiments(_MISSING_SYMBOL)) == 0
+        assert len(query_experiments([_MISSING_SYMBOL])) == 0
 
 
 class TestQueryStrategyRuns:

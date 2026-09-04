@@ -404,18 +404,3 @@ impl Country {
 }
 
 impl_python_enum_variants!(Country);
-
-impl<'a, 'py> FromPyObject<'a, 'py> for Country {
-    type Error = PyErr;
-
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        // First try a direct downcast
-        if let Ok(bound) = obj.cast::<Country>() {
-            return Ok(*bound.borrow());
-        }
-
-        // Else parse from string
-        let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown country {s:?}.")))
-    }
-}

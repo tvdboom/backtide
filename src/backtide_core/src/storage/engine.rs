@@ -523,4 +523,33 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].exchange, "NASDAQ");
     }
+
+    #[tokio::test]
+    async fn stub_provider_implements_every_data_provider_operation() {
+        let provider = StubProvider;
+        assert!(provider
+            .fetch_instrument(&"AAPL".to_owned(), InstrumentType::Stocks)
+            .await
+            .is_err());
+        let instrument = Instrument {
+            symbol: "AAPL".into(),
+            name: "Apple Inc.".into(),
+            base: None,
+            quote: "USD".into(),
+            instrument_type: InstrumentType::Stocks,
+            exchange: "NASDAQ".into(),
+            provider: Provider::Yahoo,
+        };
+        assert_eq!(provider.fetch_range(instrument, Interval::OneDay).await.unwrap(), (0, 0));
+        assert!(provider
+            .list_instruments(InstrumentType::Stocks, None, 1)
+            .await
+            .unwrap()
+            .is_empty());
+        let download = provider
+            .download_bars("AAPL", InstrumentType::Stocks, Interval::OneDay, 0, 1)
+            .await
+            .unwrap();
+        assert!(download.bars.is_empty() && download.dividends.is_empty());
+    }
 }

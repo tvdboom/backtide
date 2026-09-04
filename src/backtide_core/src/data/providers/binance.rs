@@ -10,7 +10,7 @@ use crate::data::utils::canonical_symbol;
 use crate::utils::http::{HttpClient, HttpClientConfig, HttpError};
 use async_trait::async_trait;
 use serde::Deserialize;
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
 /// Binance spot-market data provider.
 ///
@@ -20,6 +20,12 @@ use tracing::{debug, info, instrument};
 pub struct Binance {
     /// Shared async HTTP client.
     client: HttpClient,
+
+    /// Exchange-information endpoint.
+    exchange_info_url: String,
+
+    /// Candlestick endpoint.
+    klines_url: String,
 }
 
 impl Binance {
@@ -45,6 +51,8 @@ impl Binance {
         info!("Binance provider initialized.");
         Ok(Self {
             client,
+            exchange_info_url: Self::EXCHANGE_INFO_URL.to_owned(),
+            klines_url: Self::KLINES_URL.to_owned(),
         })
     }
 
@@ -104,7 +112,7 @@ impl Binance {
 
         let params_ref: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
-        let resp = self.client.get(Self::KLINES_URL, Some(&params_ref)).await?;
+        let resp = self.client.get(&self.klines_url, Some(&params_ref)).await?;
         let parsed = HttpClient::json::<BinanceResponse<Vec<serde_json::Value>>>(resp).await?;
         let rows = Self::unwrap_response(parsed)?;
 
@@ -135,7 +143,7 @@ impl DataProvider for Binance {
 
         let resp = self
             .client
-            .get(Self::EXCHANGE_INFO_URL, Some(&[("symbol", &binance_symbol)]))
+            .get(&self.exchange_info_url, Some(&[("symbol", &binance_symbol)]))
             .await
             .map_err(|_| DataError::SymbolNotFound(symbol.to_owned()))?;
 
@@ -148,7 +156,7 @@ impl DataProvider for Binance {
             .next()
             .ok_or_else(|| DataError::SymbolNotFound(symbol.to_owned()))?;
 
-        Ok(Instrument::try_from(info)?)
+        Ok(Instrument::from(info))
     }
 
     /// Returns the usable download range for an instrument at a given interval.
@@ -193,7 +201,7 @@ impl DataProvider for Binance {
         Self::check_instrument_type(instrument_type)?;
 
         let resp =
-            self.client.get(Self::EXCHANGE_INFO_URL, Some(&[("permissions", "SPOT")])).await?;
+            self.client.get(&self.exchange_info_url, Some(&[("permissions", "SPOT")])).await?;
         let parsed = HttpClient::json::<BinanceResponse<ExchangeInfo>>(resp).await?;
         let info = Self::unwrap_response(parsed)?;
 
@@ -201,14 +209,7 @@ impl DataProvider for Binance {
             .symbols
             .into_iter()
             .filter(|s| s.status == "TRADING")
-            .filter_map(|info| {
-                Instrument::try_from(info)
-                    .map_err(|e| {
-                        debug!("Binance list_instruments error: {e}");
-                        e
-                    })
-                    .ok()
-            })
+            .map(Instrument::from)
             .take(limit)
             .collect();
 
@@ -317,16 +318,14 @@ struct SymbolInfo {
     quote_asset: String,
 }
 
-impl TryFrom<SymbolInfo> for Instrument {
-    type Error = DataError;
-
-    fn try_from(info: SymbolInfo) -> DataResult<Self> {
+impl From<SymbolInfo> for Instrument {
+    fn from(info: SymbolInfo) -> Self {
         let base = info.base_asset;
         let quote = info.quote_asset;
 
         let symbol = canonical_symbol(&info.symbol, &Some(base.clone()), &quote);
 
-        Ok(Instrument {
+        Instrument {
             symbol: symbol.clone(),
             name: symbol,
             base: Some(base),
@@ -334,7 +333,7 @@ impl TryFrom<SymbolInfo> for Instrument {
             instrument_type: InstrumentType::Crypto,
             exchange: "BINANCE".to_owned(), // Binance has no MIC code.
             provider: Provider::Binance,
-        })
+        }
     }
 }
 
@@ -451,6 +450,16 @@ mod tests {
     use super::*;
     use rstest::rstest;
     use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn mocked_binance(server: &MockServer) -> Binance {
+        Binance {
+            client: HttpClient::new().unwrap(),
+            exchange_info_url: format!("{}/exchangeInfo", server.uri()),
+            klines_url: format!("{}/klines", server.uri()),
+        }
+    }
 
     // ── parse_canonical_symbol ───────────────────────────────────────────
 
@@ -559,7 +568,7 @@ mod tests {
             base_asset: "BTC".to_owned(),
             quote_asset: "USDT".to_owned(),
         };
-        let inst = Instrument::try_from(info).unwrap();
+        let inst = Instrument::from(info);
         assert_eq!(inst.symbol, "BTC-USDT");
         assert_eq!(inst.base, Some("BTC".to_owned()));
         assert_eq!(inst.quote, "USDT");
@@ -572,6 +581,59 @@ mod tests {
     #[tokio::test]
     async fn binance_new_initialises_client() {
         let _b = Binance::new().await.expect("Binance::new should succeed");
+    }
+
+    #[tokio::test]
+    async fn binance_http_paths_parse_bars_fetch_metadata_and_list_markets() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/klines"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([[
+                1_000_000i64,
+                "1.0",
+                "2.0",
+                "0.5",
+                "1.5",
+                "10.0",
+                2_000_000i64,
+                "0",
+                7
+            ]])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/exchangeInfo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "symbols": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "status": "TRADING",
+                        "baseAsset": "BTC",
+                        "quoteAsset": "USDT"
+                    },
+                    {
+                        "symbol": "ETHUSDT",
+                        "status": "BREAK",
+                        "baseAsset": "ETH",
+                        "quoteAsset": "USDT"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let provider = mocked_binance(&server);
+
+        let bars =
+            provider.get_bars("BTCUSDT", Interval::OneMinute, Some(1), Some(2), 10).await.unwrap();
+        let instrument = provider
+            .fetch_instrument(&"BTC-USDT".to_owned(), InstrumentType::Crypto)
+            .await
+            .unwrap();
+        let listed = provider.list_instruments(InstrumentType::Crypto, None, 10).await.unwrap();
+
+        assert_eq!(bars[0].n_trades, Some(7));
+        assert_eq!(instrument.symbol, "BTC-USDT");
+        assert_eq!(listed.len(), 1);
     }
 
     // ── check_instrument_type error message ─────────────────────────────

@@ -29,6 +29,15 @@ pub struct YahooFinance {
 
     /// CSRF crumb token tied to the active session cookie.
     crumb: String,
+
+    /// Custom screener endpoint.
+    screener_url: String,
+
+    /// Predefined screener endpoint.
+    predefined_screener_url: String,
+
+    /// Chart endpoint prefix.
+    chart_url: String,
 }
 
 impl YahooFinance {
@@ -67,12 +76,15 @@ impl YahooFinance {
             request_timeout: Duration::from_secs(30),
             min_request_interval: Some(Duration::from_millis(20)),
         })?;
-        let crumb = Self::fetch_crumb(&client).await?;
+        let crumb = Self::fetch_crumb(&client, Self::COOKIE_SEED_URL, Self::CRUMB_URL).await?;
 
         info!("Yahoo Finance session established");
         Ok(Self {
             client,
             crumb,
+            screener_url: Self::SCREENER_URL.to_owned(),
+            predefined_screener_url: Self::PREDEFINED_SCREENER_URL.to_owned(),
+            chart_url: Self::CHART_URL.to_owned(),
         })
     }
 
@@ -84,12 +96,16 @@ impl YahooFinance {
     ///
     /// `fc.yahoo.com` commonly returns 404 but still sets the required
     /// session cookie, so its status code is intentionally ignored.
-    async fn fetch_crumb(client: &HttpClient) -> DataResult<String> {
+    async fn fetch_crumb(
+        client: &HttpClient,
+        cookie_seed_url: &str,
+        crumb_url: &str,
+    ) -> DataResult<String> {
         debug!("Seeding Yahoo session cookie");
-        let _ = client.inner.get(Self::COOKIE_SEED_URL).send().await;
+        let _ = client.inner.get(cookie_seed_url).send().await;
 
         let crumb_resp = client
-            .get(Self::CRUMB_URL, None)
+            .get(crumb_url, None)
             .await
             .map_err(|e| DataError::Auth(format!("Crumb request failed: {e}")))?;
 
@@ -119,7 +135,7 @@ impl YahooFinance {
             let resp = self
                 .client
                 .get(
-                    Self::PREDEFINED_SCREENER_URL,
+                    &self.predefined_screener_url,
                     Some(&[
                         ("scrIds", scr_id),
                         ("count ", &batch.to_string()),
@@ -176,7 +192,7 @@ impl YahooFinance {
                 let resp = self
                     .client
                     .post(
-                        Self::SCREENER_URL,
+                        &self.screener_url,
                         &[("crumb", &self.crumb), ("lang", "en-US"), ("region", "US")],
                         &payload,
                     )
@@ -316,7 +332,7 @@ impl YahooFinance {
 
         let resp = self
             .client
-            .get(&format!("{}/{}", Self::CHART_URL, yahoo_symbol), Some(&param_refs))
+            .get(&format!("{}/{}", self.chart_url, yahoo_symbol), Some(&param_refs))
             .await?;
 
         let parsed = HttpClient::json::<ChartResponse>(resp).await?;
@@ -426,7 +442,7 @@ impl DataProvider for YahooFinance {
         let resp = self
             .client
             .get(
-                &format!("{}/{symbol}", Self::CHART_URL),
+                &format!("{}/{symbol}", self.chart_url),
                 Some(&[("range", "1d"), ("interval", "1d"), ("crumb", &self.crumb)]),
             )
             .await
@@ -477,7 +493,7 @@ impl DataProvider for YahooFinance {
         let resp = self
             .client
             .get(
-                &format!("{}/{}", Self::CHART_URL, symbol),
+                &format!("{}/{}", self.chart_url, symbol),
                 Some(&[
                     ("period1", (now - lookback).to_string().as_str()),
                     ("period2", now.to_string().as_str()),
@@ -584,6 +600,10 @@ impl DataProvider for YahooFinance {
                     ARCX, XAMS, XASX, XETR, XHKG, XJPX, XKRX, XLON, XMAD, XNAS, XNSE, XNYS, XPAR,
                     XSES, XSHG, XSHE, XSWX,
                 ]);
+
+                if exchanges.is_empty() {
+                    return Ok(Vec::new());
+                }
 
                 let limit_per_ex = limit / exchanges.len();
                 let tasks: Vec<_> = exchanges
@@ -981,6 +1001,18 @@ struct ChartDividend {
 mod tests {
     use super::*;
     use rstest::rstest;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn mocked_yahoo(server: &MockServer) -> YahooFinance {
+        YahooFinance {
+            client: HttpClient::new().unwrap(),
+            crumb: "test-crumb".to_owned(),
+            screener_url: format!("{}/screener", server.uri()),
+            predefined_screener_url: format!("{}/predefined", server.uri()),
+            chart_url: format!("{}/chart", server.uri()),
+        }
+    }
 
     // ── parse_instrument_type ───────────────────────────────────────────
 
@@ -1350,6 +1382,9 @@ mod tests {
             })
             .unwrap(),
             crumb: "test".to_owned(),
+            screener_url: YahooFinance::SCREENER_URL.to_owned(),
+            predefined_screener_url: YahooFinance::PREDEFINED_SCREENER_URL.to_owned(),
+            chart_url: YahooFinance::CHART_URL.to_owned(),
         };
         let instruments = yf.list_instruments(InstrumentType::Forex, None, 1).await.unwrap();
         assert!(!instruments.is_empty());
@@ -1436,5 +1471,179 @@ mod tests {
         assert!(cq.low.is_empty());
         assert!(cq.close.is_empty());
         assert!(cq.volume.is_empty());
+    }
+
+    #[tokio::test]
+    async fn yahoo_http_paths_cover_crumb_screeners_chart_and_empty_exchanges() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/seed"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/crumb"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("crumb"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/empty-crumb"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(""))
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let crumb = YahooFinance::fetch_crumb(
+            &client,
+            &format!("{}/seed", server.uri()),
+            &format!("{}/crumb", server.uri()),
+        )
+        .await
+        .unwrap();
+        let empty_crumb = YahooFinance::fetch_crumb(
+            &client,
+            &format!("{}/seed", server.uri()),
+            &format!("{}/empty-crumb", server.uri()),
+        )
+        .await;
+        assert_eq!(crumb, "crumb");
+        assert!(matches!(empty_crumb, Err(DataError::Auth(_))));
+
+        let quotes = json!({
+            "finance": {
+                "result": [{
+                    "quotes": [
+                        {
+                            "symbol": "AAPL",
+                            "shortName": "Apple",
+                            "currency": "USD",
+                            "quoteType": "EQUITY",
+                            "exchange": "NMS"
+                        },
+                        {
+                            "symbol": "BROKEN",
+                            "quoteType": "EQUITY",
+                            "exchange": "NMS"
+                        }
+                    ]
+                }]
+            }
+        });
+        Mock::given(method("POST"))
+            .and(path("/screener"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(quotes.clone()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/predefined"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(quotes))
+            .mount(&server)
+            .await;
+
+        let chart = json!({
+            "chart": {
+                "result": [{
+                    "meta": {
+                        "symbol": "AAPL",
+                        "shortName": "Apple",
+                        "currency": "USD",
+                        "instrumentType": "EQUITY",
+                        "exchangeName": "NMS",
+                        "regularMarketTime": 200
+                    },
+                    "timestamp": [-1, 100, 200],
+                    "indicators": {
+                        "quote": [{
+                            "open": [9.0, 10.0, 11.0],
+                            "high": [10.0, 12.0, 13.0],
+                            "low": [8.0, 9.0, 10.0],
+                            "close": [9.5, 11.0, 12.0],
+                            "volume": [1.0, 2.0, 3.0]
+                        }],
+                        "adjclose": [{"adjclose": [9.4, 10.5, null]}]
+                    },
+                    "events": {
+                        "dividends": {
+                            "150": {"date": 150, "amount": 0.25},
+                            "999": {"date": 999, "amount": 1.0}
+                        }
+                    }
+                }],
+                "error": null
+            }
+        });
+        Mock::given(method("GET"))
+            .and(path("/chart/AAPL"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(chart))
+            .mount(&server)
+            .await;
+
+        let provider = mocked_yahoo(&server);
+        let instrument =
+            provider.fetch_instrument(&"AAPL".to_owned(), InstrumentType::Stocks).await.unwrap();
+        let range = provider.fetch_range(instrument.clone(), Interval::OneDay).await.unwrap();
+        let download = provider
+            .download_bars("AAPL", InstrumentType::Stocks, Interval::OneDay, 0, 300)
+            .await
+            .unwrap();
+        let stocks = provider
+            .list_instruments(InstrumentType::Stocks, Some(vec![Exchange::XNAS]), 100)
+            .await
+            .unwrap();
+        let crypto = provider.list_instruments(InstrumentType::Crypto, None, 300).await.unwrap();
+        let empty =
+            provider.list_instruments(InstrumentType::Stocks, Some(Vec::new()), 100).await.unwrap();
+
+        assert_eq!(instrument.symbol, "AAPL");
+        assert_eq!(range.1, 0);
+        assert_eq!(download.bars.len(), 2);
+        assert_eq!(download.bars[1].adj_close, 12.0);
+        assert_eq!(download.dividends.len(), 1);
+        assert_eq!(stocks.len(), 1);
+        assert_eq!(crypto.len(), 3);
+        assert!(empty.is_empty());
+    }
+
+    #[tokio::test]
+    async fn yahoo_chart_errors_are_reported() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/chart/ERR"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "chart": {
+                    "result": [],
+                    "error": {"code": "Bad", "description": null}
+                }
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/chart/NONE"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "chart": {
+                    "result": [{
+                        "meta": {"symbol": "NONE"},
+                        "timestamp": [100]
+                    }],
+                    "error": null
+                }
+            })))
+            .mount(&server)
+            .await;
+        let provider = mocked_yahoo(&server);
+
+        let chart_error = provider
+            .download_chart_chunk("ERR", InstrumentType::Stocks, "1d", (0, 200), (0, 200))
+            .await;
+        let missing_indicators = provider
+            .download_chart_chunk("NONE", InstrumentType::Stocks, "1d", (0, 200), (0, 200))
+            .await;
+
+        assert!(
+            matches!(chart_error, Err(DataError::UnexpectedResponse(message)) if message == "unknown chart error")
+        );
+        assert!(
+            matches!(missing_indicators, Err(DataError::UnexpectedResponse(message)) if message.contains("indicators"))
+        );
     }
 }

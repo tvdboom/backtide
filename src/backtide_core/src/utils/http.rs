@@ -433,17 +433,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_paginate_zero_page_size_returns_without_fetching() {
-        let mut called = false;
-
-        let result = paginate::<i32, (), _, _>(10, 0, |_, _| {
-            called = true;
-            async { Ok(vec![1]) }
-        })
-        .await
-        .unwrap();
+        let result =
+            paginate::<i32, (), _, _>(10, 0, |_, _| async { unreachable!() }).await.unwrap();
 
         assert!(result.is_empty());
-        assert!(!called);
     }
 
     #[tokio::test]
@@ -636,6 +629,56 @@ mod tests {
         let client = HttpClient::with_config(config).unwrap();
         let result = client.get(&format!("{}/fail", server.uri()), None).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_http_rate_limit_honors_zero_retry_after_and_exhausts() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/limited"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
+            .expect(HttpClient::MAX_RETRIES as u64)
+            .mount(&server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let result = client.get(&format!("{}/limited", server.uri()), None).await;
+
+        assert!(
+            matches!(result, Err(HttpError::Status { status, .. }) if status == StatusCode::TOO_MANY_REQUESTS)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_http_access_denied_retries_and_exhausts() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/denied"))
+            .respond_with(ResponseTemplate::new(403))
+            .expect(HttpClient::MAX_RETRIES as u64)
+            .mount(&server)
+            .await;
+
+        let result =
+            HttpClient::new().unwrap().get(&format!("{}/denied", server.uri()), None).await;
+
+        assert!(matches!(
+            result,
+            Err(HttpError::Status { status, .. }) if status == StatusCode::FORBIDDEN
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_http_transport_errors_are_retried_and_reported() {
+        let result = HttpClient::new().unwrap().get("http://127.0.0.1:9/unreachable", None).await;
+
+        assert!(matches!(result, Err(HttpError::Exhausted { .. })));
     }
 
     #[tokio::test]

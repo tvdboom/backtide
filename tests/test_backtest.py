@@ -117,6 +117,19 @@ class TestExchangeExpConfig:
         c = ExchangeExpConfig()
         assert isinstance(c.to_dict(), dict)
 
+    def test_commission_type_accepts_enum_and_string_inputs(self):
+        """Commission modes extract both enum instances and validated strings."""
+        assert (
+            ExchangeExpConfig(commission_type=CommissionType.Fixed).commission_type
+            == CommissionType.Fixed
+        )
+        assert (
+            ExchangeExpConfig(commission_type="percentage").commission_type
+            == CommissionType.Percentage
+        )
+        with pytest.raises(ValueError, match="Unknown commission type"):
+            ExchangeExpConfig(commission_type="invalid")
+
     def test_margin_defaults(self):
         """Margin / leverage / short-selling defaults are sensible."""
         c = ExchangeExpConfig()
@@ -243,6 +256,7 @@ class TestExperimentConfig:
         """Test equality comparison."""
         assert ExperimentConfig() == ExperimentConfig()
         assert ExperimentConfig(general=GeneralExpConfig(name="a")) != ExperimentConfig()
+        assert (ExperimentConfig() < ExperimentConfig()) is False
 
     def test_repr(self):
         """Test repr output."""
@@ -312,7 +326,7 @@ def test_enum_get_default(cls):
         OrderType,
     ],
 )
-def test_every_enum_variant_supports_its_public_contract(cls: type) -> None:
+def test_every_enum_variant_supports_its_public_contract(cls: Any) -> None:
     """Every variant can be inspected and round-tripped through pickle."""
     variants = cls.variants()
 
@@ -480,7 +494,8 @@ class TestResultModels:
         class RoundTripStrategy(BaseStrategy):
             """Open one share and close it on the following strategy tick."""
 
-            def evaluate(self, _data, portfolio, _state, _indicators):
+            def evaluate(self, data, portfolio, state, indicators):
+                del data, state, indicators
                 quantity = portfolio.positions.get("AAPL", 0.0)
                 if quantity > 0.0:
                     return [Order("AAPL", -quantity)]

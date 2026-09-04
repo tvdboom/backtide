@@ -8,6 +8,7 @@ Description: Unit tests for the CLI commands.
 import json
 import runpy
 from types import SimpleNamespace
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 import warnings
 
@@ -671,6 +672,172 @@ class TestStartLiveSessionCommand:
         assert events[0]["market"]["symbol"] == "BTC-USD"
         assert events[0]["strategies"]["Monitor"]["snapshot"]["equity"] == 101.25
         manager.delete_session("0123456789abcdef")
+        mock_logging.assert_called_once_with("warn")
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    def test_live_session_waits_for_conversion_legs_and_loads_metrics(
+        self,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Non-base quotes initialize conversion feeds before processing targets."""
+        mock_cfg.return_value = MagicMock(
+            general=MagicMock(log_level="warn"),
+            data=SimpleNamespace(storage_path=tmp_path),
+        )
+        leg = SimpleNamespace(
+            symbol="ETH-EUR",
+            interval="1m",
+            close=2_000.0,
+            close_ts=100,
+        )
+        target = SimpleNamespace(
+            symbol="AAVE-ETH",
+            interval="1m",
+            close=0.05,
+            close_ts=101,
+        )
+
+        class Feed:
+            created: ClassVar[list[Any]] = []
+
+            def __init__(self, _provider, symbols, _interval, *, include_partial):
+                assert include_partial
+                self.symbols = symbols
+                self.calls = 0
+                self.canceled = False
+                Feed.created.append(self)
+
+            def collect(self, **_kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return [leg, target]
+                raise KeyboardInterrupt
+
+            def cancel(self):
+                self.canceled = True
+
+        class Session:
+            rates: ClassVar[list[tuple[str, str, float, int]]] = []
+
+            def __init__(self, config, strategy):
+                assert config == "session-config"
+                assert strategy is None
+
+            def set_exchange_rate(self, base, quote, rate, timestamp):
+                Session.rates.append((base, quote, rate, timestamp))
+
+            def on_bar(self, market):
+                assert market is target
+                return SimpleNamespace(
+                    processed=False,
+                    snapshot=SimpleNamespace(equity=100.0),
+                    fills=[],
+                )
+
+            def snapshot(self):
+                return SimpleNamespace(processed_bars=0, equity=100.0)
+
+        cfg_path = tmp_path / "conversion.json"
+        cfg_path.write_text(
+            json.dumps(
+                {
+                    "provider": "kraken",
+                    "symbols": ["AAVE-ETH"],
+                    "session": {"base_currency": "EUR", "metrics": ["sharpe"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        events = []
+        monkeypatch.setattr(cli_module, "LiveMarketFeed", Feed)
+        monkeypatch.setattr(cli_module, "SessionConfig", lambda **_kwargs: "session-config")
+        monkeypatch.setattr(cli_module, "Session", Session)
+        monkeypatch.setattr(cli_module, "_load_session_metrics", lambda values, _cfg: values)
+        monkeypatch.setattr(
+            cli_module,
+            "_live_currency_plan",
+            lambda *_args: (
+                {"AAVE-ETH": "ETH"},
+                {"ETH-EUR": ("ETH", "EUR")},
+            ),
+        )
+        monkeypatch.setattr(cli_module, "_write_cli_live_manifest", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr("backtide.live_history.new_session_id", lambda: "session")
+        monkeypatch.setattr("backtide.live_history.utc_now", lambda: "now")
+        monkeypatch.setattr(
+            "backtide.live_history.serialize_combined_update",
+            lambda market, _updates: {"market": {"symbol": market.symbol}},
+        )
+        monkeypatch.setattr(
+            "backtide.live_history.append_event",
+            lambda session_id, update: events.append((session_id, update)),
+        )
+
+        result = runner.invoke(start_live_session, [str(cfg_path)])
+
+        assert result.exit_code == 0, result.output
+        assert Feed.created[0].canceled
+        assert Feed.created[1].symbols == ["AAVE-ETH", "ETH-EUR"]
+        assert Session.rates == [("ETH", "EUR", 2_000.0, 100)]
+        assert events[0][1]["exchange_rates"]["ETH-EUR"]["rate"] == 2_000.0
+        mock_logging.assert_called_once_with("warn")
+
+    @patch("backtide.cli.get_config")
+    @patch("backtide.cli.init_logging")
+    def test_live_session_preserves_runtime_error_when_error_manifest_fails(
+        self,
+        mock_logging,
+        mock_cfg,
+        runner,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Best-effort error persistence never replaces the original feed failure."""
+        mock_cfg.return_value = MagicMock(
+            general=MagicMock(log_level="warn"),
+            data=SimpleNamespace(storage_path=tmp_path),
+        )
+
+        class Feed:
+            def __init__(self, *_args, **_kwargs):
+                self.canceled = False
+
+            def collect(self, **_kwargs):
+                raise RuntimeError("feed failed")
+
+            def cancel(self):
+                self.canceled = True
+
+        session = SimpleNamespace(snapshot=lambda: SimpleNamespace(equity=1.0))
+        writes = []
+
+        def write_manifest(*_args, **kwargs):
+            writes.append(kwargs["status"])
+            if kwargs["status"] == "error":
+                raise OSError("disk failed")
+
+        cfg_path = tmp_path / "failure.json"
+        cfg_path.write_text(
+            json.dumps({"provider": "kraken", "symbols": ["BTC-USD"]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(cli_module, "LiveMarketFeed", Feed)
+        monkeypatch.setattr(cli_module, "SessionConfig", lambda **_kwargs: object())
+        monkeypatch.setattr(cli_module, "Session", lambda *_args: session)
+        monkeypatch.setattr(cli_module, "_write_cli_live_manifest", write_manifest)
+        monkeypatch.setattr("backtide.live_history.new_session_id", lambda: "session")
+        monkeypatch.setattr("backtide.live_history.utc_now", lambda: "now")
+
+        result = runner.invoke(start_live_session, [str(cfg_path)])
+
+        assert result.exit_code == 1
+        assert "feed failed" in result.output
+        assert writes == ["running", "error"]
         mock_logging.assert_called_once_with("warn")
 
     @patch("backtide.cli.get_config")

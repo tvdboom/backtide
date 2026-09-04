@@ -683,9 +683,6 @@ impl Strategy for DoubleTop {
 
             let p1 = peaks[peaks.len() - 2];
             let p2 = peaks[peaks.len() - 1];
-            if p2.0 <= p1.0 + 1 {
-                continue;
-            }
             let resistance = p1.1.max(p2.1);
             let neckline = win[p1.0..=p2.0].iter().cloned().fold(f64::INFINITY, f64::min);
 
@@ -3090,5 +3087,156 @@ mod tests {
             )
             .is_none());
         });
+    }
+
+    #[test]
+    fn python_constructors_and_metadata_cover_every_builtin_strategy() -> PyResult<()> {
+        Python::attach(|py| {
+            macro_rules! construct {
+                ($ty:ty) => {{
+                    let class = py.get_type::<$ty>();
+                    let instance = class.call0()?;
+                    let name = class.getattr("name")?;
+                    let name = if name.is_callable() {
+                        name.call0()?
+                    } else {
+                        name
+                    };
+                    let description = class.getattr("description")?;
+                    let description = if description.is_callable() {
+                        description.call0()?
+                    } else {
+                        description
+                    };
+                    assert!(!name.extract::<String>()?.is_empty());
+                    assert!(!description.extract::<String>()?.is_empty());
+                    assert!(instance.call_method0("required_indicators")?.len()? < 10);
+                }};
+            }
+
+            construct!(AdaptiveRsi);
+            construct!(AlphaRsiPro);
+            construct!(BollingerMeanReversion);
+            construct!(BuyAndHold);
+            construct!(DoubleTop);
+            construct!(HybridAlphaRsi);
+            construct!(Macd);
+            construct!(Momentum);
+            construct!(MultiBollingerRotation);
+            construct!(RiskAverse);
+            construct!(Roc);
+            construct!(RocRotation);
+            construct!(Rsi);
+            construct!(Rsrs);
+            construct!(RsrsRotation);
+            construct!(SmaCrossover);
+            construct!(SmaNaive);
+            construct!(TripleRsiRotation);
+            construct!(TurtleTrading);
+            construct!(Vcp);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn strategy_edge_inputs_skip_incomplete_or_non_finite_signals() {
+        let empty = IndicatorData::new();
+
+        let adaptive = AdaptiveRsi::new(2, 3);
+        let short_name = indicator_deterministic_name("RSI", &[fmt_arg(2)]);
+        let long_name = indicator_deterministic_name("RSI", &[fmt_arg(3)]);
+        assert!(evaluate(&adaptive, &[100.0; 4], 0.0, &indicator(short_name.clone(), &[20.0]),)
+            .is_empty());
+        let flat_rsi =
+            indicators(&[(short_name, "AAPL", vec![80.0]), (long_name, "AAPL", vec![20.0])]);
+        assert_eq!(evaluate(&adaptive, &[100.0; 4], 0.0, &flat_rsi).len(), 1);
+
+        let alpha = AlphaRsiPro::new(2, 2);
+        assert!(evaluate(&alpha, &[0.0, 0.0, 1.0], 0.0, &empty).is_empty());
+        assert!(evaluate(
+            &alpha,
+            &[0.0, 0.0, 1.0],
+            0.0,
+            &indicator(indicator_deterministic_name("RSI", &[fmt_arg(2)]), &[40.0]),
+        )
+        .is_empty());
+
+        let bollinger = BollingerMeanReversion::new(2, 1.0);
+        let bb_name = indicator_deterministic_name("BB", &[fmt_arg(2), fmt_arg(1.0)]);
+        assert!(evaluate(&bollinger, &[100.0], 0.0, &indicator(bb_name.clone(), &[1.0, 2.0]))
+            .is_empty());
+        assert!(evaluate(&bollinger, &[100.0], 0.0, &indicator(bb_name, &[f64::NAN, 2.0, 1.0]),)
+            .is_empty());
+
+        let macd = Macd::new(2, 3, 2);
+        let macd_name = indicator_deterministic_name("MACD", &[fmt_arg(2), fmt_arg(3), fmt_arg(2)]);
+        assert!(evaluate(&macd, &[100.0], 0.0, &indicator(macd_name.clone(), &[1.0])).is_empty());
+        assert!(evaluate(&macd, &[100.0], 0.0, &indicator(macd_name, &[f64::NAN, 1.0])).is_empty());
+
+        let momentum = Momentum::new(3, 2);
+        assert!(evaluate(&momentum, &[1.0, 2.0, 3.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&momentum, &[1.0, 2.0, 3.0, 4.0], 0.0, &empty).is_empty());
+
+        let risk = RiskAverse::new(2, 2);
+        assert!(evaluate(&risk, &[1.0, 2.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&risk, &[1.0, 2.0, 0.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&risk, &[1.0, 2.0, 3.0], 0.0, &empty).is_empty());
+
+        assert!(evaluate(&Roc::new(3), &[1.0, 2.0, 3.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&Roc::new(2), &[0.0, 1.0, 2.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&Rsrs::new(4), &[1.0, 2.0, 3.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&Rsrs::new(3), &[1.0, 1.0, 1.0], 0.0, &empty).is_empty());
+
+        let crossover = SmaCrossover::new(2, 3);
+        let fast = indicator_deterministic_name("SMA", &[fmt_arg(2)]);
+        assert!(evaluate(&crossover, &[100.0], 0.0, &indicator(fast, &[101.0])).is_empty());
+        assert!(evaluate(&SmaNaive::new(2), &[], 0.0, &empty).is_empty());
+        assert!(evaluate(&SmaNaive::new(2), &[100.0], 0.0, &empty).is_empty());
+
+        let rsi = Rsi::new(2, 3, 1.0);
+        let rsi_name = indicator_deterministic_name("RSI", &[fmt_arg(2)]);
+        assert!(evaluate(&rsi, &[100.0], 0.0, &indicator(rsi_name.clone(), &[20.0])).is_empty());
+        assert!(evaluate(&rsi, &[100.0], 0.0, &indicator(rsi_name, &[20.0])).is_empty());
+    }
+
+    #[test]
+    fn rotation_pattern_and_breakout_strategies_handle_invalid_windows() {
+        let empty = IndicatorData::new();
+
+        let targeted = BuyAndHold::new(Some("AAPL".to_owned()));
+        assert!(evaluate(&targeted, &[], 0.0, &empty).is_empty());
+        assert!(evaluate(&targeted, &[f64::NAN], 0.0, &empty).is_empty());
+
+        assert!(evaluate(&DoubleTop::new(6), &[1.0, 2.0, 3.0], 0.0, &empty).is_empty());
+        assert!(evaluate(
+            &DoubleTop::new(6),
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            0.0,
+            &empty,
+        )
+        .is_empty());
+
+        let hybrid = HybridAlphaRsi::new(2, 3, 2);
+        let short_rsi = indicator_deterministic_name("RSI", &[fmt_arg(2)]);
+        let long_rsi = indicator_deterministic_name("RSI", &[fmt_arg(3)]);
+        assert!(evaluate(&hybrid, &[1.0, 2.0, 3.0], 0.0, &indicator(short_rsi, &[20.0])).is_empty());
+        let both = indicators(&[
+            (indicator_deterministic_name("RSI", &[fmt_arg(2)]), "AAPL", vec![20.0]),
+            (long_rsi, "AAPL", vec![20.0]),
+        ]);
+        assert!(evaluate(&hybrid, &[1.0, 2.0], 0.0, &both).is_empty());
+
+        assert!(evaluate(&RocRotation::new(2, 1, 1), &[1.0, 2.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&RocRotation::new(2, 1, 1), &[0.0, 1.0, 2.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&RsrsRotation::new(4, 1, 1), &[1.0, 2.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&RsrsRotation::new(3, 1, 1), &[f64::NAN; 3], 0.0, &empty).is_empty());
+
+        let turtle = TurtleTrading::new(3, 2, 2);
+        assert!(evaluate(&turtle, &[1.0, 2.0, 0.0], 0.0, &empty).is_empty());
+        assert!(evaluate(&turtle, &[1.0, 2.0, 3.0], 0.0, &empty).is_empty());
+
+        assert!(
+            evaluate(&Vcp::new(6, 3), &[1.0, 2.0, 1.0, 1.0, 10.0, 1.0], 0.0, &empty,).is_empty()
+        );
     }
 }

@@ -1,5 +1,5 @@
 use pyo3::exceptions::PyValueError;
-use pyo3::{pyclass, pymethods, Borrowed, Bound, FromPyObject, Py, PyAny, PyErr, PyResult, Python};
+use pyo3::{pyclass, pymethods, Bound, Py, PyAny, PyResult, Python};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 
@@ -69,15 +69,3 @@ impl OrderStatus {
 }
 
 impl_python_enum_variants!(OrderStatus);
-
-impl<'a, 'py> FromPyObject<'a, 'py> for OrderStatus {
-    type Error = PyErr;
-
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        if let Ok(bound) = obj.cast::<OrderStatus>() {
-            return Ok(*bound.borrow());
-        }
-        let s: String = obj.extract()?;
-        s.parse().map_err(|_| PyValueError::new_err(format!("Unknown order status {s:?}.")))
-    }
-}

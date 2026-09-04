@@ -2635,4 +2635,66 @@ mod tests {
         // best_sharpe is None because no sharpe key in metrics.
         assert!(rows[0].best_sharpe.is_none());
     }
+
+    #[test]
+    fn test_query_instruments_reports_corrupt_instrument_type() {
+        let (_dir, db) = make_db();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO instruments (symbol, provider, instrument_type)
+                 VALUES ('BROKEN', 'yahoo', 'not-an-instrument')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let error = db.query_instruments(None, None, None, None).unwrap_err();
+
+        assert!(
+            matches!(error, StorageError::CorruptData(message) if message.contains("instrument type"))
+        );
+    }
+
+    #[test]
+    fn test_query_strategy_runs_requires_a_base_currency() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        let run_id = result.strategies[0].strategy_id.clone();
+        db.write_experiment(&cfg, &result).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE experiment_strategies SET base_currency = NULL WHERE id = ?",
+                params![run_id],
+            )
+            .unwrap();
+        }
+
+        let error = db.query_strategy_runs(&result.experiment_id, true, true, true).unwrap_err();
+
+        assert!(error.to_string().contains("missing base currency"));
+    }
+
+    #[test]
+    fn test_query_strategy_runs_reads_legacy_scalar_cash() {
+        let (_dir, db) = make_db();
+        let cfg = sample_experiment_config();
+        let result = sample_experiment_result();
+        let run_id = result.strategies[0].strategy_id.clone();
+        db.write_experiment(&cfg, &result).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE experiment_equity SET cash = '1234.5' WHERE run_id = ?",
+                params![run_id],
+            )
+            .unwrap();
+        }
+
+        let runs = db.query_strategy_runs(&result.experiment_id, true, false, false).unwrap();
+
+        assert_eq!(runs[0].equity_curve[0].cash[&Currency::USD], 1234.5);
+    }
 }

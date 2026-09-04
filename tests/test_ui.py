@@ -22,6 +22,7 @@ import pytest
 
 from backtide.live_history import (
     append_event,
+    clean,
     new_session_id,
     utc_now,
     write_manifest,
@@ -4694,3 +4695,803 @@ class TestLiveTradingManagerEdgeCases:
 
         assert manager._session is None
         assert manager._sessions == {}
+
+
+class TestRemainingServiceCoverage:
+    """Exercise the remaining result and saved-study service branches."""
+
+    @staticmethod
+    def _result_context(monkeypatch, tmp_path: Path, *, figure: Any = Ellipsis):
+        """Install deterministic result-plot collaborators."""
+        import backtide
+        import backtide.backtest as backtest_module
+        import backtide.config as config_module
+        import backtide.storage as storage_module
+
+        class Interval:
+            def __str__(self):
+                return "1d"
+
+            @staticmethod
+            def minutes():
+                return 1_440
+
+        class Figure:
+            @staticmethod
+            def to_json():
+                return '{"data":[{"name":"C001 · fast=10"}],"layout":{}}'
+
+        returned_figure = Figure() if figure is Ellipsis else figure
+        analysis = SimpleNamespace(
+            plot_cash_holdings=lambda *_args, **_kwargs: returned_figure,
+            plot_mae_mfe=lambda *_args, **_kwargs: returned_figure,
+            plot_pnl=lambda *_args, **_kwargs: returned_figure,
+            plot_pnl_histogram=lambda *_args, **_kwargs: returned_figure,
+            plot_position_size=lambda *_args, **_kwargs: returned_figure,
+            plot_price=lambda *_args, **_kwargs: returned_figure,
+            plot_rolling_returns=lambda *_args, **_kwargs: returned_figure,
+            plot_rolling_sharpe=lambda *_args, **_kwargs: returned_figure,
+            plot_trade_duration=lambda *_args, **_kwargs: returned_figure,
+            plot_trade_pnl=lambda *_args, **_kwargs: returned_figure,
+        )
+        config = SimpleNamespace(data=SimpleNamespace(interval=Interval(), symbols=["AAPL"]))
+        monkeypatch.setattr(backtide, "analysis", analysis, raising=False)
+        monkeypatch.setitem(sys.modules, "backtide.analysis", analysis)
+        monkeypatch.setattr(
+            backtest_module,
+            "ExperimentConfig",
+            SimpleNamespace(from_toml=lambda _text: config),
+        )
+        monkeypatch.setattr(
+            config_module,
+            "get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=str(tmp_path))),
+        )
+        monkeypatch.setattr(storage_module, "query_bars", lambda **_kwargs: [])
+        monkeypatch.setattr(storage_module, "query_study", lambda _experiment_id: None)
+        run = SimpleNamespace(
+            strategy_id="run-1",
+            is_benchmark=False,
+            trades=[SimpleNamespace(symbol="AAPL")],
+            orders=[
+                SimpleNamespace(
+                    status="Filled",
+                    order=SimpleNamespace(symbol="AAPL"),
+                )
+            ],
+        )
+        services = BacktideServices()
+        monkeypatch.setattr(services, "_query_result_runs", lambda *_args, **_kwargs: [run])
+        monkeypatch.setattr(services, "_read_text", lambda *_args, **_kwargs: "config")
+        return services, run, config, storage_module
+
+    @pytest.mark.parametrize(
+        "plot_name",
+        [
+            "cash",
+            "pnl_histogram",
+            "rolling_returns",
+            "rolling_sharpe",
+            "trade_duration",
+            "trade_pnl",
+            "mae_mfe",
+            "position_size",
+            "price",
+        ],
+    )
+    def test_result_plot_dispatches_every_supported_result_shape(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+        plot_name,
+    ):
+        """Every result plot delegates to its public analysis helper."""
+        services, _run, _config, _storage = self._result_context(monkeypatch, tmp_path)
+
+        result = services.result_plot(
+            {
+                "experiment_id": "exp-1",
+                "strategy_id": "run-1",
+                "plot": plot_name,
+                "options": {"bins": 10, "symbols": ["AAPL"], "window": 5},
+            }
+        )
+
+        assert result["data"]
+
+    def test_result_plot_handles_studies_and_rejects_unavailable_figures(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ):
+        """Study labels are shortened and missing figures become API errors."""
+        services, run, _config, storage_module = self._result_context(monkeypatch, tmp_path)
+        study = SimpleNamespace(candidates=[SimpleNamespace(strategy_name="C001 · fast=10")])
+        monkeypatch.setattr(storage_module, "query_study", lambda _experiment_id: study)
+        monkeypatch.setattr(services, "_study_detail_runs", lambda _runs, _study: [run])
+
+        result = services.result_plot({"experiment_id": "exp-1", "plot": "pnl"})
+
+        assert result["data"][0]["name"] == "C001"
+
+        services, _run, _config, _storage = self._result_context(
+            monkeypatch,
+            tmp_path,
+            figure=None,
+        )
+        with pytest.raises(APIError, match="could not be generated"):
+            services.result_plot({"experiment_id": "exp-1", "plot": "pnl"})
+
+    def test_result_plot_validates_runs_configuration_options_and_symbols(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ):
+        """Result plots reject every missing or malformed prerequisite."""
+        services, run, config, _storage = self._result_context(monkeypatch, tmp_path)
+        monkeypatch.setattr(services, "_query_result_runs", lambda *_args, **_kwargs: [])
+        with pytest.raises(APIError, match="runs were not found"):
+            services.result_plot({"experiment_id": "exp-1", "plot": "pnl"})
+
+        monkeypatch.setattr(services, "_query_result_runs", lambda *_args, **_kwargs: [run])
+        monkeypatch.setattr(services, "_read_text", lambda *_args, **_kwargs: None)
+        with pytest.raises(APIError, match="configuration was not found"):
+            services.result_plot({"experiment_id": "exp-1", "plot": "pnl"})
+
+        monkeypatch.setattr(services, "_read_text", lambda *_args, **_kwargs: "config")
+        with pytest.raises(APIError, match="options must be an object"):
+            services.result_plot({"experiment_id": "exp-1", "plot": "pnl", "options": ["invalid"]})
+
+        config.data.symbols = []
+        run.trades = []
+        with pytest.raises(APIError, match="No symbol"):
+            services.result_plot({"experiment_id": "exp-1", "plot": "price"})
+
+    @pytest.mark.parametrize("method_name", ["reuse_study_setup", "rerun_study"])
+    def test_saved_study_drafts_require_an_identifier(self, method_name):
+        """Saved-study draft endpoints require a study identifier."""
+        with pytest.raises(APIError, match="Study id is required"):
+            getattr(BacktideServices(), method_name)({})
+
+    @pytest.mark.parametrize("method_name", ["reuse_study_setup", "rerun_study"])
+    def test_saved_study_drafts_require_a_stored_study(self, monkeypatch, method_name):
+        """Saved-study draft endpoints reject missing persisted studies."""
+        import backtide.storage as storage_module
+
+        monkeypatch.setattr(storage_module, "query_study", lambda _study_id: None)
+        with pytest.raises(APIError, match="Study not found"):
+            getattr(BacktideServices(), method_name)({"study_id": "missing"})
+
+    def test_reuse_study_validates_candidate_template_and_constructor(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ):
+        """Study reuse reports absent candidates, templates, and invalid parameters."""
+        import backtide.config as config_module
+        import backtide.storage as storage_module
+        import backtide.strategies.utils as strategy_utils
+
+        cfg = SimpleNamespace(data=SimpleNamespace(storage_path=str(tmp_path)))
+        study = SimpleNamespace(
+            strategy_name="Saved",
+            best_candidate=None,
+        )
+        monkeypatch.setattr(config_module, "get_config", lambda: cfg)
+        monkeypatch.setattr(storage_module, "query_study", lambda _study_id: study)
+        with pytest.raises(APIError, match="no eligible candidate"):
+            BacktideServices().reuse_study_setup({"study_id": "study"})
+
+        study.best_candidate = SimpleNamespace(
+            strategy_name="C001 · invalid=True",
+            parameters={"invalid": True},
+        )
+        monkeypatch.setattr(strategy_utils, "_load_stored_strategies", lambda _cfg: {})
+        with pytest.raises(APIError, match="Saved strategy"):
+            BacktideServices().reuse_study_setup({"study_id": "study"})
+
+        class Strategy:
+            def __init__(self):
+                pass
+
+        monkeypatch.setattr(
+            strategy_utils,
+            "_load_stored_strategies",
+            lambda _cfg: {"Saved": Strategy()},
+        )
+        with pytest.raises(APIError, match="could not be reconstructed"):
+            BacktideServices().reuse_study_setup({"study_id": "study"})
+
+    def test_small_service_validation_and_serialization_branches(self):
+        """Service helpers validate symbols and runs while serializing order history."""
+        with pytest.raises(APIError, match="symbol is required"):
+            BacktideServices().instrument_overview("   ")
+        with pytest.raises(APIError, match="Strategy run not found"):
+            BacktideServices._select_run([SimpleNamespace(strategy_id="one")], "two")
+
+        order = SimpleNamespace(
+            timestamp=1,
+            status="Filled",
+            fill_price=10.0,
+            commission=0.0,
+            pnl=1.0,
+            reason="",
+            order=SimpleNamespace(
+                id="order",
+                symbol="AAPL",
+                order_type="Market",
+                quantity=1.0,
+                price=None,
+                limit_price=None,
+            ),
+        )
+        run = SimpleNamespace(
+            trades=[],
+            orders=[order],
+            strategy_id="run",
+            strategy_name="Strategy",
+            metrics={},
+        )
+        result = BacktideServices()._serialize_run(run)
+        assert result["order_count"] == 1
+        assert result["orders"][0]["order"]["symbol"] == "AAPL"
+
+        summary = BacktideServices()._primary_metric_summary(
+            "invalid = [",
+            [{"strategy_name": "Strategy", "metrics": {"sharpe": 1.0}}],
+            {"builtin": [], "saved": []},
+        )
+        assert summary["primary_metric"] == "sharpe"
+        assert clean({"value": float("nan")}) == {"value": None}
+
+    def test_live_service_facade_lazily_creates_managers(self, monkeypatch):
+        """Starting and replaying live sessions lazily create their manager."""
+        import backtide.ui.live as live_module
+
+        manager = SimpleNamespace(
+            start=lambda payload: {"started": payload},
+            replay=lambda session_id, speed: {"replayed": session_id, "speed": speed},
+        )
+        monkeypatch.setattr(live_module, "LiveTradingManager", lambda: manager)
+
+        services = BacktideServices()
+        assert services.start_live({"symbol": "AAPL"})["started"] == {"symbol": "AAPL"}
+        del services._live_manager
+        assert services.replay_live({"session_id": "session", "speed": 2}) == {
+            "replayed": "session",
+            "speed": 2,
+        }
+
+    def test_experiment_detail_applies_study_selection_and_metadata(self, monkeypatch, tmp_path):
+        """Study detail responses select ranked runs and attach study summaries."""
+        import backtide.config as config_module
+        import backtide.storage as storage_module
+
+        stored_run = SimpleNamespace(strategy_id="run-1")
+        study = SimpleNamespace(to_dict=lambda: {"study_id": "exp-1"})
+        monkeypatch.setattr(storage_module, "query_experiments", lambda *_args: [{"id": "exp-1"}])
+        monkeypatch.setattr(
+            storage_module, "query_strategy_runs", lambda *_args, **_kwargs: [stored_run]
+        )
+        monkeypatch.setattr(storage_module, "query_study", lambda _experiment_id: study)
+        monkeypatch.setattr(
+            config_module,
+            "get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=str(tmp_path))),
+        )
+        services = BacktideServices()
+        monkeypatch.setattr(services, "_study_detail_runs", lambda runs, _study: runs)
+        monkeypatch.setattr(
+            services,
+            "_serialize_run",
+            lambda run, **_kwargs: {
+                "strategy_id": run.strategy_id,
+                "strategy_name": "Candidate",
+                "is_benchmark": False,
+                "metrics": {},
+            },
+        )
+        monkeypatch.setattr(services, "_read_text", lambda *_args, **_kwargs: "config")
+        monkeypatch.setattr(services, "_read_log_tail", lambda *_args, **_kwargs: ("log", False))
+        monkeypatch.setattr(services, "_apply_benchmark_display_name", lambda *_args: None)
+        monkeypatch.setattr(services, "_primary_metric_summary", lambda *_args: {})
+        applied = []
+        monkeypatch.setattr(
+            services,
+            "_apply_study_run_metadata",
+            lambda runs, _study: applied.extend(runs),
+        )
+        monkeypatch.setattr(services, "_study_metric_summary", lambda *_args: {"study_metric": 1})
+        monkeypatch.setattr(services, "metric_catalog", dict)
+
+        result = services.experiment("exp-1")
+
+        assert result["study"] == {"study_id": "exp-1"}
+        assert result["experiment"]["study_metric"] == 1
+        assert applied == result["runs"]
+
+    @pytest.mark.parametrize("method_name", ["reuse_study_setup", "rerun_study"])
+    def test_saved_study_drafts_require_the_original_configuration(
+        self,
+        monkeypatch,
+        tmp_path,
+        method_name,
+    ):
+        """Saved-study drafts report a missing source configuration."""
+        import backtide.config as config_module
+        import backtide.storage as storage_module
+        import backtide.strategies.utils as strategy_utils
+
+        class Strategy:
+            def __init__(self, value=1):
+                self.value = value
+
+        study = SimpleNamespace(
+            strategy_name="Saved",
+            best_candidate=SimpleNamespace(
+                strategy_name="C001 · value=2",
+                parameters={"value": 2},
+            ),
+        )
+        cfg = SimpleNamespace(data=SimpleNamespace(storage_path=str(tmp_path)))
+        monkeypatch.setattr(config_module, "get_config", lambda: cfg)
+        monkeypatch.setattr(storage_module, "query_study", lambda _study_id: study)
+        monkeypatch.setattr(
+            strategy_utils, "_load_stored_strategies", lambda _cfg: {"Saved": Strategy()}
+        )
+        monkeypatch.setattr(strategy_utils, "_save_strategy", lambda *_args: None)
+        services = BacktideServices()
+        monkeypatch.setattr(services, "_read_text", lambda *_args, **_kwargs: None)
+
+        with pytest.raises(APIError, match="configuration was not found"):
+            getattr(services, method_name)({"study_id": "study"})
+
+    def test_update_sizer_and_metric_delegate_to_the_shared_replacement_path(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Sizer and metric updates provide their type-specific collaborators."""
+        import backtide.config as config_module
+        import backtide.metrics.utils as metric_utils
+        import backtide.sizers.utils as sizer_utils
+
+        cfg = SimpleNamespace(data=SimpleNamespace(storage_path=str(tmp_path)))
+        monkeypatch.setattr(config_module, "get_config", lambda: cfg)
+        monkeypatch.setattr(sizer_utils, "_load_stored_sizers", lambda _cfg: {})
+        monkeypatch.setattr(metric_utils, "_load_stored_metrics", lambda _cfg: {})
+        services = BacktideServices()
+        delegated = []
+
+        def update(**kwargs):
+            delegated.append(kwargs)
+            return {"updated": kwargs["label"]}
+
+        monkeypatch.setattr(services, "_update_saved_asset", update)
+
+        assert services.update_sizer("Sizer", {}) == {"updated": "sizer"}
+        assert services.update_metric("Metric", {}) == {"updated": "metric"}
+        assert [call["folder"] for call in delegated] == ["sizers", "metrics"]
+
+    def test_session_config_handles_missing_sources_and_yahoo_fallback(
+        self, monkeypatch, tmp_path
+    ):
+        """Live drafts reject missing files and replace Yahoo with a WebSocket provider."""
+        import backtide.backtest as backtest_module
+        import backtide.config as config_module
+
+        monkeypatch.setattr(
+            config_module,
+            "get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=str(tmp_path))),
+        )
+        services = BacktideServices()
+        monkeypatch.setattr(services, "_read_text", lambda *_args, **_kwargs: None)
+        with pytest.raises(APIError, match="configuration was not found"):
+            services.session_config_from_experiment("missing")
+
+        values = {
+            "data": {"provider": "Yahoo", "symbols": ["AAPL"], "interval": "OneDay"},
+            "portfolio": {},
+            "strategy": {"strategies": ["Buy & Hold"]},
+            "indicators": {},
+            "metrics": ["alpha", "sharpe"],
+            "exchange": {},
+            "engine": {},
+        }
+        monkeypatch.setattr(services, "_read_text", lambda *_args, **_kwargs: "config")
+        monkeypatch.setattr(
+            backtest_module,
+            "ExperimentConfig",
+            SimpleNamespace(from_toml=lambda _text: SimpleNamespace(to_dict=lambda: values)),
+        )
+
+        result = services.session_config_from_experiment("experiment")
+
+        assert result["provider"] == "kraken"
+        assert result["interval"] == "1d"
+        assert result["config"]["metrics"] == ["sharpe"]
+
+    def test_parse_config_preserves_api_errors_and_study_metadata_skips_unknown_runs(
+        self,
+        monkeypatch,
+    ):
+        """Existing API errors are preserved and unmatched study runs remain unchanged."""
+        import backtide.backtest as backtest_module
+
+        monkeypatch.setattr(
+            backtest_module,
+            "ExperimentConfig",
+            SimpleNamespace(
+                from_toml=lambda _text: (_ for _ in ()).throw(APIError("specific", 422))
+            ),
+        )
+        with pytest.raises(APIError, match="specific") as error:
+            BacktideServices().parse_experiment_config({"text": "x", "suffix": ".toml"})
+        assert error.value.status == 422
+
+        runs = [{"strategy_id": "unknown", "strategy_name": "Unchanged"}]
+        study = SimpleNamespace(
+            candidates=[SimpleNamespace(strategy_id="known", strategy_name="C001", parameters={})]
+        )
+        BacktideServices._apply_study_run_metadata(runs, study)
+        assert runs[0]["strategy_name"] == "Unchanged"
+
+    def test_download_plan_skips_requested_intervals_without_provider_ranges(
+        self,
+        monkeypatch,
+    ):
+        """Download estimates omit requested intervals absent from a provider profile."""
+        import backtide.config as config_module
+        import backtide.data as data_module
+        import backtide.utils.utils as utils_module
+
+        profile = SimpleNamespace(
+            earliest_ts={"1d": 1_577_836_800},
+            latest_ts={"1d": 1_577_923_200},
+            exchange="",
+            quote="USD",
+            symbol="AAPL",
+            name="Apple",
+            instrument_type="stocks",
+            provider="yahoo",
+            legs=[],
+        )
+        monkeypatch.setattr(data_module, "resolve_profiles", lambda *_args, **_kwargs: [profile])
+        monkeypatch.setattr(
+            config_module,
+            "get_config",
+            lambda: SimpleNamespace(display=SimpleNamespace(timezone="UTC")),
+        )
+        monkeypatch.setattr(utils_module, "_get_timezone", lambda _value: UTC)
+        services = BacktideServices()
+        monkeypatch.setattr(services, "_estimate_download_bars", lambda *_args: 1)
+
+        result = services.download_plan(
+            {"symbols": ["AAPL"], "intervals": ["1d", "1h"], "full_history": True}
+        )
+
+        assert [item["interval"] for item in result["profiles"][0]["intervals"]] == ["1d"]
+
+    def test_saved_asset_validation_reserved_names_and_missing_study_strategy(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Saved assets report invalid source, reserved names, and missing study strategies."""
+        import backtide.config as config_module
+        import backtide.storage as storage_module
+        import backtide.strategies.utils as strategy_utils
+
+        services = BacktideServices()
+        common: dict[str, Any] = {
+            "folder": "strategies",
+            "label": "strategy",
+            "original_name": "Saved",
+            "stored": {"Saved": object()},
+            "storage_path": tmp_path,
+            "is_builtin": lambda _value: False,
+            "build": lambda _code: object(),
+            "save": lambda *_args: None,
+        }
+        with pytest.raises(APIError, match="invalid source"):
+            services._update_saved_asset(
+                payload={"code": "bad"},
+                validate=lambda _code: "invalid source",
+                **common,
+            )
+        with pytest.raises(APIError, match="reserved"):
+            services._update_saved_asset(
+                payload={"code": "good", "name": "Builtin"},
+                validate=lambda _code: None,
+                reserved_names={"Builtin"},
+                **common,
+            )
+
+        study = SimpleNamespace(strategy_name="Missing")
+        monkeypatch.setattr(storage_module, "query_study", lambda _study_id: study)
+        monkeypatch.setattr(
+            config_module,
+            "get_config",
+            lambda: SimpleNamespace(data=SimpleNamespace(storage_path=str(tmp_path))),
+        )
+        monkeypatch.setattr(strategy_utils, "_load_stored_strategies", lambda _cfg: {})
+        with pytest.raises(APIError, match="Saved strategy 'Missing'"):
+            services.rerun_study({"study_id": "study"})
+
+
+class TestRemainingLiveManagerCoverage:
+    """Exercise replay control and live-manager state edges."""
+
+    @staticmethod
+    def _live_types(*, reject_market: bool = False):
+        """Return small replay-compatible live classes."""
+
+        class Config:
+            def __init__(self, **values):
+                self.values = values
+
+        class Market:
+            def __init__(self, **values):
+                if reject_market:
+                    raise ValueError("malformed replay market")
+                self.__dict__.update(values)
+
+        class Session:
+            def __init__(self, _config, _strategy, *_args):
+                self.config = _config
+                self.rates = []
+
+            def on_bar(self, market, _orders=None):
+                return SimpleNamespace(processed=True, market=market, fills=[])
+
+            def set_exchange_rate(self, *values):
+                self.rates.append(values)
+
+            @staticmethod
+            def warm_up(_markets):
+                return None
+
+            @staticmethod
+            def snapshot():
+                return None
+
+        return SimpleNamespace(MarketUpdate=Market, SessionConfig=Config, Session=Session)
+
+    def test_replay_loads_metrics_and_marks_unavailable_storage_warmup(
+        self,
+        monkeypatch,
+    ):
+        """Replay resolves metric objects and reports an unavailable storage warm-up."""
+        session_id = _persist_live_replay_source(
+            {
+                "mode": "live",
+                "provider": "mock",
+                "symbols": ["BTC-USD"],
+                "strategies": [],
+                "warmup_bars": 2,
+                "config": {"metrics": ["custom"]},
+            }
+        )
+        monkeypatch.setitem(sys.modules, "backtide.live", self._live_types())
+        manager = LiveTradingManager()
+        loaded = object()
+        monkeypatch.setattr(manager, "_load_metrics", lambda values: [loaded] if values else [])
+        monkeypatch.setattr(manager, "_warm_up_sessions", lambda **_kwargs: 0)
+
+        manager.replay(session_id)
+        assert manager._thread is not None
+        manager._thread.join(timeout=1.0)
+
+        assert manager._session is not None
+        assert manager._session.config.values["metrics"] == [loaded]
+        assert manager._replay_warmup_source == "unavailable"
+        replay_id = manager._session_id
+        assert replay_id is not None
+        manager.delete_session(replay_id)
+        manager.delete_session(session_id)
+
+    def test_live_worker_stops_between_collection_and_processing(self, monkeypatch):
+        """A stop received after collection prevents the collected market from processing."""
+        manager = LiveTradingManager()
+        manager._config = {"provider": "mock", "symbols": ["BTC-USD"], "interval": "1m"}
+        processed = []
+
+        class Feed:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def collect(self, **_kwargs):
+                manager._stop.set()
+                return [object()]
+
+        monkeypatch.setitem(sys.modules, "backtide.live", SimpleNamespace(LiveMarketFeed=Feed))
+        monkeypatch.setattr(manager, "_process_market", processed.append)
+        monkeypatch.setattr(manager, "_persist_manifest", lambda _status: None)
+
+        manager._run()
+
+        assert processed == []
+        assert manager._feed is None
+        assert LiveTradingManager._load_strategies([]) == [("Monitor", None)]
+
+    def test_replay_reports_manifest_and_event_failures(self, monkeypatch):
+        """Replay setup and worker failures are translated into stable manager state."""
+        market = {
+            "symbol": "BTC-USD",
+            "interval": "1m",
+            "open_ts": 1,
+            "close_ts": 2,
+            "open": 1.0,
+            "high": 1.0,
+            "low": 1.0,
+            "close": 1.0,
+            "volume": 1.0,
+            "is_final": True,
+            "provider": "mock",
+            "received_ts": 2,
+        }
+        source = _persist_live_replay_source(
+            {
+                "mode": "live",
+                "provider": "mock",
+                "symbols": ["BTC-USD"],
+                "strategies": [],
+                "config": {},
+            },
+            events=[{"market": market}],
+        )
+        monkeypatch.setitem(sys.modules, "backtide.live", self._live_types(reject_market=True))
+
+        class CapturedThread:
+            def __init__(self, *, target, **_kwargs):
+                self.target = target
+
+            @staticmethod
+            def is_alive():
+                return False
+
+            def start(self):
+                self.target()
+
+            @staticmethod
+            def join(**_kwargs):
+                return None
+
+        import backtide.ui.live as live_module
+
+        monkeypatch.setattr(live_module.threading, "Thread", CapturedThread)
+        manager = LiveTradingManager()
+        manager.replay(source)
+        assert manager._error == "malformed replay market"
+        replay_id = manager._session_id
+        assert replay_id is not None
+        manager.delete_session(replay_id)
+
+        manager = LiveTradingManager()
+        original_persist = manager._persist_manifest
+
+        def fail_running(status):
+            if status == "running":
+                raise OSError("disk full")
+            return original_persist(status)
+
+        monkeypatch.setattr(manager, "_persist_manifest", fail_running)
+        with pytest.raises(APIError, match="Could not prepare replay session"):
+            manager.replay(source)
+        assert manager._session is None
+        assert manager._sessions == {}
+        manager.delete_session(source)
+
+    def test_replay_runner_honors_pause_and_delay_stops(self, monkeypatch):
+        """Replay exits at both resume gates and when an inter-event delay is canceled."""
+        markets = [
+            {
+                "symbol": "BTC-USD",
+                "interval": "1m",
+                "open_ts": timestamp,
+                "close_ts": timestamp + 1,
+                "open": 1.0,
+                "high": 1.0,
+                "low": 1.0,
+                "close": 1.0,
+                "volume": 1.0,
+                "is_final": True,
+                "provider": "mock",
+                "received_ts": timestamp + 1,
+            }
+            for timestamp in (1, 3)
+        ]
+        sources = [
+            _persist_live_replay_source(
+                {
+                    "mode": "live",
+                    "provider": "mock",
+                    "symbols": ["BTC-USD"],
+                    "strategies": [],
+                    "config": {},
+                },
+                events=[{"market": market} for market in markets],
+            )
+            for _ in range(3)
+        ]
+        monkeypatch.setitem(sys.modules, "backtide.live", self._live_types())
+
+        class DeferredThread:
+            def __init__(self, *, target, **_kwargs):
+                self.target = target
+
+            @staticmethod
+            def start():
+                return None
+
+            @staticmethod
+            def is_alive():
+                return False
+
+            @staticmethod
+            def join(**_kwargs):
+                return None
+
+        import backtide.ui.live as live_module
+
+        monkeypatch.setattr(live_module.threading, "Thread", DeferredThread)
+        managers = []
+
+        first = LiveTradingManager()
+        monkeypatch.setattr(first, "_process_market", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(first, "_wait_until_replay_resumed", lambda: False)
+        first.replay(sources[0], 1)
+        cast(Any, first._thread).target()
+        managers.append(first)
+
+        second = LiveTradingManager()
+        monkeypatch.setattr(second, "_process_market", lambda *_args, **_kwargs: None)
+        gates = iter([True, False])
+        monkeypatch.setattr(second, "_wait_until_replay_resumed", lambda: next(gates))
+        second.replay(sources[1], 1)
+        cast(Any, second._thread).target()
+        managers.append(second)
+
+        third = LiveTradingManager()
+        monkeypatch.setattr(third, "_process_market", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(third, "_wait_until_replay_resumed", lambda: True)
+        monkeypatch.setattr(third, "_wait_replay_delay", lambda _seconds: False)
+        third.replay(sources[2], 1)
+        cast(Any, third._thread).target()
+        managers.append(third)
+
+        assert [manager._replay_processed_events for manager in managers] == [0, 0, 1]
+        for manager, source in zip(managers, sources, strict=True):
+            replay_id = manager._session_id
+            assert replay_id is not None
+            manager.delete_session(replay_id)
+            manager.delete_session(source)
+
+    def test_process_market_covers_pause_control_and_warmup_conversion(self, monkeypatch):
+        """Live processing pauses safely, clears controls, and warms conversion legs."""
+        manager = LiveTradingManager()
+        manager._config = {"mode": "live", "symbols": ["BTC-USD"]}
+        manager._paused.set()
+        market = SimpleNamespace(symbol="BTC-USD", close=1.0, close_ts=2)
+        manager._process_market(market)
+        assert not manager._updates
+
+        manager._paused.clear()
+        manager._cancel_requested = True
+        session = self._live_types().Session(SimpleNamespace(), None)
+        manager._sessions = {"Monitor": session}
+        monkeypatch.setattr(manager, "_control_orders", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(
+            manager,
+            "_serialize_combined_update",
+            lambda _market, _results: {"strategies": {}},
+        )
+        monkeypatch.setattr(manager, "_append_event", lambda _update: None)
+        manager._process_market(market)
+        assert manager._cancel_requested is False
+
+        manager._conversion_legs = {"ETH-USD": ("ETH", "USD")}
+        leg = SimpleNamespace(symbol="ETH-USD", close=2.0, close_ts=3)
+        assert manager._warm_up_sessions(markets=[leg], persist=False) == 0
+        assert session.rates == [("ETH", "USD", 2.0, 3)]

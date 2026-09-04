@@ -169,6 +169,24 @@ class TestProviderSupport:
             "EUR-USDT": ("EUR", "USDT"),
         }
 
+    def test_currency_plan_handles_non_pairs_direct_quotes_and_missing_routes(self, monkeypatch):
+        """Test catalog rows without bases and both currency-routing error cases."""
+        instruments = [
+            SimpleNamespace(symbol="AAPL", base=None, quote="USD"),
+            SimpleNamespace(symbol="BTC-USD", base="BTC", quote="USD"),
+            SimpleNamespace(symbol="ETH-BTC", base="ETH", quote="BTC"),
+        ]
+        monkeypatch.setattr(live, "list_live_instruments", lambda *_args, **_kwargs: instruments)
+
+        quotes, legs = live._live_currency_plan("kraken", ["AAPL"], "USD")
+
+        assert quotes == {"AAPL": "USD"}
+        assert legs == {}
+        with pytest.raises(ValueError, match="was not found"):
+            live._live_currency_plan("kraken", ["MISSING"], "USD")
+        with pytest.raises(ValueError, match="No live conversion path"):
+            live._live_currency_plan("kraken", ["ETH-BTC"], "EUR")
+
 
 class TestSession:
     """Tests for deterministic simulated execution and accounting."""

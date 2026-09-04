@@ -421,6 +421,19 @@ mod tests {
         p
     }
 
+    fn unexpected_outcome(outcome: TriggerOutcome) -> ! {
+        panic!("unexpected trigger outcome: {outcome:?}")
+    }
+
+    macro_rules! expect_outcome {
+        ($value:expr; $pattern:pat => $body:expr $(,)?) => {{
+            match $value {
+                $pattern => $body,
+                outcome => unexpected_outcome(outcome),
+            }
+        }};
+    }
+
     // ── Market Orders ────────────────────────────────────────────────────
 
     #[test]
@@ -429,7 +442,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 limit_cap,
@@ -438,8 +451,7 @@ mod tests {
                 assert_eq!(raw_px, 100.0);
                 assert!(limit_cap.is_none());
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -448,13 +460,12 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, true) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, true);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => assert_eq!(raw_px, 105.0),
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -463,13 +474,12 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => assert_eq!(raw_px, 100.0),
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     // ── Cancel Orders ────────────────────────────────────────────────────
@@ -480,14 +490,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("canceled"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     // ── SettlePosition Orders ────────────────────────────────────────────
@@ -498,7 +507,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = positions_with("AAPL", 50.0);
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
@@ -507,8 +516,7 @@ mod tests {
                 assert_eq!(order.quantity, -50.0);
                 assert_eq!(order.order_type, OrderType::Market);
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -517,7 +525,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = positions_with("AAPL", -30.0);
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
@@ -525,8 +533,7 @@ mod tests {
                 assert_eq!(raw_px, 100.0);
                 assert_eq!(order.quantity, 30.0);
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -535,14 +542,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("no position"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     #[test]
@@ -551,13 +557,12 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = positions_with("AAPL", 10.0);
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, true) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, true);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => assert_eq!(raw_px, 105.0),
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     // ── Limit Orders ─────────────────────────────────────────────────────
@@ -568,7 +573,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 limit_cap,
@@ -578,8 +583,7 @@ mod tests {
                 assert_eq!(limit_cap, Some(105.0));
                 assert!(reason.contains("open through"));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -588,7 +592,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 limit_cap,
@@ -597,8 +601,7 @@ mod tests {
                 assert_eq!(raw_px, 95.0);
                 assert_eq!(limit_cap, Some(95.0));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -607,10 +610,9 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Pending => {},
-            _ => panic!("expected Pending"),
-        }
+        );
     }
 
     #[test]
@@ -619,7 +621,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 limit_cap,
@@ -629,8 +631,7 @@ mod tests {
                 assert_eq!(limit_cap, Some(95.0));
                 assert!(reason.contains("open through"));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -639,7 +640,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 limit_cap,
@@ -648,8 +649,7 @@ mod tests {
                 assert_eq!(raw_px, 108.0);
                 assert_eq!(limit_cap, Some(108.0));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -658,10 +658,9 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Pending => {},
-            _ => panic!("expected Pending"),
-        }
+        );
     }
 
     #[test]
@@ -670,14 +669,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("missing price"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     #[test]
@@ -686,14 +684,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("zero quantity"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     // ── TakeProfit Orders ────────────────────────────────────────────────
@@ -704,13 +701,12 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => assert_eq!(raw_px, 100.0),
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -719,13 +715,12 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => assert_eq!(raw_px, 108.0),
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -734,14 +729,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("missing price"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     // ── StopLoss Orders ──────────────────────────────────────────────────
@@ -753,7 +747,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 limit_cap,
@@ -762,8 +756,7 @@ mod tests {
                 assert_eq!(raw_px, 92.0);
                 assert!(limit_cap.is_none());
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -773,7 +766,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 reason,
@@ -782,8 +775,7 @@ mod tests {
                 assert_eq!(raw_px, 100.0);
                 assert!(reason.contains("gap-down"));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -793,13 +785,12 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => assert_eq!(raw_px, 108.0),
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -809,7 +800,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 reason,
@@ -818,8 +809,7 @@ mod tests {
                 assert_eq!(raw_px, 100.0);
                 assert!(reason.contains("gap-up"));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -829,10 +819,9 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Pending => {},
-            _ => panic!("expected Pending"),
-        }
+        );
     }
 
     #[test]
@@ -842,10 +831,9 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Pending => {},
-            _ => panic!("expected Pending"),
-        }
+        );
     }
 
     #[test]
@@ -854,14 +842,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("missing price"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     // ── StopLossLimit Orders ─────────────────────────────────────────────
@@ -875,7 +862,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 limit_cap,
@@ -885,8 +872,7 @@ mod tests {
                 assert_eq!(limit_cap, Some(91.0));
                 assert_eq!(order.order_type, OrderType::Limit);
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -896,10 +882,9 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Pending => {},
-            _ => panic!("expected Pending"),
-        }
+        );
     }
 
     #[test]
@@ -908,14 +893,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("missing stop price"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     #[test]
@@ -925,7 +909,7 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 limit_cap,
                 ..
@@ -933,8 +917,7 @@ mod tests {
                 assert_eq!(limit_cap, Some(92.0));
                 assert_eq!(order.price, Some(92.0));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     // ── TakeProfitLimit Orders ───────────────────────────────────────────
@@ -949,15 +932,14 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 ..
             } => {
                 assert_eq!(order.order_type, OrderType::Limit);
                 assert_eq!(order.price, Some(107.0));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -969,15 +951,14 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 ..
             } => {
                 assert_eq!(order.order_type, OrderType::Limit);
                 assert_eq!(order.price, Some(93.0));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     // ── Trailing Stop Orders ─────────────────────────────────────────────
@@ -991,15 +972,14 @@ mod tests {
         // Bar 1: high=110, low=90. running_high=110, stop=110-15=95.
         // sell stop: bar.low=90 <= 95 → triggers.
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => {
                 assert_eq!(raw_px, 95.0);
             },
-            _ => panic!("expected Fill"),
-        }
+        );
         // Trail state should be cleaned up after fill
         assert!(!trail.contains_key(&order.id));
     }
@@ -1013,10 +993,9 @@ mod tests {
         // Bar: high=110, low=90. running_high=110, stop=110-25=85.
         // sell stop: bar.low=90 > 85 → not triggered.
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Pending => {},
-            _ => panic!("expected Pending"),
-        }
+        );
         assert!(trail.contains_key(&order.id));
     }
 
@@ -1029,15 +1008,14 @@ mod tests {
         // Bar: high=110, low=90. running_low=90, stop=90+15=105.
         // buy stop: bar.high=110 >= 105 → triggers.
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => {
                 assert_eq!(raw_px, 105.0);
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -1046,14 +1024,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("zero quantity"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     #[test]
@@ -1062,14 +1039,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("missing/invalid"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     #[test]
@@ -1078,14 +1054,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         let pos = empty_positions();
         let mut trail = HashMap::new();
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("missing/invalid"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     #[test]
@@ -1096,17 +1071,15 @@ mod tests {
 
         // Bar 1: high=110, low=90. running_high=110, stop=80. Not triggered (low=90 > 80).
         let b1 = bar(100.0, 110.0, 90.0, 105.0);
-        match resolve_trigger(&mut order, &b1, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b1, &pos, &mut trail, false);
             TriggerOutcome::Pending => {},
-            _ => panic!("expected Pending"),
-        }
+        );
 
         // Bar 2: high=120, low=95. running_high=120, stop=90. Not triggered (low=95 > 90).
         let b2 = bar(112.0, 120.0, 95.0, 115.0);
-        match resolve_trigger(&mut order, &b2, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b2, &pos, &mut trail, false);
             TriggerOutcome::Pending => {},
-            _ => panic!("expected Pending"),
-        }
+        );
 
         let (rh, rl) = trail[&order.id];
         assert_eq!(rh, 120.0);
@@ -1114,15 +1087,14 @@ mod tests {
 
         // Bar 3: high=121, low=85. running_high=121, stop=91. Triggered (low=85 <= 91).
         let b3 = bar(118.0, 121.0, 85.0, 90.0);
-        match resolve_trigger(&mut order, &b3, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b3, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => {
                 assert_eq!(raw_px, 91.0);
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     // ── TrailingStopLimit Orders ─────────────────────────────────────────
@@ -1138,7 +1110,7 @@ mod tests {
         // sell stop: low=90 <= 95 → triggers.
         // Converts to limit at 93.
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 limit_cap,
                 ..
@@ -1147,8 +1119,7 @@ mod tests {
                 assert_eq!(order.price, Some(93.0));
                 assert_eq!(limit_cap, Some(93.0));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
@@ -1161,14 +1132,13 @@ mod tests {
         let b = bar(100.0, 110.0, 90.0, 105.0);
         // stop = 110 - 15 = 95. Triggered: low=90 <= 95.
         // No limit_price → fallback to stop=95.
-        match resolve_trigger(&mut order, &b, &pos, &mut trail, false) {
+        expect_outcome!(resolve_trigger(&mut order, &b, &pos, &mut trail, false);
             TriggerOutcome::Fill {
                 ..
             } => {
                 assert_eq!(order.price, Some(95.0));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     // ── apply_slippage ───────────────────────────────────────────────────
@@ -1286,21 +1256,20 @@ mod tests {
     #[test]
     fn fill_stop_zero_qty_cancels() {
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match fill_stop(0.0, &b, 95.0) {
+        expect_outcome!(fill_stop(0.0, &b, 95.0);
             TriggerOutcome::Cancel {
                 reason,
             } => {
                 assert!(reason.contains("zero quantity"));
             },
-            _ => panic!("expected Cancel"),
-        }
+        );
     }
 
     #[test]
     fn fill_stop_sell_at_stop_level() {
         // Sell stop at 92. bar.open=100 > 92, but low=90 <= 92 → fill at stop.
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match fill_stop(-10.0, &b, 92.0) {
+        expect_outcome!(fill_stop(-10.0, &b, 92.0);
             TriggerOutcome::Fill {
                 raw_px,
                 reason,
@@ -1310,31 +1279,28 @@ mod tests {
                 assert!(reason.contains("stop triggered"));
                 assert!(!reason.contains("gap"));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
     fn fill_stop_buy_at_stop_level() {
         // Buy stop at 108. bar.open=100 < 108, but high=110 >= 108 → fill at stop.
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match fill_stop(10.0, &b, 108.0) {
+        expect_outcome!(fill_stop(10.0, &b, 108.0);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => assert_eq!(raw_px, 108.0),
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
     fn fill_stop_not_triggered_returns_pending() {
         // Sell stop at 80. bar.low=90 > 80 → not triggered.
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match fill_stop(-10.0, &b, 80.0) {
+        expect_outcome!(fill_stop(-10.0, &b, 80.0);
             TriggerOutcome::Pending => {},
-            _ => panic!("expected Pending"),
-        }
+        );
     }
 
     // ── stop_triggered predicate ─────────────────────────────────────────
@@ -1395,31 +1361,29 @@ mod tests {
     #[test]
     fn fill_limit_buy_exact_low_at_limit() {
         let b = bar(100.0, 110.0, 95.0, 105.0);
-        match fill_limit(10.0, &b, 95.0) {
+        expect_outcome!(fill_limit(10.0, &b, 95.0);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => assert_eq!(raw_px, 95.0),
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
     fn fill_limit_sell_exact_high_at_limit() {
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match fill_limit(-10.0, &b, 110.0) {
+        expect_outcome!(fill_limit(-10.0, &b, 110.0);
             TriggerOutcome::Fill {
                 raw_px,
                 ..
             } => assert_eq!(raw_px, 110.0),
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
     fn fill_limit_buy_open_exact_at_limit() {
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match fill_limit(10.0, &b, 100.0) {
+        expect_outcome!(fill_limit(10.0, &b, 100.0);
             TriggerOutcome::Fill {
                 raw_px,
                 reason,
@@ -1428,14 +1392,13 @@ mod tests {
                 assert_eq!(raw_px, 100.0);
                 assert!(reason.contains("open through"));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 
     #[test]
     fn fill_limit_sell_open_exact_at_limit() {
         let b = bar(100.0, 110.0, 90.0, 105.0);
-        match fill_limit(-10.0, &b, 100.0) {
+        expect_outcome!(fill_limit(-10.0, &b, 100.0);
             TriggerOutcome::Fill {
                 raw_px,
                 reason,
@@ -1444,7 +1407,6 @@ mod tests {
                 assert_eq!(raw_px, 100.0);
                 assert!(reason.contains("open through"));
             },
-            _ => panic!("expected Fill"),
-        }
+        );
     }
 }

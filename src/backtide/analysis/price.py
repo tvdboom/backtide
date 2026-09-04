@@ -297,10 +297,7 @@ def plot_price(
 
         def _chart_y(sym: str, ts_seconds: int) -> float:
             """Return the plotted price at the bar nearest to `ts_seconds`."""
-            series = sym_price.get(sym)
-            if series is None or series.empty:
-                return float("nan")
-
+            series = sym_price[sym]
             target = pd.to_datetime(ts_seconds, unit="s", utc=True).tz_convert(tz)
             return series.iloc[series.index.get_indexer([target], method="nearest")[0]]
 

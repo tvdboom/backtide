@@ -333,6 +333,26 @@ class TestStudy:
         with pytest.raises(ValueError, match="must be swept or stored"):
             Study._candidate_specs(Required(1), {"other": [1]})
 
+    def test_candidate_specs_skip_unswept_variadics_and_use_constructor_defaults(self):
+        """Unswept variadics are ignored while ordinary defaults are reconstructed."""
+
+        class Defaults:
+            def __init__(self, value=3, *values, **options):
+                del values, options
+                self.recorded = value
+
+        specs = Study._candidate_specs(Defaults(), {"value": [4]})
+
+        assert specs[0].parameters == {"value": 4}
+
+        class DefaultOnly:
+            def __init__(self, fixed=7, swept=1):
+                del fixed
+                self.swept = swept
+
+        specs = Study._candidate_specs(DefaultOnly(), {"swept": [2]})
+        assert specs[0].parameters == {"fixed": 7, "swept": 2}
+
     def test_missing_engine_run_is_an_ineligible_candidate(self):
         """A candidate omitted by the engine receives an explicit error summary."""
         study = Study(
@@ -374,6 +394,61 @@ class TestStudy:
         )
         with pytest.raises(ValueError, match="does not contain one complete fold"):
             study._date_folds(cast(Any, short))
+
+    def test_date_folds_handle_disabled_and_configured_date_ranges(self):
+        """Fold construction returns early when disabled and falls back to config dates."""
+        disabled = Study(
+            _config(),
+            strategy=TunableStrategy(),
+            parameter_space={"lookback": [10]},
+        )
+        assert disabled._date_folds(cast(Any, SimpleNamespace(strategies=[]))) == []
+
+        config = _config(walk_forward=True)
+        configured = Study(
+            config,
+            strategy=TunableStrategy(),
+            parameter_space={"lookback": [10]},
+            walk_forward=WalkForwardConfig(training_days=4, test_days=2),
+        )
+
+        folds = configured._date_folds(cast(Any, SimpleNamespace(strategies=[])))
+
+        assert folds[0][1:] == (
+            study_module.date(2020, 1, 1),
+            study_module.date(2020, 1, 4),
+            study_module.date(2020, 1, 5),
+            study_module.date(2020, 1, 6),
+        )
+
+    def test_walk_forward_fold_requires_an_eligible_training_candidate(self, monkeypatch):
+        """A fold fails clearly when training constraints reject every candidate."""
+        study = Study(
+            _config(),
+            strategy=TunableStrategy(),
+            parameter_space={"lookback": [10]},
+            walk_forward=WalkForwardConfig(training_days=4, test_days=2),
+        )
+        specs = study._candidate_specs(TunableStrategy(), {"lookback": [10]})
+        monkeypatch.setattr(
+            "backtide.backtest.study.Experiment.run",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                experiment_id="training",
+                strategies=[],
+            ),
+        )
+        monkeypatch.setattr(study, "_summarize", lambda *_args: [])
+        monkeypatch.setattr("backtide.storage.delete_experiment", lambda _experiment_id: None)
+        fold = (
+            1,
+            study_module.date(2020, 1, 1),
+            study_module.date(2020, 1, 4),
+            study_module.date(2020, 1, 5),
+            study_module.date(2020, 1, 6),
+        )
+
+        with pytest.raises(ValueError, match="No candidate satisfied"):
+            study._run_fold(fold, TunableStrategy(), specs, verbose=False)
 
     def test_failed_walk_forward_fold_is_summarized(self, monkeypatch, tmp_path):
         """A failed fold remains visible and does not discard the parent study."""

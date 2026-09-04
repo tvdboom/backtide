@@ -1481,4 +1481,145 @@ class Sizer:
         let (filled, _) = broker.execute(built_in, 1_000, 100.0, None, String::new(), false, None);
         assert_eq!(filled.order.quantity, 1.0);
     }
+
+    #[test]
+    fn snapshot_handles_missing_marks_shorts_and_non_positive_equity() {
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
+        broker.portfolio.positions.insert("UNMARKED".to_owned(), 2.0);
+        assert_eq!(broker.snapshot().gross_exposure, 0.0);
+
+        broker.latest_prices.insert("UNMARKED".to_owned(), 10.0);
+        broker.latest_price_timestamps.insert("UNMARKED".to_owned(), 1_000);
+        broker.quote_currencies.insert("UNMARKED".to_owned(), "EUR".to_owned());
+        assert_eq!(broker.snapshot().gross_exposure, 0.0);
+
+        broker.portfolio.positions.clear();
+        broker.config.allow_short = true;
+        broker.config.allow_margin = true;
+        broker.process(update(100.0, 1_000), vec![market(-2.0)]);
+        let marked = broker.process(update(90.0, 1_060), Vec::new()).snapshot;
+        assert_eq!(marked.unrealized_pnl, 20.0);
+
+        broker.portfolio.cash.insert(Currency::USD, -1_000.0);
+        broker.portfolio.positions.clear();
+        broker.peak_equity = 0.0;
+        broker.config.max_leverage = 0.0;
+        broker.config.initial_margin = 0.0;
+        let insolvent = broker.snapshot();
+        assert!(insolvent.leverage.is_infinite());
+        assert_eq!(insolvent.buying_power, 0.0);
+        assert_eq!(insolvent.drawdown, 0.0);
+
+        broker.portfolio.cash.insert(Currency::USD, 1_000.0);
+        let unlimited = broker.snapshot();
+        assert!(unlimited.buying_power.is_infinite());
+        assert!(broker.effective_leverage_cap().is_infinite());
+
+        broker.portfolio.cash.insert(Currency::USD, 0.0);
+        broker.peak_equity = 0.0;
+        broker.finish_update(2_000);
+        assert_eq!(broker.equity_curve.last().unwrap().drawdown, 0.0);
+    }
+
+    #[test]
+    fn financing_and_margin_checks_skip_unpriced_or_duplicate_timestamps() {
+        let mut broker = SessionBroker::new(SessionConfig {
+            allow_short: true,
+            allow_margin: true,
+            margin_interest: 5.0,
+            borrow_rate: 5.0,
+            ..SessionConfig::default()
+        })
+        .unwrap();
+        broker.portfolio.positions.insert("UNMARKED".to_owned(), -1.0);
+        broker.accrue_financing(1_000);
+        let cash = broker.portfolio.cash[&Currency::USD];
+        broker.accrue_financing(1_000);
+        assert_eq!(broker.portfolio.cash[&Currency::USD], cash);
+
+        let mut fills = Vec::new();
+        broker.config.maintenance_margin = 101.0;
+        broker.enforce_maintenance_margin(1_000, &mut fills);
+        assert!(fills.is_empty());
+
+        broker.portfolio.cash.insert(Currency::USD, 0.0);
+        broker.portfolio.positions.insert("MARKED".to_owned(), 1.0);
+        broker.latest_prices.insert("MARKED".to_owned(), 1.0);
+        broker.latest_price_timestamps.insert("MARKED".to_owned(), 1_000);
+        broker.quote_currencies.insert("MARKED".to_owned(), "USD".to_owned());
+        broker.enforce_maintenance_margin(1_000, &mut fills);
+        assert_eq!(fills.len(), 1);
+        assert!(broker.portfolio.positions.contains_key("UNMARKED"));
+    }
+
+    #[test]
+    fn execution_rejects_non_positive_equity_and_fixed_commission_cash_deficits() {
+        let mut insolvent = SessionBroker::new(SessionConfig::default()).unwrap();
+        insolvent.portfolio.cash.insert(Currency::USD, -1.0);
+        let (fill, _) =
+            insolvent.execute(market(1.0), 1_000, 1.0, None, String::new(), false, None);
+        assert!(fill.reason.contains("equity is not positive"));
+
+        let mut cash_limited = SessionBroker::new(SessionConfig {
+            initial_cash: 100.0,
+            commission_fixed: 1.0,
+            ..SessionConfig::default()
+        })
+        .unwrap();
+        let (fill, _) =
+            cash_limited.execute(market(10.0), 1_000, 10.0, None, String::new(), false, None);
+        assert!(fill.reason.contains("insufficient cash"));
+
+        assert_eq!(cash_limited.update_cost_basis("BTC-USD", 0.0, 0.0, 10.0, 0.0, 1_000), 0.0);
+    }
+
+    #[test]
+    fn resting_limit_can_remain_pending_across_multiple_matching_bars() {
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
+        let mut order = market(1.0);
+        order.order_type = OrderType::Limit;
+        order.price = Some(50.0);
+        broker.process(update(100.0, 1_000), vec![order]);
+
+        let first = broker.process(update(90.0, 1_060), Vec::new());
+        let second = broker.process(update(80.0, 1_120), Vec::new());
+
+        assert!(first.fills.is_empty());
+        assert!(second.fills.is_empty());
+        assert_eq!(second.snapshot.portfolio.orders.len(), 1);
+    }
+
+    #[test]
+    fn cost_basis_tracks_short_profit_reversals_and_history_eviction() {
+        let mut broker = SessionBroker::new(SessionConfig {
+            allow_short: true,
+            allow_margin: true,
+            max_history: 1,
+            ..SessionConfig::default()
+        })
+        .unwrap();
+
+        broker.process(update(100.0, 1_000), vec![market(-2.0)]);
+        let covered = broker.process(update(90.0, 1_060), vec![market(3.0)]);
+        assert_eq!(covered.snapshot.portfolio.positions["BTC-USD"], 1.0);
+        assert_eq!(covered.snapshot.realized_pnl, 20.0);
+
+        broker.process(update(95.0, 1_120), vec![market(-1.0)]);
+        broker.process(update(96.0, 1_180), vec![market(1.0)]);
+        broker.process(update(97.0, 1_240), vec![market(-1.0)]);
+        assert_eq!(broker.trades().len(), 1);
+    }
+
+    #[test]
+    fn custom_sizer_receives_a_stop_distance() {
+        let mut broker = SessionBroker::new(SessionConfig::default()).unwrap();
+        let mut order = market(0.0);
+        order.price = Some(90.0);
+        order.sizer = Some(SizerSlot::Custom(custom_sizer(false)));
+
+        let (filled, _) = broker.execute(order, 1_000, 100.0, None, String::new(), false, None);
+
+        assert_eq!(filled.status, OrderStatus::Filled);
+        assert_eq!(filled.order.quantity, 2.0);
+    }
 }

@@ -1424,6 +1424,47 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn provider_test_doubles_cover_their_catalog_and_download_contracts() {
+        let mut multi = MultiProvider::new();
+        let instrument = usd_quote_instrument();
+        multi.list.push(instrument.clone());
+        multi.bars.insert("AAPL".to_owned(), vec![sample_bar(1_000)]);
+
+        assert_eq!(
+            multi.list_instruments(InstrumentType::Stocks, None, 10).await.unwrap().len(),
+            1
+        );
+        assert_eq!(
+            multi
+                .download_bars("AAPL", InstrumentType::Stocks, Interval::OneDay, 0, 2_000)
+                .await
+                .unwrap()
+                .bars
+                .len(),
+            1
+        );
+
+        let failing = FailingProvider(instrument.clone());
+        assert_eq!(
+            failing
+                .fetch_instrument(&"AAPL".to_owned(), InstrumentType::Stocks)
+                .await
+                .unwrap()
+                .symbol,
+            instrument.symbol
+        );
+        assert_eq!(
+            failing.fetch_range(instrument, Interval::OneDay).await.unwrap(),
+            (1_000, 2_000)
+        );
+        assert!(failing
+            .list_instruments(InstrumentType::Stocks, None, 10)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
     fn test_engine_failing(mock: FailingProvider) -> (Engine, TempDir) {
         let config = Box::leak(Box::new(Config::default()));
         let rt = Runtime::new().unwrap();
@@ -1733,5 +1774,54 @@ mod tests {
         assert_eq!(profiles[0].instrument.symbol, "ASSET");
         assert_eq!(profiles[0].legs, vec!["PLN-EUR"]);
         assert!(profiles.iter().any(|profile| profile.instrument.symbol == "PLN-EUR"));
+    }
+
+    #[test]
+    fn download_circuit_breaker_skips_queued_provider_failures() {
+        let instrument = usd_quote_instrument();
+        let (engine, _tmp) = test_engine_failing(FailingProvider(instrument.clone()));
+        let profiles = (0..100)
+            .map(|index| {
+                let mut item = instrument.clone();
+                item.symbol = format!("FAIL-{index}");
+                InstrumentProfile {
+                    instrument: item,
+                    earliest_ts: HashMap::from([(Interval::OneDay, 1_000)]),
+                    latest_ts: HashMap::from([(Interval::OneDay, 2_000)]),
+                    legs: Vec::new(),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let result = engine.download_bars(&profiles, None, None, true).unwrap();
+
+        assert_eq!(result.n_succeeded, 0);
+        assert_eq!(result.n_failed, profiles.len());
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.to_ascii_lowercase().contains("circuit breaker")),
+            "{:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn download_reports_a_configured_provider_without_a_runtime_client() {
+        let instrument = usd_quote_instrument();
+        let (mut engine, _tmp) = test_engine_failing(FailingProvider(instrument.clone()));
+        engine.providers.remove(&InstrumentType::Stocks);
+        let profile = InstrumentProfile {
+            instrument,
+            earliest_ts: HashMap::from([(Interval::OneDay, 1_000)]),
+            latest_ts: HashMap::from([(Interval::OneDay, 2_000)]),
+            legs: Vec::new(),
+        };
+
+        let result = engine.download_bars(&[profile], None, None, false).unwrap();
+
+        assert_eq!(result.n_failed, 1);
+        assert!(!result.warnings.is_empty());
     }
 }

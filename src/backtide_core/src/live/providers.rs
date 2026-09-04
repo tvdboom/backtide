@@ -963,4 +963,55 @@ mod tests {
         assert_eq!(queued.pop_front().unwrap().open_ts, 1_300);
         assert_eq!(partial["BTC-USD"].open_ts, 1_300);
     }
+
+    #[test]
+    fn final_update_at_the_same_timestamp_clears_partial_state() {
+        let mut queued = VecDeque::new();
+        let mut partial = HashMap::new();
+        queue_chronological_update(&mut queued, &mut partial, partial_update(1_000, 100.0));
+        queued.clear();
+        let mut final_update = partial_update(1_000, 101.0);
+        final_update.is_final = true;
+
+        queue_chronological_update(&mut queued, &mut partial, final_update);
+
+        assert!(partial.is_empty());
+        assert!(queued.front().is_some_and(|update| update.is_final));
+    }
+
+    #[test]
+    fn provider_dispatch_covers_yahoo_and_empty_payload_edges() {
+        assert_eq!(
+            support_message(Provider::Kraken, Interval::OneMinute).unwrap(),
+            "Kraken public OHLC WebSocket v2",
+        );
+        assert!(subscription_message(Provider::Yahoo, &["AAPL".to_owned()], Interval::OneMinute)
+            .unwrap_err()
+            .to_string()
+            .contains("does not expose"));
+        assert!(parse_message(Provider::Yahoo, Interval::OneMinute, &json!({}))
+            .unwrap_err()
+            .to_string()
+            .contains("does not expose"));
+        assert!(parse_message(Provider::Binance, Interval::OneMinute, &json!({"k": {"s": ""}}),)
+            .unwrap()
+            .is_empty());
+        assert!(parse_message(Provider::Kraken, Interval::OneMinute, &json!({"channel": "ohlc"}),)
+            .unwrap()
+            .is_empty());
+        assert_eq!(provider_symbol_key(Provider::Yahoo, "aapl"), "AAPL");
+    }
+
+    #[test]
+    fn kraken_alias_map_is_bidirectional_for_bitcoin_and_dogecoin() {
+        let common =
+            canonical_symbol_map(Provider::Kraken, &["BTC-USD".to_owned(), "DOGE-USD".to_owned()]);
+        assert_eq!(common["XBT/USD"], "BTC-USD");
+        assert_eq!(common["XDG/USD"], "DOGE-USD");
+
+        let exchange =
+            canonical_symbol_map(Provider::Kraken, &["XBT-USD".to_owned(), "XDG-USD".to_owned()]);
+        assert_eq!(exchange["BTC/USD"], "XBT-USD");
+        assert_eq!(exchange["DOGE/USD"], "XDG-USD");
+    }
 }

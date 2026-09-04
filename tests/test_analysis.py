@@ -349,6 +349,21 @@ class TestPlotPrice:
         # 1 price trace + 2 band traces
         assert len(fig.data) == 3
 
+    def test_with_three_line_band_indicator(self, daily_bars):
+        """A three-column band renders its upper, middle, and lower lines."""
+        ind = MagicMock()
+        ind.compute.return_value = pd.DataFrame(
+            {
+                "upper": daily_bars["close"] + 2,
+                "middle": daily_bars["close"],
+                "lower": daily_bars["close"] - 2,
+            }
+        )
+
+        fig = plot_price(daily_bars, indicators={"Bands": ind}, display=None)
+
+        assert len(fig.data) == 4
+
     def test_with_list_indicator(self, daily_bars):
         """Overlay indicators passed as a list adds extra traces."""
         ind = MagicMock()
@@ -1075,6 +1090,15 @@ class TestPlotPriceWithStrategyRun:
         fig = plot_price(daily_bars, display=None)
         assert len(fig.data) == 1
 
+    def test_trade_markers_ignore_symbols_missing_from_price_data(self, daily_bars):
+        """Trades outside the plotted symbol set do not create marker traces."""
+        run = _make_run_with_trades("S1", pnls=(10.0,))
+        run.trades[0].symbol = "MSFT"
+
+        fig = plot_price(daily_bars, run=run, display=None)
+
+        assert len(fig.data) == 1
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Coverage - early-return / edge-case branches
@@ -1204,6 +1228,16 @@ class TestRollingPlotsEdgeCases:
         assert len(fig.data) == 1
         assert fig.data[0].line.dash == "dash"
 
+    def test_rolling_plots_skip_degenerate_long_curves(self):
+        """Long curves with no finite rolling statistic produce no trace."""
+        from backtide.analysis import plot_rolling_returns, plot_rolling_sharpe
+
+        constant = _run_result("Constant", [100.0] * 12)
+        zero = _run_result("Zero", [0.0] * 12)
+
+        assert len(plot_rolling_sharpe([constant], window=5, display=None).data) == 0
+        assert len(plot_rolling_returns([zero], window=5, display=None).data) == 0
+
 
 class TestTradeDurationUnits:
     """Auto-unit selection in plot_trade_duration."""
@@ -1326,6 +1360,26 @@ class TestMaeMfeEdgeCases:
         for trace in fig.data:
             if trace.name in {"Winners", "Losers"}:
                 assert len(trace.x) == 0
+
+    def test_intraday_bars_use_the_datetime_display_format(self, monkeypatch):
+        """Intraday MAE/MFE hover labels include the configured time format."""
+        from backtide.analysis import plot_mae_mfe
+
+        run = _make_run_with_trades("S1", pnls=(50.0,))
+        trade = run.trades[0]
+        bars = pd.DataFrame(
+            {
+                "open_ts": [trade.entry_ts, trade.exit_ts],
+                "interval": ["1m", "1m"],
+                "high": [110.0, 111.0],
+                "low": [95.0, 96.0],
+            }
+        )
+        monkeypatch.setattr("backtide.analysis.mae_mfe.query_bars", lambda **_: bars)
+
+        fig = plot_mae_mfe(run, display=None)
+
+        assert any(trace.name == "Winners" and len(trace.x) for trace in fig.data)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

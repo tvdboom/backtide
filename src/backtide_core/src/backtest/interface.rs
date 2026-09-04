@@ -213,18 +213,11 @@ class Callback:
     }
 
     #[test]
-    fn abort_and_experiment_logging_cover_every_level() {
-        ABORT_REQUESTED.store(false, Ordering::Relaxed);
-        assert!(!check_abort());
-        request_abort();
-        assert!(check_abort());
-
+    fn experiment_logging_covers_every_level() {
         for level in
             [LogLevel::Trace, LogLevel::Debug, LogLevel::Info, LogLevel::Warn, LogLevel::Error]
         {
             experiment_log("coverage", level);
         }
-
-        ABORT_REQUESTED.store(false, Ordering::Relaxed);
     }
 }

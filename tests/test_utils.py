@@ -204,6 +204,18 @@ class TestToPandasInUtils:
         assert isinstance(result, pd.DataFrame)
         assert list(result.columns) == ["a", "b"]
 
+    def test_object_conversion_method(self):
+        """Objects exposing `to_pandas` delegate their conversion."""
+
+        class Convertible:
+            @staticmethod
+            def to_pandas():
+                return {"a": [1]}
+
+        result = _to_pandas(Convertible())
+
+        assert result.to_dict(orient="list") == {"a": [1]}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -301,6 +313,14 @@ class TestFormatPriceEdgeCases:
 
         result = _format_price(1234.56, currency=Currency.USD)
         assert isinstance(result, str)
+
+    def test_currency_symbol_can_follow_the_number(self, monkeypatch):
+        """Currency placement follows the configured suffix convention."""
+        import backtide.utils.utils as utils_module
+
+        monkeypatch.setattr(utils_module.cfg.display, "currency_prefix", False)
+
+        assert _format_price(12.5, currency="USD").endswith(" $")
 
     def test_format_price_with_invalid_currency_string(self):
         """Test formatting with invalid currency code falls back."""

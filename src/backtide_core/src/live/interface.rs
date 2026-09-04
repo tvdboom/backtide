@@ -1247,9 +1247,7 @@ class Strategy:
                 attempts,
                 backoff,
             );
-            let Err(error) = result else {
-                panic!("invalid retry configuration was accepted");
-            };
+            let error = result.err().expect("invalid retry configuration was accepted");
 
             assert!(error.to_string().contains(message));
         }
@@ -1371,9 +1369,7 @@ class Strategy:
             &mut connector,
         )
         .await;
-        let Err(error) = result else {
-            panic!("retry exhaustion was not returned");
-        };
+        let error = result.err().expect("retry exhaustion was not returned");
 
         assert!(error.to_string().contains("final failure"));
         assert!(connections.lock().unwrap().is_empty());
@@ -1455,9 +1451,7 @@ class Strategy:
             Some(Box::new(stream)),
         )
         .await;
-        let Err(error) = result else {
-            panic!("stream error was not returned");
-        };
+        let error = result.err().expect("stream error was not returned");
 
         assert!(error.to_string().contains("bad candle"));
     }
@@ -1477,9 +1471,7 @@ class Strategy:
             Some(Box::new(MockMarketDataStream::new(Vec::new()))),
         )
         .await;
-        let Err(error) = result else {
-            panic!("provider close was not returned");
-        };
+        let error = result.err().expect("provider close was not returned");
 
         assert!(error.to_string().contains("provider closed"));
     }
@@ -1974,5 +1966,36 @@ class Strategy:
         assert!(stream_error_to_python(LiveStreamError::InvalidMessage("bad".into()))
             .to_string()
             .contains("bad"));
+    }
+
+    #[test]
+    fn python_types_invoke_live_feed_and_session_constructors() -> PyResult<()> {
+        Python::attach(|py| {
+            let feed_type = py.get_type::<LiveMarketFeed>();
+            let error = feed_type
+                .call1(("yahoo", vec!["AAPL"], "1m"))
+                .expect_err("Yahoo must be rejected before connecting");
+            assert!(error.to_string().contains("does not expose"));
+
+            let session_type = py.get_type::<Session>();
+            let session = session_type.call0()?;
+            assert_eq!(
+                session.call_method0("snapshot")?.getattr("processed_bars")?.extract::<u64>()?,
+                0
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn live_catalog_initializes_and_reuses_process_wide_clients() {
+        let runtime = live_runtime().expect("live runtime");
+        let first = live_catalog_providers(runtime).expect("provider catalog");
+        let second = live_catalog_providers(runtime).expect("cached provider catalog");
+
+        assert!(first.contains_key(&Provider::Binance));
+        assert!(first.contains_key(&Provider::Coinbase));
+        assert!(first.contains_key(&Provider::Kraken));
+        assert!(std::ptr::eq(first, second));
     }
 }

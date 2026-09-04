@@ -21,6 +21,9 @@ use tracing::{debug, info, instrument};
 pub struct Coinbase {
     /// Shared async HTTP client.
     client: HttpClient,
+
+    /// Product catalog endpoint.
+    products_url: String,
 }
 
 impl Coinbase {
@@ -44,6 +47,7 @@ impl Coinbase {
         info!("Coinbase provider initialised");
         Ok(Self {
             client,
+            products_url: Self::PRODUCTS_URL.to_owned(),
         })
     }
 
@@ -79,7 +83,7 @@ impl Coinbase {
     async fn get_product_info(&self, product_id: &str) -> DataResult<ProductInfo> {
         let resp = self
             .client
-            .get(&format!("{}/{}", Self::PRODUCTS_URL, product_id), None)
+            .get(&format!("{}/{}", self.products_url, product_id), None)
             .await
             .map_err(|_| DataError::SymbolNotFound(product_id.to_owned()))?;
 
@@ -96,7 +100,7 @@ impl Coinbase {
         end: Option<u64>,
     ) -> DataResult<Vec<CoinbaseCandle>> {
         let granularity = Self::interval_granularity(interval)?;
-        let url = format!("{}/{}/candles", Self::PRODUCTS_URL, product_id);
+        let url = format!("{}/{}/candles", self.products_url, product_id);
 
         let mut params: Vec<(&str, String)> = vec![("granularity", granularity.to_owned())];
 
@@ -140,7 +144,7 @@ impl DataProvider for Coinbase {
 
         let info = self.get_product_info(symbol).await?;
 
-        Ok(Instrument::try_from(info)?)
+        Ok(Instrument::from(info))
     }
 
     /// Returns the usable download range for an instrument at a given interval.
@@ -207,7 +211,7 @@ impl DataProvider for Coinbase {
         let resp = self
             .client
             .get(
-                Self::PRODUCTS_URL,
+                &self.products_url,
                 Some(&[("product_type", "SPOT"), ("limit", &limit.to_string())]),
             )
             .await?;
@@ -218,14 +222,7 @@ impl DataProvider for Coinbase {
             .products
             .into_iter()
             .filter(|p| p.status.as_deref() == Some("online"))
-            .filter_map(|info| {
-                Instrument::try_from(info)
-                    .map_err(|e| {
-                        debug!("Coinbase list_instruments error: {e}");
-                        e
-                    })
-                    .ok()
-            })
+            .map(Instrument::from)
             .take(limit)
             .collect();
 
@@ -313,16 +310,14 @@ struct ProductInfo {
     new_at: Option<String>,
 }
 
-impl TryFrom<ProductInfo> for Instrument {
-    type Error = DataError;
-
-    fn try_from(info: ProductInfo) -> DataResult<Self> {
+impl From<ProductInfo> for Instrument {
+    fn from(info: ProductInfo) -> Self {
         let base = info.base_currency_id;
         let quote = info.quote_currency_id;
 
         let symbol = canonical_symbol(&info.product_id, &Some(base.clone()), &quote);
 
-        Ok(Instrument {
+        Instrument {
             symbol: symbol.clone(),
             name: symbol,
             base: Some(base),
@@ -330,7 +325,7 @@ impl TryFrom<ProductInfo> for Instrument {
             instrument_type: InstrumentType::Crypto,
             exchange: "COINBASE".to_owned(),
             provider: Provider::Coinbase,
-        })
+        }
     }
 }
 
@@ -452,6 +447,16 @@ impl TryFrom<CoinbaseCandleRaw> for CoinbaseCandle {
 mod tests {
     use super::*;
     use rstest::rstest;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn mocked_coinbase(server: &MockServer) -> Coinbase {
+        Coinbase {
+            client: HttpClient::new().unwrap(),
+            products_url: format!("{}/products", server.uri()),
+        }
+    }
 
     // ── interval_granularity ────────────────────────────────────────────
 
@@ -557,7 +562,7 @@ mod tests {
             status: Some("online".to_owned()),
             new_at: None,
         };
-        let inst = Instrument::try_from(info).unwrap();
+        let inst = Instrument::from(info);
         assert_eq!(inst.symbol, "BTC-USD");
         assert_eq!(inst.base, Some("BTC".to_owned()));
         assert_eq!(inst.quote, "USD");
@@ -605,7 +610,7 @@ mod tests {
             status: None,
             new_at: None,
         };
-        let inst = Instrument::try_from(info).unwrap();
+        let inst = Instrument::from(info);
         assert_eq!(inst.symbol, "ETH-USDC");
         assert_eq!(inst.base, Some("ETH".to_owned()));
         assert_eq!(inst.quote, "USDC");
@@ -620,7 +625,7 @@ mod tests {
             status: Some("online".to_owned()),
             new_at: Some("2020-01-01T00:00:00Z".to_owned()),
         };
-        let inst = Instrument::try_from(info).unwrap();
+        let inst = Instrument::from(info);
         assert_eq!(inst.symbol, "SOL-USD");
     }
 
@@ -659,5 +664,67 @@ mod tests {
         {
             assert!(Coinbase::interval_granularity(iv).is_ok());
         }
+    }
+
+    #[tokio::test]
+    async fn coinbase_http_paths_parse_bars_fetch_metadata_and_list_markets() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/products/BTC-USD/candles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "candles": [{
+                    "start": "1000",
+                    "open": "1.0",
+                    "high": "2.0",
+                    "low": "0.5",
+                    "close": "1.5",
+                    "volume": "10.0"
+                }]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/products/BTC-USD"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "product_id": "BTC-USD",
+                "base_currency_id": "BTC",
+                "quote_currency_id": "USD",
+                "status": "online",
+                "new_at": "2020-01-01T00:00:00Z"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/products"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "products": [
+                    {
+                        "product_id": "BTC-USD",
+                        "base_currency_id": "BTC",
+                        "quote_currency_id": "USD",
+                        "status": "online",
+                        "new_at": null
+                    },
+                    {
+                        "product_id": "ETH-USD",
+                        "base_currency_id": "ETH",
+                        "quote_currency_id": "USD",
+                        "status": "offline",
+                        "new_at": null
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let provider = mocked_coinbase(&server);
+
+        let bars =
+            provider.get_bars("BTC-USD", Interval::OneMinute, Some(1), Some(2)).await.unwrap();
+        let product = provider.get_product_info("BTC-USD").await.unwrap();
+        let listed = provider.list_instruments(InstrumentType::Crypto, None, 10).await.unwrap();
+
+        assert_eq!(bars[0].start, 1_000);
+        assert_eq!(product.product_id, "BTC-USD");
+        assert_eq!(listed.len(), 1);
     }
 }
