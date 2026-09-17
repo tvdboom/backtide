@@ -705,6 +705,25 @@ class TestJobStore:
 
         assert snapshot["error"] == "invalid work"
 
+    def test_aborted_job_reaches_terminal_state_without_escaping_thread(self):
+        """A user abort is captured as a completed background job."""
+        from backtide.backtest import ExperimentAborted
+
+        jobs = JobStore()
+
+        def abort(_progress):
+            raise ExperimentAborted("Experiment aborted by user.")
+
+        job = jobs.start("experiment", abort)
+        for _ in range(1000):
+            snapshot = jobs.get(job["id"])
+            if snapshot["status"] == "aborted":
+                break
+
+        assert snapshot["status"] == "aborted"
+        assert snapshot["error"] == "Experiment aborted by user."
+        assert snapshot["finished_at"]
+
     def test_unknown_job_raises_not_found(self):
         """Missing job identifiers produce an API 404."""
         with pytest.raises(APIError) as exc_info:
@@ -716,7 +735,7 @@ class TestJobStore:
         """Completed job retention removes only the oldest completed snapshots."""
         jobs = JobStore(max_completed=1)
         jobs._jobs = {
-            "old": {"id": "old", "status": "success"},
+            "old": {"id": "old", "status": "aborted"},
             "running": {"id": "running", "status": "running"},
             "new": {"id": "new", "status": "error"},
         }

@@ -163,6 +163,10 @@ class JobStore:
                 job["started_at"] = datetime.now().astimezone().isoformat()
             try:
                 result = work(update_progress)
+            except KeyboardInterrupt as exc:
+                with self._lock:
+                    job["status"] = "aborted"
+                    job["error"] = str(exc) or "Job aborted by user."
             except Exception as exc:  # noqa: BLE001
                 with self._lock:
                     job["status"] = "error"
@@ -193,7 +197,9 @@ class JobStore:
 
     def _trim(self) -> None:
         completed = [
-            key for key, job in self._jobs.items() if job["status"] in {"success", "error"}
+            key
+            for key, job in self._jobs.items()
+            if job["status"] in {"success", "error", "aborted"}
         ]
         for key in completed[: -self._max_completed]:
             self._jobs.pop(key, None)
