@@ -26,6 +26,9 @@
         <a href="https://github.com/tvdboom/backtide" target="_blank" rel="noreferrer">
           <Github :size="16" /> GitHub
         </a>
+        <a href="https://pypi.org/project/backtide/" target="_blank" rel="noreferrer">
+          <Package :size="16" /> PyPI
+        </a>
       </div>
     </aside>
     <button class="backdrop" aria-label="Close menu" @click="sidebarOpen = false" />
@@ -113,7 +116,7 @@
         <CircleAlert v-else-if="toast.kind === 'warning'" :size="19" />
         <CircleCheck v-else :size="19" />
         <span class="toast-copy">
-          <strong>{{ toast.kind === 'error' ? 'Error' : toast.kind === 'warning' ? 'Check this' : 'Done' }}</strong>
+          <strong v-if="toast.kind === 'error'">Error</strong>
           <span>{{ toast.message }}</span>
         </span>
         <button type="button" aria-label="Dismiss notification" @click="toast = null"><X :size="15" /></button>
@@ -140,6 +143,7 @@ import {
   Menu,
   Sigma,
   Moon,
+  Package,
   RefreshCw,
   Scale,
   Shapes,

@@ -257,7 +257,7 @@
 
 <script setup>
 import { Activity, ArrowLeft, ArrowRightLeft, BarChart3, BrainCircuit, CalendarDays, CalendarRange, ChartLine, ChartNoAxesCombined, ChevronDown, CircleDollarSign, Clock3, Coins, CopyPlus, Download, FileChartColumn, FileCode2, FlaskConical, Gauge, Layers3, Medal, Plus, ReceiptText, RefreshCcw, Scale, ScrollText, Search, SlidersHorizontal, Square, TableProperties, Timer, Trash2, TriangleAlert, WalletCards, X } from 'lucide-vue-next'
-import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { api, post, query, remove } from '../api'
 import ChartPanel from '../components/chart-panel.vue'
 import ConfirmationModal from '../components/confirmation-modal.vue'
@@ -314,7 +314,7 @@ const studyTabs = [
   { id: 'report', label: 'Report', icon: Medal }
 ]
 const strategyPlotIds = new Set(['mae_mfe', 'position_size', 'price'])
-let pollTimer, searchTimer, experimentObserver, experimentLoadVersion = 0
+let pollTimer, searchTimer, experimentObserver, experimentLoadVersion = 0, jobPollVersion = 0
 let activatedOnce = false
 const activeJobs = computed(() => jobs.value.filter(job =>
   ['experiment', 'study'].includes(job.kind) && ['queued', 'running'].includes(job.status)))
@@ -859,13 +859,31 @@ async function destroy() {
   finally { deleting.value = false }
 }
 async function abort() { await post('/api/experiments/abort'); emit('toast', 'Abort requested.') }
-async function pollJobs() {
-  const previous = activeJobs.value.length
-  jobs.value = await api('/api/jobs')
-  const requestedResultId = consumeCompletedJobResult(sessionStorage, jobs.value)
-  if (requestedResultId) await open(requestedResultId)
-  else if (previous && !activeJobs.value.length) await load()
-  pollTimer = setTimeout(pollJobs, 1500)
+async function pollJobs(version) {
+  try {
+    const previous = activeJobs.value.length
+    const nextJobs = await api('/api/jobs')
+    if (version !== jobPollVersion) return
+    jobs.value = nextJobs
+    const requestedResultId = consumeCompletedJobResult(sessionStorage, jobs.value)
+    if (requestedResultId) await open(requestedResultId)
+    else if (previous && !activeJobs.value.length) await load()
+  } catch {
+    // Keep polling so a temporary request failure cannot hide future experiment progress.
+  } finally {
+    if (version === jobPollVersion) {
+      pollTimer = setTimeout(() => { void pollJobs(version) }, 1500)
+    }
+  }
+}
+function startJobPolling() {
+  clearTimeout(pollTimer)
+  const version = ++jobPollVersion
+  void pollJobs(version)
+}
+function stopJobPolling() {
+  clearTimeout(pollTimer)
+  jobPollVersion++
 }
 function jobName(job) {
   return String(job?.name || '').trim() || `Unnamed ${job?.kind === 'study' ? 'study' : 'experiment'}`
@@ -929,12 +947,16 @@ onMounted(() => {
     }, { rootMargin: '240px 0px' })
   }
   load()
-  pollJobs()
+  startJobPolling()
 })
 onActivated(() => {
   resetToRequestedOverview()
-  if (activatedOnce) load()
+  if (activatedOnce) {
+    load()
+    startJobPolling()
+  }
   activatedOnce = true
 })
-onBeforeUnmount(() => { clearTimeout(pollTimer); clearTimeout(searchTimer); experimentObserver?.disconnect() })
+onDeactivated(stopJobPolling)
+onBeforeUnmount(() => { stopJobPolling(); clearTimeout(searchTimer); experimentObserver?.disconnect() })
 </script>

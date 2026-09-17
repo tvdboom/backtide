@@ -17,6 +17,12 @@ describe('application typography', () => {
   })
 })
 
+describe('sidebar footer', () => {
+  it('centers the project links horizontally', () => {
+    expect(declaration('.sidebar-footer')).toContain('justify-content: center')
+  })
+})
+
 describe('download details', () => {
   it('shows provider, exchange, and currency metadata without boxes', () => {
     expect(declaration('.download-provider')).not.toMatch(/background|border/)

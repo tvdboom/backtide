@@ -741,6 +741,41 @@ describe('results page', () => {
     expect(wrapper.get('.experiment-result-card').text()).toContain('Momentum study')
   })
 
+  it('refreshes running jobs immediately when the cached results page is reactivated', async () => {
+    let jobs = []
+    api.mockImplementation(path => path === '/api/jobs' ? jobs : detail)
+    const away = markRaw({ template: '<div class="away" />' })
+    const current = shallowRef(markRaw(ResultsPage))
+    const Host = defineComponent({
+      setup: () => ({ current }),
+      template: '<KeepAlive><component :is="current" :bootstrap="{}" /></KeepAlive>'
+    })
+    wrapper = mount(Host)
+    await flushPromises()
+
+    current.value = away
+    await wrapper.vm.$nextTick()
+    jobs = [{
+      id: 'job-2',
+      kind: 'experiment',
+      name: 'Reused momentum setup',
+      status: 'running',
+      started_at: new Date().toISOString(),
+      progress_completed: 1,
+      progress_total: 5,
+      progress_unit: 'strategy runs'
+    }]
+    sessionStorage.setItem('backtide:result-job-id', 'job-2')
+
+    current.value = markRaw(ResultsPage)
+    await wrapper.vm.$nextTick()
+    await flushPromises()
+
+    const banner = wrapper.get('.running-banner')
+    expect(banner.text()).toContain('Reused momentum setup')
+    expect(banner.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('20')
+  })
+
   it('opens a new experiment with the saved configuration', async () => {
     await mountAndOpen()
 

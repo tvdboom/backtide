@@ -135,7 +135,7 @@ small { color: var(--muted); }
 .sidebar nav button:hover { color: var(--text); background: var(--surface-2); }
 .sidebar nav button.active { color: var(--text-strong); background: linear-gradient(90deg, rgb(38 132 255 / 18%), rgb(38 132 255 / 7%)); box-shadow: inset 2px 0 var(--blue-2); }
 .sidebar nav button.active svg { color: var(--blue-2); }
-.sidebar-footer { display: flex; gap: 16px; padding: 18px 10px 0; border-top: 1px solid var(--line); }
+.sidebar-footer { display: flex; justify-content: center; gap: 6px; padding: 18px 10px 0; border-top: 1px solid var(--line); }
 .sidebar-footer a { display: flex; gap: 6px; align-items: center; color: var(--muted-dim); font-size: 13px; transition: color .15s; }
 .sidebar-footer a:hover { color: var(--text); }
 

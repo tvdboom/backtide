@@ -8,7 +8,16 @@ const api = vi.hoisted(() => vi.fn(() => new Promise(() => {})))
 
 vi.mock('./api', () => ({ api }))
 vi.mock('./pages/analysis-page.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('./pages/dashboard-page.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('./pages/dashboard-page.vue', () => ({ default: {
+  emits: ['toast'],
+  template: `
+    <div>
+      <button class="success-toast" @click="$emit('toast', 'Abort requested.')">Success</button>
+      <button class="warning-toast" @click="$emit('toast', 'Positions will flatten.', 'warning')">Warning</button>
+      <button class="error-toast" @click="$emit('toast', 'Could not abort.', 'error')">Error</button>
+    </div>
+  `
+} }))
 vi.mock('./pages/download-page.vue', () => ({ default: { name: 'DownloadPage', template: '<input aria-label="Download state" />' } }))
 vi.mock('./pages/experiment-page.vue', () => ({ default: {
   props: ['bootstrap'],
@@ -91,6 +100,40 @@ describe('App theme control', () => {
       .find(button => button.text() === 'Session history')
     expect(results.get('svg').classes()).toContain('lucide-gauge-icon')
     expect(sessionHistory.get('svg').classes()).toContain('lucide-history-icon')
+    wrapper.unmount()
+  })
+
+  it('links the sidebar footer to the project resources', () => {
+    const wrapper = mount(App)
+    const links = wrapper.findAll('.sidebar-footer a')
+
+    expect(links.map(link => link.text())).toEqual(['Docs', 'GitHub', 'PyPI'])
+    expect(links.map(link => link.attributes('href'))).toEqual([
+      'https://tvdboom.github.io/backtide',
+      'https://github.com/tvdboom/backtide',
+      'https://pypi.org/project/backtide/'
+    ])
+    expect(links.every(link => link.attributes('target') === '_blank')).toBe(true)
+    expect(links.every(link => link.attributes('rel') === 'noreferrer')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows action messages without generic success or warning titles', async () => {
+    api.mockResolvedValueOnce({})
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await wrapper.get('.success-toast').trigger('click')
+    expect(wrapper.get('.toast-copy').text()).toBe('Abort requested.')
+    expect(wrapper.find('.toast-copy strong').exists()).toBe(false)
+
+    await wrapper.get('.warning-toast').trigger('click')
+    expect(wrapper.get('.toast-copy').text()).toBe('Positions will flatten.')
+    expect(wrapper.find('.toast-copy strong').exists()).toBe(false)
+
+    await wrapper.get('.error-toast').trigger('click')
+    expect(wrapper.get('.toast-copy strong').text()).toBe('Error')
+    expect(wrapper.get('.toast-copy > span').text()).toBe('Could not abort.')
     wrapper.unmount()
   })
 
