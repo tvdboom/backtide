@@ -123,7 +123,7 @@ class TestLaunch:
         )
         result = runner.invoke(launch)
         assert result.exit_code == 0
-        assert result.output.encode("cp1252") == b"Launching app...\n"
+        assert result.output == "Launching app...\nhttp://localhost:8501\n"
         mock_run.assert_called_once()
 
     @patch("backtide.ui.launch")
@@ -137,6 +137,7 @@ class TestLaunch:
         )
         result = runner.invoke(launch, ["-p", "9000"])
         assert result.exit_code == 0
+        assert result.output == "Launching app...\nhttp://localhost:9000\n"
         assert mock_run.call_args.kwargs["port"] == 9000
 
     @patch("backtide.ui.launch")
@@ -150,6 +151,7 @@ class TestLaunch:
         )
         result = runner.invoke(launch, ["-a", "0.0.0.0"])
         assert result.exit_code == 0
+        assert result.output == "Launching app...\nhttp://localhost:8501\n"
         assert mock_run.call_args.kwargs["address"] == "0.0.0.0"
 
     @patch("backtide.ui.launch")

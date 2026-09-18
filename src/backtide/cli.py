@@ -228,13 +228,16 @@ def launch(address: str, port: str, log_level: str):
     cfg = get_config()
     init_logging(log_level or cfg.general.log_level)
 
-    click.echo("Launching app...")
+    server_address = address or cfg.display.address or "localhost"
+    server_port = int(port or cfg.display.port)
+    display_address = "localhost" if server_address in {"0.0.0.0", "::"} else server_address
+    click.echo(f"Launching app at http://{display_address}:{server_port} ...")
 
     from backtide.ui import launch as launch_ui
 
     launch_ui(
-        address=address or cfg.display.address or "localhost",
-        port=int(port or cfg.display.port),
+        address=server_address,
+        port=server_port,
     )
 
 
