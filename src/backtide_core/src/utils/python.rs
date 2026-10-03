@@ -136,7 +136,6 @@ pub fn load_pickle(py: Python<'_>, path: &Path) -> PyResult<Py<PyAny>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pyo3::types::PyDict;
     use tempfile::TempDir;
 
     #[test]

@@ -1128,7 +1128,6 @@ mod tests {
     use crate::live::providers::MockMarketDataStream;
     use crate::strategies::interface::BuyAndHold;
     use async_trait::async_trait;
-    use pyo3::types::{PyList, PyModule};
     use std::future::pending;
     use tokio::sync::Notify;
 

@@ -1,6 +1,5 @@
 use crate::indicators::interface::*;
 use pyo3::prelude::*;
-use pyo3::{Bound, PyResult};
 
 pub mod interface;
 pub mod traits;

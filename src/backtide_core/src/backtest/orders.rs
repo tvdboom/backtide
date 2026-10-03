@@ -363,9 +363,6 @@ fn fill_stop(qty: f64, bar: &Bar, stop: f64) -> TriggerOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::models::{Order, OrderId, OrderType};
-    use crate::data::models::Bar;
-    use std::collections::HashMap;
 
     fn bar(open: f64, high: f64, low: f64, close: f64) -> Bar {
         Bar {

@@ -720,8 +720,6 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::config::interface::Config;
-    use crate::data::models::BarDownload;
-    use crate::data::providers::DataProvider;
     use crate::engine::EngineCache;
     use crate::storage::duckdb::DuckDb;
     use crate::storage::traits::Storage;

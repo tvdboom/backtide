@@ -170,7 +170,6 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::runtime::Runtime;
 
     #[test]
     fn engine_cache_new_creates_empty_caches() {

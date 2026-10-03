@@ -71,6 +71,10 @@ harness = false
 name = "live_bench"
 harness = false
 
+[lints.rust]
+redundant_imports = "warn"
+unused_qualifications = "warn"
+
 [lints.clippy]
 type_complexity = "allow"
 too_many_arguments = "allow"

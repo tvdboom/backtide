@@ -9,7 +9,6 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::{PyAnyMethods, PyDictMethods};
 use pyo3::types::{PyDict, PyList, PyTuple};
 use pyo3::{Bound, Py, PyAny, PyResult, Python};
-use rayon::iter::IntoParallelRefIterator;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;

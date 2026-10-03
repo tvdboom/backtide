@@ -2,9 +2,7 @@ use crate::data::interface::{
     download_bars, fetch_bar_preview, fetch_instruments, list_instruments, resolve_profiles,
 };
 use crate::data::models::*;
-use models::Provider;
 use pyo3::prelude::*;
-use pyo3::{Bound, PyResult};
 
 mod engine;
 pub mod errors;

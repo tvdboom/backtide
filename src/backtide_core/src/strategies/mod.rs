@@ -1,6 +1,5 @@
 use crate::strategies::interface::*;
 use pyo3::prelude::*;
-use pyo3::{Bound, PyResult};
 
 pub mod interface;
 mod traits;

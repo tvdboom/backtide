@@ -25,7 +25,6 @@ use crate::utils::progress::{progress_bar, progress_spinner};
 use crate::utils::python::load_pickle;
 use itertools::Itertools;
 use pyo3::prelude::*;
-use pyo3::Py;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -1918,18 +1917,14 @@ mod tests {
     use super::*;
     use crate::config::interface::Config;
     use crate::data::errors::DataResult;
-    use crate::data::models::{
-        Bar, BarDownload, Currency, Exchange, Instrument, InstrumentType, Interval, Provider,
-    };
     use crate::data::providers::DataProvider;
-    use crate::engine::{Engine, EngineCache};
+    use crate::engine::EngineCache;
     use crate::sizers::{EqualWeight, FixedQuantity};
     use crate::storage::duckdb::DuckDb;
     use crate::storage::models::BarSeries;
     use crate::storage::traits::Storage;
     use async_trait::async_trait;
-    use pyo3::types::{PyDict, PyList, PyModule};
-    use std::collections::HashMap;
+    use pyo3::types::{PyDict, PyList};
     use std::sync::Arc;
     use strum::IntoEnumIterator;
     use tempfile::TempDir;
@@ -1959,7 +1954,7 @@ mod tests {
             self.instruments
                 .get(symbol)
                 .cloned()
-                .ok_or_else(|| crate::data::errors::DataError::SymbolNotFound(symbol.clone()))
+                .ok_or_else(|| DataError::SymbolNotFound(symbol.clone()))
         }
 
         async fn fetch_range(&self, _: Instrument, _: Interval) -> DataResult<(u64, u64)> {
@@ -3821,7 +3816,7 @@ class Metric:
             ("custom_good".to_owned(), custom_metric(42.0, false)),
             ("custom_bad".to_owned(), custom_metric(0.0, true)),
         ]);
-        let progress = crate::backtest::interface::ProgressReporter::new(progress_callback());
+        let progress = ProgressReporter::new(progress_callback());
 
         let result = engine
             .run_experiment(&config, true, &strategies, &indicators, &metrics, Some(&progress))

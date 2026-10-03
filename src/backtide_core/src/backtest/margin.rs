@@ -261,7 +261,6 @@ pub fn check_maintenance_margin(margin: f64, equity_base: f64, gross_base: f64) 
 mod tests {
     use super::*;
     use crate::backtest::models::ExchangeExpConfig;
-    use crate::data::models::Currency;
 
     /// Helper to create a minimal ExperimentConfig with custom exchange settings.
     fn cfg_with_exchange(exchange: ExchangeExpConfig) -> ExperimentConfig {

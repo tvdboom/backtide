@@ -1,6 +1,5 @@
 use crate::storage::interface::*;
 use pyo3::prelude::*;
-use pyo3::{Bound, PyResult};
 
 pub mod duckdb;
 mod engine;

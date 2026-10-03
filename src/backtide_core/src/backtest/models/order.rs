@@ -467,7 +467,6 @@ impl Order {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pyo3::types::{PyFloat, PyModule, PyString};
 
     #[test]
     fn order_id_supports_sentinel_serde_and_python_conversion() {

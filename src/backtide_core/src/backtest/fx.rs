@@ -354,9 +354,6 @@ fn forward_fill(s: &[(i64, f64)], ts: i64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{Cash, MIN_POSITION};
-    use crate::data::models::Currency;
-    use std::collections::HashMap;
 
     #[test]
     fn direct_and_inverse() {

@@ -958,9 +958,8 @@ fn rejected_fill(order: Order, timestamp: i64, reason: String) -> SessionFill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::models::{BuiltinSizer, Order, OrderId};
+    use crate::backtest::models::BuiltinSizer;
     use crate::data::models::Currency;
-    use pyo3::types::PyModule;
 
     fn update(close: f64, timestamp: u64) -> MarketUpdate {
         MarketUpdate {

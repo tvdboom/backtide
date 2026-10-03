@@ -394,7 +394,6 @@ pub fn rotation_orders(
 mod tests {
     use super::*;
     use crate::data::models::Currency;
-    use pyo3::types::PyDict;
 
     fn bar(close: f64) -> Bar {
         Bar {

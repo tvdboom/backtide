@@ -14,8 +14,8 @@ use pyo3::types::{PyDict, PyList};
 /// Parse a Python value that may be a single item or a list into `Vec<T>`.
 fn parse_one_or_many<'py, T>(value: Bound<'py, PyAny>) -> PyResult<Vec<T>>
 where
-    T: for<'a> pyo3::FromPyObject<'a, 'py>,
-    for<'a> <T as pyo3::FromPyObject<'a, 'py>>::Error: Into<PyErr>,
+    T: for<'a> FromPyObject<'a, 'py>,
+    for<'a> <T as FromPyObject<'a, 'py>>::Error: Into<PyErr>,
 {
     if let Ok(seq) = value.extract::<Vec<Bound<'py, PyAny>>>() {
         seq.iter().map(|item| item.extract::<T>().map_err(Into::into)).collect::<PyResult<Vec<_>>>()

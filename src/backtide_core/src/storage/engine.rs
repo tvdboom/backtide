@@ -100,7 +100,7 @@ mod tests {
     use crate::data::errors::DataResult;
     use crate::data::models::{Bar, BarDownload, Dividend};
     use crate::data::providers::DataProvider;
-    use crate::engine::{Engine, EngineCache};
+    use crate::engine::EngineCache;
     use crate::storage::duckdb::DuckDb;
     use crate::storage::traits::Storage;
     use async_trait::async_trait;
