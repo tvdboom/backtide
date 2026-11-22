@@ -26,6 +26,7 @@ async-trait = "0.1.92"
 chrono = "0.4.45"
 chrono-tz = "0.10.4"
 duckdb = { version = "1.10505.0", features = ["bundled"] }
+fin-primitives = { version = "4.0.1", default-features = false, features = ["indicators"] }
 futures = "0.3.34"
 indexmap = "2.14.0"
 indicatif = "0.18.6"
