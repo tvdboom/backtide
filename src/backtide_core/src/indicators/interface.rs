@@ -2,6 +2,7 @@ use crate::data::models::Bar;
 use crate::indicators::traits::Indicator;
 use crate::indicators::utils::*;
 use crate::utils::python::{extract_bars_from_python, to_python};
+use fin_primitives::signals::batch_f64;
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 
@@ -342,7 +343,7 @@ impl Indicator for BollingerBands {
     fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let mid = rolling_mean(&c, self.period);
-        let std = rolling_std(&c, self.period);
+        let std = batch_f64::rolling_std(&c, self.period, 0);
         let n = c.len();
         let mut upper = vec![f64::NAN; n];
         let mut lower = vec![f64::NAN; n];
@@ -507,7 +508,7 @@ impl Indicator for ExponentialMovingAverage {
 
     fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
-        vec![ewm(&c, self.period)]
+        vec![batch_f64::ema(&c, self.period)]
     }
 }
 
@@ -595,16 +596,8 @@ impl Indicator for MovingAverageConvergenceDivergence {
 
     fn compute_inner(&self, bars: &[Bar]) -> Vec<Vec<f64>> {
         let c: Vec<f64> = bars.iter().map(|b| b.close).collect();
-        let fast = ewm(&c, self.fast_period);
-        let slow = ewm(&c, self.slow_period);
-        let n = c.len();
-        let mut macd_line = vec![f64::NAN; n];
-        for i in 0..n {
-            if !fast[i].is_nan() && !slow[i].is_nan() {
-                macd_line[i] = fast[i] - slow[i];
-            }
-        }
-        let signal_line = ewm(&macd_line, self.signal_period);
+        let (macd_line, signal_line, _) =
+            batch_f64::macd(&c, self.fast_period, self.slow_period, self.signal_period);
         vec![macd_line, signal_line]
     }
 }
@@ -1383,12 +1376,32 @@ mod tests {
     }
 
     #[test]
-    fn ema_first_value_equals_input() {
-        let bars: Vec<Bar> = [5.0, 6.0, 7.0].into_iter().map(bar).collect();
-        let out = ExponentialMovingAverage::new(2).compute_inner(&bars);
-        assert_eq!(out[0][0], 5.0);
-        // Subsequent values bounded by the data range.
-        assert!(out[0][2] > 5.0 && out[0][2] < 8.0);
+    fn ema_is_seeded_from_sma_like_talib() {
+        let bars: Vec<Bar> = [5.0, 6.0, 7.0, 8.0].into_iter().map(bar).collect();
+        let out = ExponentialMovingAverage::new(3).compute_inner(&bars);
+        // No value until a full window, then the SMA of that window, then alpha = 2/(n+1).
+        assert!(out[0][0].is_nan() && out[0][1].is_nan());
+        assert_eq!(out[0][2], 6.0);
+        assert_eq!(out[0][3], 7.0);
+    }
+
+    #[test]
+    fn macd_warms_up_like_talib() {
+        let bars: Vec<Bar> = (0..50).map(|i| bar(100.0 + (i as f64).sin())).collect();
+        let out = MovingAverageConvergenceDivergence::new(12, 26, 9).compute_inner(&bars);
+        // MACD line first at slow - 1, signal at slow + signal - 2.
+        assert!(out[0][24].is_nan() && out[0][25].is_finite());
+        assert!(out[1][32].is_nan() && out[1][33].is_finite());
+    }
+
+    #[test]
+    fn bollinger_bands_use_population_std_like_talib() {
+        let closes = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+        let bars: Vec<Bar> = closes.into_iter().map(bar).collect();
+        let out = BollingerBands::new(8, 1.0).compute_inner(&bars);
+        // Mean 5, population std 2 (the sample std would be 2.138).
+        assert!((out[0][7] - 7.0).abs() < 1e-12);
+        assert!((out[2][7] - 3.0).abs() < 1e-12);
     }
 
     #[test]
