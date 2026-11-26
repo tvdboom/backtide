@@ -3,8 +3,9 @@ use crate::config::interface::Config;
 use crate::constants::{PositionAmount, Symbol, MIN_POSITION};
 use crate::data::models::Bar;
 use crate::errors::{EngineError, EngineResult};
+use crate::indicators::utils::extract_indicator_result;
 use crate::sizers::{EqualWeight, FixedNotional, FixedQuantity, Sizer};
-use crate::utils::python::{extract_2d_from_python, extract_bars_from_python, load_pickle};
+use crate::utils::python::{extract_bars_from_python, load_pickle};
 use itertools::Itertools;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -88,7 +89,8 @@ pub fn extract_indicator_data_from_python(
 
         let mut by_symbol = HashMap::with_capacity(per_symbol_dict.len());
         for (symbol, value) in per_symbol_dict.iter() {
-            by_symbol.insert(symbol.extract::<String>()?, extract_2d_from_python(&value)?);
+            by_symbol
+                .insert(symbol.extract::<String>()?, extract_indicator_result(value.py(), &value)?);
         }
 
         out.insert(name.extract::<String>()?, by_symbol);
@@ -430,11 +432,16 @@ mod tests {
             assert!(extract_indicator_data_from_python(Some(outer.as_any())).is_err());
 
             let by_symbol = PyDict::new(py);
-            by_symbol.set_item("AAPL", vec![vec![10.0, 20.0]]).expect("insert series");
+            by_symbol
+                .set_item("AAPL", vec![vec![10.0, 20.0], vec![30.0, 40.0], vec![50.0, 60.0]])
+                .expect("insert point-by-output history");
             outer.set_item("RSI", by_symbol).expect("insert symbol mapping");
             let extracted =
                 extract_indicator_data_from_python(Some(outer.as_any())).expect("valid payload");
-            assert_eq!(extracted["RSI"]["AAPL"], vec![vec![10.0, 20.0]]);
+            assert_eq!(
+                extracted["RSI"]["AAPL"],
+                vec![vec![10.0, 30.0, 50.0], vec![20.0, 40.0, 60.0]]
+            );
 
             assert!(extract_indicator_data_from_python(None).expect("empty payload").is_empty());
 

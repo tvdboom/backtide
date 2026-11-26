@@ -145,14 +145,15 @@ pub fn compute_indicators(
 ///
 /// Convert into `Vec<Vec<f64>>` shaped as `(n_series, n_points)`. All paths
 /// go through numpy so we only need one extraction branch.
-fn extract_indicator_result(py: Python, result: &Bound<PyAny>) -> PyResult<Vec<Vec<f64>>> {
+pub(crate) fn extract_indicator_result(
+    py: Python,
+    result: &Bound<PyAny>,
+) -> PyResult<Vec<Vec<f64>>> {
     let np = py.import("numpy")?;
 
     // Convert to a float64 numpy array regardless of origin.
     let arr = if result.hasattr("to_numpy")? {
-        let kwargs = PyDict::new(py);
-        kwargs.set_item("allow_copy", true)?;
-        result.call_method("to_numpy", (), Some(&kwargs))?
+        result.call_method0("to_numpy")?
     } else {
         np.call_method1("asarray", (result,))?
     };

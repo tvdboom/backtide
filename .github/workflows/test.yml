@@ -69,7 +69,11 @@ jobs:
           files: ./coverage.xml
 
   cargo-tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
@@ -86,6 +90,7 @@ jobs:
         with:
           workspaces: src/backtide_core
       - name: Set Python library path
+        if: runner.os == 'Linux'
         run: echo "LD_LIBRARY_PATH=$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" >> "$GITHUB_ENV"
       - name: Run Cargo tests
         run: |
