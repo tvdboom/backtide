@@ -608,17 +608,20 @@ impl SessionBroker {
                     };
                     builtin.calculate(capital, raw_price, stop_distance, None)
                 },
-                SizerSlot::Custom(custom) => Python::attach(|py| -> PyResult<f64> {
+                SizerSlot::Custom(custom) => {
+                    // Metrics use Rayon workers that may be waiting to call Python.
                     let equity = self.snapshot().equity / quote_to_base_rate;
-                    custom
-                        .bind(py)
-                        .call_method1(
-                            "calculate",
-                            (equity, raw_price, stop_distance, Option::<f64>::None),
-                        )?
-                        .extract()
-                })
-                .map_err(|error| error.to_string()),
+                    Python::attach(|py| -> PyResult<f64> {
+                        custom
+                            .bind(py)
+                            .call_method1(
+                                "calculate",
+                                (equity, raw_price, stop_distance, Option::<f64>::None),
+                            )?
+                            .extract()
+                    })
+                    .map_err(|error| error.to_string())
+                },
             };
 
             match quantity {

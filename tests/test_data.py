@@ -33,37 +33,55 @@ from backtide.data import (
 class TestDownloadBars:
     """Tests for the 'download_bars' function."""
 
-    def test_empty_profiles_do_not_initialize_providers_or_storage(self, tmp_path: Path) -> None:
-        """An empty download returns its summary without network or storage access."""
+    @pytest.mark.parametrize("with_profile", [False, True])
+    def test_no_download_tasks_avoid_provider_requests(
+        self, tmp_path: Path, *, with_profile: bool
+    ) -> None:
+        """Empty and nonoverlapping downloads avoid requests, with no storage for empty input."""
         script = textwrap.dedent(
             """
             import sys
             from pathlib import Path
 
             from backtide.config import Config, DataConfig, set_config
-            from backtide.data import download_bars
+            from backtide.data import Instrument, InstrumentProfile, Interval, download_bars
 
             storage_path = Path(sys.argv[1]) / "unused-storage"
-            set_config(Config(data=DataConfig(storage_path=str(storage_path))))
+            with_profile = sys.argv[2] == "True"
+            # Binance clients initialize without a network handshake.
+            set_config(Config(data=DataConfig(
+                storage_path=str(storage_path),
+                providers={name: "binance" for name in ("stocks", "etf", "forex", "crypto")},
+            )))
+            profiles = []
+            if with_profile:
+                profiles.append(InstrumentProfile(
+                    instrument=Instrument(
+                        "BTC-USD", "Bitcoin", "BTC", "USD", "crypto", "crypto", "binance"
+                    ),
+                    earliest_ts={Interval("1m"): 1000},
+                    latest_ts={Interval("1m"): 2000},
+                    legs=[],
+                ))
 
-            result = download_bars([], verbose=False)
+            result = download_bars(profiles, start=2000, end=1000, verbose=False)
 
             assert result.n_succeeded == 0
             assert result.n_failed == 0
             assert result.warnings == []
             assert repr(result) == "DownloadResult(n_succeeded=0, n_failed=0, warnings=[])"
-            assert not storage_path.exists()
-            print("empty-download-ok")
+            assert storage_path.exists() is with_profile
+            print("no-download-tasks-ok")
             """
         )
         environment = os.environ.copy()
-        # Provider initialization must fail rather than contact a public endpoint.
+        # Unexpected provider requests must fail rather than contact a public endpoint.
         for variable in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
             environment[variable] = environment[variable.lower()] = "http://127.0.0.1:9"
         environment["NO_PROXY"] = environment["no_proxy"] = ""
 
         result = subprocess.run(
-            [sys.executable, "-c", script, str(tmp_path)],
+            [sys.executable, "-c", script, str(tmp_path), str(with_profile)],
             env=environment,
             capture_output=True,
             text=True,
@@ -72,7 +90,7 @@ class TestDownloadBars:
         )
 
         assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == "empty-download-ok"
+        assert result.stdout.strip() == "no-download-tasks-ok"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

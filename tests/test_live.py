@@ -201,11 +201,19 @@ class TestSession:
             """
             from backtide.indicators import BaseIndicator
             from backtide.analysis import compute_statistics
+            from backtide.backtest import Order
             from backtide.live import MarketUpdate, Session
+            from backtide.sizers import BaseSizer
             from backtide.strategies import BuyAndHold
             import pandas as pd
 
             calls = []
+
+            class Sizer(BaseSizer):
+                def calculate(self, equity, price, stop_distance=None, atr=None):
+                    assert equity == 100000.0
+                    assert price == 100.0
+                    return 2.0
 
             class Signal(BaseIndicator):
                 def __init__(self, factor):
@@ -217,6 +225,11 @@ class TestSession:
                 def compute(self, data):
                     calls.append(self.factor)
                     assert Session().snapshot().equity == 100000.0
+                    sized = Session().on_bar(
+                        MarketUpdate("BTC-USD", "1m", 1000, 1060, 100.0, 100.0, 100.0, 100.0),
+                        [Order("BTC-USD", Sizer())],
+                    )
+                    assert sized.snapshot.portfolio.positions["BTC-USD"] == 2.0
                     stats = compute_statistics(pd.DataFrame({
                         "symbol": ["AAPL"] * 3 + ["MSFT"] * 3,
                         "close": [100.0, 101.0, 103.0, 50.0, 51.0, 53.0],
