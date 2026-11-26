@@ -34,7 +34,38 @@ from backtide.config import (
 )
 from backtide.data import Country, Currency, Exchange, InstrumentType, Interval, Provider
 from backtide.indicators import BUILTIN_INDICATORS
+from backtide.live import SessionConfig
 from backtide.strategies import BUILTIN_STRATEGIES
+
+
+class TestConfigurationInputs:
+    """Test enum conversion when public configuration models receive Python inputs."""
+
+    @pytest.mark.parametrize("period", ConversionPeriod.variants())
+    def test_conversion_period_accepts_serialized_names(self, period: ConversionPeriod) -> None:
+        """Preserve a currency conversion schedule supplied by a configuration form."""
+        config = ExchangeExpConfig(conversion_period=str(period))
+
+        assert config.conversion_period == period
+
+    @pytest.mark.parametrize(
+        ("model_type", "field", "value"),
+        [
+            (DataConfig, "providers", {"stocks": "unknown"}),
+            (DataExpConfig, "instrument_type", "unknown"),
+            (DataExpConfig, "interval", "unknown"),
+            (ExchangeExpConfig, "allowed_order_types", ["unknown"]),
+            (ExchangeExpConfig, "conversion_period", "unknown"),
+            (GeneralConfig, "base_currency", "unknown"),
+            (SessionConfig, "allowed_order_types", ["unknown"]),
+        ],
+    )
+    def test_invalid_enum_fields_are_rejected(
+        self, model_type: type[Any], field: str, value: Any
+    ) -> None:
+        """Reject unsupported configuration choices at the Python extension boundary."""
+        with pytest.raises(ValueError, match="Unknown"):
+            model_type(**{field: value})
 
 
 class TestEnumInputs:

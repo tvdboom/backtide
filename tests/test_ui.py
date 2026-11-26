@@ -7,6 +7,7 @@ Description: Unit tests for the local web application and service layer.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler
@@ -147,6 +148,27 @@ class StubServices(BacktideServices):
     def sizer_catalog(self):
         """Return a deterministic position-sizer catalog."""
         return {"builtin": [{"type": "FixedFractional"}], "saved": []}
+
+
+@pytest.fixture
+def wait_for_jobs(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[], None]]:
+    """Wait for real job threads to finish instead of relying on scheduler timing."""
+    threads: list[threading.Thread] = []
+    real_thread = threading.Thread
+
+    def record_thread(*args: Any, **kwargs: Any) -> threading.Thread:
+        thread = real_thread(*args, **kwargs)
+        threads.append(thread)
+        return thread
+
+    def wait() -> None:
+        for thread in threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive(), "Background job did not finish"
+
+    monkeypatch.setattr("backtide.ui.services.threading.Thread", record_thread)
+    yield wait
+    wait()
 
 
 @pytest.fixture
@@ -663,7 +685,7 @@ class TestServerInternals:
 class TestJobStore:
     """Tests for bounded background work snapshots."""
 
-    def test_successful_job_exposes_result(self):
+    def test_successful_job_exposes_result(self, wait_for_jobs: Callable[[], None]) -> None:
         """Completed work transitions to success and keeps its result."""
         jobs = JobStore()
 
@@ -678,11 +700,10 @@ class TestJobStore:
             progress_unit="items",
         )
 
-        for _ in range(1000):
-            snapshot = jobs.get(job["id"])
-            if snapshot["status"] == "success":
-                break
+        wait_for_jobs()
+        snapshot = jobs.get(job["id"])
 
+        assert snapshot["status"] == "success"
         assert snapshot["result"] == {"value": 42}
         assert snapshot["name"] == "Momentum research"
         assert snapshot["progress_completed"] == 4
@@ -690,7 +711,7 @@ class TestJobStore:
         assert snapshot["progress_unit"] == "items"
         assert snapshot["progress_started_at"]
 
-    def test_failed_job_exposes_safe_error(self):
+    def test_failed_job_exposes_safe_error(self, wait_for_jobs: Callable[[], None]) -> None:
         """A worker exception is captured without losing the job."""
         jobs = JobStore()
 
@@ -698,14 +719,15 @@ class TestJobStore:
             raise ValueError("invalid work")
 
         job = jobs.start("test", fail)
-        for _ in range(1000):
-            snapshot = jobs.get(job["id"])
-            if snapshot["status"] == "error":
-                break
+        wait_for_jobs()
+        snapshot = jobs.get(job["id"])
 
+        assert snapshot["status"] == "error"
         assert snapshot["error"] == "invalid work"
 
-    def test_aborted_job_reaches_terminal_state_without_escaping_thread(self):
+    def test_aborted_job_reaches_terminal_state_without_escaping_thread(
+        self, wait_for_jobs: Callable[[], None]
+    ) -> None:
         """A user abort is captured as a completed background job."""
         from backtide.backtest import ExperimentAborted
 
@@ -715,10 +737,8 @@ class TestJobStore:
             raise ExperimentAborted("Experiment aborted by user.")
 
         job = jobs.start("experiment", abort)
-        for _ in range(1000):
-            snapshot = jobs.get(job["id"])
-            if snapshot["status"] == "aborted":
-                break
+        wait_for_jobs()
+        snapshot = jobs.get(job["id"])
 
         assert snapshot["status"] == "aborted"
         assert snapshot["error"] == "Experiment aborted by user."
@@ -744,7 +764,7 @@ class TestJobStore:
 
         assert [job["id"] for job in jobs.list_jobs()] == ["new", "running"]
 
-    def test_zero_total_progress_is_ignored(self):
+    def test_zero_total_progress_is_ignored(self, wait_for_jobs: Callable[[], None]) -> None:
         """A worker cannot publish an unusable non-positive progress total."""
         jobs = JobStore()
 
@@ -753,12 +773,43 @@ class TestJobStore:
             return "done"
 
         job = jobs.start("test", work)
-        for _ in range(1000):
-            snapshot = jobs.get(job["id"])
-            if snapshot["status"] == "success":
-                break
+        wait_for_jobs()
+        snapshot = jobs.get(job["id"])
 
+        assert snapshot["status"] == "success"
         assert snapshot["progress_total"] is None
+
+    def test_progress_is_visible_before_the_worker_finishes(
+        self, wait_for_jobs: Callable[[], None]
+    ) -> None:
+        """Expose running progress before publishing the completed worker result."""
+        jobs = JobStore()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def work(progress: Callable[[float, float], None]) -> int:
+            progress(4, 10)
+            entered.set()
+            assert release.wait(timeout=5), "Worker was not released"
+            return 42
+
+        job = jobs.start("test", work)
+        try:
+            assert entered.wait(timeout=5), "Worker did not start"
+            snapshot = jobs.get(job["id"])
+
+            assert snapshot["status"] == "running"
+            assert snapshot["result"] is None
+            assert snapshot["progress_completed"] == 4
+            assert snapshot["progress_total"] == 10
+        finally:
+            release.set()
+            wait_for_jobs()
+
+        snapshot = jobs.get(job["id"])
+        assert snapshot["status"] == "success"
+        assert snapshot["result"] == 42
+        assert snapshot["finished_at"]
 
 
 class TestSerialization:
@@ -1707,7 +1758,9 @@ class TestServiceCommands:
         assert result["config"]["commission_pct"] == 0.0
         assert result["config"]["commission_fixed"] == 1.5
 
-    def test_download_converts_browser_dates_before_dispatch(self, monkeypatch):
+    def test_download_converts_browser_dates_before_dispatch(
+        self, monkeypatch: pytest.MonkeyPatch, wait_for_jobs: Callable[[], None]
+    ) -> None:
         """Download jobs pass inclusive UTC seconds to the data API."""
         from backtide import data
 
@@ -1734,10 +1787,9 @@ class TestServiceCommands:
                 "end": "2024-01-01",
             }
         )
-        for _ in range(1000):
-            if services.jobs.get(job["id"])["status"] == "success":
-                break
+        wait_for_jobs()
 
+        assert services.jobs.get(job["id"])["status"] == "success"
         assert captured == {
             "profiles": ["profile"],
             "start": 1_704_067_200,

@@ -219,7 +219,12 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path, default=root / "rust-coverage.info")
     parser.add_argument("--fail-under", type=float, default=70.0)
-    parser.add_argument("--workers", type=int, default=12)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=min(12, os.cpu_count() or 1),
+        help="Parallel build/test workers (default: available CPUs, capped at 12).",
+    )
     return parser.parse_args()
 
 
