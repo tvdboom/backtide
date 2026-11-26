@@ -3609,6 +3609,156 @@ class Metric:
     }
 
     #[test]
+    fn unwritable_experiment_directory_reports_warnings_without_losing_the_result() {
+        let mut stub = StubProvider::new();
+        stub.instruments.insert("AAPL".into(), make_instrument("AAPL"));
+        let (engine, _temporary) = make_engine_with_stub(stub);
+        write_bars(
+            &engine,
+            "AAPL",
+            vec![make_bar(1_000_000_000, 100.0), make_bar(1_000_086_400, 101.0)],
+        );
+        std::fs::create_dir_all(&engine.config.data.storage_path).unwrap();
+        std::fs::write(engine.config.data.storage_path.join("experiments"), "occupied").unwrap();
+        let mut config = base_config();
+        config.strategy.strategies = vec!["builtin".into()];
+        let strategies = HashMap::from([("builtin".into(), bah_strategy())]);
+
+        let result = engine
+            .run_experiment(&config, false, &strategies, &HashMap::new(), &HashMap::new(), None)
+            .unwrap();
+
+        assert_eq!(result.status, ExperimentStatus::Success);
+        assert_eq!(result.strategies.len(), 1);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Failed to create experiment dir")));
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Failed to persist experiment config")));
+        assert_eq!(engine.db.query_experiments(None, None, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn saved_custom_metrics_load_without_an_in_memory_override() {
+        let mut stub = StubProvider::new();
+        stub.instruments.insert("AAPL".into(), make_instrument("AAPL"));
+        let (engine, _temporary) = make_engine_with_stub(stub);
+        write_bars(
+            &engine,
+            "AAPL",
+            vec![make_bar(1_000_000_000, 100.0), make_bar(1_000_086_400, 101.0)],
+        );
+        let directory = engine.config.data.storage_path.join("metrics");
+        std::fs::create_dir_all(&directory).unwrap();
+        let metric = custom_metric(42.0, false);
+        let serialized = Python::attach(|py| {
+            py.import("cloudpickle")
+                .unwrap()
+                .call_method1("dumps", (metric,))
+                .unwrap()
+                .extract::<Vec<u8>>()
+                .unwrap()
+        });
+        std::fs::write(directory.join("saved.pkl"), serialized).unwrap();
+        let mut config = base_config();
+        config.metrics = crate::metrics::selection::MetricSelection::from_names(vec![
+            "saved".into(),
+            "missing".into(),
+        ]);
+        config.strategy.strategies = vec!["builtin".into()];
+        let strategies = HashMap::from([("builtin".into(), bah_strategy())]);
+
+        let result = engine
+            .run_experiment(&config, false, &strategies, &HashMap::new(), &HashMap::new(), None)
+            .unwrap();
+
+        assert_eq!(result.strategies[0].metrics["saved"], 42.0);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Failed to load metric \"missing\"")));
+    }
+
+    #[test]
+    fn delayed_currency_conversion_preserves_equity_when_the_sweep_becomes_due() {
+        for mode in [CurrencyConversionMode::EndOfPeriod, CurrencyConversionMode::CustomInterval] {
+            let mut config = base_config();
+            config.portfolio.starting_positions = [("AAPL".into(), 1.0)].into();
+            config.exchange.conversion_mode = mode;
+            config.exchange.conversion_period = Some(ConversionPeriod::Day);
+            config.exchange.conversion_interval = Some(3);
+            config.engine.trade_on_close = true;
+            let mut profile = make_profile("AAPL");
+            profile.instrument.quote = "EUR".into();
+            let mut fx = FxTable::new("USD");
+            fx.add_series("EUR", "USD", vec![(0, 1.1)]);
+            let aligned = make_aligned(
+                "AAPL",
+                vec![
+                    Some(make_bar(86_280, 100.0)),
+                    Some(make_bar(86_340, 100.0)),
+                    Some(make_bar(86_400, 100.0)),
+                ],
+            );
+
+            let result = run_one_strategy(
+                "conversion",
+                custom_strategy_batches(vec![vec![make_order(
+                    "AAPL",
+                    -1.0,
+                    OrderType::Market,
+                    None,
+                )]]),
+                &config,
+                &aligned,
+                &HashMap::new(),
+                &[profile],
+                &[86_280, 86_340, 86_400],
+                &fx,
+                None,
+            );
+
+            assert!(result.error.is_none());
+            assert!(result.equity_curve[1].cash.get(&Currency::EUR).copied().unwrap_or(0.0) > 0.0);
+            assert_eq!(
+                result.equity_curve[2].cash.get(&Currency::EUR).copied().unwrap_or(0.0),
+                0.0
+            );
+            assert!((result.equity_curve[1].equity - result.equity_curve[2].equity).abs() < 1e-8);
+        }
+    }
+
+    #[test]
+    fn malformed_indicator_cache_is_reported_without_panicking_or_submitting_orders() {
+        let config = base_config();
+        let aligned =
+            make_aligned("AAPL", vec![Some(make_bar(1_000, 100.0)), Some(make_bar(2_000, 100.0))]);
+        let indicators = HashMap::from([(
+            "RAGGED".into(),
+            HashMap::from([("AAPL".into(), vec![vec![1.0], vec![1.0, 2.0]])]),
+        )]);
+
+        let result = run_one_strategy(
+            "malformed",
+            custom_strategy_batches(vec![]),
+            &config,
+            &aligned,
+            &indicators,
+            &[make_profile("AAPL")],
+            &[1_000, 2_000],
+            &FxTable::new("USD"),
+            None,
+        );
+
+        assert!(result.error.as_deref().unwrap().contains("Failed to pre-build strategy view"));
+        assert!(result.orders.is_empty());
+        assert_eq!(result.equity_curve.len(), 2);
+    }
+
+    #[test]
     fn run_experiment_empty_symbols_list_returns_engine_error() {
         let (engine, _tmp) = make_engine();
         let mut cfg = base_config();

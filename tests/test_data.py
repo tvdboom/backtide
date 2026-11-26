@@ -18,11 +18,26 @@ from backtide.data import (
     InstrumentType,
     Interval,
     Provider,
+    download_bars,
     fetch_bar_preview,
     fetch_instruments,
     list_instruments,
     resolve_profiles,
 )
+
+
+class TestDownloadBars:
+    """Tests for bulk-download summaries."""
+
+    def test_empty_profiles_return_an_empty_summary(self) -> None:
+        """Finish an empty download without provider access or failures."""
+        result = download_bars([], verbose=False)
+
+        assert result.n_succeeded == 0
+        assert result.n_failed == 0
+        assert result.warnings == []
+        assert repr(result) == "DownloadResult(n_succeeded=0, n_failed=0, warnings=[])"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # InstrumentType

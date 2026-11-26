@@ -609,6 +609,23 @@ mod tests {
     }
 
     #[test]
+    fn reversing_a_position_limits_only_the_new_opposite_exposure() {
+        let config = cfg_with_exchange(ExchangeExpConfig {
+            max_position_size: 10,
+            ..Default::default()
+        });
+        let fx = FxTable::new("USD");
+
+        let quantity = check_order_against_limits(
+            &config, "AAPL", -100.0, 100.0, "USD", "USD", 10_000.0, 5_000.0, 50.0, 5_000.0, &fx, 0,
+        )
+        .unwrap();
+
+        assert_eq!(quantity, -60.0);
+        assert_eq!((50.0 + quantity).abs() * 100.0, 1_000.0);
+    }
+
+    #[test]
     fn limits_fx_conversion() {
         // Order in EUR, base is USD. EUR/USD = 1.10.
         let exchange = ExchangeExpConfig {

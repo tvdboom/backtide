@@ -5,6 +5,11 @@ Description: Unit tests for utility functions and constants.
 
 """
 
+from datetime import datetime, timedelta
+import subprocess
+import sys
+import textwrap
+import zoneinfo
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -298,6 +303,59 @@ class TestCoreUtils:
         """clear_cache runs without error."""
         clear_cache()
 
+    def test_polars_backend_and_explicit_timezone_in_a_fresh_process(self) -> None:
+        """Preserve dataframe shapes and explicit timezone settings across the extension."""
+        # Configuration is immutable after first use, so test a different backend in a child.
+        script = textwrap.dedent("""\
+            import math
+            import pandas as pd
+            import polars as pl
+            from backtide.config import Config, DataConfig, DisplayConfig, set_config
+
+            set_config(Config(
+                data=DataConfig(dataframe_library="polars"),
+                display=DisplayConfig(timezone="America/New_York"),
+            ))
+            from backtide.analysis import compute_statistics
+            from backtide.backtest import State
+            from backtide.indicators import SimpleMovingAverage, BollingerBands
+            from backtide.utils import init_logging
+
+            bars = pl.DataFrame({
+                key: [1.0, 2.0, 3.0] for key in ("open", "high", "low", "close", "volume")
+            })
+            mean = SimpleMovingAverage(2).compute(bars)
+            bands = BollingerBands(2, 1.0).compute(bars)
+            assert isinstance(mean, pl.Series)
+            assert math.isnan(mean[0])
+            assert mean.to_list()[1:] == [1.5, 2.5]
+            assert isinstance(bands, pl.DataFrame)
+            assert bands.shape == (3, 3)
+            assert bands[2, 1] == 2.5
+
+            frame = pd.DataFrame({
+                "symbol": ["AAPL"] * 3, "close": [1.0, 2.0, 3.0],
+                "open_ts": [1704067200, 1704153600, 1704240000],
+                "dt": pd.date_range("2024-01-01", periods=3, tz="UTC"),
+            })
+            statistics = compute_statistics(frame, price_col="close")
+            assert isinstance(statistics, pl.DataFrame)
+            assert statistics["symbol"].to_list() == ["AAPL"]
+
+            timestamp = State(timestamp=0).datetime
+            assert timestamp.isoformat() == "1969-12-31T19:00:00-05:00"
+            assert timestamp.tzinfo.key == "America/New_York"
+            init_logging("info")
+            print("backend-contract-ok")
+            """)
+
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, check=False, timeout=30
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "backend-contract-ok" in result.stdout
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _format_price and _format_number edge cases
@@ -559,6 +617,26 @@ class TestGetTimezone:
 
         result = _get_timezone("US/Eastern")
         assert isinstance(result, ZoneInfo)
+
+    @pytest.mark.parametrize("name", ["US/Eastern", "America/New_York"])
+    def test_timezone_falls_back_to_package_without_system_data(
+        self, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        """Resolve timezone aliases and daylight saving from the packaged database."""
+        from backtide.utils.utils import _get_timezone
+
+        # Bypass cached zones so the packaged fallback must supply the data.
+        monkeypatch.setattr("backtide.utils.utils.ZoneInfo", ZoneInfo.no_cache)
+        previous_path = zoneinfo.TZPATH
+        try:
+            zoneinfo.reset_tzpath(())
+            timezone = _get_timezone(name)
+        finally:
+            zoneinfo.reset_tzpath(previous_path)
+
+        assert timezone.key == name
+        assert datetime(2026, 1, 15, tzinfo=timezone).utcoffset() == timedelta(hours=-5)
+        assert datetime(2026, 7, 15, tzinfo=timezone).utcoffset() == timedelta(hours=-4)
 
 
 class TestDataTransformations:

@@ -329,6 +329,7 @@ pub fn wilder_smooth(data: &[f64], period: usize) -> Vec<f64> {
         for i in (start + 1)..n {
             let prev = out[i - 1];
             if !prev.is_finite() || !data[i].is_finite() {
+                out[i] = prev;
                 continue;
             }
             out[i] = prev + alpha * (data[i] - prev);
@@ -451,6 +452,48 @@ pub fn true_range(high: &[f64], low: &[f64], close: &[f64]) -> Vec<f64> {
 mod tests {
     use super::*;
     use pyo3::types::PyModule;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case(f64::NAN)]
+    #[case(f64::INFINITY)]
+    #[case(f64::NEG_INFINITY)]
+    fn smoothing_preserves_the_last_value_across_missing_samples(#[case] missing: f64) {
+        let result = wilder_smooth(&[1.0, 3.0, missing, 4.0], 2);
+
+        assert!(result[0].is_nan());
+        assert_eq!(result[1..], [2.0, 2.0, 3.0]);
+    }
+
+    #[rstest]
+    #[case(f64::NAN)]
+    #[case(f64::INFINITY)]
+    #[case(f64::NEG_INFINITY)]
+    fn rolling_windows_recover_after_a_non_finite_sample_leaves(#[case] missing: f64) {
+        let data = [1.0, missing, 3.0, 5.0];
+
+        let mean = rolling_mean(&data, 2);
+        let deviation = rolling_std(&data, 2);
+
+        assert!(mean[..3].iter().all(|value| value.is_nan()));
+        assert!(deviation[..3].iter().all(|value| value.is_nan()));
+        assert_eq!(mean[3], 4.0);
+        assert!((deviation[3] - 2.0_f64.sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn true_range_skips_missing_extremes_and_recovers_without_a_previous_close() {
+        let result = true_range(
+            &[f64::NAN, 4.0, f64::INFINITY, 8.0],
+            &[0.0, 2.0, 3.0, 5.0],
+            &[f64::NAN, 3.0, f64::NAN, 7.0],
+        );
+
+        assert!(result[0].is_nan());
+        assert_eq!(result[1], 2.0);
+        assert!(result[2].is_nan());
+        assert_eq!(result[3], 3.0);
+    }
 
     fn bar(close: f64) -> Bar {
         Bar {
@@ -496,6 +539,13 @@ class Empty:
     def __reduce__(self):
         return None
 
+class DictionaryArguments:
+    def __init__(self):
+        self.period = 7
+        self.source = "close"
+    def __reduce__(self):
+        return (DictionaryArguments, ())
+
 class ArrayLike:
     def to_numpy(self, allow_copy=True):
         import numpy
@@ -525,6 +575,13 @@ class ArrayLike:
             let empty = custom_indicator("Empty");
             assert!(indicator_args_from_py(empty.bind(py)).unwrap().is_empty());
             assert_eq!(indicator_deterministic_name("EMPTY", &[]), "EMPTY");
+
+            let dictionary = custom_indicator("DictionaryArguments");
+            assert_eq!(indicator_args_from_py(dictionary.bind(py)).unwrap(), ["7", "close"]);
+            assert_eq!(
+                _indicator_deterministic_name(dictionary.bind(py)).unwrap(),
+                "DictionaryArguments_7_close"
+            );
         });
     }
 

@@ -30,6 +30,7 @@ And operating systems:
 * **[pandas](https://pandas.pydata.org/)** (>=3.0.5; >=3.1.0 on Python 3.15)
 * **[plotly](https://plotly.com/python/)** (>=6.7.0)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
+* **[tzdata](https://tzdata.readthedocs.io/)** (>=2026.3; fallback IANA timezone database)
 * **[tzlocal](https://github.com/regebro/tzlocal)** (>=5.0)
 
 

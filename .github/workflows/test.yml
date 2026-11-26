@@ -35,6 +35,7 @@ jobs:
   unit-tests:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         # Match the release toolchain supported by bundled DuckDB.
         os: [ubuntu-latest, windows-2022, macos-latest]
@@ -60,7 +61,7 @@ jobs:
           uv sync --locked --no-install-project --no-default-groups --group tox
           uv run --no-sync tox -m unit
       - name: Upload coverage reports to Codecov
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

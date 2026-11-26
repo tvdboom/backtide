@@ -512,6 +512,9 @@ mod tests {
     #[rstest]
     #[case("not_a_number", "1.0", "1.0", "1.0", "1.0", "1.0")]
     #[case("1000", "bad", "1.0", "1.0", "1.0", "1.0")]
+    #[case("1000", "1.0", "bad", "1.0", "1.0", "1.0")]
+    #[case("1000", "1.0", "1.0", "bad", "1.0", "1.0")]
+    #[case("1000", "1.0", "1.0", "1.0", "bad", "1.0")]
     #[case("1000", "1.0", "1.0", "1.0", "1.0", "bad")]
     fn candle_try_from_invalid(
         #[case] start: &str,
@@ -529,7 +532,8 @@ mod tests {
             close: close.to_owned(),
             volume: volume.to_owned(),
         };
-        assert!(CoinbaseCandle::try_from(raw).is_err());
+        let error = CoinbaseCandle::try_from(raw).unwrap_err();
+        assert!(error.to_string().contains("invalid candle"));
     }
 
     // ── CoinbaseCandle -> Bar ───────────────────────────────────────────

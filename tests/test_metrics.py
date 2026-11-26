@@ -27,6 +27,21 @@ from backtide.ui.services import APIError, BacktideServices
 class TestMetricCatalog:
     """Tests for built-in metric metadata and experiment defaults."""
 
+    @pytest.mark.parametrize("names", [("sharpe", "pnl", "sharpe"), "sharpe"])
+    def test_metric_names_normalize_without_duplicates(self, names: str | tuple[str, ...]) -> None:
+        """Normalize supported metric selections into ordered unique names."""
+        config = ExperimentConfig(metrics=names)
+
+        assert config.metrics == (["sharpe"] if isinstance(names, str) else ["sharpe", "pnl"])
+
+    def test_catalog_representations_identify_the_metric(self) -> None:
+        """Identify both the machine key and display name in metric representations."""
+        for metric in list_builtin_metrics():
+            representation = repr(metric)
+
+            assert metric.key in representation
+            assert metric.name in representation
+
     def test_default_metrics_begin_with_sharpe(self):
         """Default metric configuration places Sharpe first."""
         config = ExperimentConfig()

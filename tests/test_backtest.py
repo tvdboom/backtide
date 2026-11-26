@@ -5,6 +5,7 @@ Description: Unit tests for the backtest module.
 
 """
 
+import json
 import pickle
 import threading
 from types import SimpleNamespace
@@ -117,6 +118,18 @@ class TestExchangeExpConfig:
         c = ExchangeExpConfig()
         assert isinstance(c.to_dict(), dict)
 
+    @pytest.mark.parametrize("mode", CurrencyConversionMode.variants())
+    def test_conversion_mode_accepts_serialized_names(self, mode: CurrencyConversionMode) -> None:
+        """Preserve currency conversion modes supplied as configuration strings."""
+        config = ExchangeExpConfig(conversion_mode=str(mode))
+
+        assert config.conversion_mode == mode
+
+    def test_rejects_unknown_conversion_mode(self) -> None:
+        """Reject an unknown conversion mode before creating an experiment."""
+        with pytest.raises(ValueError, match="Unknown currency conversion mode"):
+            ExchangeExpConfig(conversion_mode="unknown")
+
     def test_commission_type_accepts_enum_and_string_inputs(self):
         """Commission modes extract both enum instances and validated strings."""
         assert (
@@ -183,6 +196,17 @@ class TestExchangeExpConfig:
 
 class TestEngineExpConfig:
     """Tests for the EngineExpConfig model."""
+
+    @pytest.mark.parametrize("policy", EmptyBarPolicy.variants())
+    def test_empty_bar_policy_accepts_enum_and_string(self, policy: EmptyBarPolicy) -> None:
+        """Resolve both enum instances and serialized missing-bar policies."""
+        assert EngineExpConfig(empty_bar_policy=policy).empty_bar_policy == policy
+        assert EngineExpConfig(empty_bar_policy=str(policy)).empty_bar_policy == policy
+
+    def test_rejects_unknown_empty_bar_policy(self) -> None:
+        """Reject an unsupported missing-bar policy before execution."""
+        with pytest.raises(ValueError, match="Unknown empty bar policy"):
+            EngineExpConfig(empty_bar_policy="unknown")
 
     def test_defaults(self):
         """Test default values."""
@@ -515,7 +539,12 @@ class TestResultModels:
             value.__setstate__(state)
 
             assert pickle.dumps(value)
-            assert repr(value)
+            assert value.__repr__() == repr(value)
+
+            before_invalid_state = json.loads(value.__getstate__())
+            with pytest.raises(ValueError, match="expected"):
+                value.__setstate__(b"invalid json")
+            assert json.loads(value.__getstate__()) == before_invalid_state
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -686,6 +715,23 @@ class TestExperiment:
     def test_runtime_parameter_resolves_stored_names(self):
         """Stored runtime dependencies retain their configured names without overrides."""
         assert Experiment._resolve_runtime_param("Saved") == (["Saved"], {})
+
+    def test_stored_strategy_runs_without_an_in_memory_override(self) -> None:
+        """Reload a saved strategy by name and run it against isolated offline bars."""
+        from backtide.config import get_config
+        from backtide.strategies.utils import _save_strategy
+
+        name = "saved_strategy_contract"
+        _save_strategy(BuyAndHold(), name, get_config())
+
+        result = Experiment(_fixture_config(name="saved-strategy-contract"), strategies=name).run(
+            verbose=False
+        )
+
+        assert result.status == ExperimentStatus.Success
+        assert result.strategies[0].strategy_name == name
+        assert result.strategies[0].error is None
+        assert any(order.status == OrderStatus.Filled for order in result.strategies[0].orders)
 
     def test_external_abort_cleans_up_completed_result(self, monkeypatch):
         """An abort requested during execution removes the newly persisted result."""

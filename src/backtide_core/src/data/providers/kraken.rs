@@ -481,6 +481,28 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    #[tokio::test]
+    async fn malformed_ohlc_containers_return_contextual_errors() {
+        for (result, expected) in [
+            (json!([]), "OHLC result is not an object"),
+            (json!({"last": 1000}), "no OHLC data array found"),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/ohlc"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "error": [], "result": result,
+                })))
+                .mount(&server)
+                .await;
+            let provider = mocked_kraken(&server);
+
+            let error = provider.get_bars("XBTUSD", Interval::OneMinute, None).await.unwrap_err();
+
+            assert!(error.to_string().contains(expected));
+        }
+    }
+
     fn mocked_kraken(server: &MockServer) -> Kraken {
         Kraken {
             client: HttpClient::new().unwrap(),

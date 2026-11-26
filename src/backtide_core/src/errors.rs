@@ -49,3 +49,56 @@ impl From<EngineError> for PyErr {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::models::{InstrumentType, Interval, Provider};
+    use pyo3::Python;
+
+    #[test]
+    fn aborts_remain_keyboard_interrupts_at_the_python_boundary() {
+        Python::attach(|py| {
+            let error = PyErr::from(EngineError::Aborted);
+
+            assert!(error.is_instance_of::<PyKeyboardInterrupt>(py));
+            assert!(error.to_string().contains("Experiment aborted by user"));
+        });
+    }
+
+    #[test]
+    fn data_storage_and_engine_errors_keep_their_context_in_python() {
+        Python::attach(|py| {
+            let errors = [
+                (
+                    PyErr::from(EngineError::Initialization("test initialization".into())),
+                    "test initialization",
+                ),
+                (PyErr::from(EngineError::Experiment("test experiment".into())), "test experiment"),
+                (PyErr::from(DataError::SymbolNotFound("MISSING".into())), "MISSING"),
+                (
+                    PyErr::from(DataError::ProviderNotConfigured(InstrumentType::Crypto)),
+                    "No provider configured",
+                ),
+                (
+                    PyErr::from(DataError::ProviderUnavailable(Provider::Coinbase)),
+                    "Provider is not available",
+                ),
+                (
+                    PyErr::from(DataError::UnsupportedInterval(Interval::OneWeek)),
+                    "Unsupported interval",
+                ),
+                (
+                    PyErr::from(StorageError::CorruptData("test corrupt data".into())),
+                    "test corrupt data",
+                ),
+                (PyErr::from(StorageError::LockPoisoned), "connection lock is unavailable"),
+            ];
+
+            for (error, expected) in errors {
+                assert!(error.is_instance_of::<PyRuntimeError>(py));
+                assert!(error.to_string().contains(expected));
+            }
+        });
+    }
+}

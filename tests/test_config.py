@@ -6,6 +6,7 @@ Description: Unit tests for the configuration frontend.
 """
 
 import json
+from typing import Any
 
 import pytest
 import yaml
@@ -13,11 +14,49 @@ import yaml
 from backtide.config import (
     Config,
     DataConfig,
+    DataFrameLibrary,
     DisplayConfig,
     GeneralConfig,
+    LogLevel,
+    TriangulationStrategy,
     get_config,
     load_config,
 )
+
+
+class TestConfigEnums:
+    """Tests for enum-valued configuration fields."""
+
+    @pytest.mark.parametrize(
+        ("config_type", "field", "enum_type"),
+        [
+            (GeneralConfig, "log_level", LogLevel),
+            (DataConfig, "dataframe_library", DataFrameLibrary),
+            (GeneralConfig, "triangulation_strategy", TriangulationStrategy),
+        ],
+    )
+    def test_accepts_enums_and_serialized_names(
+        self, config_type: type[Any], field: str, enum_type: type[Any]
+    ) -> None:
+        """Preserve every enum setting through string and instance inputs."""
+        for variant in enum_type.variants():
+            assert getattr(config_type(**{field: variant}), field) == variant
+            assert getattr(config_type(**{field: str(variant)}), field) == variant
+            assert variant.__repr__() == repr(variant)
+
+    @pytest.mark.parametrize(
+        ("config_type", "field"),
+        [
+            (GeneralConfig, "log_level"),
+            (DataConfig, "dataframe_library"),
+            (GeneralConfig, "triangulation_strategy"),
+        ],
+    )
+    def test_rejects_unknown_names(self, config_type: type[Any], field: str) -> None:
+        """Reject unknown configuration enum names without silently defaulting."""
+        with pytest.raises(ValueError, match="Unknown"):
+            config_type(**{field: "unknown"})
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DisplayConfig
