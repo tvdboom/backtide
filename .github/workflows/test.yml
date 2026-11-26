@@ -22,8 +22,6 @@ jobs:
         with:
           path: .tox
           key: tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
-          restore-keys: |
-            tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -48,11 +46,10 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
       - uses: actions/cache@v4
+        # Tox runners use incompatible metadata; only restore matching configuration.
         with:
           path: .tox
           key: tox-${{ matrix.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
-          restore-keys: |
-            tox-${{ matrix.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -84,8 +81,6 @@ jobs:
         with:
           path: .tox
           key: tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
-          restore-keys: |
-            tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -136,8 +131,6 @@ jobs:
         with:
           path: .tox
           key: tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
-          restore-keys: |
-            tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core
@@ -162,8 +155,6 @@ jobs:
         with:
           path: .tox
           key: tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock', 'tox.ini') }}
-          restore-keys: |
-            tox-${{ runner.os }}-${{ github.job }}-py${{ env.PYTHON_VERSION }}-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/backtide_core

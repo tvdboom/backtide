@@ -323,6 +323,15 @@ pub fn download_bars(
     end: Option<u64>,
     verbose: bool,
 ) -> PyResult<DownloadResult> {
+    // A no-op download must not initialize network clients or storage.
+    if profiles.is_empty() {
+        return Ok(DownloadResult {
+            n_succeeded: 0,
+            n_failed: 0,
+            warnings: Vec::new(),
+        });
+    }
+
     let engine = Engine::get()?;
 
     // Release the GIL so HTTP workers and browser clients can continue running.

@@ -5,7 +5,12 @@ Description: Unit tests for the data interface and model classes.
 
 """
 
+import os
+from pathlib import Path
 import pickle
+import subprocess
+import sys
+import textwrap
 
 import pytest
 
@@ -23,6 +28,52 @@ from backtide.data import (
     list_instruments,
     resolve_profiles,
 )
+
+
+class TestDownloadBars:
+    """Tests for the 'download_bars' function."""
+
+    def test_empty_profiles_do_not_initialize_providers_or_storage(self, tmp_path: Path) -> None:
+        """An empty download returns its summary without network or storage access."""
+        script = textwrap.dedent(
+            """
+            import sys
+            from pathlib import Path
+
+            from backtide.config import Config, DataConfig, set_config
+            from backtide.data import download_bars
+
+            storage_path = Path(sys.argv[1]) / "unused-storage"
+            set_config(Config(data=DataConfig(storage_path=str(storage_path))))
+
+            result = download_bars([], verbose=False)
+
+            assert result.n_succeeded == 0
+            assert result.n_failed == 0
+            assert result.warnings == []
+            assert repr(result) == "DownloadResult(n_succeeded=0, n_failed=0, warnings=[])"
+            assert not storage_path.exists()
+            print("empty-download-ok")
+            """
+        )
+        environment = os.environ.copy()
+        # Provider initialization must fail rather than contact a public endpoint.
+        for variable in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+            environment[variable] = environment[variable.lower()] = "http://127.0.0.1:9"
+        environment["NO_PROXY"] = environment["no_proxy"] = ""
+
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(tmp_path)],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "empty-download-ok"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # InstrumentType
