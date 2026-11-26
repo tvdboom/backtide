@@ -430,7 +430,7 @@ impl Session {
     ) -> PyResult<SessionUpdate> {
         let explicit_orders = orders.unwrap_or_default();
         self.record_history(&market);
-        let (mut fills, processed) = self.broker.begin_update(&market);
+        let (mut fills, processed) = py.detach(|| self.broker.begin_update(&market));
 
         let strategy_orders = if processed && self.strategy.is_some() {
             self.evaluate_strategy(py, &market)?
@@ -440,9 +440,11 @@ impl Session {
 
         let orders_submitted = explicit_orders.len() + strategy_orders.len();
         if processed {
-            self.broker.submit_orders(explicit_orders, &market, &mut fills, false);
-            self.broker.submit_orders(strategy_orders, &market, &mut fills, true);
-            self.broker.finish_update(market.close_ts as i64);
+            py.detach(|| {
+                self.broker.submit_orders(explicit_orders, &market, &mut fills, false);
+                self.broker.submit_orders(strategy_orders, &market, &mut fills, true);
+                self.broker.finish_update(market.close_ts as i64);
+            });
         }
         let indicators = if processed {
             self.compute_latest_indicators()?
@@ -500,7 +502,7 @@ impl Session {
     }
 
     fn __repr__(&self) -> String {
-        let snapshot = self.broker.snapshot();
+        let snapshot = Python::attach(|py| py.detach(|| self.broker.snapshot()));
         format!(
             "Session(equity={}, positions={}, open_orders={}, processed_bars={})",
             snapshot.equity,
@@ -513,7 +515,7 @@ impl Session {
 
 impl Session {
     fn snapshot_with_metrics(&self) -> PyResult<SessionSnapshot> {
-        let mut snapshot = self.broker.snapshot();
+        let mut snapshot = Python::attach(|py| py.detach(|| self.broker.snapshot()));
         for (name, metric) in &self.metric_objects {
             let value =
                 compute_custom_metric(metric, self.broker.equity_curve(), self.broker.trades())?;
@@ -548,7 +550,7 @@ impl Session {
         let Some(strategy) = self.strategy.as_ref().map(|strategy| strategy.clone_ref(py)) else {
             return Ok(Vec::new());
         };
-        let snapshot = self.broker.snapshot();
+        let snapshot = py.detach(|| self.broker.snapshot());
         let state = State {
             timestamp: market.close_ts as i64,
             bar_index: snapshot.processed_bars.saturating_sub(1),

@@ -371,12 +371,20 @@ pub fn compute_statistics<'py>(
         .collect::<PyResult<Vec<_>>>()?;
 
     // Sort results by symbol for deterministic output.
-    let mut results: Vec<SymbolStats> = symbol_data
-        .into_par_iter()
-        .filter_map(|sd| {
-            compute_single(sd.symbol, &sd.prices, &sd.timestamps, risk_free_rate, periods_per_year)
-        })
-        .collect();
+    let mut results: Vec<SymbolStats> = py.detach(|| {
+        symbol_data
+            .into_par_iter()
+            .filter_map(|sd| {
+                compute_single(
+                    sd.symbol,
+                    &sd.prices,
+                    &sd.timestamps,
+                    risk_free_rate,
+                    periods_per_year,
+                )
+            })
+            .collect()
+    });
 
     // Sort results by symbol for deterministic output
     results.sort_by(|a, b| a.symbol.cmp(&b.symbol));

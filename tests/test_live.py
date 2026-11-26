@@ -200,8 +200,10 @@ class TestSession:
         script = textwrap.dedent(
             """
             from backtide.indicators import BaseIndicator
+            from backtide.analysis import compute_statistics
             from backtide.live import MarketUpdate, Session
             from backtide.strategies import BuyAndHold
+            import pandas as pd
 
             calls = []
 
@@ -214,6 +216,13 @@ class TestSession:
 
                 def compute(self, data):
                     calls.append(self.factor)
+                    assert Session().snapshot().equity == 100000.0
+                    stats = compute_statistics(pd.DataFrame({
+                        "symbol": ["AAPL"] * 3 + ["MSFT"] * 3,
+                        "close": [100.0, 101.0, 103.0, 50.0, 51.0, 53.0],
+                        "open_ts": [0, 86400, 172800] * 2,
+                    }), price_col="close")
+                    assert stats["symbol"].to_list() == ["AAPL", "MSFT"]
                     return [value * self.factor for value in data["close"].to_list()]
 
             session = Session(strategy=BuyAndHold(), indicators=[Signal(2), Signal(3)])

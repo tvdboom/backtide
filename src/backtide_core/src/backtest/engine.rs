@@ -469,10 +469,15 @@ impl Engine {
         };
 
         // Run the built-in and custom strategies in parallel.
-        let (mut results, custom_results): (Vec<RunResult>, Vec<RunResult>) = rayon::join(
-            || builtin.into_par_iter().map(&run).collect(),
-            || custom.into_iter().map(&run).collect(),
-        );
+        let (mut results, custom_results): (Vec<RunResult>, Vec<RunResult>) =
+            Python::attach(|py| {
+                py.detach(|| {
+                    rayon::join(
+                        || builtin.into_par_iter().map(&run).collect(),
+                        || custom.into_iter().map(&run).collect(),
+                    )
+                })
+            });
         results.extend(custom_results);
 
         if let Some(progress) = progress {
