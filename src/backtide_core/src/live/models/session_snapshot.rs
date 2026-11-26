@@ -69,7 +69,7 @@ use std::collections::HashMap;
 /// print(snapshot.equity)
 /// print(snapshot.portfolio.positions)
 /// ```
-#[pyclass(get_all, frozen, skip_from_py_object, module = "backtide.live")]
+#[pyclass(get_all, frozen, module = "backtide.live")]
 #[derive(Clone, Debug)]
 pub struct SessionSnapshot {
     /// Cash, positions, and currently resting orders.

@@ -258,12 +258,27 @@ in `tox.ini` and uses the [tox-uv](https://github.com/tox-dev/tox-uv) plugin so 
 
 | Environment         | What it does                                                                        |
 |---------------------|-------------------------------------------------------------------------------------|
-| `py311` ... `py314` | Build the wheel (including Rust compilation) and run pytest on that Python version. |
-| `py314-min`         | Test against the **oldest compatible** versions of runtime dependencies.            |
+| `py311` ... `py315` | Build the wheel (including Rust compilation) and run pytest on that Python version. |
+| `py311-min`         | Test against the **oldest compatible** versions of runtime dependencies.            |
+| `python-test`       | Rebuild the extension in an isolated environment and run pytest on Python 3.15.     |
 | `cargo-test`        | Run `cargo test` on the Rust crate.                                                 |
 | `pre-commit`        | Run all pre-commit hooks (`ruff`, `ruff-format`, `cargo fmt`, `cargo clippy`, …).   |
 | `bench`             | Run Criterion.rs benchmarks (see [Benchmarks]).                                     |
 | `docs`              | Build the MkDocs documentation in strict mode.                                      |
+
+The `unit` label runs Python 3.11 through 3.15 and the minimum-dependency environment.
+Python 3.15 also checks Python coverage against the configured threshold. CI runs these
+environments on Linux, Windows, and macOS:
+
+```bash
+uv run tox -m unit
+```
+
+To run only the Python 3.15 wheel tests:
+
+```bash
+uv run tox -e py315
+```
 
 <br><br>
 
@@ -405,7 +420,7 @@ and accept your changes.
 If your contribution requires a new **Python** library dependency:
 
 * Double-check that the new dependency is easy to install via pip.
-* The library should support Python 3.11, 3.12, 3.13 and 3.14.
+* The library should support Python 3.11, 3.12, 3.13, 3.14 and 3.15.
 * Make sure the code works with the latest version of the library.
 * Update the dependencies in the documentation.
 * Add the library with the minimum required version to `pyproject.toml`.

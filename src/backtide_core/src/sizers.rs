@@ -99,7 +99,7 @@ macro_rules! sizer_pymethods {
 /// - backtide.sizers:BaseSizer
 /// - backtide.sizers:FixedFractional
 /// - backtide.sizers:FixedNotional
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.sizers")]
+#[pyclass(get_all, set_all, module = "backtide.sizers")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EqualWeight {
     n_positions: u32,
@@ -166,7 +166,7 @@ sizer_pymethods!(EqualWeight);
 /// - backtide.sizers:BaseSizer
 /// - backtide.sizers:EqualWeight
 /// - backtide.sizers:FixedNotional
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.sizers")]
+#[pyclass(get_all, set_all, module = "backtide.sizers")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FixedFractional {
     fraction: f64,
@@ -235,7 +235,7 @@ sizer_pymethods!(FixedFractional);
 /// - backtide.sizers:BaseSizer
 /// - backtide.sizers:FixedFractional
 /// - backtide.sizers:FixedQuantity
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.sizers")]
+#[pyclass(get_all, set_all, module = "backtide.sizers")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FixedNotional {
     amount: f64,
@@ -300,7 +300,7 @@ sizer_pymethods!(FixedNotional);
 /// - backtide.sizers:BaseSizer
 /// - backtide.sizers:FixedFractional
 /// - backtide.sizers:FixedNotional
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.sizers")]
+#[pyclass(get_all, set_all, module = "backtide.sizers")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FixedQuantity {
     quantity: f64,
@@ -368,7 +368,7 @@ sizer_pymethods!(FixedQuantity);
 /// - backtide.sizers:BaseSizer
 /// - backtide.sizers:FixedFractional
 /// - backtide.sizers:RiskBased
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.sizers")]
+#[pyclass(get_all, set_all, module = "backtide.sizers")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KellyCriterion {
     win_rate: f64,
@@ -468,7 +468,7 @@ sizer_pymethods!(KellyCriterion);
 /// - backtide.sizers:BaseSizer
 /// - backtide.sizers:KellyCriterion
 /// - backtide.sizers:VolatilityScaled
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.sizers")]
+#[pyclass(get_all, set_all, module = "backtide.sizers")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RiskBased {
     risk_pct: f64,
@@ -545,7 +545,7 @@ sizer_pymethods!(RiskBased);
 /// - backtide.sizers:BaseSizer
 /// - backtide.sizers:FixedFractional
 /// - backtide.sizers:RiskBased
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.sizers")]
+#[pyclass(get_all, set_all, module = "backtide.sizers")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VolatilityScaled {
     risk_pct: f64,

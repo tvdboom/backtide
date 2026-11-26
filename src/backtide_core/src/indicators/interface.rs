@@ -117,7 +117,7 @@ pub fn _indicator_deterministic_name(indicator: &Bound<'_, PyAny>) -> PyResult<S
 /// backtide.indicators:AverageTrueRange
 /// backtide.indicators:MovingAverageConvergenceDivergence
 /// backtide.indicators:RelativeStrengthIndex
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct AverageDirectionalIndex {
     /// Look-back window length.
@@ -230,7 +230,7 @@ impl Indicator for AverageDirectionalIndex {
 /// backtide.indicators:AverageDirectionalIndex
 /// backtide.indicators:BollingerBands
 /// backtide.indicators:SimpleMovingAverage
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct AverageTrueRange {
     /// Look-back window length.
@@ -306,7 +306,7 @@ impl Indicator for AverageTrueRange {
 /// backtide.indicators:AverageTrueRange
 /// backtide.indicators:CommodityChannelIndex
 /// backtide.indicators:SimpleMovingAverage
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct BollingerBands {
     /// Look-back window length.
@@ -394,7 +394,7 @@ impl Indicator for BollingerBands {
 /// backtide.indicators:BollingerBands
 /// backtide.indicators:RelativeStrengthIndex
 /// backtide.indicators:StochasticOscillator
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct CommodityChannelIndex {
     /// Look-back window length.
@@ -477,7 +477,7 @@ impl Indicator for CommodityChannelIndex {
 /// backtide.indicators:MovingAverageConvergenceDivergence
 /// backtide.indicators:SimpleMovingAverage
 /// backtide.indicators:WeightedMovingAverage
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct ExponentialMovingAverage {
     /// Look-back window length.
@@ -554,7 +554,7 @@ impl Indicator for ExponentialMovingAverage {
 /// backtide.indicators:AverageDirectionalIndex
 /// backtide.indicators:ExponentialMovingAverage
 /// backtide.indicators:RelativeStrengthIndex
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct MovingAverageConvergenceDivergence {
     /// Fast EMA period.
@@ -635,7 +635,7 @@ impl Indicator for MovingAverageConvergenceDivergence {
 /// backtide.indicators:MovingAverageConvergenceDivergence
 /// backtide.indicators:RelativeStrengthIndex
 /// backtide.indicators:VolumeWeightedAveragePrice
-#[pyclass(skip_from_py_object, module = "backtide.indicators")]
+#[pyclass(module = "backtide.indicators")]
 #[derive(Clone, Debug, Default)]
 pub struct OnBalanceVolume;
 
@@ -706,7 +706,7 @@ impl Indicator for OnBalanceVolume {
 /// backtide.indicators:CommodityChannelIndex
 /// backtide.indicators:MovingAverageConvergenceDivergence
 /// backtide.indicators:StochasticOscillator
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct RelativeStrengthIndex {
     /// Look-back window length.
@@ -811,7 +811,7 @@ impl Indicator for RelativeStrengthIndex {
 /// backtide.indicators:BollingerBands
 /// backtide.indicators:ExponentialMovingAverage
 /// backtide.indicators:WeightedMovingAverage
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct SimpleMovingAverage {
     /// Look-back window length.
@@ -885,7 +885,7 @@ impl Indicator for SimpleMovingAverage {
 /// backtide.indicators:CommodityChannelIndex
 /// backtide.indicators:MovingAverageConvergenceDivergence
 /// backtide.indicators:RelativeStrengthIndex
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct StochasticOscillator {
     /// %K look-back period.
@@ -968,7 +968,7 @@ impl Indicator for StochasticOscillator {
 /// backtide.indicators:OnBalanceVolume
 /// backtide.indicators:SimpleMovingAverage
 /// backtide.indicators:WeightedMovingAverage
-#[pyclass(skip_from_py_object, module = "backtide.indicators")]
+#[pyclass(module = "backtide.indicators")]
 #[derive(Clone, Debug, Default)]
 pub struct VolumeWeightedAveragePrice;
 
@@ -1041,7 +1041,7 @@ impl Indicator for VolumeWeightedAveragePrice {
 /// backtide.indicators:ExponentialMovingAverage
 /// backtide.indicators:MovingAverageConvergenceDivergence
 /// backtide.indicators:SimpleMovingAverage
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.indicators")]
+#[pyclass(get_all, set_all, module = "backtide.indicators")]
 #[derive(Clone, Debug)]
 pub struct WeightedMovingAverage {
     /// Look-back window length.

@@ -13,7 +13,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// ----------
 /// class_name : str
 ///     Return the Python class name.
-#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.config")]
+#[pyclass(frozen, eq, hash, module = "backtide.config")]
 #[derive(
     Clone,
     Copy,

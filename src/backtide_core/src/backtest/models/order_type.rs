@@ -23,7 +23,7 @@ use std::str::FromStr;
 /// - backtide.backtest:CommissionType
 /// - backtide.backtest:ExchangeExpConfig
 /// - backtide.backtest:Order
-#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.backtest")]
+#[pyclass(frozen, eq, hash, module = "backtide.backtest")]
 #[derive(
     Clone,
     Copy,

@@ -11,7 +11,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// - backtide.data:Instrument
 /// - backtide.data:InstrumentType
 /// - backtide.data:Interval
-#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.data")]
+#[pyclass(frozen, eq, hash, module = "backtide.data")]
 #[derive(
     Clone,
     Copy,

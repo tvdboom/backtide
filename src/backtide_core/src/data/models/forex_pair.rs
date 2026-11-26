@@ -16,7 +16,7 @@ use strum::{EnumIter, EnumString};
 /// - backtide.data:Country
 /// - backtide.data:Currency
 /// - backtide.data:Exchange
-#[pyclass(skip_from_py_object, frozen, eq, hash)]
+#[pyclass(frozen, eq, hash)]
 #[derive(
     Clone,
     Copy,

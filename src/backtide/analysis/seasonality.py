@@ -155,7 +155,7 @@ def plot_seasonality(
     if subset["dt"].dt.date.duplicated(keep=False).any():
         # Averages returns across all history per (day-of-week, hour) slot.
         day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        subset["dow"] = subset["dt"].dt.dayofweek  # 0=Mon
+        subset["dow"] = subset["dt"].dt.day_of_week  # 0=Mon
         subset["hour"] = subset["dt"].dt.hour
 
         hourly = subset.groupby(["dow", "hour"])["return"].mean().reset_index()

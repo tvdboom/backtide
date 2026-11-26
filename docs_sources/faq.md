@@ -6,7 +6,7 @@ regularly. If you have any other questions, don't hesitate to create
 a new [discussion](https://github.com/tvdboom/backtide/discussions)!
 
 ??? faq "What Python versions does Backtide support?"
-    Backtide supports Python 3.11, 3.12, 3.13 and 3.14. The compiled Rust
+    Backtide supports Python 3.11, 3.12, 3.13, 3.14 and 3.15. The compiled Rust
     extension (`.pyd` / `.so`) is built separately for each version, so make
     sure the wheel you install matches your interpreter. See the
     [dependencies] page for more details.

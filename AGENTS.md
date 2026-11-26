@@ -113,7 +113,7 @@ exceptions: they are generated, but shipped in wheels and therefore must be kept
 
 Follow the existing code and `pyproject.toml` exactly.
 
-- Target Python 3.11 through 3.14. Use modern annotations (`X | None`, built-in generics), four
+- Target Python 3.11 through 3.15. Use modern annotations (`X | None`, built-in generics), four
   spaces, double-quoted strings as formatted by Ruff, and a 99-character line limit.
 - Start normal source/test modules with the existing module docstring form:
 

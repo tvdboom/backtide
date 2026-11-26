@@ -9,7 +9,7 @@ use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 /// --------
 /// - backtide.backtest:ExperimentResult
 /// - backtide.backtest:Experiment
-#[pyclass(skip_from_py_object, frozen, eq, hash, module = "backtide.backtest")]
+#[pyclass(frozen, eq, hash, module = "backtide.backtest")]
 #[derive(
     Clone,
     Copy,

@@ -7,10 +7,6 @@ Install backtide's newest release easily via `pip`:
 
     pip install -U backtide
 
-or via `conda`:
-
-    conda install -c conda-forge backtide
-
 <br style="display: block; margin-top: 2em; content: ' '">
 
 **Latest source**

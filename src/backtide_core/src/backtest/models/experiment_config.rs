@@ -872,7 +872,7 @@ impl ExperimentConfigInner {
 /// - backtide.backtest:DataExpConfig
 /// - backtide.backtest:GeneralExpConfig
 /// - backtide.backtest:StrategyExpConfig
-#[pyclass(get_all, set_all, skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(get_all, set_all, module = "backtide.backtest")]
 #[derive(Clone, Debug)]
 pub struct ExperimentConfig {
     pub general: GeneralExpConfig,

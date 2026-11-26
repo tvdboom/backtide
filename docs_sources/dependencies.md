@@ -9,6 +9,7 @@ As of the moment, Backtide supports the following Python versions:
 * [Python 3.12](https://www.python.org/downloads/release/python-3120/)
 * [Python 3.13](https://www.python.org/downloads/release/python-3130/)
 * [Python 3.14](https://www.python.org/downloads/release/python-3140/)
+* [Python 3.15](https://www.python.org/downloads/release/python-3150/)
 
 And operating systems:
 
@@ -25,8 +26,8 @@ And operating systems:
 
 * **[click](https://click.palletsprojects.com/)** (>=8.3.1)
 * **[cloudpickle](https://github.com/cloudpipe/cloudpickle)** (>=3.1.2)
-* **[numpy](https://numpy.org/)** (>=2.0.0)
-* **[pandas](https://pandas.pydata.org/)** (>=2.3.3)
+* **[numpy](https://numpy.org/)** (>=2.4.6; >=2.5.2 on Python 3.15)
+* **[pandas](https://pandas.pydata.org/)** (>=3.0.5; >=3.1.0 on Python 3.15)
 * **[plotly](https://plotly.com/python/)** (>=6.7.0)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
 * **[tzlocal](https://github.com/regebro/tzlocal)** (>=5.0)
@@ -75,7 +76,7 @@ required for any of its functionalities. These libraries are only necessary to
 * **[mkdocs-simple-hooks](https://github.com/aklajnert/mkdocs-simple-hooks)** (>=0.1.5)
 * **[pymdown-extensions](https://facelessuser.github.io/pymdown-extensions/)** (>=10.21)
 * **[pyyaml](https://pyyaml.org/)** (>=6.0.3)
-* **[regex](https://github.com/mrabarnett/mrab-regex)** (>=2026.2.28)
+* **[regex](https://github.com/mrabarnett/mrab-regex)** (>=2026.7.19; >=2026.11.15 on Python 3.15)
 
 **Frontend**
 
@@ -99,8 +100,8 @@ Vue, Vite, Vitest, Plotly.js, Lucide, and Inter.
 * **[indicatif](https://crates.io/crates/indicatif)** (0.18.4)
 * **[itertools](https://crates.io/crates/itertools)** (0.14)
 * **[moka](https://crates.io/crates/moka)** (0.12.15)
-* **[pyo3](https://crates.io/crates/pyo3)** (0.28.3)
-* **[pythonize](https://crates.io/crates/pythonize)** (0.28.0)
+* **[pyo3](https://crates.io/crates/pyo3)** (0.30.1)
+* **[pythonize](https://crates.io/crates/pythonize)** (0.30.0)
 * **[reqwest](https://crates.io/crates/reqwest)** (0.13.3)
 * **[serde](https://crates.io/crates/serde)** (1.0.228)
 * **[serde_json](https://crates.io/crates/serde_json)** (1.0.149)

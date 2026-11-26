@@ -157,7 +157,7 @@ macro_rules! strategy_pymethods {
 /// backtide.strategies:AlphaRsiPro
 /// backtide.strategies:HybridAlphaRsi
 /// backtide.strategies:Rsi
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct AdaptiveRsi {
     /// Minimum adaptive RSI period.
@@ -283,7 +283,7 @@ impl Strategy for AdaptiveRsi {
 /// backtide.strategies:AdaptiveRsi
 /// backtide.strategies:HybridAlphaRsi
 /// backtide.strategies:Rsi
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct AlphaRsiPro {
     /// RSI look-back period.
@@ -396,7 +396,7 @@ impl Strategy for AlphaRsiPro {
 /// backtide.strategies:MultiBollingerRotation
 /// backtide.strategies:Rsi
 /// backtide.strategies:SmaCrossover
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct BollingerMeanReversion {
@@ -498,7 +498,7 @@ impl Strategy for BollingerMeanReversion {
 /// backtide.strategies:Momentum
 /// backtide.strategies:SmaNaive
 /// backtide.strategies:TurtleTrading
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug, Default)]
 pub struct BuyAndHold {
     /// Optional single symbol to buy.
@@ -625,7 +625,7 @@ impl Strategy for BuyAndHold {
 /// backtide.strategies:Momentum
 /// backtide.strategies:TurtleTrading
 /// backtide.strategies:Vcp
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct DoubleTop {
     /// Number of bars to search for the double-top pattern.
@@ -740,7 +740,7 @@ impl Strategy for DoubleTop {
 /// backtide.strategies:AdaptiveRsi
 /// backtide.strategies:AlphaRsiPro
 /// backtide.strategies:Rsi
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct HybridAlphaRsi {
     /// Minimum adaptive RSI period.
@@ -884,7 +884,7 @@ impl Strategy for HybridAlphaRsi {
 /// backtide.strategies:Momentum
 /// backtide.strategies:SmaCrossover
 /// backtide.strategies:Rsi
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct Macd {
     /// Fast EMA period.
@@ -993,7 +993,7 @@ impl Strategy for Macd {
 /// backtide.strategies:BuyAndHold
 /// backtide.strategies:Roc
 /// backtide.strategies:SmaCrossover
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct Momentum {
     /// Look-back period for the momentum calculation.
@@ -1102,7 +1102,7 @@ impl Strategy for Momentum {
 /// backtide.strategies:BollingerMeanReversion
 /// backtide.strategies:RocRotation
 /// backtide.strategies:TripleRsiRotation
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct MultiBollingerRotation {
     /// Bollinger Band moving average period.
@@ -1218,7 +1218,7 @@ impl Strategy for MultiBollingerRotation {
 /// backtide.strategies:BuyAndHold
 /// backtide.strategies:TurtleTrading
 /// backtide.strategies:Vcp
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct RiskAverse {
     /// ATR look-back period for the volatility filter.
@@ -1327,7 +1327,7 @@ impl Strategy for RiskAverse {
 /// backtide.strategies:Momentum
 /// backtide.strategies:RocRotation
 /// backtide.strategies:Rsi
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct Roc {
     /// ROC look-back period.
@@ -1415,7 +1415,7 @@ impl Strategy for Roc {
 /// backtide.strategies:Roc
 /// backtide.strategies:RsrsRotation
 /// backtide.strategies:TripleRsiRotation
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct RocRotation {
     /// ROC look-back period for ranking.
@@ -1527,7 +1527,7 @@ impl Strategy for RocRotation {
 /// backtide.strategies:AdaptiveRsi
 /// backtide.strategies:AlphaRsiPro
 /// backtide.strategies:BollingerMeanReversion
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct Rsi {
     /// RSI look-back period.
@@ -1640,7 +1640,7 @@ impl Strategy for Rsi {
 /// backtide.strategies:Momentum
 /// backtide.strategies:RsrsRotation
 /// backtide.strategies:TurtleTrading
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct Rsrs {
     /// Look-back window for the linear regression.
@@ -1735,7 +1735,7 @@ impl Strategy for Rsrs {
 /// backtide.strategies:RocRotation
 /// backtide.strategies:Rsrs
 /// backtide.strategies:TripleRsiRotation
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct RsrsRotation {
     /// RSRS look-back window for ranking.
@@ -1843,7 +1843,7 @@ impl Strategy for RsrsRotation {
 /// backtide.strategies:Macd
 /// backtide.strategies:Momentum
 /// backtide.strategies:SmaNaive
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct SmaCrossover {
     /// Fast moving average period.
@@ -1937,7 +1937,7 @@ impl Strategy for SmaCrossover {
 /// backtide.strategies:BuyAndHold
 /// backtide.strategies:Momentum
 /// backtide.strategies:SmaCrossover
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct SmaNaive {
     /// Moving average period.
@@ -2034,7 +2034,7 @@ impl Strategy for SmaNaive {
 /// backtide.strategies:MultiBollingerRotation
 /// backtide.strategies:RocRotation
 /// backtide.strategies:RsrsRotation
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct TripleRsiRotation {
     /// Short-term RSI period.
@@ -2176,7 +2176,7 @@ impl Strategy for TripleRsiRotation {
 /// backtide.strategies:BuyAndHold
 /// backtide.strategies:Momentum
 /// backtide.strategies:RiskAverse
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct TurtleTrading {
     /// Number of bars for the entry breakout (highest high).
@@ -2312,7 +2312,7 @@ impl Strategy for TurtleTrading {
 /// backtide.strategies:DoubleTop
 /// backtide.strategies:RiskAverse
 /// backtide.strategies:TurtleTrading
-#[pyclass(skip_from_py_object, get_all, set_all, module = "backtide.strategies")]
+#[pyclass(get_all, set_all, module = "backtide.strategies")]
 #[derive(Clone, Debug)]
 pub struct Vcp {
     /// Number of bars to detect the contraction pattern.

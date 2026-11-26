@@ -33,7 +33,7 @@ use std::collections::HashMap;
 /// - backtide.backtest:ExperimentResult
 /// - backtide.analysis:plot_pnl
 /// - backtide.backtest:RunResult
-#[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(get_all, eq, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EquitySample {
     pub timestamp: i64,
@@ -109,7 +109,7 @@ impl EquitySample {
 /// - backtide.backtest:Order
 /// - backtide.backtest:OrderRecord
 /// - backtide.backtest:RunResult
-#[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(get_all, eq, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Trade {
     pub symbol: String,
@@ -185,7 +185,7 @@ impl Trade {
 /// - backtide.backtest:Order
 /// - backtide.backtest:RunResult
 /// - backtide.backtest:Trade
-#[pyclass(get_all, eq, skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(get_all, eq, module = "backtide.backtest")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OrderRecord {
     pub order: Order,
@@ -272,7 +272,7 @@ impl OrderRecord {
 /// - backtide.backtest:EquitySample
 /// - backtide.backtest:ExperimentResult
 /// - backtide.storage:query_strategy_runs
-#[pyclass(get_all, skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunResult {
     #[serde(default)]
@@ -365,7 +365,7 @@ impl RunResult {
 /// - backtide.backtest:ExperimentConfig
 /// - backtide.backtest:Experiment
 /// - backtide.backtest:RunResult
-#[pyclass(get_all, skip_from_py_object, module = "backtide.backtest")]
+#[pyclass(get_all, module = "backtide.backtest")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExperimentResult {
     pub experiment_id: String,

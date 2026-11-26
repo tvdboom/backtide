@@ -45,7 +45,7 @@ use std::collections::HashMap;
 /// print(update.processed)
 /// print(update.snapshot.equity)
 /// ```
-#[pyclass(get_all, frozen, skip_from_py_object, module = "backtide.live")]
+#[pyclass(get_all, frozen, module = "backtide.live")]
 #[derive(Clone, Debug)]
 pub struct SessionUpdate {
     /// Market update supplied by the caller.

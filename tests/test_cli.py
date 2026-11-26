@@ -123,7 +123,7 @@ class TestLaunch:
         )
         result = runner.invoke(launch)
         assert result.exit_code == 0
-        assert result.output == "Launching app...\nhttp://localhost:8501\n"
+        assert result.output == "Launching app at http://localhost:8501 ...\n"
         mock_run.assert_called_once()
 
     @patch("backtide.ui.launch")
@@ -137,22 +137,29 @@ class TestLaunch:
         )
         result = runner.invoke(launch, ["-p", "9000"])
         assert result.exit_code == 0
-        assert result.output == "Launching app...\nhttp://localhost:9000\n"
+        assert result.output == "Launching app at http://localhost:9000 ...\n"
         assert mock_run.call_args.kwargs["port"] == 9000
 
+    @pytest.mark.parametrize(
+        ("address", "display_address"),
+        [("0.0.0.0", "localhost"), ("::", "localhost"), ("127.0.0.1", "127.0.0.1")],
+    )
     @patch("backtide.ui.launch")
     @patch("backtide.cli.get_config")
     @patch("backtide.cli.init_logging")
-    def test_launch_custom_address(self, _mock_logging, mock_cfg, mock_run, runner):  # noqa: PT019
-        """Launch with custom address passes it to flag_options."""
+    def test_launch_custom_address(
+        self, mock_logging, mock_cfg, mock_run, runner, address: str, display_address: str
+    ) -> None:
+        """Show a reachable URL and forward the configured bind address."""
         mock_cfg.return_value = MagicMock(
             general=MagicMock(log_level="warn"),
             display=MagicMock(port=8501, address=None),
         )
-        result = runner.invoke(launch, ["-a", "0.0.0.0"])
+        result = runner.invoke(launch, ["-a", address])
         assert result.exit_code == 0
-        assert result.output == "Launching app...\nhttp://localhost:8501\n"
-        assert mock_run.call_args.kwargs["address"] == "0.0.0.0"
+        assert result.output == f"Launching app at http://{display_address}:8501 ...\n"
+        assert mock_run.call_args.kwargs["address"] == address
+        mock_logging.assert_called_once_with("warn")
 
     @patch("backtide.ui.launch")
     @patch("backtide.cli.get_config")

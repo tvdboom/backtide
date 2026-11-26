@@ -45,7 +45,7 @@ use pyo3::prelude::*;
 /// fill = Session().on_bar(market, [Order("BTC-USD", 1.0)]).fills[0]
 /// print(fill.fill_price)
 /// ```
-#[pyclass(get_all, frozen, skip_from_py_object, module = "backtide.live")]
+#[pyclass(get_all, frozen, module = "backtide.live")]
 #[derive(Clone, Debug)]
 pub struct SessionFill {
     /// Submitted order after any sizer resolution.
