@@ -6,6 +6,10 @@ Description: Tests for live market data and live simulation.
 """
 
 import inspect
+import os
+import subprocess
+import sys
+import textwrap
 from types import SimpleNamespace
 
 import pytest
@@ -190,6 +194,53 @@ class TestProviderSupport:
 
 class TestSession:
     """Tests for deterministic simulated execution and accounting."""
+
+    def test_custom_indicators_complete_with_a_bounded_rayon_pool(self) -> None:
+        """Release the calling Python thread while indicator workers invoke Python."""
+        script = textwrap.dedent(
+            """
+            from backtide.indicators import BaseIndicator
+            from backtide.live import MarketUpdate, Session
+            from backtide.strategies import BuyAndHold
+
+            calls = []
+
+            class Signal(BaseIndicator):
+                def __init__(self, factor):
+                    self.factor = factor
+
+                def __reduce__(self):
+                    return type(self), (self.factor,)
+
+                def compute(self, data):
+                    calls.append(self.factor)
+                    return [value * self.factor for value in data["close"].to_list()]
+
+            session = Session(strategy=BuyAndHold(), indicators=[Signal(2), Signal(3)])
+            update = session.on_bar(
+                MarketUpdate("BTC-USD", "1m", 1000, 1060, 100.0, 100.0, 100.0, 100.0)
+            )
+
+            assert update.processed
+            assert set(calls) == {2, 3}
+            assert update.indicators["Signal_2"]["BTC-USD"] == [[200.0]]
+            assert update.indicators["Signal_3"]["BTC-USD"] == [[300.0]]
+            assert update.snapshot.portfolio.positions["BTC-USD"] > 0.0
+            print("indicator-callbacks-ok")
+            """
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env=os.environ | {"RAYON_NUM_THREADS": "2"},
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "indicator-callbacks-ok"
 
     def test_market_order_updates_portfolio(self):
         """Test cash, positions, and equity after a market fill."""

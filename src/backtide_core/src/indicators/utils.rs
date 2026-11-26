@@ -87,56 +87,60 @@ pub fn compute_indicators(
 
     // Resolve all indicators to their compute strategy under a single GIL
     // acquisition, paying the downcast cost once here rather than per symbol.
-    let resolved: Vec<(String, IndicatorCompute)> = Python::attach(|py| {
-        indicator_objs
+    let results: HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> = Python::attach(|py| {
+        let resolved: Vec<(String, IndicatorCompute)> = indicator_objs
             .iter()
             .map(|(name, obj)| (name.clone(), IndicatorCompute::resolve(py, obj)))
-            .collect()
-    });
+            .collect();
 
-    // Parallel over indicators. Builtins also parallelize over symbols
-    // internally; Python fallbacks acquire the GIL per symbol and serialize.
-    let results: HashMap<String, HashMap<Symbol, Vec<Vec<f64>>>> = resolved
-        .par_iter()
-        .map(|(name, compute)| {
-            let per_symbol = match compute {
-                IndicatorCompute::Builtin(f) => {
-                    // Pure Rust — no GIL touch at all.
-                    symbol_bars
-                        .par_iter()
-                        .filter_map(|(sym, bars)| Some(((*sym).clone(), f(bars))))
-                        .collect()
-                },
-                IndicatorCompute::Python(obj) => {
-                    // GIL-serialized; no benefit from par_iter here.
-                    symbol_bars
-                        .iter()
-                        .filter_map(|(sym, bars)| {
-                            let result = Python::attach(|py| {
-                                let df = bars_to_data(py, bars)?;
-                                let result = obj.bind(py).call_method1("compute", (df,))?;
-                                extract_indicator_result(py, &result)
-                            });
+        // Live-session callers can already hold the GIL. Release it before waiting for
+        // Rayon, whose workers may need it for custom indicators or another session.
+        py.detach(|| {
+            // Parallel over indicators. Builtins also parallelize over symbols
+            // internally; Python fallbacks acquire the GIL per symbol and serialize.
+            resolved
+                .par_iter()
+                .map(|(name, compute)| {
+                    let per_symbol = match compute {
+                        IndicatorCompute::Builtin(f) => {
+                            // Pure Rust — no GIL touch at all.
+                            symbol_bars
+                                .par_iter()
+                                .filter_map(|(sym, bars)| Some(((*sym).clone(), f(bars))))
+                                .collect()
+                        },
+                        IndicatorCompute::Python(obj) => {
+                            // GIL-serialized; no benefit from par_iter here.
+                            symbol_bars
+                                .iter()
+                                .filter_map(|(sym, bars)| {
+                                    let result = Python::attach(|py| {
+                                        let df = bars_to_data(py, bars)?;
+                                        let result = obj.bind(py).call_method1("compute", (df,))?;
+                                        extract_indicator_result(py, &result)
+                                    });
 
-                            match result {
-                                Ok(s) => Some(((*sym).clone(), s)),
-                                Err(e) => {
-                                    warn!("Indicator {name} failed for {sym}: {e}");
-                                    None
-                                },
-                            }
-                        })
-                        .collect()
-                },
-            };
+                                    match result {
+                                        Ok(s) => Some(((*sym).clone(), s)),
+                                        Err(e) => {
+                                            warn!("Indicator {name} failed for {sym}: {e}");
+                                            None
+                                        },
+                                    }
+                                })
+                                .collect()
+                        },
+                    };
 
-            if let Some(p) = pb {
-                p.inc(1);
-            }
+                    if let Some(p) = pb {
+                        p.inc(1);
+                    }
 
-            (name.clone(), per_symbol)
+                    (name.clone(), per_symbol)
+                })
+                .collect()
         })
-        .collect();
+    });
 
     Ok(results)
 }
